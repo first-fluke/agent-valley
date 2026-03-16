@@ -1,0 +1,111 @@
+# Pre-commit hooks — Symphony Dev Template
+#
+# Install:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Run manually:
+#   pre-commit run --all-files
+#
+# Stack-specific hooks (ESLint, Ruff, golangci-lint) use `files:` patterns
+# so they only activate when the relevant files exist in the repo.
+# This keeps the config stack-agnostic until a stack is chosen.
+#
+# References:
+#   docs/harness/ENTROPY.md — lint as mechanical AI-slop prevention
+#   docs/architecture/CONSTRAINTS.md — forbidden patterns enforcement
+#   AGENTS.md section 5 Conventions — team standard tooling
+
+default_stages: [pre-commit]
+
+repos:
+  # ── Standard file hygiene ─────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ── Secret detection ──────────────────────────────────────────────────────
+  # Prevents API keys and tokens from reaching commits.
+  # See docs/harness/SAFETY.md section 1 — Secret Management
+  # and docs/architecture/CONSTRAINTS.md section 3 — No Hardcoded Secrets.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: |
+          (?x)^(
+            \.env\.example|
+            .*\.md|
+            .*test.*|
+            .*spec.*
+          )$
+
+  # ── Python lint (Ruff) ────────────────────────────────────────────────────
+  # Only runs if Python files are present.
+  # See docs/architecture/enforcement/python.md
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        files: \.py$
+        args: [--fix]
+      - id: ruff-format
+        files: \.py$
+
+  # ── TypeScript / JavaScript lint (ESLint) ─────────────────────────────────
+  # Only runs if JS/TS files are present.
+  # Requires ESLint to be installed in the project (npm ci / npm install).
+  # See docs/architecture/enforcement/typescript.md
+  - repo: local
+    hooks:
+      - id: eslint
+        name: ESLint
+        language: system
+        entry: bash -c 'if command -v npx >/dev/null 2>&1 && [ -f package.json ]; then npx eslint --max-warnings=0 "$@"; else echo "ESLint skipped (no package.json)"; fi' --
+        types_or: [javascript, jsx, ts, tsx]
+        files: \.(js|jsx|ts|tsx)$
+        pass_filenames: true
+
+  # ── Go lint (golangci-lint) ───────────────────────────────────────────────
+  # Only runs if Go files are present.
+  # See docs/architecture/enforcement/go.md
+  - repo: local
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint
+        language: system
+        entry: bash -c 'if command -v golangci-lint >/dev/null 2>&1 && [ -f go.mod ]; then golangci-lint run "$@"; else echo "golangci-lint skipped (no go.mod or binary not found)"; fi' --
+        types: [go]
+        files: \.go$
+        pass_filenames: false
+
+  # ── Harness validation ────────────────────────────────────────────────────
+  # Runs architecture and safety checks defined in scripts/harness/validate.sh.
+  # Checks:
+  #   - Hardcoded secrets (API key patterns)
+  #   - Dangerous shell commands (rm -rf /, force push to main)
+  #   - Architecture violations (domain/ importing from infrastructure/)
+  # References:
+  #   docs/harness/ENTROPY.md section 2
+  #   docs/architecture/CONSTRAINTS.md
+  - repo: local
+    hooks:
+      - id: harness-validate
+        name: Harness validate (arch + safety)
+        language: script
+        entry: ./scripts/harness/validate.sh
+        pass_filenames: false
+        always_run: false
+        stages: [pre-commit]

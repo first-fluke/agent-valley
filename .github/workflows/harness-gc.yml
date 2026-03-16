@@ -1,0 +1,76 @@
+# Harness GC Workflow — Symphony Dev Template
+#
+# Automatically runs the worktree garbage collector weekly.
+# Also supports manual trigger for on-demand cleanup.
+#
+# What it does:
+#   Runs scripts/harness/gc.sh to remove stale worktrees and branches
+#   (issue/* and symphony/* prefixes) older than GC_DAYS (default: 30).
+#
+# Soft-delete model (see docs/harness/ENTROPY.md section 2):
+#   First run: flags stale worktrees with .gc-flagged marker.
+#   Second run: removes flagged worktrees.
+#
+# Secrets required: none
+# Optional env vars:
+#   GC_DAYS — override default 30-day retention period
+
+name: Harness GC
+
+on:
+  schedule:
+    # Weekly on Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      gc_days:
+        description: 'Retention period in days (default: 30)'
+        required: false
+        default: '30'
+        type: string
+      dry_run:
+        description: 'Dry run — list targets without deleting'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  gc:
+    name: Worktree GC
+    runs-on: ubuntu-latest
+    # Prevent concurrent GC runs that could conflict on branch/worktree state
+    concurrency:
+      group: harness-gc
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history so we can inspect commit dates on all branches
+          fetch-depth: 0
+
+      - name: Configure git identity (required for worktree ops)
+        run: |
+          git config user.email "ci-gc@symphony-template"
+          git config user.name "Harness GC"
+
+      - name: Run GC
+        run: |
+          chmod +x ./scripts/harness/gc.sh
+          ./scripts/harness/gc.sh
+        env:
+          # Use workspace input override if provided via workflow_dispatch,
+          # otherwise fall back to runner temp dir.
+          WORKSPACE_ROOT: ${{ runner.temp }}/workspaces
+          GC_DAYS: ${{ inputs.gc_days || '30' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+
+      - name: Upload GC report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gc-report-${{ github.run_id }}
+          path: /tmp/gc-report-*.txt
+          if-no-files-found: ignore
+          retention-days: 30
