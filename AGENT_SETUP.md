@@ -88,31 +88,38 @@ docs/harness/         ← Security, observability, entropy management, feedback 
 
 ### Step 0: Install the harness
 
-Composer supports two installation modes. The installer auto-detects which one applies.
+**New project** (cloned this repo directly):
 
-**New project** (you just cloned this repo):
+Everything is already in place. Just reset the git history and start your own:
+
 ```bash
-./scripts/install.sh
+rm -rf .git
+git init
+git add -A
+git commit -m "chore: init from composer"
 ```
 
+No need to run `install.sh` — the full scaffold is already present.
+
 **Existing project** (adding the harness to a project you already have):
+
 ```bash
 cd your-existing-project
 curl -fsSL https://raw.githubusercontent.com/first-fluke/composer/main/scripts/install.sh | bash
 ```
 
-**What the installer does per mode:**
+The installer auto-detects existing project files (`package.json`, `pyproject.toml`, `go.mod`) and installs only the harness layer:
 
-| Item | New project | Existing project |
-|---|---|---|
-| `.agents/`, `.claude/`, `docs/` | Copied | Copied |
-| `scripts/harness/gc.sh`, `validate.sh` | Copied | Copied |
-| `WORKFLOW.md`, `.env.example` | Copied | Copied |
-| `AGENTS.md` | Copied | Appended (Symphony section added) |
-| `CLAUDE.md` | Copied | `@AGENTS.md` line injected if missing |
-| `.gitignore` | Copied | Missing entries appended |
-| `src/`, `scripts/dev.sh` | Copied | **Skipped** |
-| `.github/` workflows | Optional | Optional |
+| Item | Action |
+|---|---|
+| `.agents/`, `.claude/`, `docs/` | Copied |
+| `scripts/harness/gc.sh`, `validate.sh` | Copied |
+| `WORKFLOW.md`, `.env.example` | Copied |
+| `AGENTS.md` | Appended (Symphony section added) |
+| `CLAUDE.md` | `@AGENTS.md` line injected if missing |
+| `.gitignore` | Missing entries appended |
+| `src/`, `scripts/dev.sh` | **Skipped** |
+| `.github/` workflows | **Optional** — asked interactively |
 
 The installer is idempotent — safe to run multiple times.
 

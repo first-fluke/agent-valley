@@ -124,13 +124,27 @@ Composer works for both **new projects** (full scaffold) and **existing projects
 
 ### New project
 
+Clone the repo and use it directly as your project base:
+
 ```bash
 git clone https://github.com/first-fluke/composer.git my-project
 cd my-project
-./scripts/install.sh
+
+# Reset git history and start fresh
+rm -rf .git
+git init
+git add -A
+git commit -m "chore: init from composer"
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your values (LINEAR_API_KEY, WORKSPACE_ROOT, etc.)
+
+# Validate
+./scripts/harness/validate.sh
 ```
 
-The installer copies the full scaffold: harness core, `src/`, `scripts/dev.sh`, and optionally `.github/` CI workflows.
+Everything is already in place — `src/` is empty and ready for your implementation. No need to run `install.sh` for a fresh clone.
 
 ### Existing project
 
