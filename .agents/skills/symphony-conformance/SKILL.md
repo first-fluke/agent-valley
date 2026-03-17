@@ -71,11 +71,11 @@ Each missing variable must produce an error message that names the variable and 
 Review the Orchestrator implementation against `docs/specs/orchestrator.md` SPEC Section 18.1 checklist:
 
 - 18.1.1: Single Orchestrator instance per process
-- 18.1.2: `pollIntervalSec` is configurable
+- 18.1.2: Webhook-driven event handling (no polling)
 - 18.1.3: `maxParallel` concurrency limit is enforced
 - 18.1.4: Duplicate run prevention for the same issueId
 - 18.1.5: Retry queue is in-memory only (no persistence)
-- 18.1.6: Restart recovery via Linear re-poll
+- 18.1.6: Restart recovery via startup sync (one-time Linear API call)
 - 18.1.7: `agent.timeout` enforced with forced runner termination
 - 18.1.8: `retryPolicy.maxAttempts` stops retries when exceeded
 - 18.1.9: Orchestrator does not write Linear issue state

@@ -4,9 +4,9 @@ version: "1.0"
 
 tracker:
   type: linear
-  api_key: $LINEAR_API_KEY          # $VAR 패턴으로 환경변수 참조
+  api_key: $LINEAR_API_KEY          # $VAR pattern resolves from environment
   team_id: $LINEAR_TEAM_ID
-  poll_interval_seconds: 30
+  webhook_secret: $LINEAR_WEBHOOK_SECRET
   workflow_states:
     in_progress: $LINEAR_WORKFLOW_STATE_IN_PROGRESS
     done: $LINEAR_WORKFLOW_STATE_DONE
@@ -14,12 +14,11 @@ tracker:
 
 workspace:
   root: $WORKSPACE_ROOT
-  key_pattern: "[^A-Za-z0-9._-]"   # 이 패턴 외 문자 → _
+  key_pattern: "[^A-Za-z0-9._-]"   # characters outside this pattern are replaced with _
   cleanup_after_days: 7
 
 agent:
-  command: "codex"
-  args: ["serve"]
+  type: $AGENT_TYPE                 # claude | gemini | codex (AgentSession selection)
   timeout_seconds: 3600
   max_retries: 3
   retry_delay_seconds: 60
@@ -32,7 +31,7 @@ server:
   log_level: $LOG_LEVEL
   log_format: $LOG_FORMAT
 
-# Appendix A: SSH Worker (선택적, 원격 실행용)
+# Appendix A: SSH Worker (optional, for remote execution)
 # ssh_worker:
 #   enabled: false
 #   host: $SSH_WORKER_HOST
