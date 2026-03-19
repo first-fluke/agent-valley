@@ -27,7 +27,7 @@ export class Orchestrator {
   private workspaceManager: WorkspaceManager
   private agentRunner: AgentRunnerService
   private retryQueue: RetryQueue
-  private httpServer: { stop: () => void } | null = null
+  private httpServer: { stop: () => void; port: number } | null = null
   private retryTimer: ReturnType<typeof setInterval> | null = null
   private promptTemplate: string = ""
 

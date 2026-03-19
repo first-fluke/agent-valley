@@ -18,7 +18,7 @@ export function startHttpServer(
     onWebhook: WebhookHandlerFn
     getStatus: StatusFn
   },
-): { stop: () => void } {
+): { stop: () => void; port: number } {
   const server = Bun.serve({
     port,
     hostname: "0.0.0.0",  // Bind to all interfaces (IPv4 + IPv6)
@@ -52,9 +52,10 @@ export function startHttpServer(
     },
   })
 
-  logger.info("orchestrator", `Server listening on port ${port}`)
+  logger.info("orchestrator", `Server listening on port ${server.port}`)
 
   return {
     stop: () => server.stop(),
+    port: server.port,
   }
 }
