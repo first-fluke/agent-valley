@@ -8,6 +8,7 @@ tracker:
   team_id: $LINEAR_TEAM_ID
   webhook_secret: $LINEAR_WEBHOOK_SECRET
   workflow_states:
+    todo: $LINEAR_WORKFLOW_STATE_TODO
     in_progress: $LINEAR_WORKFLOW_STATE_IN_PROGRESS
     done: $LINEAR_WORKFLOW_STATE_DONE
     cancelled: $LINEAR_WORKFLOW_STATE_CANCELLED
@@ -27,7 +28,7 @@ concurrency:
   max_parallel: 3
 
 server:
-  port: 8080
+  port: $SERVER_PORT
   log_level: $LOG_LEVEL
   log_format: $LOG_FORMAT
 
@@ -80,6 +81,19 @@ Follow the selected workflow. Key rules:
 - Available sub-agents: `backend-impl`, `frontend-impl`, `db-impl`, `debug-investigator`, `qa-reviewer`
 - Always verify (run tests, lint) before committing
 - Commit with conventional format: `type(scope): description`
+
+## Step 4: Deliver
+
+1. **Commit** all changes with conventional format: `type(scope): description`
+2. **Push** the branch to remote
+3. **Create a Pull Request** targeting `main`:
+   - Title: `type(scope): description` (same as commit)
+   - Body: issue summary, what was changed, test plan
+4. **Output a work summary** as the final message — this will be posted to the Linear issue:
+   - What was done (brief bullet points)
+   - Files changed
+   - Key decisions made
+   - PR URL
 
 ## Constraints
 - Work only within your workspace: {{workspace_path}}

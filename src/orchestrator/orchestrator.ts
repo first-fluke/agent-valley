@@ -7,7 +7,7 @@
 import type { Config } from "../config/config"
 import type { Issue, Workspace, RunAttempt, OrchestratorRuntimeState } from "../domain/models"
 import type { WebhookEvent } from "../tracker/types"
-import { fetchInProgressIssues } from "../tracker/linear-client"
+import { fetchIssuesByState, updateIssueState, addIssueComment } from "../tracker/linear-client"
 import { verifyWebhookSignature, parseWebhookEvent } from "../tracker/webhook-handler"
 import { WorkspaceManager } from "../workspace/workspace-manager"
 import { AgentRunnerService } from "./agent-runner"
@@ -80,16 +80,20 @@ export class Orchestrator {
 
   private async startupSync(): Promise<void> {
     try {
-      const issues = await fetchInProgressIssues(
+      const issues = await fetchIssuesByState(
         this.config.linearApiKey,
         this.config.linearTeamUuid,
-        this.config.workflowStates.inProgress,
+        [this.config.workflowStates.todo, this.config.workflowStates.inProgress],
       )
 
       logger.info("orchestrator", `Startup sync completed, found ${issues.length} issues`)
 
       for (const issue of issues) {
-        await this.handleIssueInProgress(issue)
+        if (issue.status.id === this.config.workflowStates.todo) {
+          await this.handleIssueTodo(issue)
+        } else {
+          await this.handleIssueInProgress(issue)
+        }
       }
     } catch (err) {
       logger.error("orchestrator", "Startup sync failed", { error: String(err) })
@@ -120,7 +124,9 @@ export class Orchestrator {
     })
 
     // Route event
-    if (event.stateId === this.config.workflowStates.inProgress) {
+    if (event.stateId === this.config.workflowStates.todo) {
+      await this.handleIssueTodo(event.issue)
+    } else if (event.stateId === this.config.workflowStates.inProgress) {
       await this.handleIssueInProgress(event.issue)
     } else if (event.prevStateId === this.config.workflowStates.inProgress) {
       await this.handleIssueLeftInProgress(event.issueId)
@@ -133,6 +139,46 @@ export class Orchestrator {
   }
 
   // ── Issue Handling ────────────────────────────────────────────────────
+
+  private async handleIssueTodo(issue: Issue): Promise<void> {
+    // Duplicate check
+    if (this.state.activeWorkspaces.has(issue.id)) {
+      logger.debug("orchestrator", "Issue already active, skipping Todo", { issueId: issue.id })
+      return
+    }
+
+    // Concurrency check — keep in Todo if at capacity
+    if (this.agentRunner.activeCount >= this.config.maxParallel) {
+      logger.warn("orchestrator", "Concurrency limit reached, keeping in Todo", {
+        issueId: issue.id,
+        activeCount: String(this.agentRunner.activeCount),
+        maxParallel: String(this.config.maxParallel),
+      })
+      this.retryQueue.add(issue.id, 0, "Concurrency limit reached")
+      return
+    }
+
+    // Transition Todo → In Progress on Linear
+    try {
+      await updateIssueState(
+        this.config.linearApiKey,
+        issue.id,
+        this.config.workflowStates.inProgress,
+      )
+      logger.info("orchestrator", `Transitioned ${issue.identifier} from Todo to In Progress`)
+    } catch (err) {
+      logger.error("orchestrator", "Failed to transition issue to In Progress", {
+        issueId: issue.id,
+        error: String(err),
+      })
+      this.retryQueue.add(issue.id, 0, `State transition failed: ${err}`)
+      return
+    }
+
+    // Update local issue status and delegate to In Progress handler
+    issue.status = { ...issue.status, id: this.config.workflowStates.inProgress, name: "In Progress" }
+    await this.handleIssueInProgress(issue)
+  }
 
   private async handleIssueInProgress(issue: Issue): Promise<void> {
     // Duplicate check
@@ -186,18 +232,44 @@ export class Orchestrator {
       prompt,
       workspacePath: workspace.path,
     }, {
-      onComplete: (completedAttempt) => {
+      onComplete: async (completedAttempt) => {
         const ws = this.state.activeWorkspaces.get(issue.id)
         if (ws) ws.status = "done"
         this.state.activeWorkspaces.delete(issue.id)
         this.workspaceManager.saveAttempt(workspace, completedAttempt)
+
+        // Post work summary comment (best-effort — don't block Done transition)
+        try {
+          const summary = this.buildWorkSummary(completedAttempt)
+          await addIssueComment(this.config.linearApiKey, issue.id, summary)
+        } catch (err) {
+          logger.warn("orchestrator", "Failed to post work summary comment", {
+            issueId: issue.id,
+            error: String(err),
+          })
+        }
+
+        // Transition to Done
+        try {
+          await updateIssueState(
+            this.config.linearApiKey,
+            issue.id,
+            this.config.workflowStates.done,
+          )
+        } catch (err) {
+          logger.error("orchestrator", "Failed to transition issue to Done", {
+            issueId: issue.id,
+            error: String(err),
+          })
+        }
+
         logger.info("orchestrator", `Agent completed for ${issue.identifier}`, {
           issueId: issue.id,
           exitCode: completedAttempt.exitCode ?? undefined,
           durationMs: Date.now() - new Date(attempt.startedAt).getTime(),
         })
       },
-      onError: (err) => {
+      onError: async (err) => {
         const ws = this.state.activeWorkspaces.get(issue.id)
         if (ws) ws.status = "failed"
         this.state.activeWorkspaces.delete(issue.id)
@@ -206,7 +278,34 @@ export class Orchestrator {
           error: err.message,
         })
         if (err.recoverable) {
-          this.retryQueue.add(issue.id, 1, err.message)
+          const added = this.retryQueue.add(issue.id, 1, err.message)
+          if (!added) {
+            // Max retries exceeded — cancel issue with error comment
+            try {
+              await addIssueComment(
+                this.config.linearApiKey,
+                issue.id,
+                `⚠️ Symphony: Agent failed (${this.config.agentMaxRetries} retries exceeded)\n\nError: ${err.message}`,
+              )
+            } catch (commentErr) {
+              logger.warn("orchestrator", "Failed to post error comment", {
+                issueId: issue.id,
+                error: String(commentErr),
+              })
+            }
+            try {
+              await updateIssueState(
+                this.config.linearApiKey,
+                issue.id,
+                this.config.workflowStates.cancelled,
+              )
+            } catch (stateErr) {
+              logger.error("orchestrator", "Failed to transition issue to Cancelled", {
+                issueId: issue.id,
+                error: String(stateErr),
+              })
+            }
+          }
         }
       },
       onHeartbeat: (timestamp) => {
@@ -234,12 +333,50 @@ export class Orchestrator {
   private async processRetryQueue(): Promise<void> {
     const ready = this.retryQueue.drain()
     for (const entry of ready) {
-      // Re-fetch the issue from Linear to get current state
-      // For simplicity, we skip re-fetch and just log
-      logger.info("orchestrator", "Retry entry ready but re-fetch not implemented yet", {
-        issueId: entry.issueId,
-      })
+      try {
+        const issues = await fetchIssuesByState(
+          this.config.linearApiKey,
+          this.config.linearTeamUuid,
+          [this.config.workflowStates.todo, this.config.workflowStates.inProgress],
+        )
+        const issue = issues.find((i) => i.id === entry.issueId)
+        if (issue) {
+          if (issue.status.id === this.config.workflowStates.todo) {
+            await this.handleIssueTodo(issue)
+          } else {
+            await this.handleIssueInProgress(issue)
+          }
+        } else {
+          logger.info("orchestrator", "Retry issue no longer in Todo/InProgress, dropping", {
+            issueId: entry.issueId,
+          })
+        }
+      } catch (err) {
+        logger.warn("orchestrator", "Retry re-fetch failed", {
+          issueId: entry.issueId,
+          error: String(err),
+        })
+      }
     }
+  }
+
+  // ── Work Summary ──────────────────────────────────────────────────────
+
+  private buildWorkSummary(attempt: RunAttempt): string {
+    const output = attempt.agentOutput ?? "No output captured"
+    const duration = attempt.finishedAt && attempt.startedAt
+      ? Math.round((new Date(attempt.finishedAt).getTime() - new Date(attempt.startedAt).getTime()) / 1000)
+      : 0
+
+    return [
+      `✅ Symphony: Work completed`,
+      ``,
+      `**Duration:** ${duration}s`,
+      `**Exit code:** ${attempt.exitCode}`,
+      ``,
+      `### Agent Output`,
+      output.length > 4000 ? output.slice(0, 4000) + "\n...(truncated)" : output,
+    ].join("\n")
   }
 
   // ── Status ────────────────────────────────────────────────────────────
