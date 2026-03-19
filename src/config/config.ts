@@ -11,6 +11,7 @@ const configSchema = z.object({
   linearTeamUuid: z.string().min(1, "LINEAR_TEAM_UUID is not set.\n  Fix: Add LINEAR_TEAM_UUID=xxx to .env"),
   linearWebhookSecret: z.string().min(1, "LINEAR_WEBHOOK_SECRET is not set.\n  Fix: Add LINEAR_WEBHOOK_SECRET=whsec_xxx to .env"),
   workflowStates: z.object({
+    todo: z.string().min(1, "LINEAR_WORKFLOW_STATE_TODO is not set.\n  Fix: Add LINEAR_WORKFLOW_STATE_TODO=<uuid> to .env"),
     inProgress: z.string().min(1, "LINEAR_WORKFLOW_STATE_IN_PROGRESS is not set."),
     done: z.string().min(1, "LINEAR_WORKFLOW_STATE_DONE is not set."),
     cancelled: z.string().min(1, "LINEAR_WORKFLOW_STATE_CANCELLED is not set."),
@@ -40,6 +41,7 @@ export function loadConfig(): Config {
     linearTeamUuid: env.LINEAR_TEAM_UUID ?? "",
     linearWebhookSecret: env.LINEAR_WEBHOOK_SECRET ?? "",
     workflowStates: {
+      todo: env.LINEAR_WORKFLOW_STATE_TODO ?? "",
       inProgress: env.LINEAR_WORKFLOW_STATE_IN_PROGRESS ?? "",
       done: env.LINEAR_WORKFLOW_STATE_DONE ?? "",
       cancelled: env.LINEAR_WORKFLOW_STATE_CANCELLED ?? "",
@@ -50,7 +52,7 @@ export function loadConfig(): Config {
     agentMaxRetries: 3,
     agentRetryDelay: 60,
     maxParallel: 3,
-    serverPort: 8080,
+    serverPort: Number(env.SERVER_PORT ?? "9741"),
     logLevel: (env.LOG_LEVEL ?? "info") as "debug" | "info" | "warn" | "error",
     logFormat: (env.LOG_FORMAT ?? "json") as "json" | "text",
   }

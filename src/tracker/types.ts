@@ -12,13 +12,22 @@ export interface WebhookEvent {
   prevStateId: string | null
 }
 
-export interface LinearGraphQLResponse {
-  data?: {
+export interface LinearGraphQLResponse<T = LinearTeamIssuesData> {
+  data?: T
+  errors?: Array<{ message: string }>
+}
+
+export interface LinearTeamIssuesData {
+  team?: {
     issues?: {
       nodes: LinearIssueNode[]
     }
   }
-  errors?: Array<{ message: string }>
+}
+
+export interface LinearMutationData {
+  issueUpdate?: { success: boolean }
+  commentCreate?: { success: boolean }
 }
 
 export interface LinearIssueNode {
