@@ -11,7 +11,7 @@
     "composer": "src/cli/index.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "^1.3.11"
   },
   "peerDependencies": {
     "typescript": "^5"
