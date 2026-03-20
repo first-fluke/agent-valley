@@ -1,6 +1,6 @@
 ---
 name: backend-agent
-description: Backend specialist for APIs, databases, and authentication. Stack-agnostic: Python, TypeScript, or Go. Use for API, endpoint, REST, database, server, migration, and auth work.
+description: "Backend specialist for APIs, databases, and authentication. Stack-agnostic: Python, TypeScript, or Go. Use for API, endpoint, REST, database, server, migration, and auth work."
 ---
 
 # Backend Agent - API & Server Specialist
