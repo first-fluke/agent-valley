@@ -35,6 +35,7 @@ export class ClaudeSession extends BaseSession {
     const args = [
       "--print",
       "--output-format", "stream-json",
+      "--verbose",
       "--dangerously-skip-permissions",
       "--no-session-persistence",
     ]

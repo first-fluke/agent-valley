@@ -15,7 +15,7 @@ import type { Subprocess, FileSink } from "bun"
 
 /** Env vars safe to pass to agent subprocesses */
 const SAFE_ENV_KEYS = [
-  "PATH", "HOME", "SHELL", "LANG", "LC_ALL", "TERM", "TMPDIR",
+  "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TERM", "TMPDIR",
   "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
   "NODE_ENV", "BUN_ENV",
 ]

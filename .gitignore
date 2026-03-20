@@ -40,3 +40,4 @@ docs/plans/
 # Tool internals
 .serena/
 .superset/
+.omc/
