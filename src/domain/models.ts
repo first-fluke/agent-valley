@@ -33,13 +33,6 @@ export interface RunAttempt {
   agentOutput: string | null
 }
 
-export interface LiveSession {
-  attemptId: string
-  pid: number
-  startedAt: string
-  lastHeartbeat: string
-}
-
 export interface RetryEntry {
   issueId: string
   attemptCount: number
@@ -50,6 +43,5 @@ export interface RetryEntry {
 export interface OrchestratorRuntimeState {
   isRunning: boolean
   activeWorkspaces: Map<string, Workspace>
-  retryQueue: RetryEntry[]
   lastEventAt: string | null
 }
