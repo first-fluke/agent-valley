@@ -82,6 +82,15 @@ program
     process.on("SIGTERM", shutdown)
   })
 
+// ── issue ────────────────────────────────────────────────────────────────────
+program
+  .command("issue [description]")
+  .description("Create a Linear issue (triggers agent automatically)")
+  .action(async (description?: string) => {
+    const { createIssue } = await import("./issue")
+    await createIssue(description)
+  })
+
 // ── status ───────────────────────────────────────────────────────────────────
 program
   .command("status")
