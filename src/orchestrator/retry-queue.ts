@@ -19,6 +19,23 @@ export class RetryQueue {
       return false
     }
 
+    // Dedup: if already in queue, update instead of adding
+    const existing = this.queue.find(e => e.issueId === issueId)
+    if (existing) {
+      existing.attemptCount = Math.max(existing.attemptCount, attemptCount)
+      existing.lastError = lastError
+      const delay = this.backoffSec * Math.pow(2, existing.attemptCount - 1)
+      existing.nextRetryAt = new Date(Date.now() + delay * 1000).toISOString()
+
+      logger.warn("orchestrator", "Retry updated (dedup)", {
+        issueId,
+        attemptCount: String(existing.attemptCount),
+        nextRetryAt: existing.nextRetryAt,
+      })
+
+      return true
+    }
+
     const delay = this.backoffSec * Math.pow(2, attemptCount - 1)
     const nextRetryAt = new Date(Date.now() + delay * 1000).toISOString()
 
