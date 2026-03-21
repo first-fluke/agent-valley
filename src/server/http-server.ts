@@ -8,6 +8,10 @@ export interface WebhookHandlerFn {
   (payload: string, signature: string): Promise<{ status: number; body: string }>
 }
 
+export interface GitHubWebhookHandlerFn {
+  (payload: string, signature: string, eventType: string): Promise<{ status: number; body: string }>
+}
+
 export interface StatusFn {
   (): Record<string, unknown>
 }
@@ -17,6 +21,7 @@ export function startHttpServer(
   handlers: {
     onWebhook: WebhookHandlerFn
     getStatus: StatusFn
+    onGitHubWebhook?: GitHubWebhookHandlerFn
   },
 ): { stop: () => void } {
   const MAX_PAYLOAD_SIZE = 1_048_576 // 1MB
@@ -61,6 +66,43 @@ export function startHttpServer(
           const signature = req.headers.get("linear-signature") ?? ""
 
           const result = await handlers.onWebhook(payload, signature)
+          return new Response(result.body, {
+            status: result.status,
+            headers: { "Content-Type": "application/json" },
+          })
+        }
+
+        // POST /webhook/github
+        if (req.method === "POST" && url.pathname === "/webhook/github") {
+          if (!handlers.onGitHubWebhook) {
+            return Response.json(
+              { error: "GitHub webhook sync not configured. Set GITHUB_WEBHOOK_SECRET in .env" },
+              { status: 501 },
+            )
+          }
+
+          const contentType = req.headers.get("content-type") ?? ""
+          if (!contentType.includes("application/json")) {
+            return Response.json(
+              { error: "Unsupported content type. Expected application/json" },
+              { status: 415 },
+            )
+          }
+
+          const contentLength = req.headers.get("content-length")
+          if (contentLength && parseInt(contentLength, 10) > MAX_PAYLOAD_SIZE) {
+            return Response.json({ error: "Payload too large" }, { status: 413 })
+          }
+
+          const payload = await req.text()
+          if (payload.length > MAX_PAYLOAD_SIZE) {
+            return Response.json({ error: "Payload too large" }, { status: 413 })
+          }
+
+          const signature = req.headers.get("x-hub-signature-256") ?? ""
+          const eventType = req.headers.get("x-github-event") ?? ""
+
+          const result = await handlers.onGitHubWebhook(payload, signature, eventType)
           return new Response(result.body, {
             status: result.status,
             headers: { "Content-Type": "application/json" },

@@ -161,6 +161,51 @@ export async function addIssueComment(
   }
 }
 
+// ── Issue Lookup ──────────────────────────────────────────────────
+
+const ISSUE_BY_NUMBER_QUERY = `
+query GetIssueByNumber($teamId: String!, $number: Float!) {
+  team(id: $teamId) {
+    issues(filter: { number: { eq: $number } }, first: 1) {
+      nodes {
+        id identifier title description url
+        state { id name type }
+        team { id key }
+      }
+    }
+  }
+}
+`
+
+export async function fetchIssueByIdentifier(
+  apiKey: string,
+  teamUuid: string,
+  identifier: string,
+): Promise<Issue | null> {
+  const match = identifier.match(/-(\d+)$/)
+  if (!match) {
+    logger.warn("tracker-client", `Cannot parse issue number from identifier "${identifier}". Expected format: KEY-123`)
+    return null
+  }
+  const issueNumber = parseInt(match[1]!, 10)
+
+  const data = await linearGraphQL<LinearTeamIssuesData>(
+    apiKey,
+    ISSUE_BY_NUMBER_QUERY,
+    { teamId: teamUuid, number: issueNumber },
+  )
+
+  const parsed = linearTeamIssuesDataSchema.safeParse(data)
+  if (!parsed.success) {
+    throw new Error(`Linear API response validation failed: ${parsed.error.message}`)
+  }
+
+  const nodes = parsed.data?.team?.issues?.nodes ?? []
+  if (nodes.length === 0) return null
+
+  return nodeToIssue(nodes[0]!)
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function nodeToIssue(node: LinearIssueNode): Issue {

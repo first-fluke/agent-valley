@@ -73,3 +73,24 @@ export interface IntegrationEvent {
   timestamp: string
   detail: string | null
 }
+
+// ── Sync Types ──────────────────────────────────────────────────────
+
+export type SyncSource = "github"
+
+export type SyncEventKind =
+  | "pr_opened"
+  | "pr_merged"
+  | "pr_closed"
+  | "check_suite_completed"
+
+export interface SyncEvent {
+  source: SyncSource
+  kind: SyncEventKind
+  issueIdentifier: string | null
+  prNumber: number | null
+  prTitle: string | null
+  externalUrl: string
+  detail: string | null
+  timestamp: string
+}

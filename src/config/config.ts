@@ -35,6 +35,7 @@ const configSchema = z.object({
       token: z.string(),
       owner: z.string(),
       repo: z.string(),
+      webhookSecret: z.string().optional(),
     }).optional(),
     slack: z.object({
       webhookUrl: z.string().url("SLACK_WEBHOOK_URL must be a valid URL.\n  Fix: Set SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx in .env"),
@@ -72,6 +73,7 @@ export function loadConfig(): Config {
         token: env.GITHUB_TOKEN,
         owner: env.GITHUB_OWNER ?? "",
         repo: env.GITHUB_REPO ?? "",
+        webhookSecret: env.GITHUB_WEBHOOK_SECRET,
       } : undefined,
       slack: env.SLACK_WEBHOOK_URL ? {
         webhookUrl: env.SLACK_WEBHOOK_URL,
