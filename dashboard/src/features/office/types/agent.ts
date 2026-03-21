@@ -5,6 +5,7 @@ export interface ActiveWorkspace {
   key: string
   status: WorkspaceStatus
   startedAt: string
+  lastOutput?: string
 }
 
 export interface OrchestratorState {
@@ -14,13 +15,17 @@ export interface OrchestratorState {
   activeAgents: number
   retryQueueSize: number
   config: {
-    agentType: "claude" | "codex" | "gemini"
+    agentType: AgentType
     maxParallel: number
     serverPort: number
   }
 }
 
 export type AgentType = "claude" | "codex" | "gemini"
+
+export type CharacterSkin = "default" | "ponytail" | "plumber" | "glasses" | "mohawk"
+
+export const CHARACTER_SKINS: CharacterSkin[] = ["default", "ponytail", "plumber", "glasses", "mohawk"]
 
 export interface AgentVisual {
   type: AgentType

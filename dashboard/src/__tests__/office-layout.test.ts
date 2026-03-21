@@ -1,52 +1,70 @@
 import { describe, test, expect } from "bun:test"
 import {
   TILE_SIZE,
-  OFFICE_COLS,
   OFFICE_ROWS,
-  OFFICE_WIDTH,
-  OFFICE_HEIGHT,
-  DESK_POSITIONS,
-  FURNITURE_POSITIONS,
+  computeLayout,
 } from "../features/office/utils/office-layout"
 
 describe("Office Layout", () => {
   test("dimensions are consistent", () => {
-    expect(OFFICE_WIDTH).toBe(OFFICE_COLS * TILE_SIZE)
-    expect(OFFICE_HEIGHT).toBe(OFFICE_ROWS * TILE_SIZE)
+    const layout = computeLayout(3)
+    expect(layout.width).toBe(layout.cols * TILE_SIZE)
+    expect(layout.height).toBe(OFFICE_ROWS * TILE_SIZE)
   })
 
-  test("has 3 desk positions for 3 agent types", () => {
-    expect(DESK_POSITIONS).toHaveLength(3)
+  test("desk count matches requested slots", () => {
+    expect(computeLayout(3).desks).toHaveLength(3)
+    expect(computeLayout(5).desks).toHaveLength(5)
+    expect(computeLayout(1).desks).toHaveLength(1)
   })
 
-  test("desk labels match agent types", () => {
-    const labels = DESK_POSITIONS.map((d) => d.label)
-    expect(labels).toContain("Claude")
-    expect(labels).toContain("Codex")
-    expect(labels).toContain("Gemini")
+  test("office widens for more desks", () => {
+    const small = computeLayout(3)
+    const large = computeLayout(5)
+    expect(large.cols).toBeGreaterThan(small.cols)
   })
 
   test("desks are within office bounds", () => {
-    for (const desk of DESK_POSITIONS) {
-      expect(desk.col).toBeGreaterThanOrEqual(1)
-      expect(desk.col).toBeLessThan(OFFICE_COLS - 1)
-      expect(desk.row).toBeGreaterThanOrEqual(2)
-      expect(desk.row).toBeLessThan(OFFICE_ROWS - 1)
+    for (const count of [1, 3, 5, 8]) {
+      const layout = computeLayout(count)
+      for (const desk of layout.desks) {
+        expect(desk.col).toBeGreaterThanOrEqual(1)
+        expect(desk.col).toBeLessThan(layout.cols - 1)
+        expect(desk.row).toBeGreaterThanOrEqual(2)
+        expect(desk.row).toBeLessThan(OFFICE_ROWS - 1)
+      }
     }
   })
 
   test("furniture positions are within office bounds", () => {
-    for (const item of FURNITURE_POSITIONS) {
-      expect(item.col).toBeGreaterThanOrEqual(0)
-      expect(item.col).toBeLessThan(OFFICE_COLS)
-      expect(item.row).toBeGreaterThanOrEqual(0)
-      expect(item.row).toBeLessThan(OFFICE_ROWS)
+    for (const count of [1, 3, 5]) {
+      const layout = computeLayout(count)
+      for (const item of layout.furniture) {
+        expect(item.col).toBeGreaterThanOrEqual(0)
+        expect(item.col).toBeLessThan(layout.cols)
+        expect(item.row).toBeGreaterThanOrEqual(0)
+        expect(item.row).toBeLessThan(OFFICE_ROWS)
+      }
     }
   })
 
   test("desks do not overlap", () => {
-    const positions = DESK_POSITIONS.map((d) => `${d.col},${d.row}`)
+    const layout = computeLayout(5)
+    const positions = layout.desks.map((d) => `${d.col},${d.row}`)
     const unique = new Set(positions)
     expect(unique.size).toBe(positions.length)
+  })
+
+  test("walkable tiles exclude desks and furniture", () => {
+    const layout = computeLayout(3)
+    const walkableSet = new Set(layout.walkableTiles.map((t) => `${t.col},${t.row}`))
+    for (const desk of layout.desks) {
+      expect(walkableSet.has(`${desk.col},${desk.row}`)).toBe(false)
+    }
+  })
+
+  test("has interest points for gym, bathroom, and coffee", () => {
+    const layout = computeLayout(3)
+    expect(layout.interestPoints.length).toBeGreaterThanOrEqual(3)
   })
 })

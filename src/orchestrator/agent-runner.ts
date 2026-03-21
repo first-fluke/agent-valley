@@ -23,9 +23,12 @@ export interface RunCallbacks {
   onHeartbeat: (timestamp: string) => void
 }
 
+const MAX_OUTPUT_SNIPPET = 24
+
 export class AgentRunnerService {
   private activeSessions = new Map<string, AgentSession>()
   private activeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private lastOutputs = new Map<string, string>()
   private sessionsRegistered = false
 
   async ensureRegistered(): Promise<void> {
@@ -53,6 +56,7 @@ export class AgentRunnerService {
       if (timer) clearTimeout(timer)
       this.activeTimers.delete(attempt.id)
       this.activeSessions.delete(attempt.id)
+      this.lastOutputs.delete(attempt.id)
       session.off("complete", onComplete)
       session.off("error", onError)
     }
@@ -81,6 +85,10 @@ export class AgentRunnerService {
 
     // Wire up events
     session.on("heartbeat", (e) => callbacks.onHeartbeat(e.timestamp))
+    session.on("output", (e) => {
+      const snippet = e.chunk.trim().replace(/\s+/g, " ").slice(-MAX_OUTPUT_SNIPPET)
+      if (snippet) this.lastOutputs.set(attempt.id, snippet)
+    })
     session.on("complete", onComplete)
     session.on("error", onError)
 
@@ -95,13 +103,6 @@ export class AgentRunnerService {
 
     try {
       await session.start(config)
-      await session.execute(options.prompt)
-
-      logger.info("orchestrator", "Agent started", {
-        issueId: attempt.issueId,
-        attemptId: attempt.id,
-        workspacePath: options.workspacePath,
-      })
     } catch (err) {
       if (handled) return
       handled = true
@@ -113,6 +114,24 @@ export class AgentRunnerService {
       })
       return
     }
+
+    logger.info("orchestrator", "Agent started", {
+      issueId: attempt.issueId,
+      attemptId: attempt.id,
+      workspacePath: options.workspacePath,
+    })
+
+    // Fire-and-forget: execute returns when agent finishes, but we don't block spawn()
+    session.execute(options.prompt).catch((err) => {
+      if (handled) return
+      handled = true
+      cleanup()
+      callbacks.onError({
+        code: "CRASH",
+        message: `Agent execution failed: ${err}`,
+        recoverable: true,
+      })
+    })
 
     // Timeout watchdog — stored so it can be cleared on completion
     const timer = setTimeout(async () => {
@@ -169,5 +188,9 @@ export class AgentRunnerService {
 
   get activeCount(): number {
     return this.activeSessions.size
+  }
+
+  getLastOutput(attemptId: string): string | undefined {
+    return this.lastOutputs.get(attemptId)
   }
 }

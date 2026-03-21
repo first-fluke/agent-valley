@@ -139,6 +139,45 @@ export class Orchestrator {
     }
   }
 
+  // ── Fill Vacant Slots ────────────────────────────────────────────────
+
+  private async fillVacantSlots(): Promise<void> {
+    const available = this.config.maxParallel - this.agentRunner.activeCount
+    if (available <= 0) return
+
+    try {
+      const issues = await fetchIssuesByState(
+        this.config.linearApiKey,
+        this.config.linearTeamUuid,
+        [this.config.workflowStates.todo],
+      )
+
+      issues.sort((a, b) => {
+        const numA = Number.parseInt(a.identifier.split("-")[1] ?? "0", 10)
+        const numB = Number.parseInt(b.identifier.split("-")[1] ?? "0", 10)
+        return numA - numB
+      })
+
+      let filled = 0
+      for (const issue of issues) {
+        if (filled >= available) break
+        const guard = this.canAcceptIssue(issue.id)
+        if (!guard.ok) continue
+        await this.handleIssueTodo(issue)
+        filled++
+      }
+
+      if (filled > 0) {
+        logger.info("orchestrator", `Filled ${filled} vacant slot(s)`, {
+          activeCount: String(this.agentRunner.activeCount),
+          maxParallel: String(this.config.maxParallel),
+        })
+      }
+    } catch (err) {
+      logger.error("orchestrator", "Failed to fill vacant slots", { error: String(err) })
+    }
+  }
+
   // ── Webhook Handling ──────────────────────────────────────────────────
 
   private async handleWebhook(payload: string, signature: string): Promise<{ status: number; body: string }> {
@@ -321,6 +360,26 @@ export class Orchestrator {
           })
         }
 
+        // Merge worktree branch into main and push
+        const mergeResult = await this.workspaceManager.mergeAndPush(workspace)
+        if (!mergeResult.ok) {
+          logger.error("orchestrator", `Merge failed for ${issue.identifier}`, { error: mergeResult.error })
+          try {
+            await addIssueComment(
+              this.config.linearApiKey,
+              issue.id,
+              `Symphony: Merge failed — manual resolution required\n\n${mergeResult.error}`,
+            )
+          } catch { /* best-effort */ }
+        }
+
+        // Cleanup worktree
+        try {
+          await this.workspaceManager.cleanup(workspace)
+        } catch (cleanupErr) {
+          logger.warn("orchestrator", "Worktree cleanup failed", { issueId: issue.id, error: String(cleanupErr) })
+        }
+
         // Transition to Done
         try {
           await updateIssueState(
@@ -340,6 +399,9 @@ export class Orchestrator {
           exitCode: completedAttempt.exitCode ?? undefined,
           durationMs: Date.now() - new Date(attempt.startedAt).getTime(),
         })
+
+        // Fill vacant slot from Todo issues
+        await this.fillVacantSlots()
       },
       onError: async (err) => {
         const ws = this.state.activeWorkspaces.get(issue.id)
@@ -380,6 +442,9 @@ export class Orchestrator {
             }
           }
         }
+
+        // Fill vacant slot from Todo issues
+        await this.fillVacantSlots()
       },
       onHeartbeat: (timestamp) => {
         // Update last heartbeat for liveness tracking
@@ -467,12 +532,16 @@ export class Orchestrator {
   // ── Status ────────────────────────────────────────────────────────────
 
   private getStatus(): Record<string, unknown> {
-    const workspaces = Array.from(this.state.activeWorkspaces.entries()).map(([id, ws]) => ({
-      issueId: id,
-      key: ws.key,
-      status: ws.status,
-      startedAt: ws.createdAt,
-    }))
+    const workspaces = Array.from(this.state.activeWorkspaces.entries()).map(([id, ws]) => {
+      const attemptId = this.activeAttempts.get(id)
+      return {
+        issueId: id,
+        key: ws.key,
+        status: ws.status,
+        startedAt: ws.createdAt,
+        lastOutput: attemptId ? this.agentRunner.getLastOutput(attemptId) : undefined,
+      }
+    })
 
     return {
       isRunning: this.state.isRunning,

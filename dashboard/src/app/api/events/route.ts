@@ -1,16 +1,27 @@
 import { getOrchestrator } from "@/lib/orchestrator-singleton"
+import { env } from "@/lib/env"
 
 export const dynamic = "force-dynamic"
 
 export async function GET() {
   const orchestrator = getOrchestrator()
 
+  let intervalId: ReturnType<typeof setInterval> | null = null
+  let closed = false
+
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder()
 
       const send = (event: string, data: unknown) => {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+        if (closed) return
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+        } catch {
+          // Controller closed — clean up
+          closed = true
+          if (intervalId) clearInterval(intervalId)
+        }
       }
 
       // Send initial state snapshot
@@ -23,32 +34,22 @@ export async function GET() {
           activeWorkspaces: [],
           activeAgents: 0,
           retryQueueSize: 0,
-          config: { agentType: "claude", maxParallel: 3, serverPort: 3000 },
+          config: { agentType: env.AGENT_TYPE, maxParallel: env.MAX_PARALLEL, serverPort: env.SERVER_PORT },
         })
       }
 
+      send("keepalive", null)
+
       // Poll for state changes
-      const interval = setInterval(() => {
+      intervalId = setInterval(() => {
         if (orchestrator) {
           send("state", orchestrator.getStatus())
         }
       }, 2000)
-
-      // Cleanup on close
-      const cleanup = () => {
-        clearInterval(interval)
-      }
-
-      // AbortSignal is not directly available on ReadableStream controller
-      // The stream will be cleaned up when the client disconnects
-      controller.enqueue(encoder.encode(": keepalive\n\n"))
-
-      // Store cleanup for cancel
-      ;(controller as unknown as { _cleanup: () => void })._cleanup = cleanup
     },
-    cancel(controller) {
-      const ctrl = controller as unknown as { _cleanup?: () => void }
-      ctrl._cleanup?.()
+    cancel() {
+      closed = true
+      if (intervalId) clearInterval(intervalId)
     },
   })
 

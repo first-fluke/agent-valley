@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useUnmount } from "ahooks"
+import { useEffect, useRef, useState } from "react"
 import type { OrchestratorState } from "@/features/office/types/agent"
 
 type ConnectionStatus = "connecting" | "open" | "closed" | "error"
@@ -13,67 +12,77 @@ export function useOrchestratorSSE(url: string) {
   const sourceRef = useRef<EventSource | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const attemptRef = useRef(0)
+  const reconnectRef = useRef<() => void>(() => {})
 
-  const cleanup = useCallback(() => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current)
-      reconnectTimerRef.current = null
+  // W-9 fix: stable ref avoids useCallback dependency cycle + Strict Mode double-connect
+  const urlRef = useRef(url)
+  urlRef.current = url
+
+  useEffect(() => {
+    let active = true
+
+    const cleanup = () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      if (sourceRef.current) {
+        sourceRef.current.close()
+        sourceRef.current = null
+      }
     }
-    if (sourceRef.current) {
-      sourceRef.current.close()
-      sourceRef.current = null
+
+    const connect = () => {
+      cleanup()
+      if (!active) return
+
+      setStatus("connecting")
+
+      const source = new EventSource(urlRef.current)
+      sourceRef.current = source
+
+      source.onopen = () => {
+        if (!active) return
+        setStatus("open")
+        attemptRef.current = 0
+      }
+
+      source.addEventListener("state", (event) => {
+        if (!active) return
+        try {
+          const parsed = JSON.parse((event as MessageEvent).data) as OrchestratorState
+          setData(parsed)
+        } catch {
+          // skip malformed
+        }
+      })
+
+      source.onerror = () => {
+        source.close()
+        if (!active) return
+        setStatus("error")
+
+        if (attemptRef.current < MAX_RECONNECT_ATTEMPTS) {
+          attemptRef.current += 1
+          reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS)
+        } else {
+          setStatus("closed")
+        }
+      }
+    }
+
+    connect()
+    reconnectRef.current = connect
+
+    return () => {
+      active = false
+      cleanup()
     }
   }, [])
 
-  const connect = useCallback(() => {
-    cleanup()
-    setStatus("connecting")
-
-    const source = new EventSource(url)
-    sourceRef.current = source
-
-    source.onopen = () => {
-      setStatus("open")
-      attemptRef.current = 0
-    }
-
-    source.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data) as OrchestratorState
-        setData(parsed)
-      } catch {
-        // skip malformed messages
-      }
-    }
-
-    source.addEventListener("state", (event) => {
-      try {
-        const parsed = JSON.parse((event as MessageEvent).data) as OrchestratorState
-        setData(parsed)
-      } catch {
-        // skip
-      }
-    })
-
-    source.onerror = () => {
-      source.close()
-      setStatus("error")
-
-      if (attemptRef.current < MAX_RECONNECT_ATTEMPTS) {
-        attemptRef.current += 1
-        reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS)
-      } else {
-        setStatus("closed")
-      }
-    }
-  }, [url, cleanup])
-
-  useEffect(() => {
-    connect()
-    return cleanup
-  }, [connect, cleanup])
-
-  useUnmount(cleanup)
-
-  return { data, status, reconnect: connect }
+  return {
+    data,
+    status,
+    reconnect: () => reconnectRef.current(),
+  }
 }

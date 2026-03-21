@@ -12,7 +12,6 @@ export class IssueBubble {
   readonly container: Container
   private bg: Graphics
   private label: Text
-  private visible = false
 
   constructor() {
     this.container = new Container()
@@ -49,16 +48,18 @@ export class IssueBubble {
     this.bg.fill({ color, alpha: 0.9 })
 
     this.container.visible = true
-    this.visible = true
   }
 
   hide() {
     this.container.visible = false
-    this.visible = false
   }
 
   setPosition(x: number, y: number) {
     this.container.x = x
     this.container.y = y
+  }
+
+  destroy() {
+    this.container.destroy({ children: true })
   }
 }

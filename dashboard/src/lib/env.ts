@@ -16,7 +16,7 @@ export const env = createEnv({
     AGENT_TIMEOUT: z.coerce.number().min(30).default(3600),
     AGENT_MAX_RETRIES: z.coerce.number().min(1).default(3),
     AGENT_RETRY_DELAY: z.coerce.number().min(1).default(60),
-    MAX_PARALLEL: z.coerce.number().min(1).default(3),
+    MAX_PARALLEL: z.coerce.number().min(1).default(5),
     SERVER_PORT: z.coerce.number().min(1).default(9741),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     LOG_FORMAT: z.enum(["json", "text"]).default("json"),

@@ -53,7 +53,7 @@ export function loadConfig(): Config {
     agentTimeout: Number(env.AGENT_TIMEOUT ?? "3600"),
     agentMaxRetries: Number(env.AGENT_MAX_RETRIES ?? "3"),
     agentRetryDelay: Number(env.AGENT_RETRY_DELAY ?? "60"),
-    maxParallel: Number(env.MAX_PARALLEL ?? "3"),
+    maxParallel: Number(env.MAX_PARALLEL ?? "5"),
     serverPort: Number(env.SERVER_PORT ?? "9741"),
     logLevel: (env.LOG_LEVEL ?? "info") as "debug" | "info" | "warn" | "error",
     logFormat: (env.LOG_FORMAT ?? "json") as "json" | "text",

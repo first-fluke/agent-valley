@@ -1,9 +1,11 @@
 /**
- * Workspace Manager — git worktree creation, cleanup, and lifecycle management.
+ * Workspace Manager — git worktree creation, merge, cleanup, and lifecycle management.
+ *
+ * All git operations run against the WORKSPACE_ROOT repo (not the composer repo).
  */
 
 import { spawn } from "node:child_process"
-import { readdir, readFile, mkdir, writeFile, rm, access } from "node:fs/promises"
+import { readdir, readFile, mkdir, writeFile, rm } from "node:fs/promises"
 import type { Issue, Workspace, RunAttempt } from "../domain/models"
 import { logger } from "../observability/logger"
 
@@ -47,11 +49,11 @@ export class WorkspaceManager {
     const path = `${this.rootPath}/${key}`
     const branch = `symphony/${key}`
 
-    // Create git worktree first (it creates the directory)
+    // Create git worktree from WORKSPACE_ROOT repo
     const { exitCode, stderr } = await runCommand(
       "git",
       ["worktree", "add", path, "-b", branch],
-      { cwd: process.cwd() },
+      { cwd: this.rootPath },
     )
 
     if (exitCode !== 0) {
@@ -61,7 +63,7 @@ export class WorkspaceManager {
         logger.info("workspace-manager", "Reusing existing workspace", { issueId: issue.id, workspacePath: path })
         return existing
       }
-      throw new Error(`git worktree add failed: ${stderr}\n  Fix: Ensure ${this.rootPath} is inside a git repository`)
+      throw new Error(`git worktree add failed: ${stderr}\n  Fix: Ensure ${this.rootPath} is a git repository`)
     }
 
     // Create .symphony metadata directory after worktree
@@ -117,9 +119,65 @@ export class WorkspaceManager {
     await writeFile(path, JSON.stringify(attempt, null, 2), "utf-8")
   }
 
+  async mergeAndPush(workspace: Workspace): Promise<{ ok: boolean; error?: string }> {
+    const branch = `symphony/${workspace.key}`
+
+    // Check if branch has any commits ahead of main
+    const { exitCode: diffExit } = await runCommand(
+      "git", ["diff", "--quiet", `main...${branch}`],
+      { cwd: this.rootPath },
+    )
+    if (diffExit === 0) {
+      logger.info("workspace-manager", "No changes to merge", { branch })
+      return { ok: true }
+    }
+
+    // Merge branch into main (rerere handles conflict resolution)
+    const { exitCode: mergeExit, stderr: mergeErr } = await runCommand(
+      "git", ["merge", branch, "--no-edit"],
+      { cwd: this.rootPath },
+    )
+    if (mergeExit !== 0) {
+      // rerere might have resolved, check for remaining conflicts
+      const { exitCode: conflictCheck } = await runCommand(
+        "git", ["diff", "--check"],
+        { cwd: this.rootPath },
+      )
+      if (conflictCheck !== 0) {
+        await runCommand("git", ["merge", "--abort"], { cwd: this.rootPath })
+        logger.error("workspace-manager", "Merge failed with unresolved conflicts", { branch, error: mergeErr })
+        return { ok: false, error: `Merge conflict on ${branch}: ${mergeErr}` }
+      }
+      // rerere resolved all conflicts — commit the resolution
+      await runCommand("git", ["commit", "--no-edit"], { cwd: this.rootPath })
+    }
+
+    // Push main (if remote exists)
+    const { exitCode: remoteCheck } = await runCommand(
+      "git", ["remote", "get-url", "origin"],
+      { cwd: this.rootPath },
+    )
+    if (remoteCheck === 0) {
+      const { exitCode: pushExit, stderr: pushErr } = await runCommand(
+        "git", ["push", "origin", "main"],
+        { cwd: this.rootPath },
+      )
+      if (pushExit !== 0) {
+        logger.error("workspace-manager", "Push failed", { error: pushErr })
+        return { ok: false, error: `Push failed: ${pushErr}` }
+      }
+    }
+
+    // Delete the feature branch
+    await runCommand("git", ["branch", "-D", branch], { cwd: this.rootPath })
+
+    logger.info("workspace-manager", "Merged and pushed", { branch })
+    return { ok: true }
+  }
+
   async cleanup(workspace: Workspace): Promise<void> {
-    // Remove git worktree
-    await runCommand("git", ["worktree", "remove", workspace.path, "--force"])
+    // Remove git worktree (from WORKSPACE_ROOT repo)
+    await runCommand("git", ["worktree", "remove", workspace.path, "--force"], { cwd: this.rootPath })
 
     // Remove directory if it still exists
     await rm(workspace.path, { recursive: true, force: true })
