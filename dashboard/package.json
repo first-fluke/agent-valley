@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --bun next dev --turbopack -p 9741",
-    "build": "bun --bun next build",
-    "start": "bun --bun next start"
+    "dev": "bun --env-file=../.env --bun next dev --turbopack -p 9741",
+    "build": "bun --env-file=../.env --bun next build",
+    "start": "bun --env-file=../.env --bun next start"
   },
   "dependencies": {
+    "@t3-oss/env-nextjs": "^0.13.10",
     "@tailwindcss/postcss": "^4.2.2",
     "ahooks": "^3.9.6",
     "next": "^16.2.1",
