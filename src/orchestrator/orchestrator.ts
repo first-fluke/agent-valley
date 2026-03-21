@@ -8,12 +8,15 @@ import { readFile, access } from "node:fs/promises"
 import type { Config } from "../config/env"
 import type { Issue, Workspace, RunAttempt, OrchestratorRuntimeState } from "../domain/models"
 import type { WebhookEvent } from "../tracker/types"
-import { fetchIssuesByState, updateIssueState, addIssueComment } from "../tracker/linear-client"
+import { fetchIssuesByState, fetchIssueLabels, updateIssueState, addIssueComment, addIssueLabel } from "../tracker/linear-client"
 import { verifyWebhookSignature, parseWebhookEvent } from "../tracker/webhook-handler"
 import { WorkspaceManager } from "../workspace/workspace-manager"
 import { AgentRunnerService } from "./agent-runner"
 import { RetryQueue } from "./retry-queue"
 import { parseWorkflow, renderPrompt } from "../config/workflow-loader"
+import { resolveRouteWithScore } from "../config/routing"
+import { analyzeScoreInBackground } from "./scoring-service"
+import { buildWorkSummary, sortByIssueNumber } from "./helpers"
 import { logger } from "../observability/logger"
 
 type OrchestratorEventHandler = (...args: any[]) => void
@@ -112,6 +115,7 @@ export class Orchestrator {
       maxParallel: this.config.maxParallel,
       displayName: this.config.displayName ?? this.config.agentType,
     })
+
     logger.info("orchestrator", "Symphony started", {
       agentType: this.config.agentType,
       maxParallel: String(this.config.maxParallel),
@@ -154,13 +158,7 @@ export class Orchestrator {
       [this.config.workflowStates.todo, this.config.workflowStates.inProgress],
     )
 
-    // Sort by issue number ascending (e.g. FIR-5 before FIR-48)
-    issues.sort((a, b) => {
-      const numA = Number.parseInt(a.identifier.split("-")[1] ?? "0", 10)
-      const numB = Number.parseInt(b.identifier.split("-")[1] ?? "0", 10)
-      return numA - numB
-    })
-
+    sortByIssueNumber(issues)
     logger.info("orchestrator", `Startup sync completed, found ${issues.length} issues`)
 
     for (const issue of issues) {
@@ -185,11 +183,7 @@ export class Orchestrator {
         [this.config.workflowStates.todo],
       )
 
-      issues.sort((a, b) => {
-        const numA = Number.parseInt(a.identifier.split("-")[1] ?? "0", 10)
-        const numB = Number.parseInt(b.identifier.split("-")[1] ?? "0", 10)
-        return numA - numB
-      })
+      sortByIssueNumber(issues)
 
       let filled = 0
       for (const issue of issues) {
@@ -335,10 +329,44 @@ export class Orchestrator {
    * Caller must have already added issue.id to processingIssues.
    */
   private async handleIssueInProgressInternal(issue: Issue): Promise<void> {
-    // Create workspace
+    // Fallback: if webhook didn't include labels and routing rules exist, fetch from API
+    if (issue.labels.length === 0 && this.config.routingRules.length > 0) {
+      try {
+        issue.labels = await fetchIssueLabels(this.config.linearApiKey, issue.id)
+      } catch (err) {
+        logger.warn("orchestrator", "Failed to fetch issue labels for routing, using default", {
+          issueId: issue.id, error: String(err),
+        })
+      }
+    }
+
+    // Resolve routing: which repo, agent, and delivery mode for this issue
+    const route = resolveRouteWithScore(issue, this.config)
+    if (route.matchedLabel) {
+      logger.info("orchestrator", `Routing ${issue.identifier} via label "${route.matchedLabel}"`, {
+        workspaceRoot: route.workspaceRoot,
+        agentType: route.agentType,
+      })
+    }
+
+    // Background scoring: if no score yet and score routing is configured, analyze async.
+    // Current run uses defaultAgentType; score label takes effect on subsequent runs.
+    if (issue.score === null && this.config.scoreRouting && this.config.scoringModel) {
+      const apiKey = this.config.linearApiKey
+      const teamId = this.config.linearTeamUuid
+      analyzeScoreInBackground(issue, this.config.scoringModel, async (issueId, score) => {
+        try {
+          await addIssueLabel(apiKey, teamId, issueId, `score:${score}`)
+        } catch (err) {
+          logger.warn("orchestrator", "Failed to attach score label", { issueId, error: String(err) })
+        }
+      })
+    }
+
+    // Create workspace in the resolved repo root
     let workspace: Workspace
     try {
-      workspace = await this.workspaceManager.create(issue)
+      workspace = await this.workspaceManager.create(issue, route.workspaceRoot)
     } catch (err) {
       this.processingIssues.delete(issue.id)
       logger.error("orchestrator", "Failed to create workspace", { issueId: issue.id, error: String(err) })
@@ -369,14 +397,14 @@ export class Orchestrator {
     const prompt = renderPrompt(this.promptTemplate, issue, workspace.path, attempt, 0)
 
     this.emitEvent("agent.start", {
-      agentType: this.config.agentType,
+      agentType: route.agentType,
       issueKey: issue.identifier,
       issueId: issue.id,
     })
 
-    // Spawn agent
+    // Spawn agent (using per-issue resolved agent type)
     await this.agentRunner.spawn(attempt, {
-      agentType: this.config.agentType,
+      agentType: route.agentType,
       timeout: this.config.agentTimeout,
       prompt,
       workspacePath: workspace.path,
@@ -390,7 +418,7 @@ export class Orchestrator {
 
         // Post work summary comment (best-effort -- don't block Done transition)
         try {
-          const summary = this.buildWorkSummary(completedAttempt)
+          const summary = buildWorkSummary(completedAttempt)
           await addIssueComment(this.config.linearApiKey, issue.id, summary)
         } catch (err) {
           logger.warn("orchestrator", "Failed to post work summary comment", {
@@ -400,7 +428,7 @@ export class Orchestrator {
         }
 
         // Deliver: merge directly or leave for PR review
-        if (this.config.deliveryMode === "merge") {
+        if (route.deliveryMode === "merge") {
           const mergeResult = await this.workspaceManager.mergeAndPush(workspace)
           if (!mergeResult.ok) {
             logger.error("orchestrator", `Merge failed for ${issue.identifier}`, { error: mergeResult.error })
@@ -441,6 +469,7 @@ export class Orchestrator {
           issueId: issue.id,
           durationMs: Date.now() - new Date(attempt.startedAt).getTime(),
         })
+
         logger.info("orchestrator", `Agent completed for ${issue.identifier}`, {
           issueId: issue.id,
           exitCode: completedAttempt.exitCode ?? undefined,
@@ -455,6 +484,7 @@ export class Orchestrator {
         if (ws) ws.status = "failed"
         this.state.activeWorkspaces.delete(issue.id)
         this.activeAttempts.delete(issue.id)
+
         this.emitEvent("agent.failed", {
           issueKey: issue.identifier,
           issueId: issue.id,
@@ -560,25 +590,6 @@ export class Orchestrator {
         })
       }
     }
-  }
-
-  // ── Work Summary ──────────────────────────────────────────────────────
-
-  private buildWorkSummary(attempt: RunAttempt): string {
-    const output = attempt.agentOutput ?? "No output captured"
-    const duration = attempt.finishedAt && attempt.startedAt
-      ? Math.round((new Date(attempt.finishedAt).getTime() - new Date(attempt.startedAt).getTime()) / 1000)
-      : 0
-
-    return [
-      `Symphony: Work completed`,
-      ``,
-      `**Duration:** ${duration}s`,
-      `**Exit code:** ${attempt.exitCode}`,
-      ``,
-      `### Agent Output`,
-      output.length > 4000 ? output.slice(0, 4000) + "\n...(truncated)" : output,
-    ].join("\n")
   }
 
   // ── Status ────────────────────────────────────────────────────────────
