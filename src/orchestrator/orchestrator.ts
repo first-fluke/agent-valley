@@ -5,7 +5,7 @@
  */
 
 import type { Config } from "../config/config"
-import type { Issue, Workspace, RunAttempt, OrchestratorRuntimeState } from "../domain/models"
+import type { Issue, Workspace, RunAttempt, OrchestratorRuntimeState, IntegrationEvent } from "../domain/models"
 import type { WebhookEvent } from "../tracker/types"
 import { fetchIssuesByState, updateIssueState, addIssueComment } from "../tracker/linear-client"
 import { verifyWebhookSignature, parseWebhookEvent } from "../tracker/webhook-handler"
@@ -14,6 +14,7 @@ import { AgentRunnerService } from "./agent-runner"
 import { RetryQueue } from "./retry-queue"
 import { parseWorkflow, renderPrompt } from "../config/workflow-loader"
 import { logger } from "../observability/logger"
+import { createIntegrationDispatcher, IntegrationDispatcher } from "../integrations"
 
 export class Orchestrator {
   private state: OrchestratorRuntimeState = {
@@ -25,6 +26,7 @@ export class Orchestrator {
   private workspaceManager: WorkspaceManager
   private agentRunner: AgentRunnerService
   private retryQueue: RetryQueue
+  private integrationDispatcher: IntegrationDispatcher
   private retryTimer: ReturnType<typeof setInterval> | null = null
   private promptTemplate: string = ""
 
@@ -38,6 +40,7 @@ export class Orchestrator {
     this.workspaceManager = new WorkspaceManager(config.workspaceRoot)
     this.agentRunner = new AgentRunnerService()
     this.retryQueue = new RetryQueue(config.agentMaxRetries, config.agentRetryDelay)
+    this.integrationDispatcher = createIntegrationDispatcher(config.integrations)
   }
 
   async start(): Promise<void> {
@@ -320,6 +323,11 @@ export class Orchestrator {
           exitCode: completedAttempt.exitCode ?? undefined,
           durationMs: Date.now() - new Date(attempt.startedAt).getTime(),
         })
+
+        // Notify integrations — best-effort
+        this.integrationDispatcher.dispatch(
+          this.buildIntegrationEvent("agent_completed", issue, workspace.path, completedAttempt.agentOutput),
+        )
       },
       onError: async (err) => {
         const ws = this.state.activeWorkspaces.get(issue.id)
@@ -330,6 +338,11 @@ export class Orchestrator {
           issueId: issue.id,
           error: err.message,
         })
+
+        // Notify integrations — best-effort
+        this.integrationDispatcher.dispatch(
+          this.buildIntegrationEvent("agent_failed", issue, workspace.path, err.message),
+        )
         if (err.recoverable) {
           const added = this.retryQueue.add(issue.id, 1, err.message)
           if (!added) {
@@ -367,6 +380,9 @@ export class Orchestrator {
     })
 
     logger.info("orchestrator", `Starting agent for ${issue.identifier}`, { issueId: issue.id })
+
+    // Notify integrations — best-effort, never blocks orchestration
+    this.integrationDispatcher.dispatch(this.buildIntegrationEvent("agent_started", issue, workspace.path, null))
   }
 
   private async handleIssueLeftInProgress(issueId: string): Promise<void> {
@@ -444,6 +460,26 @@ export class Orchestrator {
     ].join("\n")
   }
 
+  // ── Integration Events ───────────────────────────────────────────────
+
+  private buildIntegrationEvent(
+    kind: IntegrationEvent["kind"],
+    issue: Issue,
+    workspacePath: string,
+    detail: string | null,
+  ): IntegrationEvent {
+    return {
+      kind,
+      issueId: issue.id,
+      issueIdentifier: issue.identifier,
+      issueTitle: issue.title,
+      issueUrl: issue.url,
+      workspacePath,
+      timestamp: new Date().toISOString(),
+      detail,
+    }
+  }
+
   // ── Status ────────────────────────────────────────────────────────────
 
   private getStatus(): Record<string, unknown> {
@@ -460,6 +496,7 @@ export class Orchestrator {
       activeWorkspaces: workspaces,
       activeAgents: this.agentRunner.activeCount,
       retryQueueSize: this.retryQueue.size,
+      integrations: this.integrationDispatcher.statuses(),
       config: {
         agentType: this.config.agentType,
         maxParallel: this.config.maxParallel,

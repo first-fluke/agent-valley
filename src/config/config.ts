@@ -30,6 +30,16 @@ const configSchema = z.object({
   serverPort: z.number().min(1),
   logLevel: z.enum(["debug", "info", "warn", "error"]),
   logFormat: z.enum(["json", "text"]),
+  integrations: z.object({
+    github: z.object({
+      token: z.string(),
+      owner: z.string(),
+      repo: z.string(),
+    }).optional(),
+    slack: z.object({
+      webhookUrl: z.string().url("SLACK_WEBHOOK_URL must be a valid URL.\n  Fix: Set SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx in .env"),
+    }).optional(),
+  }),
 })
 
 export type Config = z.infer<typeof configSchema>
@@ -57,6 +67,16 @@ export function loadConfig(): Config {
     serverPort: Number(env.SERVER_PORT ?? "9741"),
     logLevel: (env.LOG_LEVEL ?? "info") as "debug" | "info" | "warn" | "error",
     logFormat: (env.LOG_FORMAT ?? "json") as "json" | "text",
+    integrations: {
+      github: env.GITHUB_TOKEN ? {
+        token: env.GITHUB_TOKEN,
+        owner: env.GITHUB_OWNER ?? "",
+        repo: env.GITHUB_REPO ?? "",
+      } : undefined,
+      slack: env.SLACK_WEBHOOK_URL ? {
+        webhookUrl: env.SLACK_WEBHOOK_URL,
+      } : undefined,
+    },
   }
 
   const result = configSchema.safeParse(raw)

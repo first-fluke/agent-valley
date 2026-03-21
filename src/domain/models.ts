@@ -45,3 +45,31 @@ export interface OrchestratorRuntimeState {
   activeWorkspaces: Map<string, Workspace>
   lastEventAt: string | null
 }
+
+// ── Integration Types ────────────────────────────────────────────────
+
+export type IntegrationType = "github" | "slack"
+
+export interface IntegrationStatus {
+  type: IntegrationType
+  configured: boolean
+  lastEventAt: string | null
+  error: string | null
+}
+
+export type IntegrationEventKind =
+  | "agent_started"
+  | "agent_completed"
+  | "agent_failed"
+  | "agent_timeout"
+
+export interface IntegrationEvent {
+  kind: IntegrationEventKind
+  issueId: string
+  issueIdentifier: string
+  issueTitle: string
+  issueUrl: string
+  workspacePath: string
+  timestamp: string
+  detail: string | null
+}
