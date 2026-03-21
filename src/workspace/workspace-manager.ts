@@ -39,7 +39,10 @@ export class WorkspaceManager {
   ) {}
 
   deriveKey(identifier: string): string {
-    return identifier.replace(/[^A-Za-z0-9._-]/g, "_")
+    // Replace non-safe chars, then collapse consecutive dots to prevent path traversal
+    return identifier
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .replace(/\.{2,}/g, ".")
   }
 
   async create(issue: Issue): Promise<Workspace> {
