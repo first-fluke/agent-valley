@@ -108,6 +108,24 @@ program
     }
   })
 
+// ── login ────────────────────────────────────────────────────────────────────
+program
+  .command("login")
+  .description("Login to Agent Valley team (Supabase auth)")
+  .action(async () => {
+    const { login } = await import("./login")
+    await login()
+  })
+
+// ── logout ───────────────────────────────────────────────────────────────────
+program
+  .command("logout")
+  .description("Logout from Agent Valley team")
+  .action(async () => {
+    const { logout } = await import("./login")
+    await logout()
+  })
+
 // ── default: start server ────────────────────────────────────────────────────
 program.action(async () => {
   if (!(await Bun.file(".env").exists())) {
