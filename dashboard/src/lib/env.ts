@@ -67,5 +67,12 @@ export function toOrchestratorConfig() {
     logLevel: env.LOG_LEVEL,
     logFormat: env.LOG_FORMAT,
     deliveryMode: env.DELIVERY_MODE,
+    routingRules: [],
+    scoringModel: undefined,
+    scoreRouting: undefined,
+    supabaseUrl: undefined,
+    supabaseAnonKey: undefined,
+    teamId: undefined,
+    displayName: undefined,
   }
 }

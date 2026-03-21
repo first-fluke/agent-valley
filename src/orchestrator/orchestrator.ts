@@ -107,7 +107,7 @@ export class Orchestrator {
             logger.warn("orchestrator", `Startup sync attempt ${attempt} failed, retrying in 3s...`)
             await new Promise((r) => setTimeout(r, 3_000))
           } else {
-            logger.error("orchestrator", "Startup sync failed after 3 attempts", { error: String(err) })
+            logger.error("orchestrator", "Startup sync failed after 3 attempts", { error: String(err), stack: (err as Error).stack })
           }
         }
       }
@@ -330,7 +330,7 @@ export class Orchestrator {
    */
   private async handleIssueInProgressInternal(issue: Issue): Promise<void> {
     // Fallback: if webhook didn't include labels and routing rules exist, fetch from API
-    if (issue.labels.length === 0 && this.config.routingRules.length > 0) {
+    if ((!issue.labels || issue.labels.length === 0) && this.config.routingRules.length > 0) {
       try {
         issue.labels = await fetchIssueLabels(this.config.linearApiKey, issue.id)
       } catch (err) {

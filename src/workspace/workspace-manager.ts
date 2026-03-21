@@ -126,45 +126,64 @@ export class WorkspaceManager {
   async mergeAndPush(workspace: Workspace): Promise<{ ok: boolean; error?: string }> {
     const root = this.repoRoot(workspace)
     const branch = `symphony/${workspace.key}`
+    const maxAttempts = 3
 
-    // Check if branch has any commits ahead of main
-    const { exitCode: diffExit } = await runCommand("git", ["diff", "--quiet", `main...${branch}`], { cwd: root })
-    if (diffExit === 0) {
-      logger.info("workspace-manager", "No changes to merge", { branch })
+    const hasRemote = (await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })).exitCode === 0
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Pull latest main before merging
+      if (hasRemote) {
+        await runCommand("git", ["pull", "--rebase", "origin", "main"], { cwd: root })
+      }
+
+      // Check if branch has any commits ahead of main
+      const { exitCode: diffExit } = await runCommand("git", ["diff", "--quiet", `main...${branch}`], { cwd: root })
+      if (diffExit === 0) {
+        logger.info("workspace-manager", "No changes to merge", { branch })
+        return { ok: true }
+      }
+
+      // Merge branch into main (rerere handles conflict resolution)
+      const { exitCode: mergeExit, stderr: mergeErr } = await runCommand("git", ["merge", branch, "--no-edit"], {
+        cwd: root,
+      })
+      if (mergeExit !== 0) {
+        // rerere might have resolved, check for remaining conflicts
+        const { exitCode: conflictCheck } = await runCommand("git", ["diff", "--check"], { cwd: root })
+        if (conflictCheck !== 0) {
+          await runCommand("git", ["merge", "--abort"], { cwd: root })
+          logger.error("workspace-manager", "Merge failed with unresolved conflicts", { branch, error: mergeErr })
+          return { ok: false, error: `Merge conflict on ${branch}: ${mergeErr}` }
+        }
+        // rerere resolved all conflicts — commit the resolution
+        await runCommand("git", ["commit", "--no-edit"], { cwd: root })
+      }
+
+      // Push main
+      if (hasRemote) {
+        const { exitCode: pushExit, stderr: pushErr } = await runCommand("git", ["push", "origin", "main"], {
+          cwd: root,
+        })
+        if (pushExit !== 0) {
+          if (attempt < maxAttempts) {
+            logger.warn("workspace-manager", `Push rejected, retrying (${attempt}/${maxAttempts})`, { branch })
+            // Reset the merge and retry with fresh pull
+            await runCommand("git", ["reset", "--hard", "HEAD~1"], { cwd: root })
+            continue
+          }
+          logger.error("workspace-manager", "Push failed after retries", { error: pushErr })
+          return { ok: false, error: `Push failed: ${pushErr}` }
+        }
+      }
+
+      // Delete the feature branch
+      await runCommand("git", ["branch", "-D", branch], { cwd: root })
+
+      logger.info("workspace-manager", "Merged and pushed", { branch })
       return { ok: true }
     }
 
-    // Merge branch into main (rerere handles conflict resolution)
-    const { exitCode: mergeExit, stderr: mergeErr } = await runCommand("git", ["merge", branch, "--no-edit"], {
-      cwd: root,
-    })
-    if (mergeExit !== 0) {
-      // rerere might have resolved, check for remaining conflicts
-      const { exitCode: conflictCheck } = await runCommand("git", ["diff", "--check"], { cwd: root })
-      if (conflictCheck !== 0) {
-        await runCommand("git", ["merge", "--abort"], { cwd: root })
-        logger.error("workspace-manager", "Merge failed with unresolved conflicts", { branch, error: mergeErr })
-        return { ok: false, error: `Merge conflict on ${branch}: ${mergeErr}` }
-      }
-      // rerere resolved all conflicts — commit the resolution
-      await runCommand("git", ["commit", "--no-edit"], { cwd: root })
-    }
-
-    // Push main (if remote exists)
-    const { exitCode: remoteCheck } = await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })
-    if (remoteCheck === 0) {
-      const { exitCode: pushExit, stderr: pushErr } = await runCommand("git", ["push", "origin", "main"], { cwd: root })
-      if (pushExit !== 0) {
-        logger.error("workspace-manager", "Push failed", { error: pushErr })
-        return { ok: false, error: `Push failed: ${pushErr}` }
-      }
-    }
-
-    // Delete the feature branch
-    await runCommand("git", ["branch", "-D", branch], { cwd: root })
-
-    logger.info("workspace-manager", "Merged and pushed", { branch })
-    return { ok: true }
+    return { ok: false, error: `Merge+push failed after ${maxAttempts} attempts` }
   }
 
   async cleanup(workspace: Workspace): Promise<void> {
