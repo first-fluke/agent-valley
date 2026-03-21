@@ -5,6 +5,38 @@
 
 import { z } from "zod/v4"
 
+const routingRuleSchema = z.object({
+  label: z.string().min(1, "Each routing rule must have a non-empty label"),
+  workspaceRoot: z.string().min(1).refine(
+    (v) => v.startsWith("/"),
+    "workspaceRoot in routing rule must be an absolute path"
+  ),
+  agentType: z.enum(["claude", "codex", "gemini"]).optional(),
+  deliveryMode: z.enum(["merge", "pr"]).optional(),
+})
+
+export type RoutingRule = z.infer<typeof routingRuleSchema>
+
+const scoreRoutingTierSchema = z.object({
+  min: z.number().int().min(1).max(10),
+  max: z.number().int().min(1).max(10),
+  agent: z.enum(["claude", "codex", "gemini"]),
+}).refine(
+  (v) => v.min <= v.max,
+  "Each score tier must have min <= max.\n  Fix: Ensure min is less than or equal to max in SCORE_ROUTING"
+)
+
+const scoreRoutingSchema = z.object({
+  easy: scoreRoutingTierSchema,
+  medium: scoreRoutingTierSchema,
+  hard: scoreRoutingTierSchema,
+}).refine(
+  (v) => v.easy.max < v.medium.min && v.medium.max < v.hard.min,
+  "Score tiers must not overlap.\n  Fix: Ensure easy.max < medium.min and medium.max < hard.min in SCORE_ROUTING"
+)
+
+export type ScoreRoutingConfig = z.infer<typeof scoreRoutingSchema>
+
 const configSchema = z.object({
   linearApiKey: z.string().min(1, "LINEAR_API_KEY is not set.\n  Fix: Add LINEAR_API_KEY=lin_api_xxx to .env"),
   linearTeamId: z.string().min(1, "LINEAR_TEAM_ID is not set.\n  Fix: Add LINEAR_TEAM_ID=ACR to .env"),
@@ -31,6 +63,9 @@ const configSchema = z.object({
   logLevel: z.enum(["debug", "info", "warn", "error"]),
   logFormat: z.enum(["json", "text"]),
   deliveryMode: z.enum(["merge", "pr"]),
+  routingRules: z.array(routingRuleSchema),
+  scoringModel: z.string().optional(),
+  scoreRouting: scoreRoutingSchema.optional(),
   // Team mode (optional — auto-detected)
   supabaseUrl: z.string().optional(),
   supabaseAnonKey: z.string().optional(),
@@ -42,6 +77,45 @@ export type Config = z.infer<typeof configSchema>
 
 export function isTeamMode(config: Config): boolean {
   return !!(config.supabaseUrl && config.supabaseAnonKey && config.teamId)
+}
+
+function parseScoreRouting(raw: string | undefined): z.infer<typeof scoreRoutingSchema> | undefined {
+  if (!raw || raw.trim() === "") return undefined
+  try {
+    const parsed = JSON.parse(raw)
+    const result = scoreRoutingSchema.safeParse(parsed)
+    if (!result.success) {
+      const issues = result.error.issues.map((e) => `  - ${e.path.join(".")}: ${e.message}`).join("\n")
+      console.error(
+        "SCORE_ROUTING validation failed:\n" + issues + "\n" +
+        '  Fix: Set SCORE_ROUTING=\'{"easy":{"min":1,"max":3,"agent":"gemini"},"medium":{"min":4,"max":7,"agent":"codex"},"hard":{"min":8,"max":10,"agent":"claude"}}\' in .env\n' +
+        "  Or remove SCORE_ROUTING to disable score-based routing."
+      )
+      return process.exit(1)
+    }
+    return result.data
+  } catch {
+    console.error(
+      "SCORE_ROUTING is not valid JSON.\n" +
+      '  Fix: Set SCORE_ROUTING=\'{"easy":{"min":1,"max":3,"agent":"gemini"},...}\' in .env\n' +
+      "  Or remove SCORE_ROUTING to disable score-based routing."
+    )
+    return process.exit(1)
+  }
+}
+
+function parseRoutingRules(raw: string | undefined): RoutingRule[] {
+  if (!raw || raw.trim() === "") return []
+  try {
+    return JSON.parse(raw) as RoutingRule[]
+  } catch {
+    console.error(
+      "ROUTING_RULES is not valid JSON.\n" +
+      '  Fix: Set ROUTING_RULES=\'[{"label":"backend","workspaceRoot":"/path/to/repo"}]\' in .env\n' +
+      "  Or remove ROUTING_RULES to use the default WORKSPACE_ROOT for all issues."
+    )
+    return process.exit(1)
+  }
 }
 
 export function loadConfig(): Config {
@@ -68,6 +142,9 @@ export function loadConfig(): Config {
     logLevel: (env.LOG_LEVEL ?? "info") as "debug" | "info" | "warn" | "error",
     logFormat: (env.LOG_FORMAT ?? "json") as "json" | "text",
     deliveryMode: (env.DELIVERY_MODE ?? "merge") as "merge" | "pr",
+    routingRules: parseRoutingRules(env.ROUTING_RULES),
+    scoringModel: env.SCORING_MODEL || undefined,
+    scoreRouting: parseScoreRouting(env.SCORE_ROUTING),
     supabaseUrl: env.SUPABASE_URL || undefined,
     supabaseAnonKey: env.SUPABASE_ANON_KEY || undefined,
     teamId: env.TEAM_ID || undefined,
