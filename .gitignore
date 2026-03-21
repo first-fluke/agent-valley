@@ -37,6 +37,9 @@ logs/
 PLAN.md
 docs/plans/
 
+# Mise (local overrides)
+.mise.local.toml
+
 # Tool internals
 .serena/
 .superset/

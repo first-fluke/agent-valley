@@ -13,25 +13,39 @@ When working on this project, use these specialized sub-agents:
 
 ## What This Project Is
 
-Symphony Dev Template — an agent orchestration platform that receives Linear webhook events and dispatches work to AI agents (Claude Code, Codex, Gemini) in isolated git worktrees. Implemented in **TypeScript + Bun**.
+Globe CRM — a polyglot monorepo for a geographic-aware CRM platform. The project combines:
+
+- **Symphony orchestrator** (TypeScript + Bun) — receives Linear webhook events and dispatches work to AI agents in isolated git worktrees
+- **Web dashboard** (Next.js) — admin UI
+- **API** (Python FastAPI) — backend services (planned)
+- **Mobile** (Flutter) — mobile app (planned)
+- **Infrastructure** (Terraform) — cloud provisioning (planned)
 
 ## Commands
 
 ```bash
-# Run the server
-bun run src/main.ts
+# Tool version management
+mise install                    # Install all pinned tool versions
+
+# Backing services
+docker compose up -d            # Start PostgreSQL, Redis, MinIO
+docker compose down             # Stop all services
+
+# Symphony orchestrator
+bun run src/main.ts             # Run the orchestrator server
+
+# Dashboard
+cd dashboard && bun dev         # Run Next.js dev server
+
+# Lint & format (root-level)
+bunx @biomejs/biome check .     # Lint + format check
+bunx @biomejs/biome check --write .  # Auto-fix
 
 # Validate architecture (secret detection, layer violations, forbidden patterns)
 ./scripts/harness/validate.sh
 
-# Bootstrap dev environment (prerequisite checks + config validation)
+# Bootstrap dev environment
 ./scripts/dev.sh
-
-# Install harness into a new or existing project
-./scripts/install.sh
-
-# Garbage-collect old workspaces
-./scripts/harness/gc.sh
 
 # Type-check (no emit — Bun handles transpilation)
 tsc --noEmit
@@ -61,6 +75,30 @@ Infrastructure src/tracker/         Linear GraphQL client + webhook HMAC + state
 
 **Key boundary:** Symphony is a scheduler/runner. It manages lifecycle state transitions (Todo→InProgress→Done/Cancelled) and posts work summaries. Agents focus on business logic (code writing, PR creation).
 
+## Monorepo Structure
+
+```
+globe-crm/
+├── apps/
+│   ├── api/              ← Python FastAPI backend (planned)
+│   ├── web/              ← Next.js frontend (currently dashboard/)
+│   └── mobile/           ← Flutter mobile app (planned)
+├── packages/             ← Shared TypeScript packages (planned)
+├── infra/                ← Terraform IaC (planned)
+├── src/                  ← Symphony orchestrator
+├── docker-compose.yml    ← PostgreSQL+PostGIS, Redis, MinIO
+├── .mise.toml            ← Node 22, Python 3.12, Flutter 3, Terraform 1.x
+└── biome.json            ← Root lint/format config
+```
+
+## Backing Services
+
+| Service | Port | Credentials |
+|---|---|---|
+| PostgreSQL + PostGIS | 5432 | `globe:globe` / db: `globe_crm` |
+| Redis | 6379 | no auth |
+| MinIO (S3) | 9000 (API) / 9001 (Console) | `minioadmin:minioadmin` |
+
 ## Agent Session Plugin System
 
 `src/sessions/agent-session.ts` defines the `AgentSession` interface. Each agent type extends `BaseSession` (shared event emitter + process management):
@@ -75,21 +113,6 @@ Infrastructure src/tracker/         Linear GraphQL client + webhook HMAC + state
 
 - **Config:** Zod schema in `src/config/config.ts` validates all env vars at startup. Fails fast with actionable error messages including the variable name and where to fix it.
 - **WORKFLOW.md:** YAML front matter (`---` delimited) defines tracker/workspace/agent/server config. Prompt template body follows, with `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.description}}`, `{{workspace_path}}` template variables. Supports `$VAR` env var substitution.
-
-## Event Flow
-
-1. Linear sends webhook → `src/server/http-server.ts` receives it
-2. `src/tracker/webhook-handler.ts` verifies HMAC-SHA256 signature
-3. Orchestrator routes the event:
-   - Todo → transition to In Progress via Linear API, then start agent
-   - In Progress → start agent directly
-   - Left In Progress → stop agent + cleanup
-4. WorkspaceManager creates git worktree in `WORKSPACE_ROOT/{issue-key}`
-5. AgentRunnerService spawns the appropriate agent session
-6. On completion → post work summary comment + transition to Done
-7. On failure → RetryQueue schedules exponential backoff; max retries exceeded → error comment + Cancelled
-
-Startup sync: on boot, Orchestrator fetches all Todo + In Progress issues from Linear to recover state.
 
 ## Architecture Constraints
 
