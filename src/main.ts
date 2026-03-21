@@ -5,7 +5,7 @@
  *   bun run src/main.ts
  */
 
-import { loadConfig } from "./config/config"
+import { loadConfig } from "./config/env"
 import { configureLogger, logger } from "./observability/logger"
 import { Orchestrator } from "./orchestrator/orchestrator"
 import { startHttpServer } from "./server/http-server"

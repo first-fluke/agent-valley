@@ -5,7 +5,7 @@
  */
 
 import { readFile, access } from "node:fs/promises"
-import type { Config } from "../config/config"
+import type { Config } from "../config/env"
 import type { Issue, Workspace, RunAttempt, OrchestratorRuntimeState } from "../domain/models"
 import type { WebhookEvent } from "../tracker/types"
 import { fetchIssuesByState, updateIssueState, addIssueComment } from "../tracker/linear-client"
