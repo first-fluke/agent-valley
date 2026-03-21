@@ -1,7 +1,7 @@
 /**
  * Workspace Manager — git worktree creation, merge, cleanup, and lifecycle management.
  *
- * All git operations run against the WORKSPACE_ROOT repo (not the composer repo).
+ * All git operations run against the WORKSPACE_ROOT repo (not the agent-valley repo).
  */
 
 import { spawn } from "node:child_process"

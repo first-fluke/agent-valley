@@ -13,13 +13,13 @@ export interface OrchestratorInstance {
 
 declare global {
   // biome-ignore lint: global augmentation for singleton
-  var __composer_orchestrator__: OrchestratorInstance | undefined
+  var __agent_valley_orchestrator__: OrchestratorInstance | undefined
 }
 
 export function setOrchestrator(instance: OrchestratorInstance) {
-  globalThis.__composer_orchestrator__ = instance
+  globalThis.__agent_valley_orchestrator__ = instance
 }
 
 export function getOrchestrator(): OrchestratorInstance | null {
-  return globalThis.__composer_orchestrator__ ?? null
+  return globalThis.__agent_valley_orchestrator__ ?? null
 }

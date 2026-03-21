@@ -93,7 +93,7 @@ export async function createIssue(input: string | undefined, options?: { yes?: b
   const todoStateId = process.env.LINEAR_WORKFLOW_STATE_TODO
 
   if (!apiKey || !teamUuid || !todoStateId) {
-    console.log(pc.red("설정이 필요합니다. `bun composer setup` 을 먼저 실행하세요."))
+    console.log(pc.red("설정이 필요합니다. `bun agent-valley setup` 을 먼저 실행하세요."))
     process.exit(1)
   }
 

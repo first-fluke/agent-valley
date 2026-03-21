@@ -4,7 +4,7 @@ import { setOrchestrator, getOrchestrator } from "../lib/orchestrator-singleton"
 describe("Orchestrator Singleton", () => {
   beforeEach(() => {
     // Reset global state
-    globalThis.__composer_orchestrator__ = undefined
+    globalThis.__agent_valley_orchestrator__ = undefined
   })
 
   test("returns null when not initialized", () => {
@@ -41,6 +41,6 @@ describe("Orchestrator Singleton", () => {
     }
     setOrchestrator(mock)
     // Verify via globalThis directly
-    expect(globalThis.__composer_orchestrator__).toBe(mock)
+    expect(globalThis.__agent_valley_orchestrator__).toBe(mock)
   })
 })

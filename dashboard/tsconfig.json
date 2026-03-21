@@ -26,7 +26,7 @@
       "@/*": [
         "./src/*"
       ],
-      "@composer/*": [
+      "@agent-valley/*": [
         "../src/*"
       ]
     }

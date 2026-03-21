@@ -5,8 +5,8 @@
 
 import path from "node:path"
 import { toOrchestratorConfig } from "@/lib/env"
-import { configureLogger, logger } from "@composer/observability/logger"
-import { Orchestrator } from "@composer/orchestrator/orchestrator"
+import { configureLogger, logger } from "@agent-valley/observability/logger"
+import { Orchestrator } from "@agent-valley/orchestrator/orchestrator"
 import { setOrchestrator } from "@/lib/orchestrator-singleton"
 
 export async function bootstrap() {

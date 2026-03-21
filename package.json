@@ -1,14 +1,14 @@
 {
-  "name": "composer",
+  "name": "agent-valley",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "scripts": {
-    "composer": "bun run src/cli/index.ts",
+    "agent-valley": "bun run src/cli/index.ts",
     "start": "bun run src/main.ts"
   },
   "bin": {
-    "composer": "src/cli/index.ts"
+    "agent-valley": "src/cli/index.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.11"

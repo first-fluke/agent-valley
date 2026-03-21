@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname, ".."),
     resolveAlias: {
-      "@composer": path.resolve(__dirname, "../src"),
+      "@agent-valley": path.resolve(__dirname, "../src"),
     },
   },
   serverExternalPackages: ["zod"],

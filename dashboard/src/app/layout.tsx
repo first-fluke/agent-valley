@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import "@/app/globals.css"
 
 export const metadata: Metadata = {
-  title: "Composer Dashboard",
+  title: "Agent Valley Dashboard",
   description: "Pixel art office view of AI agent orchestration",
 }
 

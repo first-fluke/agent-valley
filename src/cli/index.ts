@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * CLI entry point — `bun composer`
+ * CLI entry point — `bun agent-valley`
  *
  * Commands:
  *   (default)  Check config, then start server
@@ -14,8 +14,8 @@ import { program } from "commander"
 import pc from "picocolors"
 
 program
-  .name("composer")
-  .description("Symphony Composer — AI agent orchestrator")
+  .name("agent-valley")
+  .description("Agent Valley — AI agent orchestrator")
   .version("0.1.0")
 
 // ── setup ────────────────────────────────────────────────────────────────────

@@ -86,7 +86,7 @@ function cancelled(): never {
 }
 
 export async function setup(): Promise<void> {
-  p.intro(pc.bgCyan(pc.black(" Symphony Composer Setup ")))
+  p.intro(pc.bgCyan(pc.black(" Agent Valley Setup ")))
 
   // ── Check existing .env ──────────────────────────────────────────────────
   if (await Bun.file(".env").exists()) {
@@ -258,5 +258,5 @@ export async function setup(): Promise<void> {
     p.log.success(`워크스페이스 디렉토리 생성: ${workspaceRoot}`)
   }
 
-  p.outro(pc.green("설정 완료! `bun composer` 로 서버를 시작하세요."))
+  p.outro(pc.green("설정 완료! `bun agent-valley` 로 서버를 시작하세요."))
 }
