@@ -43,6 +43,7 @@ export interface LinearIssueNode {
   url: string
   state: { id: string; name: string; type: string }
   team: { id: string; key: string }
+  labels: { nodes: Array<{ name: string }> }
 }
 
 // ── Zod Schemas for Runtime Validation ──────────────────────────────
@@ -55,6 +56,9 @@ export const linearIssueNodeSchema = z.object({
   url: z.string(),
   state: z.object({ id: z.string(), name: z.string(), type: z.string() }),
   team: z.object({ id: z.string(), key: z.string() }),
+  labels: z.object({
+    nodes: z.array(z.object({ name: z.string() })),
+  }).optional().default({ nodes: [] }),
 })
 
 export const linearTeamIssuesDataSchema = z.object({

@@ -44,16 +44,17 @@ export class WorkspaceManager {
     return identifier.replace(/[^A-Za-z0-9._-]/g, "_")
   }
 
-  async create(issue: Issue): Promise<Workspace> {
+  async create(issue: Issue, rootOverride?: string): Promise<Workspace> {
+    const root = rootOverride ?? this.rootPath
     const key = this.deriveKey(issue.identifier)
-    const path = `${this.rootPath}/${key}`
+    const path = `${root}/${key}`
     const branch = `symphony/${key}`
 
-    // Create git worktree from WORKSPACE_ROOT repo
+    // Create git worktree from the target repo
     const { exitCode, stderr } = await runCommand(
       "git",
       ["worktree", "add", path, "-b", branch],
-      { cwd: this.rootPath },
+      { cwd: root },
     )
 
     if (exitCode !== 0) {
@@ -119,13 +120,21 @@ export class WorkspaceManager {
     await writeFile(path, JSON.stringify(attempt, null, 2), "utf-8")
   }
 
+  /** Derive the git repo root from a workspace path (parent of the workspace key dir). */
+  private repoRoot(workspace: Workspace): string {
+    // workspace.path = "{repoRoot}/{key}", so strip the last segment
+    const idx = workspace.path.lastIndexOf(`/${workspace.key}`)
+    return idx > 0 ? workspace.path.slice(0, idx) : this.rootPath
+  }
+
   async mergeAndPush(workspace: Workspace): Promise<{ ok: boolean; error?: string }> {
+    const root = this.repoRoot(workspace)
     const branch = `symphony/${workspace.key}`
 
     // Check if branch has any commits ahead of main
     const { exitCode: diffExit } = await runCommand(
       "git", ["diff", "--quiet", `main...${branch}`],
-      { cwd: this.rootPath },
+      { cwd: root },
     )
     if (diffExit === 0) {
       logger.info("workspace-manager", "No changes to merge", { branch })
@@ -135,32 +144,32 @@ export class WorkspaceManager {
     // Merge branch into main (rerere handles conflict resolution)
     const { exitCode: mergeExit, stderr: mergeErr } = await runCommand(
       "git", ["merge", branch, "--no-edit"],
-      { cwd: this.rootPath },
+      { cwd: root },
     )
     if (mergeExit !== 0) {
       // rerere might have resolved, check for remaining conflicts
       const { exitCode: conflictCheck } = await runCommand(
         "git", ["diff", "--check"],
-        { cwd: this.rootPath },
+        { cwd: root },
       )
       if (conflictCheck !== 0) {
-        await runCommand("git", ["merge", "--abort"], { cwd: this.rootPath })
+        await runCommand("git", ["merge", "--abort"], { cwd: root })
         logger.error("workspace-manager", "Merge failed with unresolved conflicts", { branch, error: mergeErr })
         return { ok: false, error: `Merge conflict on ${branch}: ${mergeErr}` }
       }
       // rerere resolved all conflicts — commit the resolution
-      await runCommand("git", ["commit", "--no-edit"], { cwd: this.rootPath })
+      await runCommand("git", ["commit", "--no-edit"], { cwd: root })
     }
 
     // Push main (if remote exists)
     const { exitCode: remoteCheck } = await runCommand(
       "git", ["remote", "get-url", "origin"],
-      { cwd: this.rootPath },
+      { cwd: root },
     )
     if (remoteCheck === 0) {
       const { exitCode: pushExit, stderr: pushErr } = await runCommand(
         "git", ["push", "origin", "main"],
-        { cwd: this.rootPath },
+        { cwd: root },
       )
       if (pushExit !== 0) {
         logger.error("workspace-manager", "Push failed", { error: pushErr })
@@ -169,15 +178,16 @@ export class WorkspaceManager {
     }
 
     // Delete the feature branch
-    await runCommand("git", ["branch", "-D", branch], { cwd: this.rootPath })
+    await runCommand("git", ["branch", "-D", branch], { cwd: root })
 
     logger.info("workspace-manager", "Merged and pushed", { branch })
     return { ok: true }
   }
 
   async cleanup(workspace: Workspace): Promise<void> {
-    // Remove git worktree (from WORKSPACE_ROOT repo)
-    await runCommand("git", ["worktree", "remove", workspace.path, "--force"], { cwd: this.rootPath })
+    const root = this.repoRoot(workspace)
+    // Remove git worktree (from the target repo)
+    await runCommand("git", ["worktree", "remove", workspace.path, "--force"], { cwd: root })
 
     // Remove directory if it still exists
     await rm(workspace.path, { recursive: true, force: true })
