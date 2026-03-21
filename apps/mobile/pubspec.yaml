@@ -1,0 +1,33 @@
+name: mapple
+description: Mapple mobile application
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^3.0.0
+  riverpod_annotation: ^3.0.0
+  go_router: ^14.0.0
+  forui: ^0.18.0
+  dio: ^5.0.0
+  drift: ^2.0.0
+  flutter_inappwebview: ^6.0.0
+  connectivity_plus: ^6.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  riverpod_generator: ^3.0.0
+  riverpod_lint: ^3.0.0
+  build_runner: ^2.4.0
+  drift_dev: ^2.0.0
+  custom_lint: ^0.7.0
+
+flutter:
+  uses-material-design: true
