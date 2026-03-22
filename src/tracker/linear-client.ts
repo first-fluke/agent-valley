@@ -275,18 +275,21 @@ export async function createSubIssue(
 }
 
 const CREATE_RELATION_MUTATION = `
-mutation CreateIssueRelation($issueId: String!, $relatedIssueId: String!, $type: String!) {
+mutation CreateIssueRelation($issueId: String!, $relatedIssueId: String!, $type: IssueRelationType!) {
   issueRelationCreate(input: { issueId: $issueId, relatedIssueId: $relatedIssueId, type: $type }) {
     issueRelation { id type }
   }
 }
 `
 
+/** Linear API IssueRelationType enum values */
+export type LinearRelationType = "blocks" | "related" | "duplicate"
+
 export async function createIssueRelation(
   apiKey: string,
   issueId: string,
   relatedIssueId: string,
-  type: string,
+  type: LinearRelationType,
 ): Promise<void> {
   await linearGraphQL<LinearMutationData>(apiKey, CREATE_RELATION_MUTATION, {
     issueId,
@@ -296,9 +299,9 @@ export async function createIssueRelation(
 }
 
 const ISSUE_BY_IDENTIFIER_QUERY = `
-query GetIssueByIdentifier($teamId: String!, $identifier: String!) {
+query GetIssueByIdentifier($teamId: String!, $number: Float!) {
   team(id: $teamId) {
-    issues(filter: { identifier: { eq: $identifier } }, first: 1) {
+    issues(filter: { number: { eq: $number } }, first: 1) {
       nodes { id identifier }
     }
   }
@@ -310,10 +313,12 @@ export async function fetchIssueByIdentifier(
   teamUuid: string,
   identifier: string,
 ): Promise<{ id: string; identifier: string } | null> {
+  const num = Number(identifier.split("-").pop())
+  if (Number.isNaN(num)) return null
   const data = await linearGraphQL<{ team?: { issues?: { nodes: Array<{ id: string; identifier: string }> } } }>(
     apiKey,
     ISSUE_BY_IDENTIFIER_QUERY,
-    { teamId: teamUuid, identifier },
+    { teamId: teamUuid, number: num },
   )
   return data?.team?.issues?.nodes?.[0] ?? null
 }

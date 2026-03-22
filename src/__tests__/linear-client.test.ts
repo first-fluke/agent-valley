@@ -7,7 +7,7 @@
  *   - linearTeamIssuesDataSchema — full team issues response parsing
  */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test, vi } from "vitest"
 import { linearIssueNodeSchema, linearTeamIssuesDataSchema } from "../tracker/types"
 
 // ── Shared fixtures ──────────────────────────────────────────────────
@@ -352,5 +352,137 @@ describe("linearTeamIssuesDataSchema — with DAG data", () => {
 
     const result = linearTeamIssuesDataSchema.safeParse(data)
     expect(result.success).toBe(false)
+  })
+})
+
+// ── fetchIssueByIdentifier — identifier parsing ───────────────────
+
+describe("fetchIssueByIdentifier — identifier→number parsing", () => {
+  /**
+   * Regression: fetchIssueByIdentifier used `filter: { identifier: { eq: $identifier } }`
+   * which does not exist in Linear's IssueFilter. The fix extracts the numeric part
+   * and uses `filter: { number: { eq: $number } }`.
+   */
+
+  test("extracts number from standard identifier format", async () => {
+    // We test the parsing logic by importing and calling the function with a mock
+    const { fetchIssueByIdentifier } = await import("../tracker/linear-client")
+
+    // Mock fetch to capture the variables sent to Linear API
+    let capturedVariables: Record<string, unknown> = {}
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string)
+      capturedVariables = body.variables
+      return new Response(
+        JSON.stringify({ data: { team: { issues: { nodes: [{ id: "uuid-1", identifier: "FIR-57" }] } } } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    }) as typeof fetch
+
+    try {
+      const result = await fetchIssueByIdentifier("fake-key", "team-uuid", "FIR-57")
+      expect(capturedVariables.number).toBe(57)
+      expect(capturedVariables.teamId).toBe("team-uuid")
+      expect(result?.identifier).toBe("FIR-57")
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test("extracts number from multi-digit identifier", async () => {
+    const { fetchIssueByIdentifier } = await import("../tracker/linear-client")
+
+    let capturedVariables: Record<string, unknown> = {}
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string)
+      capturedVariables = body.variables
+      return new Response(JSON.stringify({ data: { team: { issues: { nodes: [] } } } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }) as typeof fetch
+
+    try {
+      const result = await fetchIssueByIdentifier("fake-key", "team-uuid", "ACR-123")
+      expect(capturedVariables.number).toBe(123)
+      expect(result).toBeNull()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test("returns null for invalid identifier without number", async () => {
+    const { fetchIssueByIdentifier } = await import("../tracker/linear-client")
+
+    const result = await fetchIssueByIdentifier("fake-key", "team-uuid", "NO-NUMBER-HERE")
+    expect(result).toBeNull()
+  })
+})
+
+// ── createIssueRelation — only accepts valid Linear API types ─────
+
+describe("createIssueRelation — Linear API type contract", () => {
+  /**
+   * Regression: Linear API enum IssueRelationType only has "blocks", "related", "duplicate".
+   * There is no "blocked-by". Callers must swap direction before calling.
+   *
+   * Design: createIssueRelation is a thin infra wrapper — no business logic.
+   * Direction swap happens in the presentation layer (CLI).
+   */
+
+  function mockLinearFetch(): { getCaptured: () => Record<string, unknown>; restore: () => void } {
+    let captured: Record<string, unknown> = {}
+    const original = globalThis.fetch
+    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string)
+      captured = body.variables
+      return new Response(
+        JSON.stringify({ data: { issueRelationCreate: { issueRelation: { id: "r1", type: "blocks" } } } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    }) as typeof fetch
+    return {
+      getCaptured: () => captured,
+      restore: () => {
+        globalThis.fetch = original
+      },
+    }
+  }
+
+  test("blocks sends issueId and relatedIssueId as-is", async () => {
+    const { createIssueRelation } = await import("../tracker/linear-client")
+    const { getCaptured, restore } = mockLinearFetch()
+
+    try {
+      await createIssueRelation("fake-key", "parent-id", "child-id", "blocks")
+      expect(getCaptured().issueId).toBe("parent-id")
+      expect(getCaptured().relatedIssueId).toBe("child-id")
+      expect(getCaptured().type).toBe("blocks")
+    } finally {
+      restore()
+    }
+  })
+
+  test("CLI --blocked-by pattern: caller swaps direction and uses blocks", async () => {
+    /**
+     * This test documents the correct calling pattern from CLI:
+     * "FIR-58 blocked-by FIR-57" → createIssueRelation(key, FIR-57.id, FIR-58.id, "blocks")
+     */
+    const { createIssueRelation } = await import("../tracker/linear-client")
+    const { getCaptured, restore } = mockLinearFetch()
+
+    try {
+      const blockerId = "fir-57-uuid"
+      const blockedId = "fir-58-uuid"
+      // Caller swaps: blocker.id first, blocked.id second, type "blocks"
+      await createIssueRelation("fake-key", blockerId, blockedId, "blocks")
+      expect(getCaptured().issueId).toBe(blockerId)
+      expect(getCaptured().relatedIssueId).toBe(blockedId)
+      expect(getCaptured().type).toBe("blocks")
+    } finally {
+      restore()
+    }
   })
 })

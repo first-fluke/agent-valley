@@ -228,7 +228,8 @@ export async function executeBreakdown(input: string, opts: { yes?: boolean }): 
       const blocker = createdIds.find((c) => c.index === blockerIdx)
       if (blocker) {
         try {
-          await createIssueRelation(apiKey, created.id, blocker.id, "blocked-by")
+          // "created blocked-by blocker" → Linear API: "blocker blocks created"
+          await createIssueRelation(apiKey, blocker.id, created.id, "blocks")
           relationsCreated++
         } catch {
           // Non-critical: relation creation failure doesn't block

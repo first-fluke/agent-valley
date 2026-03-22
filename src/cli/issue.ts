@@ -272,12 +272,13 @@ export async function createIssue(
     }
 
     // Create blocked-by relation if specified
+    // "issue blocked-by blocker" → Linear API: "blocker blocks issue"
     if (options?.blockedBy) {
       try {
         const { fetchIssueByIdentifier, createIssueRelation } = await import("../tracker/linear-client")
         const blocker = await fetchIssueByIdentifier(apiKey, teamUuid, options.blockedBy)
         if (blocker) {
-          await createIssueRelation(apiKey, issue.id, blocker.id, "blocked-by")
+          await createIssueRelation(apiKey, blocker.id, issue.id, "blocks")
         }
       } catch {
         // Non-critical: relation creation failure logged but doesn't block
