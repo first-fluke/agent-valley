@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * CLI entry point — `bun agent-valley`
+ * CLI entry point — `bun av`
  *
  * Commands:
  *   (default)  Check config, then start server
@@ -13,7 +13,7 @@
 import { program } from "commander"
 import pc from "picocolors"
 
-program.name("agent-valley").description("Agent Valley — AI agent orchestrator").version("0.1.0")
+program.name("av").description("Agent Valley — AI agent orchestrator").version("0.1.0")
 
 // ── setup ────────────────────────────────────────────────────────────────────
 program

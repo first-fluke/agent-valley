@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Batch create Globe CRM Linear issues via `bun agent-valley issue --raw -y`
+# Batch create Globe CRM Linear issues via `bun av issue --raw -y`
 # Usage: bash scripts/create-globe-crm-issues.sh
 set -euo pipefail
 
@@ -10,7 +10,7 @@ issue() {
   local input="$1"
   local title="${input%%$'\n'*}"
   echo "  → $title"
-  bun agent-valley issue --raw -y "$input"
+  bun av issue --raw -y "$input"
 }
 
 echo "🌍 Creating Globe CRM issues..."

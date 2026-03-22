@@ -294,5 +294,5 @@ export async function setup(): Promise<void> {
     p.log.success(`워크스페이스 디렉토리 생성: ${workspaceRoot}`)
   }
 
-  p.outro(pc.green("설정 완료! `bun agent-valley` 로 서버를 시작하세요."))
+  p.outro(pc.green("설정 완료! `bun av` 로 서버를 시작하세요."))
 }

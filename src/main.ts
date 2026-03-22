@@ -31,7 +31,7 @@ if (isTeamMode(config)) {
 
   const creds = loadCredentials()
   if (!creds || creds.expiresAt <= Date.now()) {
-    logger.error("main", "Team mode requires login or token has expired. Run `agent-valley login` first.")
+    logger.error("main", "Team mode requires login or token has expired. Run `bun av login` first.")
     process.exit(1)
   }
 

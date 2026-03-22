@@ -4,14 +4,14 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "agent-valley": "bun run src/cli/index.ts",
+    "av": "bun run src/cli/index.ts",
     "start": "bun run src/main.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",
     "prepare": "husky"
   },
   "bin": {
-    "agent-valley": "src/cli/index.ts"
+    "av": "src/cli/index.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
