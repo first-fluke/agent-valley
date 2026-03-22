@@ -9,27 +9,35 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 
-/** Run a command and return its exit code + stderr text. */
+/** Run a command and return its exit code, stdout, and stderr. */
 function runCommand(
   cmd: string,
   args: string[],
   options: { cwd?: string; ignoreStdio?: boolean } = {},
-): Promise<{ exitCode: number; stderr: string }> {
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const proc = spawn(cmd, args, {
       cwd: options.cwd ?? process.cwd(),
-      stdio: options.ignoreStdio ? "ignore" : ["ignore", "ignore", "pipe"],
+      stdio: options.ignoreStdio ? "ignore" : ["ignore", "pipe", "pipe"],
     })
 
+    let stdout = ""
     let stderr = ""
-    if (!options.ignoreStdio && proc.stderr) {
-      proc.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString()
-      })
+    if (!options.ignoreStdio) {
+      if (proc.stdout) {
+        proc.stdout.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString()
+        })
+      }
+      if (proc.stderr) {
+        proc.stderr.on("data", (chunk: Buffer) => {
+          stderr += chunk.toString()
+        })
+      }
     }
 
     proc.once("close", (code) => {
-      resolve({ exitCode: code ?? -1, stderr })
+      resolve({ exitCode: code ?? -1, stdout, stderr })
     })
   })
 }
@@ -184,6 +192,65 @@ export class WorkspaceManager {
     }
 
     return { ok: false, error: `Merge+push failed after ${maxAttempts} attempts` }
+  }
+
+  // ── Safety-net: unfinished work detection ────────────────────────
+
+  async detectUnfinishedWork(
+    workspace: Workspace,
+  ): Promise<{ hasUncommittedChanges: boolean; hasCodeChanges: boolean }> {
+    const cwd = workspace.path
+
+    // Uncommitted changes in working tree or index
+    const { stdout: statusOut } = await runCommand("git", ["status", "--porcelain"], { cwd })
+    const hasUncommittedChanges = statusOut.trim().length > 0
+
+    // Any diff from main (committed changes on the branch)
+    const { exitCode: diffExit } = await runCommand("git", ["diff", "--quiet", "main...HEAD"], { cwd })
+    const hasBranchDiff = diffExit !== 0
+
+    return {
+      hasUncommittedChanges,
+      hasCodeChanges: hasUncommittedChanges || hasBranchDiff,
+    }
+  }
+
+  async autoCommit(workspace: Workspace): Promise<{ ok: boolean }> {
+    const cwd = workspace.path
+
+    await runCommand("git", ["add", "-A"], { cwd })
+    const { exitCode } = await runCommand("git", ["commit", "-m", "chore: auto-commit unfinished agent work"], { cwd })
+
+    if (exitCode !== 0) {
+      logger.warn("workspace-manager", "Auto-commit failed", { workspacePath: workspace.path })
+      return { ok: false }
+    }
+
+    logger.info("workspace-manager", "Auto-committed unfinished work", { workspacePath: workspace.path })
+    return { ok: true }
+  }
+
+  async getDiffStat(workspace: Workspace): Promise<string | null> {
+    const { stdout } = await runCommand("git", ["diff", "--stat", "main...HEAD"], { cwd: workspace.path })
+    const lines = stdout.trim().split("\n")
+    return lines.length > 0 ? lines[lines.length - 1]?.trim() || null : null
+  }
+
+  async pushBranch(workspace: Workspace): Promise<{ ok: boolean; error?: string }> {
+    const root = this.repoRoot(workspace)
+    const branch = `symphony/${workspace.key}`
+
+    const hasRemote = (await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })).exitCode === 0
+    if (!hasRemote) return { ok: true }
+
+    const { exitCode, stderr } = await runCommand("git", ["push", "-u", "origin", branch], { cwd: root })
+    if (exitCode !== 0) {
+      logger.error("workspace-manager", "Branch push failed", { branch, error: stderr })
+      return { ok: false, error: `Push failed: ${stderr}` }
+    }
+
+    logger.info("workspace-manager", "Pushed branch", { branch })
+    return { ok: true }
   }
 
   async cleanup(workspace: Workspace): Promise<void> {

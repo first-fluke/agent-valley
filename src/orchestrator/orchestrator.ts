@@ -20,7 +20,8 @@ import {
 import { parseWebhookEvent, verifyWebhookSignature } from "../tracker/webhook-handler"
 import { WorkspaceManager } from "../workspace/workspace-manager"
 import { AgentRunnerService } from "./agent-runner"
-import { buildWorkSummary, sortByIssueNumber } from "./helpers"
+import { type CompletionDeps, createCompletionCallbacks } from "./completion-handler"
+import { sortByIssueNumber } from "./helpers"
 import { RetryQueue } from "./retry-queue"
 import { analyzeScoreInBackground } from "./scoring-service"
 
@@ -36,6 +37,7 @@ export class Orchestrator {
   private workspaceManager: WorkspaceManager
   private agentRunner: AgentRunnerService
   private retryQueue: RetryQueue
+  private completionDeps: CompletionDeps
   private retryTimer: ReturnType<typeof setInterval> | null = null
   private promptTemplate: string = ""
 
@@ -74,6 +76,20 @@ export class Orchestrator {
     this.workspaceManager = new WorkspaceManager(config.workspaceRoot)
     this.agentRunner = new AgentRunnerService()
     this.retryQueue = new RetryQueue(config.agentMaxRetries, config.agentRetryDelay)
+    this.completionDeps = {
+      config,
+      workspaceManager: this.workspaceManager,
+      cleanupState: (issueId, status) => {
+        const ws = this.state.activeWorkspaces.get(issueId)
+        if (ws) ws.status = status
+        this.state.activeWorkspaces.delete(issueId)
+        this.activeAttempts.delete(issueId)
+      },
+      saveAttempt: (ws, att) => this.workspaceManager.saveAttempt(ws, att),
+      addRetry: (issueId, count, error) => this.retryQueue.add(issueId, count, error),
+      emitEvent: (event, payload) => this.emitEvent(event, payload),
+      fillVacantSlots: () => this.fillVacantSlots(),
+    }
   }
 
   async start(): Promise<void> {
@@ -107,7 +123,10 @@ export class Orchestrator {
             logger.warn("orchestrator", `Startup sync attempt ${attempt} failed, retrying in 3s...`)
             await new Promise((r) => setTimeout(r, 3_000))
           } else {
-            logger.error("orchestrator", "Startup sync failed after 3 attempts", { error: String(err), stack: (err as Error).stack })
+            logger.error("orchestrator", "Startup sync failed after 3 attempts", {
+              error: String(err),
+              stack: (err as Error).stack,
+            })
           }
         }
       }
@@ -156,8 +175,6 @@ export class Orchestrator {
     }
   }
 
-  // ── Startup Sync ──────────────────────────────────────────────────────
-
   private async startupSync(): Promise<void> {
     const issues = await fetchIssuesByState(this.config.linearApiKey, this.config.linearTeamUuid, [
       this.config.workflowStates.todo,
@@ -175,8 +192,6 @@ export class Orchestrator {
       }
     }
   }
-
-  // ── Fill Vacant Slots ────────────────────────────────────────────────
 
   private async fillVacantSlots(): Promise<void> {
     const available = this.config.maxParallel - this.agentRunner.activeCount
@@ -209,8 +224,6 @@ export class Orchestrator {
     }
   }
 
-  // ── Webhook Handling ──────────────────────────────────────────────────
-
   private async handleWebhook(payload: string, signature: string): Promise<{ status: number; body: string }> {
     // Verify signature
     const valid = await verifyWebhookSignature(payload, signature, this.config.linearWebhookSecret)
@@ -233,6 +246,16 @@ export class Orchestrator {
 
     // Route event
     if (event.stateId === this.config.workflowStates.todo) {
+      // Instant acknowledgment — webhook-triggered only (not startup sync or retry)
+      if (!this.processingIssues.has(event.issueId) && !this.state.activeWorkspaces.has(event.issueId)) {
+        addIssueComment(
+          this.config.linearApiKey,
+          event.issueId,
+          `Symphony: Received — starting agent for ${event.issue.identifier}`,
+        ).catch(() => {
+          /* best-effort, non-blocking */
+        })
+      }
       await this.handleIssueTodo(event.issue)
     } else if (event.stateId === this.config.workflowStates.inProgress) {
       await this.handleIssueInProgress(event.issue)
@@ -246,12 +269,6 @@ export class Orchestrator {
     return { status: 200, body: '{"ok":true}' }
   }
 
-  // ── Concurrency Guard ─────────────────────────────────────────────────
-
-  /**
-   * Checks whether the orchestrator can accept a new issue for processing.
-   * Combines duplicate check, processing-in-flight check, and concurrency limit.
-   */
   private canAcceptIssue(issueId: string): { ok: boolean; reason?: string } {
     if (this.processingIssues.has(issueId) || this.state.activeWorkspaces.has(issueId)) {
       return { ok: false, reason: "already active or being processed" }
@@ -262,23 +279,18 @@ export class Orchestrator {
     return { ok: true }
   }
 
-  // ── Issue Handling ────────────────────────────────────────────────────
+  /** Try to accept an issue; if at concurrency limit, queue for retry. Returns true if accepted. */
+  private tryAcceptOrQueue(issueId: string): boolean {
+    const guard = this.canAcceptIssue(issueId)
+    if (guard.ok) return true
+    if (guard.reason === "concurrency limit reached") {
+      this.retryQueue.add(issueId, 0, "Concurrency limit reached")
+    }
+    return false
+  }
 
   private async handleIssueTodo(issue: Issue): Promise<void> {
-    const guard = this.canAcceptIssue(issue.id)
-    if (!guard.ok) {
-      if (guard.reason === "concurrency limit reached") {
-        logger.warn("orchestrator", "Concurrency limit reached, keeping in Todo", {
-          issueId: issue.id,
-          activeCount: String(this.agentRunner.activeCount),
-          maxParallel: String(this.config.maxParallel),
-        })
-        this.retryQueue.add(issue.id, 0, "Concurrency limit reached")
-      } else {
-        logger.debug("orchestrator", "Issue already active, skipping Todo", { issueId: issue.id })
-      }
-      return
-    }
+    if (!this.tryAcceptOrQueue(issue.id)) return
 
     // Lock: mark as processing to prevent TOCTOU races
     this.processingIssues.add(issue.id)
@@ -304,22 +316,7 @@ export class Orchestrator {
   }
 
   private async handleIssueInProgress(issue: Issue): Promise<void> {
-    const guard = this.canAcceptIssue(issue.id)
-    if (!guard.ok) {
-      if (guard.reason === "concurrency limit reached") {
-        logger.warn("orchestrator", "Concurrency limit reached, queuing", {
-          issueId: issue.id,
-          activeCount: String(this.agentRunner.activeCount),
-          maxParallel: String(this.config.maxParallel),
-        })
-        this.retryQueue.add(issue.id, 0, "Concurrency limit reached")
-      } else {
-        logger.debug("orchestrator", "Issue already active, skipping", { issueId: issue.id })
-      }
-      return
-    }
-
-    // Lock: mark as processing to prevent TOCTOU races
+    if (!this.tryAcceptOrQueue(issue.id)) return
     this.processingIssues.add(issue.id)
     await this.handleIssueInProgressInternal(issue)
   }
@@ -403,6 +400,8 @@ export class Orchestrator {
       issueId: issue.id,
     })
 
+    const callbacks = createCompletionCallbacks(this.completionDeps, issue, workspace, attempt, route)
+
     // Spawn agent (using per-issue resolved agent type)
     await this.agentRunner.spawn(
       attempt,
@@ -412,124 +411,7 @@ export class Orchestrator {
         prompt,
         workspacePath: workspace.path,
       },
-      {
-        onComplete: async (completedAttempt) => {
-          const ws = this.state.activeWorkspaces.get(issue.id)
-          if (ws) ws.status = "done"
-          this.state.activeWorkspaces.delete(issue.id)
-          this.activeAttempts.delete(issue.id)
-          this.workspaceManager.saveAttempt(workspace, completedAttempt)
-
-          // Post work summary comment (best-effort -- don't block Done transition)
-          try {
-            const summary = buildWorkSummary(completedAttempt)
-            await addIssueComment(this.config.linearApiKey, issue.id, summary)
-          } catch (err) {
-            logger.warn("orchestrator", "Failed to post work summary comment", {
-              issueId: issue.id,
-              error: String(err),
-            })
-          }
-
-          // Deliver: merge directly or leave for PR review
-          if (route.deliveryMode === "merge") {
-            const mergeResult = await this.workspaceManager.mergeAndPush(workspace)
-            if (!mergeResult.ok) {
-              logger.error("orchestrator", `Merge failed for ${issue.identifier}`, { error: mergeResult.error })
-              try {
-                await addIssueComment(
-                  this.config.linearApiKey,
-                  issue.id,
-                  `Symphony: Merge failed — manual resolution required\n\n${mergeResult.error}`,
-                )
-              } catch {
-                /* best-effort */
-              }
-            }
-
-            // Cleanup worktree after merge
-            try {
-              await this.workspaceManager.cleanup(workspace)
-            } catch (cleanupErr) {
-              logger.warn("orchestrator", "Worktree cleanup failed", { issueId: issue.id, error: String(cleanupErr) })
-            }
-          }
-          // pr mode: agent already pushed branch + created PR, no merge/cleanup needed
-
-          // Transition to Done
-          try {
-            await updateIssueState(this.config.linearApiKey, issue.id, this.config.workflowStates.done)
-          } catch (err) {
-            logger.error("orchestrator", "Failed to transition issue to Done", {
-              issueId: issue.id,
-              error: String(err),
-            })
-          }
-
-          this.emitEvent("agent.done", {
-            issueKey: issue.identifier,
-            issueId: issue.id,
-            durationMs: Date.now() - new Date(attempt.startedAt).getTime(),
-          })
-
-          logger.info("orchestrator", `Agent completed for ${issue.identifier}`, {
-            issueId: issue.id,
-            exitCode: completedAttempt.exitCode ?? undefined,
-            durationMs: Date.now() - new Date(attempt.startedAt).getTime(),
-          })
-
-          // Fill vacant slot from Todo issues
-          await this.fillVacantSlots()
-        },
-        onError: async (err) => {
-          const ws = this.state.activeWorkspaces.get(issue.id)
-          if (ws) ws.status = "failed"
-          this.state.activeWorkspaces.delete(issue.id)
-          this.activeAttempts.delete(issue.id)
-
-          this.emitEvent("agent.failed", {
-            issueKey: issue.identifier,
-            issueId: issue.id,
-            error: { code: "AGENT_ERROR", message: err.message, retryable: err.recoverable },
-          })
-          logger.warn("orchestrator", `Agent failed for ${issue.identifier}`, {
-            issueId: issue.id,
-            error: err.message,
-          })
-          if (err.recoverable) {
-            const added = this.retryQueue.add(issue.id, 1, err.message)
-            if (!added) {
-              // Max retries exceeded -- cancel issue with error comment
-              try {
-                await addIssueComment(
-                  this.config.linearApiKey,
-                  issue.id,
-                  `Symphony: Agent failed (${this.config.agentMaxRetries} retries exceeded)\n\nError: ${err.message}`,
-                )
-              } catch (commentErr) {
-                logger.warn("orchestrator", "Failed to post error comment", {
-                  issueId: issue.id,
-                  error: String(commentErr),
-                })
-              }
-              try {
-                await updateIssueState(this.config.linearApiKey, issue.id, this.config.workflowStates.cancelled)
-              } catch (stateErr) {
-                logger.error("orchestrator", "Failed to transition issue to Cancelled", {
-                  issueId: issue.id,
-                  error: String(stateErr),
-                })
-              }
-            }
-          }
-
-          // Fill vacant slot from Todo issues
-          await this.fillVacantSlots()
-        },
-        onHeartbeat: (_timestamp) => {
-          // Update last heartbeat for liveness tracking
-        },
-      },
+      callbacks,
     )
 
     logger.info("orchestrator", `Starting agent for ${issue.identifier}`, { issueId: issue.id })
@@ -551,8 +433,6 @@ export class Orchestrator {
     this.state.activeWorkspaces.delete(issueId)
     this.retryQueue.remove(issueId)
   }
-
-  // ── Retry Queue ───────────────────────────────────────────────────────
 
   private async processRetryQueue(): Promise<void> {
     const ready = this.retryQueue.drain()
@@ -589,8 +469,6 @@ export class Orchestrator {
       }
     }
   }
-
-  // ── Status ────────────────────────────────────────────────────────────
 
   private getStatus(): Record<string, unknown> {
     const workspaces = Array.from(this.state.activeWorkspaces.entries()).map(([id, ws]) => {

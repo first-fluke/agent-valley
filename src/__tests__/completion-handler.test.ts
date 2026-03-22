@@ -1,0 +1,366 @@
+/**
+ * Completion Handler tests — safety-net, delivery, and exit assessment.
+ */
+import { beforeEach, describe, expect, test } from "bun:test"
+import type { Config } from "../config/env"
+import type { ResolvedRoute } from "../config/routing"
+import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import { type CompletionDeps, createCompletionCallbacks } from "../orchestrator/completion-handler"
+
+// ── Test fixtures ──────────────────────────────────────────────────
+
+function makeIssue(overrides: Partial<Issue> = {}): Issue {
+  return {
+    id: "issue-1",
+    identifier: "PROJ-1",
+    title: "Test issue",
+    description: "Test description",
+    status: { id: "state-ip", name: "In Progress", type: "started" },
+    team: { id: "team-1", key: "PROJ" },
+    labels: [],
+    url: "https://linear.app/proj/issue/PROJ-1",
+    score: null,
+    ...overrides,
+  }
+}
+
+function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    issueId: "issue-1",
+    path: "/workspace/PROJ-1",
+    key: "PROJ-1",
+    status: "running",
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  }
+}
+
+function makeAttempt(overrides: Partial<RunAttempt> = {}): RunAttempt {
+  return {
+    id: "attempt-1",
+    issueId: "issue-1",
+    workspacePath: "/workspace/PROJ-1",
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    finishedAt: null,
+    exitCode: null,
+    agentOutput: null,
+    ...overrides,
+  }
+}
+
+function makeRoute(overrides: Partial<ResolvedRoute> = {}): ResolvedRoute {
+  return {
+    workspaceRoot: "/workspace",
+    agentType: "claude",
+    deliveryMode: "merge",
+    matchedLabel: null,
+    ...overrides,
+  }
+}
+
+function makeConfig(overrides: Partial<Config> = {}): Config {
+  return {
+    linearApiKey: "lin_api_test",
+    linearTeamId: "PROJ",
+    linearTeamUuid: "team-uuid",
+    linearWebhookSecret: "whsec_test",
+    workflowStates: {
+      todo: "state-todo",
+      inProgress: "state-ip",
+      done: "state-done",
+      cancelled: "state-cancelled",
+    },
+    workspaceRoot: "/workspace",
+    agentType: "claude",
+    agentTimeout: 3600,
+    agentMaxRetries: 3,
+    agentRetryDelay: 60,
+    maxParallel: 2,
+    serverPort: 9741,
+    logLevel: "info",
+    logFormat: "json",
+    deliveryMode: "merge",
+    routingRules: [],
+    ...overrides,
+  } as Config
+}
+
+// ── Mock workspace manager ─────────────────────────────────────────
+
+function makeMockWorkspaceManager(
+  opts: {
+    hasUncommittedChanges?: boolean
+    hasCodeChanges?: boolean
+    diffStat?: string | null
+    autoCommitOk?: boolean
+    mergeOk?: boolean
+    pushOk?: boolean
+  } = {},
+) {
+  return {
+    detectUnfinishedWork: async () => ({
+      hasUncommittedChanges: opts.hasUncommittedChanges ?? false,
+      hasCodeChanges: opts.hasCodeChanges ?? false,
+    }),
+    autoCommit: async () => ({ ok: opts.autoCommitOk ?? true }),
+    getDiffStat: async () => opts.diffStat ?? null,
+    mergeAndPush: async () => ({ ok: opts.mergeOk ?? true }),
+    pushBranch: async () => ({ ok: opts.pushOk ?? true }),
+    cleanup: async () => {},
+    saveAttempt: async () => {},
+  }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────
+
+describe("createCompletionCallbacks", () => {
+  let events: Array<{ event: string; payload: Record<string, unknown> }>
+  let stateCleanups: Array<{ issueId: string; status: string }>
+  let retryAdds: Array<{ issueId: string; count: number; error: string }>
+  let filledSlots: number
+
+  function makeDeps(
+    mockWm: ReturnType<typeof makeMockWorkspaceManager>,
+    configOverrides: Partial<Config> = {},
+  ): CompletionDeps {
+    return {
+      config: makeConfig(configOverrides),
+      workspaceManager: mockWm as unknown as CompletionDeps["workspaceManager"],
+      cleanupState: (issueId, status) => stateCleanups.push({ issueId, status }),
+      saveAttempt: () => {},
+      addRetry: (issueId, count, error) => {
+        retryAdds.push({ issueId, count, error })
+        return count < 3
+      },
+      emitEvent: (event, payload) => events.push({ event, payload }),
+      fillVacantSlots: async () => {
+        filledSlots++
+      },
+    }
+  }
+
+  beforeEach(() => {
+    events = []
+    stateCleanups = []
+    retryAdds = []
+    filledSlots = 0
+  })
+
+  describe("onComplete — safety net", () => {
+    test("auto-commits when agent leaves uncommitted changes", async () => {
+      let autoCommitCalled = false
+      const mockWm = makeMockWorkspaceManager({
+        hasUncommittedChanges: true,
+        hasCodeChanges: true,
+        diffStat: "3 files changed, 45 insertions(+)",
+        autoCommitOk: true,
+      })
+      const origAutoCommit = mockWm.autoCommit
+      mockWm.autoCommit = async () => {
+        autoCommitCalled = true
+        return origAutoCommit()
+      }
+
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(autoCommitCalled).toBe(true)
+      expect(stateCleanups[0]?.status).toBe("done")
+    })
+
+    test("does not auto-commit when no uncommitted changes", async () => {
+      let autoCommitCalled = false
+      const mockWm = makeMockWorkspaceManager({
+        hasUncommittedChanges: false,
+        hasCodeChanges: true,
+        diffStat: "2 files changed",
+      })
+      mockWm.autoCommit = async () => {
+        autoCommitCalled = true
+        return { ok: true }
+      }
+
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(autoCommitCalled).toBe(false)
+    })
+  })
+
+  describe("onComplete — exit assessment", () => {
+    test("transitions to Done when code changes exist", async () => {
+      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file changed" })
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Implemented feature",
+      })
+
+      // agent.done event emitted
+      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+      expect(filledSlots).toBe(1)
+    })
+
+    test("transitions to Done when no changes but has output", async () => {
+      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "No changes needed — the feature already exists",
+      })
+
+      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+    })
+
+    test("transitions to Cancelled when no changes and no output (premature exit)", async () => {
+      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: null,
+      })
+
+      // Still emits agent.done (completed, just empty)
+      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+    })
+
+    test("transitions to Cancelled when output is whitespace-only", async () => {
+      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "   \n  ",
+      })
+
+      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+    })
+  })
+
+  describe("onComplete — delivery mode", () => {
+    test("merge mode calls mergeAndPush + cleanup", async () => {
+      let merged = false
+      let cleaned = false
+      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      mockWm.mergeAndPush = async () => {
+        merged = true
+        return { ok: true }
+      }
+      mockWm.cleanup = async () => {
+        cleaned = true
+      }
+
+      const deps = makeDeps(mockWm)
+      const route = makeRoute({ deliveryMode: "merge" })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), route)
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(merged).toBe(true)
+      expect(cleaned).toBe(true)
+    })
+
+    test("pr mode pushes branch when code changes exist", async () => {
+      let pushed = false
+      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file", pushOk: true })
+      mockWm.pushBranch = async () => {
+        pushed = true
+        return { ok: true }
+      }
+
+      const deps = makeDeps(mockWm)
+      const route = makeRoute({ deliveryMode: "pr" })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), route)
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(pushed).toBe(true)
+    })
+
+    test("pr mode skips push when no code changes", async () => {
+      let pushed = false
+      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      mockWm.pushBranch = async () => {
+        pushed = true
+        return { ok: true }
+      }
+
+      const deps = makeDeps(mockWm)
+      const route = makeRoute({ deliveryMode: "pr" })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), route)
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: null,
+      })
+
+      expect(pushed).toBe(false)
+    })
+  })
+
+  describe("onError", () => {
+    test("cleans up state and emits agent.failed", async () => {
+      const mockWm = makeMockWorkspaceManager()
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onError({ code: "CRASH", message: "process died", recoverable: true })
+
+      expect(stateCleanups[0]).toEqual({ issueId: "issue-1", status: "failed" })
+      expect(events[0]?.event).toBe("agent.failed")
+      expect(retryAdds.length).toBe(1)
+      expect(filledSlots).toBe(1)
+    })
+
+    test("non-recoverable error does not queue retry", async () => {
+      const mockWm = makeMockWorkspaceManager()
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onError({ code: "FATAL", message: "unrecoverable", recoverable: false })
+
+      expect(retryAdds.length).toBe(0)
+    })
+  })
+})
