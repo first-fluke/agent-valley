@@ -2,8 +2,8 @@
  * Webhook Handler tests — signature verification and payload parsing.
  */
 import { describe, expect, test } from "vitest"
-import type { RelationWebhookEvent, WebhookEvent } from "@/tracker/types"
-import { parseWebhookEvent, verifyWebhookSignature } from "@/tracker/webhook-handler.ts"
+import type { RelationWebhookEvent, WebhookEvent } from "../tracker/types"
+import { parseWebhookEvent, verifyWebhookSignature } from "../tracker/webhook-handler.ts"
 
 // ── Helper: compute HMAC-SHA256 hex digest ──────────────────────────
 

@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { linearIssueNodeSchema, linearTeamIssuesDataSchema } from "@/tracker/types"
+import { linearIssueNodeSchema, linearTeamIssuesDataSchema } from "../tracker/types"
 
 // ── Shared fixtures ──────────────────────────────────────────────────
 

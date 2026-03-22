@@ -2,10 +2,10 @@
  * Agent Runner — Manages AgentSession lifecycle for issue execution.
  */
 
-import type { RunAttempt } from "@/domain/models"
-import { logger } from "@/observability/logger"
-import type { AgentConfig, AgentEvent, AgentSession } from "@/sessions/agent-session"
-import { createSession, registerBuiltinSessions } from "@/sessions/session-factory"
+import type { RunAttempt } from "../domain/models"
+import { logger } from "../observability/logger"
+import type { AgentConfig, AgentEvent, AgentSession } from "../sessions/agent-session"
+import { createSession, registerBuiltinSessions } from "../sessions/session-factory"
 
 export interface RunOptions {
   agentType: string

@@ -3,9 +3,9 @@
  * Application layer: calls LLM, returns ScoreAnalysis. No Linear API calls.
  */
 
-import { sanitizeIssueBody } from "@/config/workflow-loader"
-import type { Issue, ScoreAnalysis } from "@/domain/models"
-import { logger } from "@/observability/logger"
+import { sanitizeIssueBody } from "../config/workflow-loader"
+import type { Issue, ScoreAnalysis } from "../domain/models"
+import { logger } from "../observability/logger"
 
 export interface ScoringService {
   analyze(title: string, description: string): Promise<ScoreAnalysis>

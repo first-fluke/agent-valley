@@ -5,10 +5,10 @@
  */
 
 import { describe, expect, test } from "vitest"
-import type { Config } from "@/config/env"
-import { resolveRouteWithScore } from "@/config/routing"
-import type { Issue } from "@/domain/models"
-import { parseScoreFromLabels } from "@/domain/models"
+import type { Config } from "../config/env"
+import { resolveRouteWithScore } from "../config/routing"
+import type { Issue } from "../domain/models"
+import { parseScoreFromLabels } from "../domain/models"
 
 // ── parseScoreFromLabels ──────────────────────────────────────────────
 

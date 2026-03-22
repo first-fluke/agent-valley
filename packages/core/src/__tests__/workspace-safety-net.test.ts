@@ -8,8 +8,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import type { Workspace } from "@/domain/models"
-import { WorkspaceManager } from "@/workspace/workspace-manager"
+import type { Workspace } from "../domain/models"
+import { WorkspaceManager } from "../workspace/workspace-manager"
 
 let repoDir: string
 let worktreeDir: string

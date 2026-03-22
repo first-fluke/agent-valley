@@ -2,9 +2,9 @@
  * Linear Client — GraphQL API for issue queries and mutations.
  */
 
-import type { Issue, IssueRelation } from "@/domain/models"
-import { parseScoreFromLabels } from "@/domain/models"
-import { logger } from "@/observability/logger"
+import type { Issue, IssueRelation } from "../domain/models"
+import { parseScoreFromLabels } from "../domain/models"
+import { logger } from "../observability/logger"
 import type { LinearGraphQLResponse, LinearIssueNode, LinearMutationData, LinearTeamIssuesData } from "./types"
 import { linearTeamIssuesDataSchema } from "./types"
 

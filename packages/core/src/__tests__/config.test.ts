@@ -2,7 +2,7 @@
  * Config Layer tests — loadConfig() validation and error messages.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { loadConfig } from "@/config/env.ts"
+import { loadConfig } from "../config/env.ts"
 
 /** Minimal valid env vars for loadConfig() to succeed. */
 function validEnv(): Record<string, string> {

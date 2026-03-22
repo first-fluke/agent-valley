@@ -9,8 +9,8 @@ import {
   getReadyIssues,
   getUnblockedByCompletion,
   getUnresolvedBlockers,
-} from "@/domain/dag"
-import type { DagNode } from "@/domain/models"
+} from "../domain/dag"
+import type { DagNode } from "../domain/models"
 
 function makeNode(overrides: Partial<DagNode> & { issueId: string }): DagNode {
   return {

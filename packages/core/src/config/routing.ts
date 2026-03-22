@@ -3,7 +3,7 @@
  * Determines which workspace root (git repo), agent type, and delivery mode to use per issue.
  */
 
-import type { Issue } from "@/domain/models"
+import type { Issue } from "../domain/models"
 import type { Config, ScoreRoutingConfig } from "./env"
 
 export interface ResolvedRoute {

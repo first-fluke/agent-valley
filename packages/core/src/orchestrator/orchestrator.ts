@@ -5,20 +5,20 @@
  */
 
 import { access, readFile } from "node:fs/promises"
-import type { Config } from "@/config/env"
-import { resolveRouteWithScore } from "@/config/routing"
-import { parseWorkflow, renderPrompt } from "@/config/workflow-loader"
-import type { Issue, OrchestratorRuntimeState, RunAttempt, Workspace } from "@/domain/models"
-import { logger } from "@/observability/logger"
+import type { Config } from "../config/env"
+import { resolveRouteWithScore } from "../config/routing"
+import { parseWorkflow, renderPrompt } from "../config/workflow-loader"
+import type { Issue, OrchestratorRuntimeState, RunAttempt, Workspace } from "../domain/models"
+import { logger } from "../observability/logger"
 import {
   addIssueComment,
   addIssueLabel,
   fetchIssueLabels,
   fetchIssuesByState,
   updateIssueState,
-} from "@/tracker/linear-client"
-import { parseWebhookEvent, verifyWebhookSignature } from "@/tracker/webhook-handler"
-import { WorkspaceManager } from "@/workspace/workspace-manager"
+} from "../tracker/linear-client"
+import { parseWebhookEvent, verifyWebhookSignature } from "../tracker/webhook-handler"
+import { WorkspaceManager } from "../workspace/workspace-manager"
 import { AgentRunnerService } from "./agent-runner"
 import { type CompletionDeps, createCompletionCallbacks } from "./completion-handler"
 import { DagScheduler } from "./dag-scheduler"

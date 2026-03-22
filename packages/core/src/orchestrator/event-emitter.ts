@@ -3,7 +3,7 @@
  * Used for team dashboard broadcasting and ledger bridge subscriptions.
  */
 
-import { logger } from "@/observability/logger"
+import { logger } from "../observability/logger"
 
 export type OrchestratorEventHandler = (...args: unknown[]) => void
 

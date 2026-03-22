@@ -3,9 +3,9 @@
  */
 
 import { z } from "zod/v4"
-import type { Issue } from "@/domain/models"
-import { parseScoreFromLabels } from "@/domain/models"
-import { logger } from "@/observability/logger"
+import type { Issue } from "../domain/models"
+import { parseScoreFromLabels } from "../domain/models"
+import { logger } from "../observability/logger"
 import type { ParsedWebhookEvent, RelationWebhookEvent, WebhookEvent } from "./types"
 
 /**

@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod/v4"
-import type { Issue } from "@/domain/models"
+import type { Issue } from "../domain/models"
 
 export interface WebhookEvent {
   kind?: undefined

@@ -2,8 +2,8 @@
  * Retry Queue — Exponential backoff retry scheduling.
  */
 
-import type { RetryEntry } from "@/domain/models"
-import { logger } from "@/observability/logger"
+import type { RetryEntry } from "../domain/models"
+import { logger } from "../observability/logger"
 
 export class RetryQueue {
   private queue: RetryEntry[] = []

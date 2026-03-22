@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import type { LedgerEvent } from "@/domain/ledger"
+import type { LedgerEvent } from "../domain/ledger"
 import { replayLedger } from "./replay"
 
 function makeEvent(partial: Partial<LedgerEvent> & Pick<LedgerEvent, "type" | "payload">): LedgerEvent {

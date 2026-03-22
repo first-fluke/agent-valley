@@ -4,8 +4,8 @@
 
 import { unlink } from "node:fs/promises"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import type { Issue } from "@/domain/models"
-import { DagScheduler } from "@/orchestrator/dag-scheduler"
+import type { Issue } from "../domain/models"
+import { DagScheduler } from "../orchestrator/dag-scheduler"
 
 const TEST_CACHE = `/tmp/dag-test-${crypto.randomUUID()}.json`
 

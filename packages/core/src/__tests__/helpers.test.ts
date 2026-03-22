@@ -2,8 +2,8 @@
  * Orchestrator Helpers tests — buildWorkSummary with auto-commit and diff stat options.
  */
 import { describe, expect, test } from "vitest"
-import type { RunAttempt } from "@/domain/models"
-import { buildWorkSummary } from "@/orchestrator/helpers"
+import type { RunAttempt } from "../domain/models"
+import { buildWorkSummary } from "../orchestrator/helpers"
 
 function makeAttempt(overrides: Partial<RunAttempt> = {}): RunAttempt {
   return {

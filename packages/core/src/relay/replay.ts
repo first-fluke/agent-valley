@@ -8,7 +8,7 @@
  * - Duplicate agent.start for the same issueKey on the same node is idempotent
  */
 
-import type { LedgerEvent, NodePresence, TeamState } from "@/domain/ledger"
+import type { LedgerEvent, NodePresence, TeamState } from "../domain/ledger"
 
 export function replayLedger(events: LedgerEvent[]): TeamState {
   const nodes = new Map<string, NodePresence>()

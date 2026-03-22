@@ -3,9 +3,9 @@
  * Fire-and-forget: Supabase failures must never stop the Orchestrator.
  */
 
-import type { LedgerEvent, LedgerEventPublisher, LedgerEventType } from "@/domain/ledger"
-import { logger } from "@/observability/logger"
-import type { Orchestrator } from "@/orchestrator/orchestrator"
+import type { LedgerEvent, LedgerEventPublisher, LedgerEventType } from "../domain/ledger"
+import { logger } from "../observability/logger"
+import type { Orchestrator } from "../orchestrator/orchestrator"
 
 type PublishableEvent = Omit<LedgerEvent, "seq" | "relayTimestamp" | "v">
 

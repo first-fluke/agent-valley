@@ -2,7 +2,7 @@
  * RetryQueue tests — exponential backoff scheduling.
  */
 import { beforeEach, describe, expect, test } from "vitest"
-import { RetryQueue } from "@/orchestrator/retry-queue.ts"
+import { RetryQueue } from "../orchestrator/retry-queue.ts"
 
 describe("RetryQueue", () => {
   let queue: RetryQueue

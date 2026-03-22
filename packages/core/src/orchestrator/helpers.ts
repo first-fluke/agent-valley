@@ -2,8 +2,8 @@
  * Orchestrator Helpers — Pure functions extracted to keep orchestrator.ts under 500 lines.
  */
 
-import type { Config } from "@/config/env"
-import type { DagNode, Issue, OrchestratorRuntimeState, RunAttempt } from "@/domain/models"
+import type { Config } from "../config/env"
+import type { DagNode, Issue, OrchestratorRuntimeState, RunAttempt } from "../domain/models"
 import type { AgentRunnerService } from "./agent-runner"
 import type { RetryQueue } from "./retry-queue"
 

@@ -12,9 +12,9 @@ import {
   getUnblockedByCompletion as dagGetUnblockedByCompletion,
   getUnresolvedBlockers as dagGetUnresolvedBlockers,
   detectCycles,
-} from "@/domain/dag"
-import type { DagCache, DagNode, DagNodeStatus, Issue } from "@/domain/models"
-import { logger } from "@/observability/logger"
+} from "../domain/dag"
+import type { DagCache, DagNode, DagNodeStatus, Issue } from "../domain/models"
+import { logger } from "../observability/logger"
 
 export class DagScheduler {
   private cache: DagCache = { version: 1, updatedAt: "", nodes: {} }

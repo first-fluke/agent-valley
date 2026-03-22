@@ -12,8 +12,12 @@
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
+import { resolve } from "node:path"
 import { program } from "commander"
 import pc from "picocolors"
+
+/** Project root = cwd where user runs `bunx av` */
+const ROOT = process.cwd()
 
 program.name("av").description("Agent Valley — AI agent orchestrator").version("0.1.0")
 
@@ -46,7 +50,7 @@ program
   .command("dev")
   .description("Start dashboard + orchestrator + ngrok tunnel")
   .action(async () => {
-    if (!existsSync(".env")) {
+    if (!existsSync(resolve(ROOT, ".env"))) {
       console.log(pc.yellow("No .env found. Running setup first...\n"))
       const { setup } = await import("./setup")
       await setup()
@@ -60,7 +64,7 @@ program
 
     const startDashboard = () => {
       dashProc = spawn("bun", ["run", "dev"], {
-        cwd: "apps/dashboard",
+        cwd: resolve(ROOT, "apps/dashboard"),
         stdio: "inherit",
       })
       console.log(pc.green(`▶ Dashboard started (pid: ${dashProc.pid}) → http://localhost:${port}`))
@@ -110,7 +114,7 @@ program
 
     // Watch config files for restart
     const chokidar = await import("chokidar")
-    const watcher = chokidar.watch(["WORKFLOW.md", ".env"], {
+    const watcher = chokidar.watch([resolve(ROOT, "WORKFLOW.md"), resolve(ROOT, ".env")], {
       ignoreInitial: true,
     })
 

@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "av": "bun run --filter @agent-valley/cli av",
+    "av": "bun apps/cli/src/index.ts",
     "start": "bun run --cwd apps/dashboard dev",
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",

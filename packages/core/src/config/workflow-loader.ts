@@ -2,7 +2,7 @@
  * Workflow Loader — Parse WORKFLOW.md YAML front matter + prompt template.
  */
 
-import type { Issue, RunAttempt } from "@/domain/models"
+import type { Issue, RunAttempt } from "../domain/models"
 
 interface WorkflowConfig {
   tracker: Record<string, unknown>

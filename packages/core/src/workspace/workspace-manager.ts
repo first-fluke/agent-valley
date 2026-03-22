@@ -6,8 +6,8 @@
 
 import { spawn } from "node:child_process"
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
-import type { Issue, RunAttempt, Workspace } from "@/domain/models"
-import { logger } from "@/observability/logger"
+import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import { logger } from "../observability/logger"
 
 /** Run a command and return its exit code, stdout, and stderr. */
 function runCommand(

@@ -6,8 +6,8 @@
  * so RLS policies (auth.uid()) work correctly.
  */
 
-import type { LedgerEvent, LedgerEventPublisher } from "@/domain/ledger"
-import { logger } from "@/observability/logger"
+import type { LedgerEvent, LedgerEventPublisher } from "../domain/ledger"
+import { logger } from "../observability/logger"
 
 interface PendingEvent {
   event: Omit<LedgerEvent, "seq" | "relayTimestamp" | "v">

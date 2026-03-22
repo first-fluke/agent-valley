@@ -3,12 +3,12 @@
  * Safety-net (auto-commit), delivery (merge/pr), and exit assessment.
  */
 
-import type { Config } from "@/config/env"
-import type { ResolvedRoute } from "@/config/routing"
-import type { Issue, RunAttempt, Workspace } from "@/domain/models"
-import { logger } from "@/observability/logger"
-import { addIssueComment, updateIssueState } from "@/tracker/linear-client"
-import type { WorkspaceManager } from "@/workspace/workspace-manager"
+import type { Config } from "../config/env"
+import type { ResolvedRoute } from "../config/routing"
+import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import { logger } from "../observability/logger"
+import { addIssueComment, updateIssueState } from "../tracker/linear-client"
+import type { WorkspaceManager } from "../workspace/workspace-manager"
 import type { RunCallbacks } from "./agent-runner"
 import type { DagScheduler } from "./dag-scheduler"
 import { buildParentSummary, buildWorkSummary } from "./helpers"

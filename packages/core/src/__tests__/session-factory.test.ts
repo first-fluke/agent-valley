@@ -2,8 +2,8 @@
  * SessionFactory tests — registry, creation, error messages.
  */
 import { beforeEach, describe, expect, test } from "vitest"
-import type { AgentSession } from "@/sessions/agent-session.ts"
-import { SessionRegistry } from "@/sessions/session-factory.ts"
+import type { AgentSession } from "../sessions/agent-session.ts"
+import { SessionRegistry } from "../sessions/session-factory.ts"
 
 /** Minimal mock session for testing the registry. */
 function mockSession(): AgentSession {
