@@ -14,7 +14,7 @@
 ./scripts/install.sh
 
 # Existing project (run from project root)
-curl -fsSL https://raw.githubusercontent.com/first-fluke/composer/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
 ```
 
 The install script auto-detects project state and branches into new/existing mode.

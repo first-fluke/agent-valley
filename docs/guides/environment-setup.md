@@ -10,7 +10,7 @@ Everything is already in place. Just reset the git history and start your own:
 rm -rf .git
 git init
 git add -A
-git commit -m "chore: init from composer"
+git commit -m "chore: init from agent-valley"
 ```
 
 No need to run `install.sh` — the full scaffold is already present.
@@ -19,7 +19,7 @@ No need to run `install.sh` — the full scaffold is already present.
 
 ```bash
 cd your-existing-project
-curl -fsSL https://raw.githubusercontent.com/first-fluke/composer/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
 ```
 
 The installer auto-detects existing project files (`package.json`, `pyproject.toml`, `go.mod`) and installs only the harness layer:

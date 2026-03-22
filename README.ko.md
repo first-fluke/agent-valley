@@ -132,7 +132,7 @@ Agent Valley는 **신규 프로젝트** (전체 스캐폴드)와 **기존 프로
 레포를 클론해서 그대로 프로젝트 베이스로 사용합니다:
 
 ```bash
-git clone https://github.com/first-fluke/composer.git my-project
+git clone https://github.com/first-fluke/agent-valley.git my-project
 cd my-project
 
 # agent-valley git 히스토리 제거 후 내 프로젝트로 시작
@@ -157,7 +157,7 @@ cp .env.example .env
 
 ```bash
 cd your-existing-project
-curl -fsSL https://raw.githubusercontent.com/first-fluke/composer/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
 ```
 
 **기존 프로젝트에 설치되는 항목:**

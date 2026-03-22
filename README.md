@@ -126,7 +126,7 @@ agent-template/
 ## Quick Start
 
 ```bash
-git clone https://github.com/first-fluke/composer.git my-project
+git clone https://github.com/first-fluke/agent-valley.git my-project
 cd my-project
 bun install
 cp .env.example .env   # Fill in LINEAR_API_KEY, LINEAR_WEBHOOK_SECRET, etc.
@@ -146,7 +146,7 @@ Agent Valley works for both **new projects** (full scaffold) and **existing proj
 Clone the repo and use it directly as your project base:
 
 ```bash
-git clone https://github.com/first-fluke/composer.git my-project
+git clone https://github.com/first-fluke/agent-valley.git my-project
 cd my-project
 
 # Reset git history and start fresh
@@ -174,7 +174,7 @@ Run the installer from your project root — no cloning required:
 
 ```bash
 cd your-existing-project
-curl -fsSL https://raw.githubusercontent.com/first-fluke/composer/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
 ```
 
 **What gets installed on an existing project:**

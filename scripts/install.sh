@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# scripts/install.sh — Composer Symphony Harness Installer
+# scripts/install.sh — Agent Valley Symphony Harness Installer
 #
 # Usage (new project, local):
 #   ./scripts/install.sh
 #
 # Usage (existing project, remote):
-#   curl -fsSL https://raw.githubusercontent.com/first-fluke/composer/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
 #
 set -euo pipefail
 
@@ -17,12 +17,12 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
-info()    { echo -e "${BLUE}[composer]${RESET} $*"; }
-success() { echo -e "${GREEN}[composer]${RESET} $*"; }
-warn()    { echo -e "${YELLOW}[composer]${RESET} $*"; }
-err()     { echo -e "${RED}[composer]${RESET} $*" >&2; }
+info()    { echo -e "${BLUE}[agent-valley]${RESET} $*"; }
+success() { echo -e "${GREEN}[agent-valley]${RESET} $*"; }
+warn()    { echo -e "${YELLOW}[agent-valley]${RESET} $*"; }
+err()     { echo -e "${RED}[agent-valley]${RESET} $*" >&2; }
 
-REPO_URL="https://github.com/first-fluke/composer.git"
+REPO_URL="https://github.com/first-fluke/agent-valley.git"
 TARGET_DIR="${PWD}"
 
 # Detect whether we're running from inside the cloned repo
@@ -118,7 +118,7 @@ ask() {
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}  ♪ Composer — Symphony Dev Harness Installer${RESET}"
+echo -e "${BOLD}  ♪ Agent Valley — Symphony Dev Harness Installer${RESET}"
 echo "  ─────────────────────────────────────────────"
 echo ""
 
@@ -148,7 +148,7 @@ if [[ "$IS_LOCAL" == false ]]; then
   TEMP_DIR="$(mktemp -d)"
   trap 'rm -rf "$TEMP_DIR"' EXIT
 
-  info "Fetching composer harness..."
+  info "Fetching agent-valley harness..."
   git clone --depth 1 --quiet "$REPO_URL" "$TEMP_DIR"
   SOURCE_DIR="$TEMP_DIR"
   success "Harness fetched."
@@ -193,7 +193,7 @@ if [[ "$MODE" == "existing" ]]; then
       echo ""
       echo "## Symphony Harness"
       echo ""
-      echo "This project uses the [Composer Symphony harness](https://github.com/first-fluke/composer)."
+      echo "This project uses the [Agent Valley harness](https://github.com/first-fluke/agent-valley)."
       echo "See \`WORKFLOW.md\` and \`docs/specs/\` for Symphony component specifications."
       echo "Run \`./scripts/harness/validate.sh\` to check architecture conformance."
     } >> "${TARGET_DIR}/AGENTS.md"
@@ -254,7 +254,7 @@ fi
 # Done
 # ═════════════════════════════════════════════════════════════════════════════
 echo ""
-echo -e "${GREEN}${BOLD}  ✓ Composer harness installed successfully${RESET}"
+echo -e "${GREEN}${BOLD}  ✓ Agent Valley harness installed successfully${RESET}"
 echo ""
 echo "  Next steps:"
 echo ""
@@ -272,5 +272,5 @@ echo ""
 echo "  3. Ask your agent to set up the implementation:"
 echo "     Read AGENT_SETUP.md and scaffold a Symphony implementation using [TypeScript/Python/Go]."
 echo ""
-echo "  Docs: https://github.com/first-fluke/composer"
+echo "  Docs: https://github.com/first-fluke/agent-valley"
 echo ""
