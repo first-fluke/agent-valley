@@ -1,6 +1,6 @@
 /**
- * Merge conflict auto-resolution tests.
- * Creates real git repos to test the workspace manager's conflict handling.
+ * Merge delivery tests — rebase-based workflow with conflict auto-resolution.
+ * Creates real git repos to verify workspace manager's mergeAndPush.
  */
 
 import { execSync } from "node:child_process"
@@ -10,12 +10,19 @@ import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import { WorkspaceManager } from "../workspace/workspace-manager"
 
-function git(cwd: string, ...args: string[]): string {
-  const escaped = args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")
-  return execSync(`git ${escaped}`, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim()
+function git(cwd: string, args: string[]): string {
+  return execSync(["git", ...args].map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" "), {
+    cwd,
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+  }).trim()
 }
 
-describe("mergeAndPush — conflict auto-resolution", () => {
+function readFile(path: string): string {
+  return execSync(`cat ${path}`, { encoding: "utf-8" })
+}
+
+describe("mergeAndPush — rebase-based delivery", () => {
   let tmpDir: string
   let bareDir: string
   let repoDir: string
@@ -26,27 +33,21 @@ describe("mergeAndPush — conflict auto-resolution", () => {
     bareDir = resolve(tmpDir, "bare.git")
     repoDir = resolve(tmpDir, "repo")
 
-    // Create bare remote
+    // Create bare remote with main as default branch
     mkdirSync(bareDir)
-    git(bareDir, "init", "--bare")
+    git(bareDir, ["init", "--bare", "--initial-branch=main"])
 
-    // Clone and set up main branch
-    git(bareDir, "config", "init.defaultBranch", "main")
-    // Re-init bare with main as default
-    rmSync(bareDir, { recursive: true, force: true })
-    mkdirSync(bareDir)
-    git(bareDir, "init", "--bare", "--initial-branch=main")
-
+    // Clone
     execSync(`git clone ${bareDir} ${repoDir}`, { stdio: "pipe" })
-    git(repoDir, "config", "user.email", "test@test.com")
-    git(repoDir, "config", "user.name", "Test")
-    git(repoDir, "config", "rerere.enabled", "true")
-    git(repoDir, "checkout", "-b", "main")
+    git(repoDir, ["config", "user.email", "test@test.com"])
+    git(repoDir, ["config", "user.name", "Test"])
+    git(repoDir, ["config", "rerere.enabled", "true"])
+    git(repoDir, ["checkout", "-b", "main"])
 
     writeFileSync(resolve(repoDir, "file.txt"), "line 1\nline 2\nline 3\n")
-    git(repoDir, "add", ".")
-    git(repoDir, "commit", "-m", "initial")
-    git(repoDir, "push", "-u", "origin", "main")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "initial"])
+    git(repoDir, ["push", "-u", "origin", "main"])
 
     manager = new WorkspaceManager(repoDir)
   })
@@ -55,41 +56,61 @@ describe("mergeAndPush — conflict auto-resolution", () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  test("auto-resolves conflict with theirs strategy", async () => {
-    // Create a feature branch with a change
-    git(repoDir, "checkout", "-b", "symphony/TEST-1")
-    writeFileSync(resolve(repoDir, "file.txt"), "line 1\nfeature change\nline 3\n")
-    git(repoDir, "add", ".")
-    git(repoDir, "commit", "-m", "feature: change line 2")
+  test("rebases feature branch and fast-forward merges", async () => {
+    // Feature branch
+    git(repoDir, ["checkout", "-b", "symphony/TEST-1"])
+    writeFileSync(resolve(repoDir, "feature.txt"), "feature content\n")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: add feature"])
 
-    // Go back to main and create a conflicting change
-    git(repoDir, "checkout", "main")
-    writeFileSync(resolve(repoDir, "file.txt"), "line 1\nmain change\nline 3\n")
-    git(repoDir, "add", ".")
-    git(repoDir, "commit", "-m", "main: change line 2")
-    git(repoDir, "push", "origin", "main")
+    // Meanwhile, main advances
+    git(repoDir, ["checkout", "main"])
+    writeFileSync(resolve(repoDir, "other.txt"), "other content\n")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "chore: add other"])
+    git(repoDir, ["push", "origin", "main"])
 
-    // Attempt merge — should auto-resolve with theirs
-    const workspace = { id: "test", key: "TEST-1", path: resolve(repoDir, "TEST-1"), issueId: "test-id" }
+    const workspace = { id: "t", key: "TEST-1", path: resolve(repoDir, "TEST-1"), issueId: "t" }
     const result = await manager.mergeAndPush(workspace)
 
     expect(result.ok).toBe(true)
 
-    // Verify the feature branch version won (theirs)
-    const content = execSync(`cat ${resolve(repoDir, "file.txt")}`, { encoding: "utf-8" })
-    expect(content).toContain("feature change")
+    // Both files should exist on main
+    git(repoDir, ["checkout", "main"])
+    expect(readFile(resolve(repoDir, "feature.txt"))).toContain("feature content")
+    expect(readFile(resolve(repoDir, "other.txt"))).toContain("other content")
   })
 
-  test("handles no-conflict merge cleanly", async () => {
-    // Create a feature branch with a non-conflicting change
-    git(repoDir, "checkout", "-b", "symphony/TEST-2")
-    writeFileSync(resolve(repoDir, "new-file.txt"), "new content\n")
-    git(repoDir, "add", ".")
-    git(repoDir, "commit", "-m", "feature: add new file")
+  test("auto-resolves rebase conflict (feature branch wins)", async () => {
+    // Feature branch modifies line 2
+    git(repoDir, ["checkout", "-b", "symphony/TEST-2"])
+    writeFileSync(resolve(repoDir, "file.txt"), "line 1\nfeature change\nline 3\n")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: change line 2"])
 
-    git(repoDir, "checkout", "main")
+    // Main also modifies line 2 (conflict!)
+    git(repoDir, ["checkout", "main"])
+    writeFileSync(resolve(repoDir, "file.txt"), "line 1\nmain change\nline 3\n")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "chore: change line 2"])
+    git(repoDir, ["push", "origin", "main"])
 
-    const workspace = { id: "test", key: "TEST-2", path: resolve(repoDir, "TEST-2"), issueId: "test-id" }
+    const workspace = { id: "t", key: "TEST-2", path: resolve(repoDir, "TEST-2"), issueId: "t" }
+    const result = await manager.mergeAndPush(workspace)
+
+    expect(result.ok).toBe(true)
+
+    // Feature branch version wins (theirs in rebase context)
+    git(repoDir, ["checkout", "main"])
+    expect(readFile(resolve(repoDir, "file.txt"))).toContain("feature change")
+  })
+
+  test("clean merge with no changes returns ok", async () => {
+    git(repoDir, ["checkout", "-b", "symphony/TEST-3"])
+    // No changes
+    git(repoDir, ["checkout", "main"])
+
+    const workspace = { id: "t", key: "TEST-3", path: resolve(repoDir, "TEST-3"), issueId: "t" }
     const result = await manager.mergeAndPush(workspace)
 
     expect(result.ok).toBe(true)

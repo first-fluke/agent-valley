@@ -139,40 +139,55 @@ export class WorkspaceManager {
     const hasRemote = (await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })).exitCode === 0
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      // Pull latest main before merging
+      // 1. Update main to latest
       if (hasRemote) {
-        await runCommand("git", ["pull", "--rebase", "origin", "main"], { cwd: root })
+        await runCommand("git", ["checkout", "main"], { cwd: root })
+        await runCommand("git", ["pull", "--ff-only", "origin", "main"], { cwd: root })
       }
 
-      // Check if branch has any commits ahead of main
+      // 2. Check if branch has any commits ahead of main
       const { exitCode: diffExit } = await runCommand("git", ["diff", "--quiet", `main...${branch}`], { cwd: root })
       if (diffExit === 0) {
         logger.info("workspace-manager", "No changes to merge", { branch })
         return { ok: true }
       }
 
-      // Merge branch into main (rerere handles conflict resolution)
-      const { exitCode: mergeExit, stderr: mergeErr } = await runCommand("git", ["merge", branch, "--no-edit"], {
-        cwd: root,
-      })
-      if (mergeExit !== 0) {
-        // rerere might have resolved, check for remaining conflicts
+      // 3. Rebase feature branch onto latest main
+      //    This puts agent's work on top of all other agents' merged work.
+      //    If conflict: agent's code adapts to main, not the other way around.
+      const { exitCode: rebaseExit, stderr: rebaseErr } = await runCommand(
+        "git",
+        ["rebase", "main", branch],
+        { cwd: root },
+      )
+
+      if (rebaseExit !== 0) {
+        // rerere might resolve it
         const { exitCode: conflictCheck } = await runCommand("git", ["diff", "--check"], { cwd: root })
         if (conflictCheck !== 0) {
-          // Try auto-resolving: accept incoming (theirs) for all conflicted files
-          const resolved = await this.autoResolveConflicts(root, branch)
+          // Auto-resolve: accept ours (= feature branch in rebase context)
+          const resolved = await this.autoResolveRebaseConflicts(root, branch)
           if (!resolved) {
-            await runCommand("git", ["merge", "--abort"], { cwd: root })
-            logger.error("workspace-manager", "Merge failed with unresolved conflicts", { branch, error: mergeErr })
-            return { ok: false, error: `Merge conflict on ${branch}: ${mergeErr}` }
+            await runCommand("git", ["rebase", "--abort"], { cwd: root })
+            logger.error("workspace-manager", "Rebase failed with unresolved conflicts", { branch, error: rebaseErr })
+            return { ok: false, error: `Rebase conflict on ${branch}: ${rebaseErr}` }
           }
         } else {
-          // rerere resolved all conflicts — commit the resolution
-          await runCommand("git", ["commit", "--no-edit"], { cwd: root })
+          // rerere resolved — continue rebase
+          await runCommand("git", ["add", "."], { cwd: root })
+          await runCommand("git", ["rebase", "--continue"], { cwd: root, env: { ...process.env, GIT_EDITOR: "true" } })
         }
       }
 
-      // Push main
+      // 4. Fast-forward merge into main (guaranteed clean after rebase)
+      await runCommand("git", ["checkout", "main"], { cwd: root })
+      const { exitCode: mergeExit } = await runCommand("git", ["merge", "--ff-only", branch], { cwd: root })
+      if (mergeExit !== 0) {
+        logger.warn("workspace-manager", "ff-only merge failed, falling back to regular merge", { branch })
+        await runCommand("git", ["merge", branch, "--no-edit"], { cwd: root })
+      }
+
+      // 5. Push main
       if (hasRemote) {
         const { exitCode: pushExit, stderr: pushErr } = await runCommand("git", ["push", "origin", "main"], {
           cwd: root,
@@ -180,8 +195,7 @@ export class WorkspaceManager {
         if (pushExit !== 0) {
           if (attempt < maxAttempts) {
             logger.warn("workspace-manager", `Push rejected, retrying (${attempt}/${maxAttempts})`, { branch })
-            // Reset the merge and retry with fresh pull
-            await runCommand("git", ["reset", "--hard", "HEAD~1"], { cwd: root })
+            await runCommand("git", ["reset", "--hard", "origin/main"], { cwd: root })
             continue
           }
           logger.error("workspace-manager", "Push failed after retries", { error: pushErr })
@@ -189,7 +203,7 @@ export class WorkspaceManager {
         }
       }
 
-      // Delete the feature branch
+      // 6. Delete the feature branch
       await runCommand("git", ["branch", "-D", branch], { cwd: root })
 
       logger.info("workspace-manager", "Merged and pushed", { branch })
@@ -200,13 +214,12 @@ export class WorkspaceManager {
   }
 
   /**
-   * Auto-resolve merge conflicts using a tiered strategy:
-   * 1. For each conflicted file, accept "theirs" (feature branch version)
-   * 2. Stage resolved files and commit
-   * 3. Let rerere learn the resolution for future conflicts
+   * Auto-resolve rebase conflicts.
+   * During rebase, "ours" = the branch being rebased onto (main),
+   * "theirs" = the feature branch commits being replayed.
+   * We accept "theirs" (feature branch) to preserve agent's work.
    */
-  private async autoResolveConflicts(root: string, branch: string): Promise<boolean> {
-    // Get list of conflicted files
+  private async autoResolveRebaseConflicts(root: string, branch: string): Promise<boolean> {
     const { stdout: conflictList } = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: root })
     const conflictedFiles = conflictList
       .trim()
@@ -215,34 +228,36 @@ export class WorkspaceManager {
 
     if (conflictedFiles.length === 0) return false
 
-    logger.info("workspace-manager", `Auto-resolving ${conflictedFiles.length} conflicted file(s)`, {
+    logger.info("workspace-manager", `Auto-resolving ${conflictedFiles.length} rebase conflict(s)`, {
       branch,
       files: conflictedFiles.join(", "),
     })
 
-    // Accept theirs (feature branch) for each conflicted file
+    // In rebase context: --theirs = the commit being rebased (feature branch)
     for (const file of conflictedFiles) {
       const { exitCode } = await runCommand("git", ["checkout", "--theirs", "--", file], { cwd: root })
       if (exitCode !== 0) {
-        logger.warn("workspace-manager", `Failed to resolve ${file}, aborting`, { branch })
+        logger.warn("workspace-manager", `Failed to resolve ${file}`, { branch })
         return false
       }
       await runCommand("git", ["add", file], { cwd: root })
     }
 
-    // Commit the resolution
-    const { exitCode: commitExit } = await runCommand(
-      "git",
-      ["commit", "-m", `merge: auto-resolve ${branch} conflicts (accept theirs)`],
-      { cwd: root },
-    )
+    // Continue the rebase
+    const { exitCode: continueExit } = await runCommand("git", ["rebase", "--continue"], {
+      cwd: root,
+      env: { ...process.env, GIT_EDITOR: "true" },
+    })
 
-    if (commitExit !== 0) {
-      logger.warn("workspace-manager", "Auto-resolve commit failed", { branch })
-      return false
+    if (continueExit !== 0) {
+      // Might have more conflicts in subsequent commits — recurse
+      const { exitCode: moreConflicts } = await runCommand("git", ["diff", "--check"], { cwd: root })
+      if (moreConflicts !== 0) {
+        return this.autoResolveRebaseConflicts(root, branch)
+      }
     }
 
-    logger.info("workspace-manager", `Auto-resolved ${conflictedFiles.length} conflict(s)`, { branch })
+    logger.info("workspace-manager", `Auto-resolved rebase conflicts for ${branch}`)
     return true
   }
 
