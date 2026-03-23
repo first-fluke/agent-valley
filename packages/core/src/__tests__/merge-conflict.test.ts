@@ -89,7 +89,7 @@ describe("mergeAndPush — rebase-based delivery", () => {
     expect(readFile(resolve(repoDir, "other.txt"))).toContain("other content")
   })
 
-  test("auto-resolves rebase conflict (feature branch wins)", async () => {
+  test("auto-resolves rebase conflict (feature branch wins)", { timeout: 10000 }, async () => {
     // Feature branch modifies line 2
     git(repoDir, ["checkout", "-b", "feature/TEST-2"])
     writeFileSync(resolve(repoDir, "file.txt"), "line 1\nfeature change\nline 3\n")

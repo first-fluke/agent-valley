@@ -19,6 +19,7 @@ function runCommand(
     const proc = spawn(cmd, args, {
       cwd: options.cwd ?? process.cwd(),
       stdio: options.ignoreStdio ? "ignore" : ["ignore", "pipe", "pipe"],
+      env: options.env ? { ...process.env, ...options.env } : undefined,
     })
 
     let stdout = ""
