@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "NODE_OPTIONS='--max-old-space-size=16384' bun --env-file=../../.env next dev --turbopack -p 9741",
     "build": "bun --env-file=../../.env next build",
-    "start": "bun --env-file=../../.env next start"
+    "start": "bun --env-file=../../.env next start -p 9741"
   },
   "dependencies": {
     "@agent-valley/core": "workspace:*",

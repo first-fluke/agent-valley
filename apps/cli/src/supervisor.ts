@@ -2,15 +2,16 @@
  * Supervisor — keeps the dashboard alive with auto-restart on crash.
  * Spawned by `av up` as a detached background process.
  *
- * Usage: bun apps/cli/src/supervisor.ts <dashboard-cwd> <port>
+ * Usage: bun apps/cli/src/supervisor.ts <dashboard-cwd> <port> [dev|start]
  */
 
 import { spawn } from "node:child_process"
-import { appendFileSync } from "node:fs"
+import { appendFileSync, existsSync } from "node:fs"
 import { resolve } from "node:path"
 
 const dashboardCwd = process.argv[2]
 const port = process.argv[3] ?? "9741"
+const mode = process.argv[4] ?? "start"
 const logFile = resolve(process.cwd(), ".av.log")
 
 const MAX_RESTARTS = 20
@@ -24,16 +25,29 @@ function log(msg: string): void {
 }
 
 function startDashboard(): void {
-  const proc = spawn("bun", ["run", "dev"], {
-    cwd: dashboardCwd,
-    stdio: ["ignore", "pipe", "pipe"],
-  })
+  let proc: ReturnType<typeof spawn>
 
-  // Pipe to log file
+  // Production: run standalone server.js directly (no node_modules needed)
+  // Monorepo standalone output mirrors the workspace structure
+  const standaloneServer = resolve(dashboardCwd, ".next/standalone/apps/dashboard/server.js")
+  if (mode === "start" && existsSync(standaloneServer)) {
+    proc = spawn("node", [standaloneServer], {
+      cwd: dashboardCwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PORT: port, HOSTNAME: "0.0.0.0" },
+    })
+    log(`Dashboard started via standalone (pid: ${proc.pid}, port: ${port})`)
+  } else {
+    // Dev mode or standalone not available
+    proc = spawn("bun", ["run", mode === "start" ? "start" : "dev"], {
+      cwd: dashboardCwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    log(`Dashboard started via bun run ${mode} (pid: ${proc.pid})`)
+  }
+
   proc.stdout?.on("data", (chunk: Buffer) => appendFileSync(logFile, chunk))
   proc.stderr?.on("data", (chunk: Buffer) => appendFileSync(logFile, chunk))
-
-  log(`Dashboard started (pid: ${proc.pid})`)
 
   proc.on("exit", (code, signal) => {
     log(`Dashboard exited (code: ${code}, signal: ${signal})`)
@@ -49,5 +63,5 @@ function startDashboard(): void {
   })
 }
 
-log(`Supervisor started — port ${port}, cwd ${dashboardCwd}`)
+log(`Supervisor started — port ${port}, mode ${mode}, cwd ${dashboardCwd}`)
 startDashboard()

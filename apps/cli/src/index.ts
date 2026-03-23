@@ -142,8 +142,16 @@ program
     const dashboardCwd = resolve(ROOT, "apps/dashboard")
     const supervisorScript = resolve(import.meta.dirname, "supervisor.ts")
 
+    // Build first, then run in production mode (Turbopack dev eats 100% CPU)
+    console.log(pc.dim("  Building dashboard..."))
+    const build = spawnSync("bun", ["run", "build"], { cwd: dashboardCwd, stdio: "inherit" })
+    if (build.status !== 0) {
+      console.log(pc.red("Build failed. Falling back to dev mode."))
+    }
+    const mode = build.status === 0 ? "start" : "dev"
+
     // Start supervisor as detached background process (handles auto-restart)
-    const dashProc = spawn("bun", [supervisorScript, dashboardCwd, port], {
+    const dashProc = spawn("bun", [supervisorScript, dashboardCwd, port, mode], {
       cwd: ROOT,
       stdio: "ignore",
       detached: true,
