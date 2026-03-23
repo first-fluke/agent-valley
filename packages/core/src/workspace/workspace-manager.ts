@@ -159,12 +159,17 @@ export class WorkspaceManager {
         // rerere might have resolved, check for remaining conflicts
         const { exitCode: conflictCheck } = await runCommand("git", ["diff", "--check"], { cwd: root })
         if (conflictCheck !== 0) {
-          await runCommand("git", ["merge", "--abort"], { cwd: root })
-          logger.error("workspace-manager", "Merge failed with unresolved conflicts", { branch, error: mergeErr })
-          return { ok: false, error: `Merge conflict on ${branch}: ${mergeErr}` }
+          // Try auto-resolving: accept incoming (theirs) for all conflicted files
+          const resolved = await this.autoResolveConflicts(root, branch)
+          if (!resolved) {
+            await runCommand("git", ["merge", "--abort"], { cwd: root })
+            logger.error("workspace-manager", "Merge failed with unresolved conflicts", { branch, error: mergeErr })
+            return { ok: false, error: `Merge conflict on ${branch}: ${mergeErr}` }
+          }
+        } else {
+          // rerere resolved all conflicts — commit the resolution
+          await runCommand("git", ["commit", "--no-edit"], { cwd: root })
         }
-        // rerere resolved all conflicts — commit the resolution
-        await runCommand("git", ["commit", "--no-edit"], { cwd: root })
       }
 
       // Push main
@@ -192,6 +197,53 @@ export class WorkspaceManager {
     }
 
     return { ok: false, error: `Merge+push failed after ${maxAttempts} attempts` }
+  }
+
+  /**
+   * Auto-resolve merge conflicts using a tiered strategy:
+   * 1. For each conflicted file, accept "theirs" (feature branch version)
+   * 2. Stage resolved files and commit
+   * 3. Let rerere learn the resolution for future conflicts
+   */
+  private async autoResolveConflicts(root: string, branch: string): Promise<boolean> {
+    // Get list of conflicted files
+    const { stdout: conflictList } = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: root })
+    const conflictedFiles = conflictList
+      .trim()
+      .split("\n")
+      .filter((f) => f.length > 0)
+
+    if (conflictedFiles.length === 0) return false
+
+    logger.info("workspace-manager", `Auto-resolving ${conflictedFiles.length} conflicted file(s)`, {
+      branch,
+      files: conflictedFiles.join(", "),
+    })
+
+    // Accept theirs (feature branch) for each conflicted file
+    for (const file of conflictedFiles) {
+      const { exitCode } = await runCommand("git", ["checkout", "--theirs", "--", file], { cwd: root })
+      if (exitCode !== 0) {
+        logger.warn("workspace-manager", `Failed to resolve ${file}, aborting`, { branch })
+        return false
+      }
+      await runCommand("git", ["add", file], { cwd: root })
+    }
+
+    // Commit the resolution
+    const { exitCode: commitExit } = await runCommand(
+      "git",
+      ["commit", "-m", `merge: auto-resolve ${branch} conflicts (accept theirs)`],
+      { cwd: root },
+    )
+
+    if (commitExit !== 0) {
+      logger.warn("workspace-manager", "Auto-resolve commit failed", { branch })
+      return false
+    }
+
+    logger.info("workspace-manager", `Auto-resolved ${conflictedFiles.length} conflict(s)`, { branch })
+    return true
   }
 
   // ── Safety-net: unfinished work detection ────────────────────────
