@@ -107,7 +107,7 @@ export function parseExpandedIssue(output: string): IssueInput {
 
 async function expandWithClaude(rawInput: string): Promise<IssueInput> {
   const cmd = ["claude", "--print", "--no-session-persistence", "-p", `${EXPAND_PROMPT}\n\nInput: ${rawInput}`]
-  const proc = spawn(cmd[0], cmd.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
+  const proc = spawn(cmd[0]!, cmd.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
 
   const { output, exitCode } = await new Promise<{ output: string; exitCode: number }>((resolve, reject) => {
     const chunks: Buffer[] = []
@@ -258,7 +258,7 @@ export async function createIssue(
       errors?: { message: string }[]
     }
 
-    if (result.errors) throw new Error(result.errors[0].message)
+    if (result.errors) throw new Error(result.errors[0]?.message)
     if (!result.data?.issueCreate?.success || !result.data.issueCreate.issue) throw new Error("Issue creation failed")
 
     const issue = result.data.issueCreate.issue

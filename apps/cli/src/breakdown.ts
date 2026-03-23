@@ -78,7 +78,7 @@ export function parseBreakdownOutput(output: string): BreakdownResult {
         : []
 
       subIssues.push({
-        title: titleMatch[1]?.trim(),
+        title: titleMatch[1]?.trim() ?? "",
         description: descMatch?.[1]?.trim() ?? "",
         blockedByIndices,
       })

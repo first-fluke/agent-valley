@@ -112,11 +112,12 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
     // Top-level key (no leading spaces)
     if (!line.startsWith(" ") && !line.startsWith("\t") && trimmed.includes(":")) {
       const [key, ...valueParts] = trimmed.split(":")
+      const keyName = key?.trim() ?? ""
       const value = valueParts.join(":").trim()
       if (value) {
-        result[key?.trim()] = resolveValue(value)
+        result[keyName] = resolveValue(value)
       } else {
-        currentSection = key?.trim()
+        currentSection = keyName
         result[currentSection] = result[currentSection] ?? {}
       }
     }
@@ -125,7 +126,7 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
       const [key, ...valueParts] = trimmed.split(":")
       const value = valueParts.join(":").trim()
       const section = result[currentSection] as Record<string, unknown>
-      section[key?.trim()] = resolveValue(value)
+      section[key?.trim() ?? ""] = resolveValue(value)
     }
   }
 

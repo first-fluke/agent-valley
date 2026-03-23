@@ -78,7 +78,7 @@ export async function readClipboard(): Promise<string | null> {
   try {
     const cmd = process.platform === "darwin" ? "pbpaste" : "xclip -selection clipboard -o"
     const parts = cmd.split(" ")
-    const proc = spawn(parts[0], parts.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
+    const proc = spawn(parts[0] as string, parts.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
 
     const { text, exitCode } = await new Promise<{ text: string; exitCode: number }>((resolve, reject) => {
       const chunks: Buffer[] = []
@@ -98,7 +98,7 @@ export async function writeClipboard(text: string): Promise<boolean> {
   try {
     const cmd = process.platform === "darwin" ? "pbcopy" : "xclip -selection clipboard"
     const parts = cmd.split(" ")
-    const proc = spawn(parts[0], parts.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
+    const proc = spawn(parts[0] as string, parts.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
 
     proc.stdin.write(text)
     proc.stdin.end()

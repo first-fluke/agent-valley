@@ -31,7 +31,7 @@ describe("loadConfig", () => {
   beforeEach(() => {
     originalEnv = { ...process.env }
     // Prevent actual process.exit — throw instead so we can catch it
-    exitSpy = vi.spyOn(process, "exit").mockImplementation((_code?: number) => {
+    exitSpy = vi.spyOn(process, "exit").mockImplementation((_code?: string | number | null) => {
       throw new Error(`process.exit(${_code})`)
     })
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})

@@ -18,7 +18,7 @@ async function computeHmac(payload: string, secret: string): Promise<string> {
 
 function asIssueEvent(event: unknown): WebhookEvent {
   const e = event as WebhookEvent
-  if (e && !("kind" in e && (e as Record<string, unknown>).kind === "relation")) return e
+  if (e && !("kind" in e && (e as unknown as Record<string, unknown>).kind === "relation")) return e
   throw new Error("Expected WebhookEvent, got RelationWebhookEvent")
 }
 

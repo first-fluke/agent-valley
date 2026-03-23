@@ -9,7 +9,7 @@ import { spawn } from "node:child_process"
 import { appendFileSync, existsSync, rmSync, symlinkSync } from "node:fs"
 import { resolve } from "node:path"
 
-const dashboardCwd = process.argv[2]
+const dashboardCwd = process.argv[2] ?? "."
 const port = process.argv[3] ?? "9741"
 const mode = process.argv[4] ?? "start"
 const logFile = resolve(process.cwd(), ".av.log")

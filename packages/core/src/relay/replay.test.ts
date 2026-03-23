@@ -32,9 +32,9 @@ describe("replayLedger", () => {
     expect(state.nodes.size).toBe(1)
     const node = state.nodes.get("gahyun:macbook")
     expect(node).toBeDefined()
-    expect(node.displayName).toBe("가현")
-    expect(node.online).toBe(true)
-    expect(node.activeIssues).toEqual([])
+    expect(node!.displayName).toBe("가현")
+    expect(node!.online).toBe(true)
+    expect(node!.activeIssues).toEqual([])
   })
 
   test("agent.start adds active issue", () => {
@@ -53,8 +53,8 @@ describe("replayLedger", () => {
     const state = replayLedger(events)
     const node = state.nodes.get("gahyun:macbook")
     expect(node).toBeDefined()
-    expect(node.activeIssues).toHaveLength(1)
-    expect(node.activeIssues[0].issueKey).toBe("FIR-12")
+    expect(node!.activeIssues).toHaveLength(1)
+    expect(node!.activeIssues[0]!.issueKey).toBe("FIR-12")
   })
 
   test("agent.done removes active issue", () => {
@@ -74,7 +74,7 @@ describe("replayLedger", () => {
     const state = replayLedger(events)
     const node = state.nodes.get("gahyun:macbook")
     expect(node).toBeDefined()
-    expect(node.activeIssues).toHaveLength(0)
+    expect(node!.activeIssues).toHaveLength(0)
   })
 
   test("node.leave clears all active issues", () => {
@@ -99,8 +99,8 @@ describe("replayLedger", () => {
     const state = replayLedger(events)
     const node = state.nodes.get("gahyun:macbook")
     expect(node).toBeDefined()
-    expect(node.online).toBe(false)
-    expect(node.activeIssues).toHaveLength(0)
+    expect(node!.online).toBe(false)
+    expect(node!.activeIssues).toHaveLength(0)
   })
 
   test("duplicate agent.start is idempotent", () => {
@@ -124,7 +124,7 @@ describe("replayLedger", () => {
     const state = replayLedger(events)
     const node = state.nodes.get("gahyun:macbook")
     expect(node).toBeDefined()
-    expect(node.activeIssues).toHaveLength(1)
+    expect(node!.activeIssues).toHaveLength(1)
   })
 
   test("agent.done without prior start is harmless", () => {
@@ -139,7 +139,7 @@ describe("replayLedger", () => {
     const state = replayLedger(events)
     const node = state.nodes.get("gahyun:macbook")
     expect(node).toBeDefined()
-    expect(node.activeIssues).toHaveLength(0)
+    expect(node!.activeIssues).toHaveLength(0)
   })
 
   test("multiple nodes", () => {
@@ -189,7 +189,7 @@ describe("replayLedger", () => {
     const state = replayLedger(events)
     const node = state.nodes.get("gahyun:macbook")
     expect(node).toBeDefined()
-    expect(node.online).toBe(true)
+    expect(node!.online).toBe(true)
   })
 
   test("tracks lastSeq correctly with gaps", () => {
@@ -230,6 +230,6 @@ describe("replayLedger", () => {
     const state = replayLedger(events)
     const node = state.nodes.get("gahyun:macbook")
     expect(node).toBeDefined()
-    expect(node.activeIssues).toHaveLength(0)
+    expect(node!.activeIssues).toHaveLength(0)
   })
 })

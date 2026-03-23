@@ -64,7 +64,7 @@ export async function linearQuery(apiKey: string, query: string): Promise<Record
   if (!res.ok) throw new Error(`Linear API HTTP ${res.status}`)
 
   const data = (await res.json()) as { data?: Record<string, unknown>; errors?: { message: string }[] }
-  if (data.errors) throw new Error(data.errors[0].message)
+  if (data.errors) throw new Error(data.errors[0]?.message)
 
   if (!data.data) throw new Error("Linear API returned no data")
   return data.data
@@ -188,9 +188,9 @@ async function stepTeam(ctx: Partial<SetupContext>, step: number, total: number)
       linearQuery(ctx.apiKey, "{ teams { nodes { id key name } } }"),
       linearQuery(ctx.apiKey, "{ viewer { organization { urlKey } } }"),
     ])
-    ctx.teams = (teamsData as Record<string, Record<string, unknown>>).teams.nodes as LinearTeam[]
-    ctx.orgUrlKey = (viewerData as Record<string, Record<string, Record<string, unknown>>>).viewer.organization
-      .urlKey as string
+    ctx.teams = (teamsData as Record<string, Record<string, unknown>>).teams?.nodes as LinearTeam[]
+    ctx.orgUrlKey = (viewerData as Record<string, Record<string, Record<string, unknown>>>).viewer?.organization
+      ?.urlKey as string
     s.stop("팀 조회 완료")
   } catch (e) {
     s.stop(pc.red("Linear API 호출 실패"))
@@ -222,7 +222,8 @@ async function stepWorkflowStates(ctx: Partial<SetupContext>, step: number, tota
 
   try {
     const data = await linearQuery(ctx.apiKey, `{ team(id: "${ctx.teamUuid}") { states { nodes { id name type } } } }`)
-    ctx.states = (data as Record<string, Record<string, Record<string, unknown>>>).team.states.nodes as WorkflowState[]
+    ctx.states = (data as Record<string, Record<string, Record<string, unknown>>>).team?.states
+      ?.nodes as WorkflowState[]
     s.stop("워크플로우 상태 조회 완료")
   } catch (e) {
     s.stop(pc.red("워크플로우 상태 조회 실패"))
@@ -453,7 +454,7 @@ async function fastTrackSetup(invite: InviteData): Promise<void> {
   const totalSteps = fastSteps.length
   let i = 0
   while (i < fastSteps.length) {
-    const result = await fastSteps[i](ctx, i + 1, totalSteps)
+    const result = await fastSteps[i]?.(ctx, i + 1, totalSteps)
     if (result === BACK) {
       i = Math.max(0, i - 1)
       continue
@@ -716,7 +717,7 @@ export async function setup(): Promise<void> {
   const totalSteps = steps.length
   let i = 0
   while (i < steps.length) {
-    const result = await steps[i](ctx, i + 1, totalSteps)
+    const result = await steps[i]?.(ctx, i + 1, totalSteps)
     if (result === BACK) {
       i = Math.max(0, i - 1)
       continue

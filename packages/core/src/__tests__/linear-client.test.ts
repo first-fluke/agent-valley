@@ -62,15 +62,15 @@ describe("linearIssueNodeSchema — DAG fields", () => {
 
     // children
     expect(data.children.nodes).toHaveLength(1)
-    expect(data.children.nodes[0].id).toBe("child-1")
-    expect(data.children.nodes[0].identifier).toBe("ACR-2")
-    expect(data.children.nodes[0].state).toEqual(baseState)
+    expect(data.children.nodes[0]!.id).toBe("child-1")
+    expect(data.children.nodes[0]!.identifier).toBe("ACR-2")
+    expect(data.children.nodes[0]!.state).toEqual(baseState)
 
     // relations
     expect(data.relations.nodes).toHaveLength(1)
-    expect(data.relations.nodes[0].type).toBe("blocks")
-    expect(data.relations.nodes[0].relatedIssue.id).toBe("rel-1")
-    expect(data.relations.nodes[0].relatedIssue.identifier).toBe("ACR-3")
+    expect(data.relations.nodes[0]!.type).toBe("blocks")
+    expect(data.relations.nodes[0]!.relatedIssue.id).toBe("rel-1")
+    expect(data.relations.nodes[0]!.relatedIssue.identifier).toBe("ACR-3")
   })
 
   test("defaults missing parent, children, and relations to safe empty values", () => {
@@ -159,8 +159,8 @@ describe("linearIssueNodeSchema — DAG fields", () => {
 
     expect(result.data.children.nodes).toHaveLength(2)
     expect(result.data.relations.nodes).toHaveLength(3)
-    expect(result.data.relations.nodes[1].type).toBe("blocked-by")
-    expect(result.data.relations.nodes[2].type).toBe("duplicate")
+    expect(result.data.relations.nodes[1]!.type).toBe("blocked-by")
+    expect(result.data.relations.nodes[2]!.type).toBe("duplicate")
   })
 
   test("parses node with empty children and relations nodes arrays", () => {
@@ -187,7 +187,7 @@ describe("linearIssueNodeSchema — DAG fields", () => {
     if (!result.success) return
 
     expect(result.data.labels.nodes).toHaveLength(2)
-    expect(result.data.labels.nodes[0].name).toBe("score:7")
+    expect(result.data.labels.nodes[0]!.name).toBe("score:7")
   })
 })
 
@@ -227,11 +227,11 @@ describe("linearTeamIssuesDataSchema — with DAG data", () => {
     const nodes = result.data.team?.issues.nodes ?? []
     expect(nodes).toHaveLength(1)
 
-    const node = nodes[0]
+    const node = nodes[0]!
     expect(node.parent).toEqual({ id: "parent-1", identifier: "ACR-0" })
-    expect(node.children.nodes[0].id).toBe("child-1")
-    expect(node.relations.nodes[0].type).toBe("blocks")
-    expect(node.relations.nodes[0].relatedIssue.identifier).toBe("ACR-3")
+    expect(node.children.nodes[0]!.id).toBe("child-1")
+    expect(node.relations.nodes[0]!.type).toBe("blocks")
+    expect(node.relations.nodes[0]!.relatedIssue.identifier).toBe("ACR-3")
   })
 
   test("parses team issues response without relationships", () => {
@@ -327,14 +327,14 @@ describe("linearTeamIssuesDataSchema — with DAG data", () => {
     const nodes = result.data.team?.issues.nodes ?? []
     expect(nodes).toHaveLength(2)
 
-    const first = nodes[0]
+    const first = nodes[0]!
     expect(first.parent?.id).toBe("parent-0")
-    expect(first.relations.nodes[0].type).toBe("blocks")
+    expect(first.relations.nodes[0]!.type).toBe("blocks")
 
-    const second = nodes[1]
+    const second = nodes[1]!
     expect(second.parent).toBeNull()
-    expect(second.children.nodes[0].id).toBe("issue-3")
-    expect(second.relations.nodes[0].type).toBe("blocked-by")
+    expect(second.children.nodes[0]!.id).toBe("issue-3")
+    expect(second.relations.nodes[0]!.type).toBe("blocked-by")
   })
 
   test("parses response with null team", () => {
@@ -378,7 +378,7 @@ describe("fetchIssueByIdentifier — identifier→number parsing", () => {
         JSON.stringify({ data: { team: { issues: { nodes: [{ id: "uuid-1", identifier: "FIR-57" }] } } } }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       )
-    }) as typeof fetch
+    }) as unknown as typeof fetch
 
     try {
       const result = await fetchIssueByIdentifier("fake-key", "team-uuid", "FIR-57")
@@ -402,7 +402,7 @@ describe("fetchIssueByIdentifier — identifier→number parsing", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
-    }) as typeof fetch
+    }) as unknown as typeof fetch
 
     try {
       const result = await fetchIssueByIdentifier("fake-key", "team-uuid", "ACR-123")
@@ -442,7 +442,7 @@ describe("createIssueRelation — Linear API type contract", () => {
         JSON.stringify({ data: { issueRelationCreate: { issueRelation: { id: "r1", type: "blocks" } } } }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       )
-    }) as typeof fetch
+    }) as unknown as typeof fetch
     return {
       getCaptured: () => captured,
       restore: () => {

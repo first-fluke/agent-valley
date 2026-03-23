@@ -13,7 +13,7 @@ import { logger } from "../observability/logger"
 function runCommand(
   cmd: string,
   args: string[],
-  options: { cwd?: string; ignoreStdio?: boolean } = {},
+  options: { cwd?: string; ignoreStdio?: boolean; env?: Record<string, string | undefined> } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const proc = spawn(cmd, args, {
@@ -65,7 +65,7 @@ const BRANCH_PREFIX_MAP: Record<string, string> = {
 
 export function deriveBranchName(identifier: string, title: string): string {
   const match = title.match(/^(\w+)[\s(:]/)
-  const prefix = match ? (BRANCH_PREFIX_MAP[match[1]] ?? "feature") : "feature"
+  const prefix = match ? (BRANCH_PREFIX_MAP[match[1]!] ?? "feature") : "feature"
   return `${prefix}/${identifier}`
 }
 

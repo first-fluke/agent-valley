@@ -5,6 +5,7 @@
 
 import type { LedgerEvent, LedgerEventPublisher, LedgerEventType } from "../domain/ledger"
 import { logger } from "../observability/logger"
+import type { OrchestratorEventHandler } from "../orchestrator/event-emitter"
 import type { Orchestrator } from "../orchestrator/orchestrator"
 
 type PublishableEvent = Omit<LedgerEvent, "seq" | "relayTimestamp" | "v">
@@ -27,7 +28,7 @@ export class LedgerBridge {
 
   private register(event: string, handler: (payload: Record<string, unknown>) => void): void {
     this.handlers.set(event, handler)
-    this.orchestrator.on(event, handler)
+    this.orchestrator.on(event, handler as OrchestratorEventHandler)
   }
 
   private publish(type: LedgerEventType, payload: Record<string, unknown>): void {
@@ -44,7 +45,7 @@ export class LedgerBridge {
 
   async dispose(): Promise<void> {
     for (const [event, handler] of this.handlers) {
-      this.orchestrator.off(event, handler)
+      this.orchestrator.off(event, handler as OrchestratorEventHandler)
     }
     this.handlers.clear()
     await this.publisher.dispose()

@@ -43,7 +43,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - run: bunx tsc --noEmit
+      - run: bunx tsc --noEmit -p packages/core/tsconfig.json
+      - run: bunx tsc --noEmit -p apps/cli/tsconfig.json
 
   test:
     name: Test (Vitest)

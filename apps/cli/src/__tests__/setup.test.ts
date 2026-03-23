@@ -157,7 +157,7 @@ describe("linearQuery", () => {
     globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       capturedInit = init
       return new Response(JSON.stringify({ data: { ok: true } }), { status: 200 })
-    }) as typeof fetch
+    }) as unknown as typeof fetch
 
     await linearQuery("lin_api_key123", "{ teams { nodes { id } } }")
 
@@ -172,14 +172,14 @@ describe("linearQuery", () => {
   it("returns data on success", async () => {
     globalThis.fetch = vi.fn(
       async () => new Response(JSON.stringify({ data: { teams: { nodes: [{ id: "1" }] } } }), { status: 200 }),
-    ) as typeof fetch
+    ) as unknown as typeof fetch
 
     const result = await linearQuery("key", "{ teams { nodes { id } } }")
-    expect(result.teams.nodes[0].id).toBe("1")
+    expect((result as { teams: { nodes: { id: string }[] } }).teams.nodes[0]?.id).toBe("1")
   })
 
   it("throws on HTTP error", async () => {
-    globalThis.fetch = vi.fn(async () => new Response("Unauthorized", { status: 401 })) as typeof fetch
+    globalThis.fetch = vi.fn(async () => new Response("Unauthorized", { status: 401 })) as unknown as typeof fetch
 
     expect(linearQuery("bad_key", "{ viewer { id } }")).rejects.toThrow("Linear API HTTP 401")
   })
@@ -187,7 +187,7 @@ describe("linearQuery", () => {
   it("throws on GraphQL error", async () => {
     globalThis.fetch = vi.fn(
       async () => new Response(JSON.stringify({ errors: [{ message: "Invalid query" }] }), { status: 200 }),
-    ) as typeof fetch
+    ) as unknown as typeof fetch
 
     expect(linearQuery("key", "{ bad }")).rejects.toThrow("Invalid query")
   })

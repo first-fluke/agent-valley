@@ -52,7 +52,7 @@ async function loginWithEmail(supabaseUrl: string, supabaseAnonKey: string): Pro
   const email = await p.text({
     message: "이메일",
     placeholder: "you@company.com",
-    validate: (v) => (!v.includes("@") ? "유효한 이메일을 입력하세요" : undefined),
+    validate: (v) => (!v?.includes("@") ? "유효한 이메일을 입력하세요" : undefined),
   })
   if (p.isCancel(email)) {
     p.cancel("취소되었습니다")
@@ -61,7 +61,7 @@ async function loginWithEmail(supabaseUrl: string, supabaseAnonKey: string): Pro
 
   const password = await p.password({
     message: "비밀번호",
-    validate: (v) => (v.length < 6 ? "비밀번호는 6자 이상이어야 합니다" : undefined),
+    validate: (v) => ((v?.length ?? 0) < 6 ? "비밀번호는 6자 이상이어야 합니다" : undefined),
   })
   if (p.isCancel(password)) {
     p.cancel("취소되었습니다")
@@ -104,7 +104,7 @@ async function signupWithEmail(supabaseUrl: string, supabaseAnonKey: string): Pr
   const email = await p.text({
     message: "이메일",
     placeholder: "you@company.com",
-    validate: (v) => (!v.includes("@") ? "유효한 이메일을 입력하세요" : undefined),
+    validate: (v) => (!v?.includes("@") ? "유효한 이메일을 입력하세요" : undefined),
   })
   if (p.isCancel(email)) {
     p.cancel("취소되었습니다")
@@ -113,7 +113,7 @@ async function signupWithEmail(supabaseUrl: string, supabaseAnonKey: string): Pr
 
   const password = await p.password({
     message: "비밀번호 (6자 이상)",
-    validate: (v) => (v.length < 6 ? "비밀번호는 6자 이상이어야 합니다" : undefined),
+    validate: (v) => ((v?.length ?? 0) < 6 ? "비밀번호는 6자 이상이어야 합니다" : undefined),
   })
   if (p.isCancel(password)) {
     p.cancel("취소되었습니다")
@@ -173,7 +173,7 @@ export async function login(): Promise<void> {
   const supabaseUrl = await p.text({
     message: "Supabase URL",
     placeholder: "https://xxx.supabase.co",
-    validate: (v) => (!v.startsWith("https://") ? "https://로 시작해야 합니다" : undefined),
+    validate: (v) => (!v?.startsWith("https://") ? "https://로 시작해야 합니다" : undefined),
   })
   if (p.isCancel(supabaseUrl)) {
     p.cancel("취소되었습니다")
@@ -183,7 +183,7 @@ export async function login(): Promise<void> {
   const supabaseAnonKey = await p.text({
     message: "Supabase Anon Key",
     placeholder: "eyJhbGciOiJIUzI1NiIs...",
-    validate: (v) => (v.length < 20 ? "유효한 키를 입력하세요" : undefined),
+    validate: (v) => ((v?.length ?? 0) < 20 ? "유효한 키를 입력하세요" : undefined),
   })
   if (p.isCancel(supabaseAnonKey)) {
     p.cancel("취소되었습니다")

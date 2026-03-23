@@ -75,7 +75,10 @@ export abstract class BaseSession implements AgentSession {
   protected process: ChildProcess | null = null
   protected startedAt: number = 0
 
-  private listeners = new Map<string, Set<AgentEventHandler<unknown>>>()
+  abstract start(config: AgentConfig): Promise<void>
+  abstract execute(prompt: string): Promise<void>
+
+  private listeners = new Map<string, Set<AgentEventHandler<AgentEventType>>>()
 
   // ── Pre-start guard ─────────────────────────────────────────────────────
 
@@ -93,11 +96,11 @@ export abstract class BaseSession implements AgentSession {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set())
     }
-    this.listeners.get(event)?.add(handler)
+    this.listeners.get(event)?.add(handler as unknown as AgentEventHandler<AgentEventType>)
   }
 
   off<T extends AgentEventType>(event: T, handler: AgentEventHandler<T>): void {
-    this.listeners.get(event)?.delete(handler)
+    this.listeners.get(event)?.delete(handler as unknown as AgentEventHandler<AgentEventType>)
   }
 
   protected emit(event: AgentEvent): void {
