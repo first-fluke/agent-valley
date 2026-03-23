@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="text" x1="0" y1="8" x2="32" y2="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#e0e7ff" stop-opacity="0.9"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect width="32" height="32" rx="7" fill="url(#bg)"/>
+  <!-- Node dots (circuit motif) -->
+  <circle cx="4" cy="16" r="1.5" fill="#ffffff" fill-opacity="0.4"/>
+  <circle cx="28" cy="16" r="1.5" fill="#ffffff" fill-opacity="0.4"/>
+  <circle cx="16" cy="4" r="1.5" fill="#ffffff" fill-opacity="0.4"/>
+  <!-- AV monogram -->
+  <!-- A: left stroke, right stroke, crossbar -->
+  <path d="M5 23 L9 9 L13 23" stroke="url(#text)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="6.5" y1="18" x2="11.5" y2="18" stroke="url(#text)" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- V: left stroke, right stroke -->
+  <path d="M15 9 L19 23 L23 9" stroke="url(#text)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Subtle circuit lines from node dots -->
+  <line x1="4" y1="16" x2="5" y2="16" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1"/>
+  <line x1="27" y1="16" x2="28" y2="16" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1"/>
+</svg>

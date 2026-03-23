@@ -1,9 +1,21 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import "@/app/globals.css"
 
 export const metadata: Metadata = {
-  title: "Agent Valley Dashboard",
-  description: "Pixel art office view of AI agent orchestration",
+  title: {
+    default: "Agent Valley",
+    template: "%s | Agent Valley",
+  },
+  description: "AI agent orchestration dashboard — monitor agents, issues, and real-time status",
+  applicationName: "Agent Valley",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+  },
+}
+
+export const viewport: Viewport = {
+  themeColor: "#6366f1",
 }
 
 export default function RootLayout({
