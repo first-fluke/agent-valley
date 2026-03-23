@@ -109,11 +109,22 @@ export function createCompletionCallbacks(
           })
         }
       } else if (hasCodeChanges) {
-        // pr mode: ensure branch is pushed so agent's PR (or manual PR) is possible
+        // PR mode: push branch + safety-net draft PR creation
         try {
           await workspaceManager.pushBranch(workspace)
+          // Safety-net: create draft PR if agent didn't
+          const branch = `symphony/${workspace.key}`
+          const prResult = await workspaceManager.createDraftPR(workspace, {
+            title: `${issue.identifier}: ${issue.title}`,
+            body: completedAttempt.agentOutput
+              ? `## Summary\n${completedAttempt.agentOutput.slice(0, 2000)}`
+              : `Automated PR for ${issue.identifier}`,
+          })
+          if (prResult.created) {
+            logger.info("completion", `Safety-net draft PR created for ${issue.identifier}`, { url: prResult.url })
+          }
         } catch (err) {
-          logger.warn("completion", "Branch push failed in PR mode", {
+          logger.warn("completion", "Branch push or PR creation failed in PR mode", {
             issueId: issue.id,
             error: String(err),
           })
@@ -125,14 +136,36 @@ export function createCompletionCallbacks(
       let targetState = config.workflowStates.done
 
       if (!hasCodeChanges && !hasOutput) {
-        // Agent produced nothing — likely premature exit or misunderstood issue
+        // Anti-premature-exit: retry once before giving up
+        const prematureRetryAdded = deps.addRetry(
+          issue.id,
+          (completedAttempt.exitCode ?? 0) === 0 ? 1 : 2,
+          "premature-exit",
+        )
+        if (prematureRetryAdded) {
+          logger.warn("completion", `Agent exited without changes for ${issue.identifier}, scheduling retry`)
+          deps.cleanupState(issue.id, "failed")
+          try {
+            await addIssueComment(
+              config.linearApiKey,
+              issue.id,
+              "Symphony: Agent exited without code changes — retrying with additional context.",
+            )
+          } catch {
+            /* best-effort */
+          }
+          await deps.fillVacantSlots()
+          return
+        }
+
+        // Retry exhausted — cancel
         targetState = config.workflowStates.cancelled
         try {
           await addIssueComment(
             config.linearApiKey,
             issue.id,
-            "Symphony: Agent exited without code changes or output.\n" +
-              "  → Consider adding more detail to the issue description and retrying.",
+            "Symphony: Agent exited without code changes after retry.\n" +
+              "  → Consider adding more detail to the issue description.",
           )
         } catch {
           /* best-effort */

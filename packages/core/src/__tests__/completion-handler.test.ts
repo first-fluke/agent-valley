@@ -246,9 +246,15 @@ describe("createCompletionCallbacks", () => {
       expect(events.some((e) => e.event === "agent.done")).toBe(true)
     })
 
-    test("transitions to Cancelled when no changes and no output (premature exit)", async () => {
+    test("schedules retry when no changes and no output (anti-premature-exit)", async () => {
       const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      let retryAdded = false
       const deps = makeDeps(mockWm)
+      const origAddRetry = deps.addRetry
+      deps.addRetry = (...args: Parameters<typeof origAddRetry>) => {
+        retryAdded = true
+        return origAddRetry(...args)
+      }
       const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
 
       await callbacks.onComplete({
@@ -258,13 +264,18 @@ describe("createCompletionCallbacks", () => {
         agentOutput: null,
       })
 
-      // Still emits agent.done (completed, just empty)
-      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+      expect(retryAdded).toBe(true)
     })
 
-    test("transitions to Cancelled when output is whitespace-only", async () => {
+    test("schedules retry when output is whitespace-only", async () => {
       const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      let retryAdded = false
       const deps = makeDeps(mockWm)
+      const origAddRetry = deps.addRetry
+      deps.addRetry = (...args: Parameters<typeof origAddRetry>) => {
+        retryAdded = true
+        return origAddRetry(...args)
+      }
       const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
 
       await callbacks.onComplete({
@@ -274,7 +285,7 @@ describe("createCompletionCallbacks", () => {
         agentOutput: "   \n  ",
       })
 
-      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+      expect(retryAdded).toBe(true)
     })
   })
 

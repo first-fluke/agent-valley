@@ -155,11 +155,9 @@ export class WorkspaceManager {
       // 3. Rebase feature branch onto latest main
       //    This puts agent's work on top of all other agents' merged work.
       //    If conflict: agent's code adapts to main, not the other way around.
-      const { exitCode: rebaseExit, stderr: rebaseErr } = await runCommand(
-        "git",
-        ["rebase", "main", branch],
-        { cwd: root },
-      )
+      const { exitCode: rebaseExit, stderr: rebaseErr } = await runCommand("git", ["rebase", "main", branch], {
+        cwd: root,
+      })
 
       if (rebaseExit !== 0) {
         // rerere might resolve it
@@ -318,6 +316,43 @@ export class WorkspaceManager {
 
     logger.info("workspace-manager", "Pushed branch", { branch })
     return { ok: true }
+  }
+
+  /** Safety-net: create a draft PR via gh CLI if one doesn't already exist for this branch */
+  async createDraftPR(
+    workspace: Workspace,
+    opts: { title: string; body: string },
+  ): Promise<{ created: boolean; url?: string }> {
+    const root = this.repoRoot(workspace)
+    const branch = `symphony/${workspace.key}`
+
+    // Check if PR already exists for this branch
+    const { stdout: existing } = await runCommand(
+      "gh",
+      ["pr", "list", "--head", branch, "--json", "url", "--limit", "1"],
+      { cwd: root },
+    )
+    try {
+      const prs = JSON.parse(existing.trim() || "[]") as Array<{ url: string }>
+      if (prs.length > 0) return { created: false, url: prs[0]?.url }
+    } catch {
+      // parse error — continue to create
+    }
+
+    // Create draft PR
+    const { exitCode, stdout, stderr } = await runCommand(
+      "gh",
+      ["pr", "create", "--draft", "--title", opts.title, "--body", opts.body, "--head", branch],
+      { cwd: root },
+    )
+
+    if (exitCode !== 0) {
+      logger.warn("workspace-manager", "Draft PR creation failed", { branch, error: stderr })
+      return { created: false }
+    }
+
+    const url = stdout.trim()
+    return { created: true, url }
   }
 
   async cleanup(workspace: Workspace): Promise<void> {
