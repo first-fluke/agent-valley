@@ -14,7 +14,7 @@ import { WorkspaceManager } from "../workspace/workspace-manager"
 let repoDir: string
 let worktreeDir: string
 let manager: WorkspaceManager
-const branch = "symphony/TEST-1"
+const branch = "feature/TEST-1"
 
 function git(args: string, cwd?: string): string {
   return execSync(`git ${args}`, { cwd: cwd ?? repoDir, encoding: "utf-8" }).trim()
@@ -25,6 +25,7 @@ function makeWorkspace(): Workspace {
     issueId: "issue-1",
     path: worktreeDir,
     key: "TEST-1",
+    branch: "feature/TEST-1",
     status: "running",
     createdAt: new Date().toISOString(),
   }

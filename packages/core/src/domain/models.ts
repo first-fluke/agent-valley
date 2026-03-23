@@ -69,6 +69,7 @@ export interface Workspace {
   issueId: string
   path: string
   key: string
+  branch: string
   status: WorkspaceStatus
   createdAt: string
 }

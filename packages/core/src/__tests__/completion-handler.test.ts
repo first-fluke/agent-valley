@@ -32,6 +32,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     issueId: "issue-1",
     path: "/workspace/PROJ-1",
     key: "PROJ-1",
+    branch: "feature/PROJ-1",
     status: "running",
     createdAt: new Date().toISOString(),
     ...overrides,

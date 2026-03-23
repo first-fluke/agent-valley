@@ -54,7 +54,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     this.workspaceManager = new WorkspaceManager(config.workspaceRoot)
     this.agentRunner = new AgentRunnerService()
     this.retryQueue = new RetryQueue(config.agentMaxRetries, config.agentRetryDelay)
-    this.dagScheduler = new DagScheduler(`${config.workspaceRoot}/.symphony/dag-cache.json`)
+    this.dagScheduler = new DagScheduler(`${config.workspaceRoot}/.agent-valley/dag-cache.json`)
     this.completionDeps = {
       config,
       workspaceManager: this.workspaceManager,

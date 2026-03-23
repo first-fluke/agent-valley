@@ -42,6 +42,33 @@ function runCommand(
   })
 }
 
+/**
+ * Derive a git branch name from issue identifier + title.
+ * Maps conventional commit prefix to git branch prefix.
+ * Falls back to "feature" if no recognized prefix found.
+ *
+ * Allowed prefixes: feature, fix, refactor, hotfix, release
+ *
+ * Examples:
+ *   "feat(web): add login" + "FIR-49"     → "feature/FIR-49"
+ *   "fix(api): null pointer" + "FIR-50"   → "fix/FIR-50"
+ *   "refactor: rename module" + "FIR-51"   → "refactor/FIR-51"
+ *   "chore: update deps" + "FIR-52"       → "feature/FIR-52"
+ */
+const BRANCH_PREFIX_MAP: Record<string, string> = {
+  feat: "feature",
+  fix: "fix",
+  hotfix: "hotfix",
+  refactor: "refactor",
+  release: "release",
+}
+
+export function deriveBranchName(identifier: string, title: string): string {
+  const match = title.match(/^(\w+)[\s(:]/)
+  const prefix = match ? (BRANCH_PREFIX_MAP[match[1]] ?? "feature") : "feature"
+  return `${prefix}/${identifier}`
+}
+
 export class WorkspaceManager {
   constructor(
     private rootPath: string,
@@ -56,7 +83,7 @@ export class WorkspaceManager {
     const root = rootOverride ?? this.rootPath
     const key = this.deriveKey(issue.identifier)
     const path = `${root}/${key}`
-    const branch = `symphony/${key}`
+    const branch = deriveBranchName(issue.identifier, issue.title)
 
     // Create git worktree from the target repo
     const { exitCode, stderr } = await runCommand("git", ["worktree", "add", path, "-b", branch], { cwd: root })
@@ -72,15 +99,19 @@ export class WorkspaceManager {
     }
 
     // Create .symphony metadata directory after worktree
-    await mkdir(`${path}/.symphony/attempts`, { recursive: true })
+    await mkdir(`${path}/.agent-valley/attempts`, { recursive: true })
 
     // Store issue metadata for workspace lookup
-    await writeFile(`${path}/.symphony/issue.json`, JSON.stringify({ issueId: issue.id, identifier: issue.identifier }))
+    await writeFile(
+      `${path}/.agent-valley/issue.json`,
+      JSON.stringify({ issueId: issue.id, identifier: issue.identifier, branch }),
+    )
 
     const workspace: Workspace = {
       issueId: issue.id,
       path,
       key,
+      branch,
       status: "idle",
       createdAt: new Date().toISOString(),
     }
@@ -99,15 +130,16 @@ export class WorkspaceManager {
     }
 
     for (const entry of entries) {
-      const metaFile = `${this.rootPath}/${entry}/.symphony/issue.json`
+      const metaFile = `${this.rootPath}/${entry}/.agent-valley/issue.json`
       try {
         const raw = await readFile(metaFile, "utf-8")
-        const meta = JSON.parse(raw) as { issueId: string }
+        const meta = JSON.parse(raw) as { issueId: string; branch?: string; identifier?: string }
         if (meta.issueId === issueId) {
           return {
             issueId,
             path: `${this.rootPath}/${entry}`,
             key: entry,
+            branch: meta.branch ?? `feature/${meta.identifier ?? entry}`,
             status: "idle",
             createdAt: new Date().toISOString(),
           }
@@ -120,7 +152,7 @@ export class WorkspaceManager {
   }
 
   async saveAttempt(workspace: Workspace, attempt: RunAttempt): Promise<void> {
-    const path = `${workspace.path}/.symphony/attempts/${attempt.id}.json`
+    const path = `${workspace.path}/.agent-valley/attempts/${attempt.id}.json`
     await writeFile(path, JSON.stringify(attempt, null, 2), "utf-8")
   }
 
@@ -133,7 +165,7 @@ export class WorkspaceManager {
 
   async mergeAndPush(workspace: Workspace): Promise<{ ok: boolean; error?: string }> {
     const root = this.repoRoot(workspace)
-    const branch = `symphony/${workspace.key}`
+    const branch = workspace.branch
     const maxAttempts = 3
 
     const hasRemote = (await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })).exitCode === 0
@@ -303,7 +335,7 @@ export class WorkspaceManager {
 
   async pushBranch(workspace: Workspace): Promise<{ ok: boolean; error?: string }> {
     const root = this.repoRoot(workspace)
-    const branch = `symphony/${workspace.key}`
+    const branch = workspace.branch
 
     const hasRemote = (await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })).exitCode === 0
     if (!hasRemote) return { ok: true }
@@ -324,7 +356,7 @@ export class WorkspaceManager {
     opts: { title: string; body: string },
   ): Promise<{ created: boolean; url?: string }> {
     const root = this.repoRoot(workspace)
-    const branch = `symphony/${workspace.key}`
+    const branch = workspace.branch
 
     // Check if PR already exists for this branch
     const { stdout: existing } = await runCommand(

@@ -58,7 +58,7 @@ describe("mergeAndPush — rebase-based delivery", () => {
 
   test("rebases feature branch and fast-forward merges", async () => {
     // Feature branch
-    git(repoDir, ["checkout", "-b", "symphony/TEST-1"])
+    git(repoDir, ["checkout", "-b", "feature/TEST-1"])
     writeFileSync(resolve(repoDir, "feature.txt"), "feature content\n")
     git(repoDir, ["add", "."])
     git(repoDir, ["commit", "-m", "feat: add feature"])
@@ -70,7 +70,15 @@ describe("mergeAndPush — rebase-based delivery", () => {
     git(repoDir, ["commit", "-m", "chore: add other"])
     git(repoDir, ["push", "origin", "main"])
 
-    const workspace = { id: "t", key: "TEST-1", path: resolve(repoDir, "TEST-1"), issueId: "t" }
+    const workspace = {
+      id: "t",
+      key: "TEST-1",
+      path: resolve(repoDir, "TEST-1"),
+      issueId: "t",
+      branch: "feature/TEST-1",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
     const result = await manager.mergeAndPush(workspace)
 
     expect(result.ok).toBe(true)
@@ -83,7 +91,7 @@ describe("mergeAndPush — rebase-based delivery", () => {
 
   test("auto-resolves rebase conflict (feature branch wins)", async () => {
     // Feature branch modifies line 2
-    git(repoDir, ["checkout", "-b", "symphony/TEST-2"])
+    git(repoDir, ["checkout", "-b", "feature/TEST-2"])
     writeFileSync(resolve(repoDir, "file.txt"), "line 1\nfeature change\nline 3\n")
     git(repoDir, ["add", "."])
     git(repoDir, ["commit", "-m", "feat: change line 2"])
@@ -95,7 +103,15 @@ describe("mergeAndPush — rebase-based delivery", () => {
     git(repoDir, ["commit", "-m", "chore: change line 2"])
     git(repoDir, ["push", "origin", "main"])
 
-    const workspace = { id: "t", key: "TEST-2", path: resolve(repoDir, "TEST-2"), issueId: "t" }
+    const workspace = {
+      id: "t",
+      key: "TEST-2",
+      path: resolve(repoDir, "TEST-2"),
+      issueId: "t",
+      branch: "feature/TEST-2",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
     const result = await manager.mergeAndPush(workspace)
 
     expect(result.ok).toBe(true)
@@ -106,11 +122,19 @@ describe("mergeAndPush — rebase-based delivery", () => {
   })
 
   test("clean merge with no changes returns ok", async () => {
-    git(repoDir, ["checkout", "-b", "symphony/TEST-3"])
+    git(repoDir, ["checkout", "-b", "feature/TEST-3"])
     // No changes
     git(repoDir, ["checkout", "main"])
 
-    const workspace = { id: "t", key: "TEST-3", path: resolve(repoDir, "TEST-3"), issueId: "t" }
+    const workspace = {
+      id: "t",
+      key: "TEST-3",
+      path: resolve(repoDir, "TEST-3"),
+      issueId: "t",
+      branch: "feature/TEST-3",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
     const result = await manager.mergeAndPush(workspace)
 
     expect(result.ok).toBe(true)

@@ -113,7 +113,6 @@ export function createCompletionCallbacks(
         try {
           await workspaceManager.pushBranch(workspace)
           // Safety-net: create draft PR if agent didn't
-          const branch = `symphony/${workspace.key}`
           const prResult = await workspaceManager.createDraftPR(workspace, {
             title: `${issue.identifier}: ${issue.title}`,
             body: completedAttempt.agentOutput
