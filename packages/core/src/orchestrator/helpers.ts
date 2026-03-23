@@ -40,6 +40,38 @@ export function sortByIssueNumber(issues: Issue[]): void {
   })
 }
 
+// Cache system metrics to avoid calling process.memoryUsage()/cpuUsage() on every poll
+let cachedMetrics: {
+  memoryRss: number
+  memoryHeapUsed: number
+  memoryHeapTotal: number
+  cpuUser: number
+  cpuSystem: number
+  uptime: number
+} | null = null
+let metricsTimestamp = 0
+const METRICS_TTL_MS = 5000
+
+function getSystemMetrics() {
+  const now = Date.now()
+  if (cachedMetrics && now - metricsTimestamp < METRICS_TTL_MS) {
+    return { ...cachedMetrics, uptime: process.uptime() }
+  }
+
+  const mem = process.memoryUsage()
+  const cpu = process.cpuUsage()
+  cachedMetrics = {
+    memoryRss: mem.rss,
+    memoryHeapUsed: mem.heapUsed,
+    memoryHeapTotal: mem.heapTotal,
+    cpuUser: cpu.user,
+    cpuSystem: cpu.system,
+    uptime: process.uptime(),
+  }
+  metricsTimestamp = now
+  return cachedMetrics
+}
+
 export function buildOrchestratorStatus(
   state: OrchestratorRuntimeState,
   activeAttempts: Map<string, string>,
@@ -58,9 +90,6 @@ export function buildOrchestratorStatus(
     }
   })
 
-  const mem = process.memoryUsage()
-  const cpu = process.cpuUsage()
-
   return {
     isRunning: state.isRunning,
     lastEventAt: state.lastEventAt,
@@ -73,14 +102,7 @@ export function buildOrchestratorStatus(
       maxParallel: config.maxParallel,
       serverPort: config.serverPort,
     },
-    systemMetrics: {
-      memoryRss: mem.rss,
-      memoryHeapUsed: mem.heapUsed,
-      memoryHeapTotal: mem.heapTotal,
-      cpuUser: cpu.user,
-      cpuSystem: cpu.system,
-      uptime: process.uptime(),
-    },
+    systemMetrics: getSystemMetrics(),
   }
 }
 

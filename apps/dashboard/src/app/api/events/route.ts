@@ -19,8 +19,15 @@ export async function GET() {
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
         } catch {
           // Controller closed — clean up
-          closed = true
-          if (intervalId) clearInterval(intervalId)
+          cleanup()
+        }
+      }
+
+      const cleanup = () => {
+        closed = true
+        if (intervalId) {
+          clearInterval(intervalId)
+          intervalId = null
         }
       }
 
@@ -52,6 +59,10 @@ export async function GET() {
 
       // Poll for state changes
       intervalId = setInterval(() => {
+        if (closed) {
+          cleanup()
+          return
+        }
         if (orchestrator) {
           send("state", orchestrator.getStatus())
         }
@@ -59,7 +70,10 @@ export async function GET() {
     },
     cancel() {
       closed = true
-      if (intervalId) clearInterval(intervalId)
+      if (intervalId) {
+        clearInterval(intervalId)
+        intervalId = null
+      }
     },
   })
 

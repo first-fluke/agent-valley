@@ -1,60 +1,47 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import type { TeamState, TeamNode, ConnectionStatus } from "../types/team"
 import type { OrchestratorState } from "@/features/office/types/agent"
 
+type SSEConnectionStatus = "connecting" | "open" | "closed" | "error"
+
+function mapConnectionStatus(status: SSEConnectionStatus): ConnectionStatus {
+  if (status === "open") return "connected"
+  if (status === "error") return "error"
+  return "connecting"
+}
+
 /**
- * Wraps the existing SSE OrchestratorState into TeamState format
- * for standalone mode compatibility.
+ * Derives TeamState from an already-open SSE OrchestratorState,
+ * instead of opening a second EventSource connection.
  */
-export function useLocalOrchestrator(sseUrl: string) {
-  const [teamState, setTeamState] = useState<TeamState | null>(null)
-  const [status, setStatus] = useState<ConnectionStatus>("connecting")
+export function useLocalOrchestrator(
+  data: OrchestratorState | null,
+  sseStatus: SSEConnectionStatus,
+) {
+  const teamState = useMemo<TeamState | null>(() => {
+    if (!data) return null
 
-  useEffect(() => {
-    let active = true
-    const source = new EventSource(sseUrl)
-
-    source.onopen = () => {
-      if (active) setStatus("connected")
+    const node: TeamNode = {
+      nodeId: "local",
+      displayName: "Local",
+      defaultAgentType: data.config.agentType,
+      maxParallel: data.config.maxParallel,
+      online: data.isRunning,
+      joinedAt: "",
+      activeIssues: data.activeWorkspaces.map((ws) => ({
+        issueKey: ws.key,
+        issueId: ws.issueId,
+        agentType: data.config.agentType,
+        startedAt: ws.startedAt,
+      })),
     }
 
-    source.addEventListener("state", (event) => {
-      if (!active) return
-      try {
-        const state = JSON.parse((event as MessageEvent).data) as OrchestratorState
+    return { nodes: [node], lastSeq: 0 }
+  }, [data])
 
-        const node: TeamNode = {
-          nodeId: "local",
-          displayName: "Local",
-          defaultAgentType: state.config.agentType,
-          maxParallel: state.config.maxParallel,
-          online: state.isRunning,
-          joinedAt: "",
-          activeIssues: state.activeWorkspaces.map((ws) => ({
-            issueKey: ws.key,
-            issueId: ws.issueId,
-            agentType: state.config.agentType,
-            startedAt: ws.startedAt,
-          })),
-        }
-
-        setTeamState({ nodes: [node], lastSeq: 0 })
-      } catch {
-        // skip malformed
-      }
-    })
-
-    source.onerror = () => {
-      if (active) setStatus("error")
-    }
-
-    return () => {
-      active = false
-      source.close()
-    }
-  }, [sseUrl])
+  const status = mapConnectionStatus(sseStatus)
 
   return { teamState, status }
 }
