@@ -325,6 +325,111 @@ program
     }
   })
 
+// ── logs ─────────────────────────────────────────────────────────────────────
+program
+  .command("logs")
+  .description("Tail dashboard + orchestrator logs")
+  .option("-n, --lines <n>", "Number of lines to show initially", "50")
+  .action((opts: { lines: string }) => {
+    if (!existsSync(LOG_FILE)) {
+      console.log(pc.yellow("No logs found. Start with: av up"))
+      return
+    }
+    const tail = spawn("tail", ["-n", opts.lines, "-f", LOG_FILE], { stdio: "inherit" })
+    process.on("SIGINT", () => {
+      tail.kill()
+      process.exit(0)
+    })
+    process.on("SIGTERM", () => {
+      tail.kill()
+      process.exit(0)
+    })
+  })
+
+// ── top ──────────────────────────────────────────────────────────────────────
+program
+  .command("top")
+  .description("Live agent status monitor")
+  .option("-i, --interval <seconds>", "Refresh interval", "2")
+  .action(async (opts: { interval: string }) => {
+    const port = process.env.SERVER_PORT ?? "9741"
+    const interval = Number(opts.interval) * 1000
+
+    const render = async () => {
+      try {
+        const res = await fetch(`http://localhost:${port}/api/status`)
+        const d = (await res.json()) as Record<string, unknown>
+        const workspaces = (d.activeWorkspaces as Array<Record<string, unknown>>) ?? []
+        const config = (d.config as Record<string, unknown>) ?? {}
+        const waiting = (d.waitingIssues as number) ?? 0
+        const retry = (d.retryQueueSize as number) ?? 0
+
+        // Clear screen
+        process.stdout.write("\x1b[2J\x1b[H")
+
+        console.log(pc.bold("Agent Valley — Live Monitor"))
+        console.log(pc.dim(`http://localhost:${port}  |  ${new Date().toLocaleTimeString()}`))
+        console.log()
+
+        // Summary bar
+        const active = workspaces.length
+        const max = (config.maxParallel as number) ?? 5
+        const bar = "█".repeat(active) + "░".repeat(max - active)
+        console.log(`  Agents  [${active >= max ? pc.red(bar) : pc.green(bar)}] ${active}/${max}`)
+        console.log(
+          `  Waiting ${pc.yellow(String(waiting))}  Retry ${retry > 0 ? pc.red(String(retry)) : pc.dim(String(retry))}`,
+        )
+        console.log()
+
+        if (workspaces.length === 0) {
+          console.log(pc.dim("  No active agents"))
+        } else {
+          // Table header
+          console.log(
+            `  ${pc.dim("ISSUE".padEnd(10))}${pc.dim("STATUS".padEnd(10))}${pc.dim("DURATION".padEnd(12))}${pc.dim("LAST OUTPUT")}`,
+          )
+          console.log(pc.dim("  " + "─".repeat(70)))
+
+          for (const w of workspaces) {
+            const key = ((w.key as string) ?? "???").padEnd(10)
+            const status = (w.status as string) ?? "?"
+            const startedAt = (w.startedAt as string) ?? ""
+            const elapsed = startedAt ? Math.round((Date.now() - new Date(startedAt).getTime()) / 1000) : 0
+            const mins = Math.floor(elapsed / 60)
+            const secs = elapsed % 60
+            const duration = `${mins}m${String(secs).padStart(2, "0")}s`.padEnd(12)
+            const output = ((w.lastOutput as string) ?? "").slice(0, 40)
+
+            const statusColored = status === "running" ? pc.green("●") : pc.yellow("○")
+            console.log(`  ${key}${statusColored} ${status.padEnd(8)}${pc.dim(duration)}${pc.dim(output)}`)
+          }
+        }
+
+        console.log()
+        console.log(pc.dim("  Press Ctrl+C to exit"))
+      } catch {
+        process.stdout.write("\x1b[2J\x1b[H")
+        console.log(pc.red("  Server not responding. Start with: av up"))
+        console.log(pc.dim("  Press Ctrl+C to exit"))
+      }
+    }
+
+    await render()
+    const timer = setInterval(render, interval)
+    process.on("SIGINT", () => {
+      clearInterval(timer)
+      process.stdout.write("\n")
+      process.exit(0)
+    })
+    process.on("SIGTERM", () => {
+      clearInterval(timer)
+      process.exit(0)
+    })
+
+    // Keep process alive
+    await new Promise(() => {})
+  })
+
 // ── login ────────────────────────────────────────────────────────────────────
 program
   .command("login")
