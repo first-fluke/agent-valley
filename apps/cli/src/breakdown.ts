@@ -3,6 +3,7 @@
  * Uses Claude CLI to analyze and split a large issue into smaller tasks.
  */
 
+import { spawn } from "node:child_process"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 
@@ -112,15 +113,22 @@ export function renderDagPreview(result: BreakdownResult): string {
 }
 
 async function expandBreakdownWithClaude(rawInput: string): Promise<BreakdownResult> {
-  const proc = Bun.spawn(
-    ["claude", "--print", "--no-session-persistence", "-p", `${BREAKDOWN_PROMPT}\n\nInput: ${rawInput}`],
-    { stdout: "pipe", stderr: "pipe" },
-  )
+  const output = await new Promise<string>((resolve, reject) => {
+    const proc = spawn(
+      "claude",
+      ["--print", "--no-session-persistence", "-p", `${BREAKDOWN_PROMPT}\n\nInput: ${rawInput}`],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    )
+    const chunks: Buffer[] = []
+    proc.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk))
+    proc.on("close", (code) => {
+      if (code !== 0) reject(new Error("Claude CLI failed during breakdown analysis."))
+      else resolve(Buffer.concat(chunks).toString("utf-8"))
+    })
+    proc.on("error", reject)
+  })
 
-  const output = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (proc.exitCode !== 0) {
+  if (!output) {
     throw new Error("Claude CLI failed during breakdown analysis.")
   }
 

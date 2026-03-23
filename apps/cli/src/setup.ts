@@ -11,7 +11,7 @@
  *   - Partial reconfiguration (--edit mode)
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { detectHardware } from "@agent-valley/core/config/hardware"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
@@ -418,7 +418,7 @@ async function saveEnv(ctx: SetupContext): Promise<void> {
     maxParallel: ctx.maxParallel,
   })
 
-  await Bun.write(".env", env)
+  writeFileSync(".env", env, "utf-8")
 
   if (!existsSync(ctx.workspaceRoot)) {
     mkdirSync(ctx.workspaceRoot, { recursive: true })
@@ -665,7 +665,7 @@ export async function setupEdit(): Promise<void> {
     process.exit(0)
   }
 
-  await Bun.write(".env", env)
+  writeFileSync(".env", env, "utf-8")
 
   if (existing.workspaceRoot && !existsSync(existing.workspaceRoot)) {
     mkdirSync(existing.workspaceRoot, { recursive: true })
@@ -681,7 +681,7 @@ export async function setup(): Promise<void> {
   p.intro(pc.bgCyan(pc.black(" Agent Valley Setup ")))
 
   // ── Check existing .env ────────────────────────────────────────────────────
-  if (await Bun.file(".env").exists()) {
+  if (existsSync(".env")) {
     const overwrite = await p.confirm({ message: ".env 파일이 이미 존재합니다. 덮어쓸까요?" })
     if (p.isCancel(overwrite) || !overwrite) {
       p.cancel("취소되었습니다")

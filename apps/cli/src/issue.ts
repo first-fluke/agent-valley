@@ -3,6 +3,7 @@
  * Uses Claude CLI to expand rough input into a structured issue.
  */
 
+import { spawn } from "node:child_process"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 
@@ -105,15 +106,17 @@ export function parseExpandedIssue(output: string): IssueInput {
 }
 
 async function expandWithClaude(rawInput: string): Promise<IssueInput> {
-  const proc = Bun.spawn(
-    ["claude", "--print", "--no-session-persistence", "-p", `${EXPAND_PROMPT}\n\nInput: ${rawInput}`],
-    { stdout: "pipe", stderr: "pipe" },
-  )
+  const cmd = ["claude", "--print", "--no-session-persistence", "-p", `${EXPAND_PROMPT}\n\nInput: ${rawInput}`]
+  const proc = spawn(cmd[0], cmd.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
 
-  const output = await new Response(proc.stdout).text()
-  await proc.exited
+  const { output, exitCode } = await new Promise<{ output: string; exitCode: number }>((resolve, reject) => {
+    const chunks: Buffer[] = []
+    proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk))
+    proc.on("close", (code) => resolve({ output: Buffer.concat(chunks).toString("utf-8"), exitCode: code ?? 1 }))
+    proc.on("error", reject)
+  })
 
-  if (proc.exitCode !== 0) {
+  if (exitCode !== 0) {
     throw new Error("Claude CLI failed. Falling back to raw input.")
   }
 

@@ -8,6 +8,7 @@
  * Format: av://invite/<base64-json>
  */
 
+import { spawn } from "node:child_process"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 
@@ -76,10 +77,18 @@ export function decodeInvite(raw: string): InviteData | null {
 export async function readClipboard(): Promise<string | null> {
   try {
     const cmd = process.platform === "darwin" ? "pbpaste" : "xclip -selection clipboard -o"
-    const proc = Bun.spawn(cmd.split(" "), { stdout: "pipe", stderr: "pipe" })
-    const text = await new Response(proc.stdout).text()
-    await proc.exited
-    return proc.exitCode === 0 ? text.trim() : null
+    const parts = cmd.split(" ")
+    const proc = spawn(parts[0], parts.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
+
+    const { text, exitCode } = await new Promise<{ text: string; exitCode: number }>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk))
+      proc.stdout.on("error", reject)
+      proc.on("close", (code) => resolve({ text: Buffer.concat(chunks).toString("utf-8"), exitCode: code ?? 1 }))
+      proc.on("error", reject)
+    })
+
+    return exitCode === 0 ? text.trim() : null
   } catch {
     return null
   }
@@ -88,11 +97,18 @@ export async function readClipboard(): Promise<string | null> {
 export async function writeClipboard(text: string): Promise<boolean> {
   try {
     const cmd = process.platform === "darwin" ? "pbcopy" : "xclip -selection clipboard"
-    const proc = Bun.spawn(cmd.split(" "), { stdin: "pipe", stderr: "pipe" })
+    const parts = cmd.split(" ")
+    const proc = spawn(parts[0], parts.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
+
     proc.stdin.write(text)
     proc.stdin.end()
-    await proc.exited
-    return proc.exitCode === 0
+
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      proc.on("close", (code) => resolve(code ?? 1))
+      proc.on("error", reject)
+    })
+
+    return exitCode === 0
   } catch {
     return false
   }
