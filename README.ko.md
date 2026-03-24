@@ -1,378 +1,174 @@
-# Symphony Dev Template
+# Agent Valley
 
-**[OpenAI Symphony SPEC](https://github.com/openai/symphony/blob/main/SPEC.md) 기반의 AI 코딩 에이전트 오케스트레이션을 위한 기술스택 무관 개발 하네스 템플릿.**
+Linear 웹훅 기반 에이전트 오케스트레이션 플랫폼. Linear에 이슈를 등록하면 AI 에이전트(Claude, Codex, Gemini)가 격리된 git worktree에서 자동으로 개발을 수행합니다 — 병렬로.
 
 > Read in: [English](./README.md)
 
----
-
-## 이게 뭔가요?
-
-이 레포지토리는 AI 코딩 에이전트(Claude Code, Codex, Gemini, Antigravity 등)를 팀 규모로 소프트웨어 엔지니어링 작업에 투입하고 싶은 팀을 위한 **즉시 사용 가능한 프로젝트 템플릿**입니다.
-
-OpenAI의 [Harness Engineering](https://openai.com/index/harness-engineering/) 접근법에서 영감을 받았습니다. 3명의 엔지니어, 5개월, 약 100만 줄의 코드, 수동으로 작성한 코드 0줄, 엔지니어 1인당 하루 평균 3.5개의 PR. 이 템플릿은 그 워크플로우를 재현하기 위한 스캐폴딩을 제공합니다.
-
-템플릿은 **기술스택 무관**입니다. 아키텍처 원칙, 문서, CI, 에이전트 하네스가 모두 갖춰져 있습니다. 구현 언어(TypeScript, Python, Go)는 여러분이 선택하고, 준비가 되면 `src/`를 채우면 됩니다.
-
----
-
-## 핵심 동작 개념
-
 ```
-Linear 이슈 (Todo 상태)
-        │
-        ▼
-  Orchestrator  ──webhook──▶  Linear Webhook Events
-        │
-        ├─ Todo → In Progress (Orchestrator가 Linear API로 전환)
-        │
-        ▼  (이슈별로)
-  WorkspaceManager  ──생성──▶  git worktree  {WORKSPACE_ROOT}/{이슈-키}/
-        │
-        ▼
-  AgentRunner  ──스폰──▶  AgentSession (claude/gemini/codex)  (WORKFLOW.md 프롬프트 렌더링 결과)
-        │
-        ▼
-  에이전트가 격리된 worktree에서 작업, 커밋, PR 오픈
-        │
-        ▼
-  Orchestrator가 작업 요약 코멘트 → Done 전환
-        │
-        ▼
-  CI 통과  →  사람이 아키텍처만 리뷰  →  병합  →  worktree GC
+Linear Issue (Todo)
+  → Webhook → Orchestrator → Git Worktree → Agent Session
+  → Completion → Merge/PR → Done
 ```
 
-**핵심 원칙:** Symphony는 스케줄러/러너입니다. 라이프사이클 상태 전환(Todo→InProgress→Done/Cancelled)을 관리하고, 에이전트는 비즈니스 로직(코드 작성, PR 생성)에 집중합니다.
+**핵심 원칙:** Agent Valley는 스케줄러/러너입니다. 생명주기 상태 전환(Todo → In Progress → Done/Cancelled)을 관리하고 작업 요약을 게시합니다. 에이전트는 비즈니스 로직(코드 작성, PR 생성)에 집중합니다.
+
+**TypeScript + Bun**으로 구축되었습니다. AgentSession 플러그인 시스템을 통해 **Claude Code, Codex, Gemini CLI**를 기본 지원하며 — 단일 인터페이스를 구현하여 커스텀 에이전트를 추가할 수 있습니다.
 
 ---
 
-## 레포지토리 구조
+## 작동 방식
 
-```
-agent-template/
-│
-├── AGENTS.md                        ← 모든 에이전트 공통 진입점 (반드시 먼저 읽을 것)
-├── CLAUDE.md                        ← Claude Code 전용 thin wrapper (AGENTS.md 임포트)
-├── WORKFLOW.md                      ← Symphony 계약: YAML 설정 + 에이전트 프롬프트 템플릿
-├── .env.example                     ← 환경변수 템플릿 (.env로 복사 후 사용)
-│
-├── docs/
-│   ├── specs/                       ← Symphony 7개 컴포넌트 인터페이스 명세
-│   │   ├── domain-models.md         ← Issue, Workspace, RunAttempt, LiveSession 등
-│   │   ├── workflow-loader.md       ← WORKFLOW.md 파싱 명세
-│   │   ├── config-layer.md          ← 타입된 설정 + $VAR resolution
-│   │   ├── tracker-client.md        ← Linear GraphQL 어댑터 명세
-│   │   ├── orchestrator.md          ← Webhook 이벤트 핸들러, 상태 머신, 재시도 큐
-│   │   ├── workspace-manager.md     ← 이슈별 worktree 수명주기
-│   │   ├── agent-runner.md          ← AgentSession 추상화, SPEC §17 테스트 매트릭스
-│   │   └── observability.md         ← 구조화된 로그, 측정 지표, 선택적 OTEL
-│   │
-│   ├── architecture/
-│   │   ├── LAYERS.md                ← 의존성 방향 원칙 (언어 무관)
-│   │   ├── CONSTRAINTS.md           ← 금지 패턴 7가지 (코드 예시 포함)
-│   │   └── enforcement/
-│   │       ├── typescript.md        ← dependency-cruiser 설정
-│   │       ├── python.md            ← import-linter 설정
-│   │       └── go.md                ← golangci-lint 설정
-│   │
-│   ├── stacks/                      ← 스택별 착수 가이드
-│   │   ├── typescript.md            ← Node.js 20+, Express/Hono, Zod, Jest
-│   │   ├── python.md                ← Python 3.12+, FastAPI, Pydantic v2, uv
-│   │   └── go.md                    ← Go 1.22+, Echo, sqlx, testify
-│   │
-│   └── harness/
-│       ├── LEGIBILITY.md            ← worktree 격리, Chrome DevTools Protocol
-│       ├── FEEDBACK-LOOPS.md        ← 정적/동적 컨텍스트, 피드백 루프
-│       ├── ENTROPY.md               ← AI Slop 방지, GC 패턴, 성숙도 레벨
-│       └── SAFETY.md                ← 최소 권한, 프롬프트 인젝션 방어, 감사 로그
-│
-├── src/                             ← 비어있음 — 스택 선택 후 채울 것
-│
-├── scripts/
-│   ├── dev.sh                       ← 원커맨드 개발 환경 부팅
-│   └── harness/
-│       ├── gc.sh                    ← 오래된 worktree 가비지 컬렉션
-│       └── validate.sh              ← 아키텍처 제약 검증
-│
-├── .github/
-│   ├── workflows/
-│   │   ├── ci.yml                   ← 린트 + 아키텍처 검사 + 테스트
-│   │   └── harness-gc.yml           ← 주 1회 엔트로피 GC (크론)
-│   ├── PULL_REQUEST_TEMPLATE.md     ← AI 인식 PR 체크리스트
-│   └── .pre-commit-config.yaml      ← 로컬 사전커밋훅
-│
-├── .agents/
-│   ├── skills/
-│   │   ├── symphony-scaffold/       ← 새 Symphony 구현 스캐폴딩
-│   │   ├── symphony-component/      ← Symphony 컴포넌트 단일 구현
-│   │   ├── symphony-conformance/    ← SPEC 준수 감사
-│   │   ├── harness-gc/              ← worktree 가비지 컬렉션 가이드
-│   │   ├── backend-agent/           ← 스택 무관 API 백엔드 (TS/Python/Go)
-│   │   ├── frontend-agent/          ← React/Next.js 프론트엔드
-│   │   └── ...                      ← 기타 oh-my-agent 스킬들
-│   └── workflows/
-│       └── ultrawork/               ← Phase-gated 다중 Wave 오케스트레이션
-│
-└── .claude/
-    ├── agents/
-    │   ├── symphony-architect.md    ← 아키텍처 결정 서브에이전트
-    │   ├── symphony-implementer.md  ← 기능 구현 서브에이전트
-    │   └── symphony-reviewer.md     ← 코드 리뷰 서브에이전트
-    └── skills/                      ← .agents/skills/ 심링크
-```
+1. Linear에서 이슈를 생성합니다 (또는 `bun av issue "description"`)
+2. Linear이 대시보드로 웹훅을 전송합니다
+3. Orchestrator가 HMAC 서명을 검증하고 이슈를 In Progress로 전환합니다
+4. DAG 스케줄러가 의존성을 확인합니다 — 차단된 이슈는 차단 이슈가 완료될 때까지 대기합니다
+5. WorkspaceManager가 `WORKSPACE_ROOT`에 격리된 git worktree를 생성합니다
+6. AgentRunnerService가 에이전트(Claude / Codex / Gemini)를 실행합니다
+7. 완료 시: main에 자동 병합(또는 PR 생성), Linear에 요약 게시, Done으로 전환
+8. 실패 시: 지수 백오프 재시도(60s × 2^n, 최대 3회), 이후 에러 코멘트와 함께 취소
+9. 슬롯 보충: 완료된 에이전트가 용량을 반환하면 대기 중인 다음 이슈가 자동으로 시작됩니다
+
+`MAX_PARALLEL`(하드웨어에서 자동 감지)까지 여러 이슈가 병렬로 실행됩니다.
 
 ---
 
-## 설치
-
-Agent Valley는 **신규 프로젝트** (전체 스캐폴드)와 **기존 프로젝트** (하네스만 추가) 모두 지원합니다. 설치 스크립트가 자동으로 모드를 감지합니다.
-
-### 신규 프로젝트
-
-레포를 클론해서 그대로 프로젝트 베이스로 사용합니다:
+## 빠른 시작
 
 ```bash
-git clone https://github.com/first-fluke/agent-valley.git my-project
-cd my-project
+# 클론
+git clone https://github.com/first-fluke/agent-valley.git
+cd agent-valley
+bun install
 
-# agent-valley git 히스토리 제거 후 내 프로젝트로 시작
-rm -rf .git
-git init
-git add -A
-git commit -m "chore: init from agent-valley"
+# 대화형 설정 마법사
+bun av setup
 
-# 환경 설정
+# 또는 수동 설정
 cp .env.example .env
-# .env 편집 (LINEAR_API_KEY, WORKSPACE_ROOT 등)
+# Linear API 키, workflow state UUID, WORKSPACE_ROOT를 입력하세요
 
-# 검증
-./scripts/harness/validate.sh
+# 시작 (dashboard + orchestrator + ngrok 터널)
+bun av dev
 ```
 
-모든 파일이 이미 준비되어 있습니다 — `src/`는 비어 있고 구현을 시작할 수 있습니다. 신규 클론에서는 `install.sh`를 실행할 필요가 없습니다.
+콘솔에 출력된 ngrok URL을 Linear 웹훅 설정에 복사합니다 → `{url}/api/webhook`.
 
-### 기존 프로젝트
+---
 
-프로젝트 루트에서 설치 스크립트를 바로 실행합니다 — 클론 불필요:
+## CLI
 
 ```bash
-cd your-existing-project
-curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
+bun av setup              # 대화형 설정 마법사
+bun av dev                # 포그라운드로 시작 (파일 감시 + 자동 재시작)
+bun av up                 # 백그라운드 데몬으로 시작
+bun av down               # 백그라운드 데몬 중지
+bun av status             # Orchestrator 상태 조회
+bun av top                # 실시간 에이전트 상태 모니터
+bun av logs               # 대시보드 로그 조회 (-n으로 라인 수 지정)
+bun av login              # 팀 로그인 (Supabase 인증)
+bun av logout             # 팀 로그아웃
+bun av invite             # 팀 설정을 클립보드에 복사
 ```
 
-**기존 프로젝트에 설치되는 항목:**
+### 이슈 생성
 
-| 항목 | 처리 방식 |
+```bash
+bun av issue "fix auth bug"                        # 이슈 생성 (Claude가 설명을 확장)
+bun av issue "fix auth bug" --raw                  # 확장 없이 생성
+bun av issue "fix auth bug" --yes                  # 확인 건너뛰기
+bun av issue "add tests" --parent ACR-10           # 하위 이슈로 생성
+bun av issue "migrate db" --blocked-by ACR-5       # 의존성 설정
+bun av issue "refactor auth" --breakdown           # 하위 작업으로 자동 분해
+```
+
+---
+
+## 설정
+
+### 필수 (.env)
+
+| 변수 | 설명 |
 |---|---|
-| `.agents/`, `.claude/`, `docs/` | 복사 (하네스 코어) |
-| `scripts/harness/gc.sh`, `validate.sh` | 복사 |
-| `WORKFLOW.md`, `.env.example` | 복사 |
-| `AGENTS.md` | 기존 파일 있으면 Symphony 섹션 추가, 없으면 생성 |
-| `CLAUDE.md` | `@AGENTS.md` import 라인 없으면 추가 |
-| `.gitignore` | 누락 항목만 추가 (덮어쓰기 없음) |
-| `src/`, `scripts/dev.sh` | **스킵** |
-| `.github/` | **선택적** — 설치 중 묻고 결정 |
+| `LINEAR_API_KEY` | Linear Personal API 키 (Settings → API) |
+| `LINEAR_TEAM_ID` | 팀 식별자 (예: `ACR`) |
+| `LINEAR_TEAM_UUID` | 팀 UUID (GraphQL 쿼리용) |
+| `LINEAR_WEBHOOK_SECRET` | 웹훅 서명 시크릿 |
+| `LINEAR_WORKFLOW_STATE_TODO` | "Todo" 상태 UUID |
+| `LINEAR_WORKFLOW_STATE_IN_PROGRESS` | "In Progress" 상태 UUID |
+| `LINEAR_WORKFLOW_STATE_DONE` | "Done" 상태 UUID |
+| `LINEAR_WORKFLOW_STATE_CANCELLED` | "Cancelled" 상태 UUID |
+| `WORKSPACE_ROOT` | 대상 git 저장소의 절대 경로 |
 
-### 설치 후 설정
-
-**1. `.env` 설정**
-
-```bash
-cp .env.example .env
-# .env 파일에 실제 값을 입력하세요
-```
-
-필수 값:
+**Linear UUID 확인 방법:**
 
 ```bash
-LINEAR_API_KEY=lin_api_YOUR_KEY_HERE
-LINEAR_TEAM_ID=ACR
-LINEAR_TEAM_UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-LINEAR_WORKFLOW_STATE_TODO=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-LINEAR_WORKFLOW_STATE_IN_PROGRESS=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-LINEAR_WORKFLOW_STATE_DONE=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-LINEAR_WORKFLOW_STATE_CANCELLED=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-WORKSPACE_ROOT=/절대경로/workspaces
-LOG_LEVEL=info
-```
-
-**Linear UUID 찾는 방법:**
-
-```bash
-# 팀 UUID
+# 팀 목록
 curl -s -X POST https://api.linear.app/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: YOUR_LINEAR_API_KEY" \
   -d '{"query":"{ teams { nodes { id key name } } }"}' | jq .
 
-# 워크플로우 상태 UUID
+# 워크플로우 상태 목록
 curl -s -X POST https://api.linear.app/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: YOUR_LINEAR_API_KEY" \
   -d '{"query":"{ workflowStates { nodes { id name type } } }"}' | jq .
 ```
 
-> Linear Personal API Key 발급: Linear → Settings → API → Personal API keys
+### 선택 사항
 
-**2. 검증**
-
-```bash
-./scripts/harness/validate.sh
-```
-
-**3. Symphony 구현 스캐폴딩**
-
-AI 에이전트에게 다음과 같이 요청하세요:
-
-```
-AGENT_SETUP.md를 읽고 [TypeScript/Python/Go]로 Symphony 구현을 스캐폴딩해줘.
-```
-
-또는 Claude Code 내장 스킬을 직접 사용:
-
-```
-/symphony-scaffold
-```
-
----
-
-## Symphony 7개 컴포넌트
-
-| # | 컴포넌트 | 역할 | 명세 |
-|---|---|---|---|
-| 1 | **Workflow Loader** | `WORKFLOW.md` 파싱 — YAML front matter + 프롬프트 바디 | `docs/specs/workflow-loader.md` |
-| 2 | **Config Layer** | 타입된 설정 객체 + `$VAR` 환경변수 resolution | `docs/specs/config-layer.md` |
-| 3 | **Issue Tracker Client** | Linear GraphQL 어댑터 — 이슈 조회, 상태 전환, 코멘트 | `docs/specs/tracker-client.md` |
-| 4 | **Orchestrator** | Webhook 이벤트 핸들러, 상태 머신, 재시도 큐, 단일 in-memory 상태 권한 | `docs/specs/orchestrator.md` |
-| 5 | **Workspace Manager** | 이슈별 `git worktree` 생성, 수명주기 훅, GC | `docs/specs/workspace-manager.md` |
-| 6 | **Agent Runner** | AgentSession 추상화로 에이전트(claude/gemini/codex) 스폰, 타임아웃 강제 | `docs/specs/agent-runner.md` |
-| 7 | **Observability** | 구조화된 JSON 로그 (stdout), 선택적 HTTP status surface, OTEL | `docs/specs/observability.md` |
-
-### 도메인 모델
-
-모든 컴포넌트가 공유하는 핵심 모델 (`docs/specs/domain-models.md`):
-
-| 모델 | 설명 |
-|---|---|
-| `Issue` | Linear 이슈 데이터 — 읽기 전용, Symphony는 이 값을 쓰지 않음 |
-| `Workspace` | 이슈별 격리 작업 디렉터리 (`{WORKSPACE_ROOT}/{key}/`) |
-| `RunAttempt` | 에이전트 실행 한 번의 기록 (시작, 종료, 종료코드, 출력) |
-| `LiveSession` | 실행 중인 프로세스 하트비트 추적 (재시작 시 고아 프로세스 감지용) |
-| `RetryEntry` | 실패한 이슈의 재시도 스케줄 (지수 백오프) |
-| `OrchestratorRuntimeState` | Orchestrator가 단독으로 소유하는 in-memory 상태 |
-
-**Workspace 키 파생 규칙:** `issue.identifier`에서 `[A-Za-z0-9._-]` 외 문자를 `_`로 대체.
-
----
-
-## 아키텍처
-
-### 클린 아키텍처 계층
-
-```
-Presentation   — CLI, HTTP 핸들러. 비즈니스 로직 없음.
-    ↓
-Application    — Orchestrator, WorkspaceManager. 인터페이스를 통해 조율.
-    ↓
-Domain         — Issue, Workspace, RunAttempt. 순수 규칙, 외부 의존성 없음.
-    ↓
-Infrastructure — LinearApiClient, FileSystem, Git, Logger. 어댑터만.
-```
-
-의존성 방향은 항상 **아래 방향**만 허용됩니다. `docs/architecture/LAYERS.md` 참조.
-
-### 주요 금지 패턴
-
-1. Domain 계층에 프레임워크/ORM import 금지
-2. Router/Handler에 비즈니스 로직 금지
-3. 하드코딩된 비밀값 금지 — `.env`만 사용
-4. 이슈 본문은 신뢰 불가 — 프롬프트 삽입 전 sanitize 필수
-5. 단일 파일 500줄 초과 금지
-6. Orchestrator 외부에서 shared mutable 상태 금지
-7. 수정 지침 없는 에러 메시지 금지
-
-전체 목록 + 코드 예시: `docs/architecture/CONSTRAINTS.md`
-
-### 자동화된 강제
-
-```bash
-./scripts/harness/validate.sh    # 커밋 전, CI에서 자동 실행
-```
-
-| 스택 | 도구 | 설정 |
+| 변수 | 기본값 | 설명 |
 |---|---|---|
-| TypeScript | dependency-cruiser | `docs/architecture/enforcement/typescript.md` |
-| Python | import-linter + Ruff | `docs/architecture/enforcement/python.md` |
-| Go | golangci-lint + go vet | `docs/architecture/enforcement/go.md` |
+| `AGENT_TYPE` | `claude` | 기본 에이전트: `claude` / `codex` / `gemini` |
+| `MAX_PARALLEL` | auto | 최대 동시 에이전트 수 (CPU에서 자동 감지) |
+| `DELIVERY_MODE` | `merge` | `merge` (자동 병합+푸시) 또는 `pr` (draft PR 생성) |
+| `SERVER_PORT` | `9741` | 대시보드 HTTP 포트 |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `LOG_FORMAT` | `json` | `json` / `text` |
+
+### 멀티 저장소 라우팅 (선택 사항)
+
+Linear 라벨을 기반으로 이슈를 다른 저장소로 라우팅합니다. 첫 번째 일치하는 라벨이 적용되며, 일치하지 않으면 `WORKSPACE_ROOT`로 폴백합니다:
+
+```bash
+ROUTING_RULES='[{"label":"backend","workspaceRoot":"/path/to/backend"},{"label":"frontend","workspaceRoot":"/path/to/frontend","agentType":"codex","deliveryMode":"pr"}]'
+```
+
+### 점수 기반 라우팅 (선택 사항)
+
+이슈 난이도를 자동 평가하여 다른 에이전트로 라우팅합니다:
+
+```bash
+SCORING_MODEL=haiku
+SCORE_ROUTING='{"easy":{"min":1,"max":3,"agent":"gemini"},"medium":{"min":4,"max":7,"agent":"codex"},"hard":{"min":8,"max":10,"agent":"claude"}}'
+```
+
+### 팀 대시보드 (선택 사항)
+
+Supabase 실시간 기반 멀티 노드 대시보드:
+
+```bash
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+TEAM_ID=my-team
+DISPLAY_NAME=my-node
+```
 
 ---
 
-## 스택별 착수 가이드 요약
+## WORKFLOW.md
 
-### TypeScript
-
-| 역할 | 선택 |
-|---|---|
-| 런타임 | Node.js 20+ |
-| HTTP | Express 또는 Hono |
-| 스키마 검증 | Zod |
-| 테스트 | Jest + ts-jest |
-| 아키텍처 린터 | dependency-cruiser |
-
-전체 가이드: `docs/stacks/typescript.md`
-
-### Python
-
-| 역할 | 선택 |
-|---|---|
-| 런타임 | Python 3.12+ |
-| HTTP | FastAPI |
-| 설정 검증 | Pydantic v2 |
-| 패키지 관리 | uv |
-| 아키텍처 린터 | import-linter |
-
-전체 가이드: `docs/stacks/python.md`
-
-### Go
-
-| 역할 | 선택 |
-|---|---|
-| 런타임 | Go 1.22+ |
-| HTTP | net/http 또는 Echo |
-| 설정 | godotenv |
-| 테스트 | testify |
-| 아키텍처 린터 | golangci-lint |
-
-전체 가이드: `docs/stacks/go.md`
-
----
-
-## WORKFLOW.md — Symphony 계약 파일
-
-`WORKFLOW.md`는 오케스트레이터 설정과 에이전트 프롬프트 템플릿을 하나의 파일에 정의합니다.
+에이전트에게 전송되는 프롬프트 템플릿입니다. YAML front matter로 설정을 정의하고(문서 용도), 본문에는 템플릿 변수가 포함된 프롬프트가 들어갑니다:
 
 ```yaml
 ---
-# YAML front matter: 오케스트레이터 설정
 tracker:
   type: linear
-  api_key: $LINEAR_API_KEY
-  team_id: $LINEAR_TEAM_ID
-  webhook_secret: $LINEAR_WEBHOOK_SECRET
-  workflow_states:
-    todo: $LINEAR_WORKFLOW_STATE_TODO
-    in_progress: $LINEAR_WORKFLOW_STATE_IN_PROGRESS
-    done: $LINEAR_WORKFLOW_STATE_DONE
-    cancelled: $LINEAR_WORKFLOW_STATE_CANCELLED
-
 workspace:
   root: $WORKSPACE_ROOT
-  cleanup_after_days: 7
-
 agent:
-  type: "codex"  # or "claude", "gemini"
+  type: $AGENT_TYPE
   timeout_seconds: 3600
-  max_retries: 3
 ---
 
 You are a software engineer working on issue {{issue.identifier}}: {{issue.title}}
@@ -386,152 +182,211 @@ You are a software engineer working on issue {{issue.identifier}}: {{issue.title
 
 ## Instructions
 1. Read AGENTS.md for project conventions
-...
+2. Implement the changes described in the issue
+3. Write tests
+4. Commit your changes with a clear message
 ```
 
-**템플릿 변수:** `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.description}}`, `{{workspace_path}}`, `{{attempt.id}}`, `{{retry_count}}`
+**템플릿 변수:** `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.description}}`, `{{workspace_path}}`, `{{attempt.id}}`, `{{retry_count}}`, `$VAR` (환경 변수 치환)
 
 ---
 
-## 하네스 엔지니어링 원칙
+## 아키텍처
 
-이 템플릿은 OpenAI Harness Engineering의 5가지 핵심 원칙을 구현합니다:
+### 모노레포 구조
 
-### 1. 컨텍스트 엔지니어링
-`AGENTS.md`가 모든 에이전트의 단일 진실 공급원(정적 컨텍스트)입니다. 로그와 측정 지표가 동적 컨텍스트를 제공합니다. 에이전트는 작업 시작 전에 반드시 `AGENTS.md`를 읽습니다.
+```
+agent-valley/
+├── apps/
+│   ├── cli/                  @agent-valley/cli — Commander CLI (bun av)
+│   └── dashboard/            agent-valley-dashboard — Next.js 16 + PixiJS
+├── packages/
+│   └── core/                 @agent-valley/core — 오케스트레이션 엔진
+│       └── src/
+│           ├── config/         Zod 설정 검증 + WORKFLOW.md 파서
+│           ├── domain/         순수 타입: Issue, Workspace, RunAttempt, DAG
+│           ├── orchestrator/   상태 머신, 에이전트 러너, 재시도 큐, DAG 스케줄러
+│           ├── sessions/       에이전트 플러그인: Claude, Codex, Gemini
+│           ├── tracker/        Linear GraphQL 클라이언트 + 웹훅 HMAC 검증
+│           ├── workspace/      Git worktree 생명주기 + 병합/PR
+│           └── observability/  구조화된 JSON/텍스트 로거
+├── docs/
+│   ├── architecture/         LAYERS.md, CONSTRAINTS.md, enforcement/
+│   ├── specs/                Symphony 7개 컴포넌트 인터페이스 스펙
+│   ├── stacks/               TypeScript, Python, Go 가이드
+│   └── harness/              SAFETY.md, LEGIBILITY.md, ENTROPY.md, FEEDBACK-LOOPS.md
+├── scripts/
+│   ├── dev.sh                개발 환경 부트스트랩
+│   ├── install.sh            하네스 설치 (신규 + 기존 프로젝트)
+│   └── harness/
+│       ├── validate.sh       아키텍처 검증 (시크릿, 레이어 위반)
+│       └── gc.sh             Worktree 가비지 컬렉터
+├── AGENTS.md                 에이전트 지침 (공유 진입점)
+├── CLAUDE.md                 Claude Code 프로젝트 지침
+├── WORKFLOW.md               에이전트 프롬프트 템플릿
+└── .env.example              환경 변수 참조
+```
 
-### 2. 아키텍처 제약
-의존성 방향 린터가 모든 커밋과 CI에서 실행됩니다. 나쁜 패턴은 코드 리뷰가 아니라 기계적으로 차단됩니다. `docs/architecture/CONSTRAINTS.md` 참조.
+### 클린 아키텍처 레이어
 
-### 3. 애플리케이션 가시성 (Application Legibility)
-각 이슈는 격리된 `git worktree`를 받습니다. 에이전트들이 서로의 작업을 방해할 수 없습니다. 선택적 Chrome DevTools Protocol(CDP) 지원으로 브라우저 기반 작업도 가능합니다. `docs/harness/LEGIBILITY.md` 참조.
+```
+Presentation   대시보드 라우트 핸들러 (비즈니스 로직 없음)
+     ↓
+Application    Orchestrator, AgentRunnerService (인터페이스를 통한 조정)
+     ↓
+Domain         Issue, Workspace, RunAttempt, DAG (순수 타입, 외부 의존성 없음)
+     ↓
+Infrastructure Linear 클라이언트, git 작업, 에이전트 세션 (어댑터)
+```
 
-### 4. 엔트로피 관리
-주 1회 GC 에이전트(`scripts/harness/gc.sh`, `.github/workflows/harness-gc.yml` 자동화)가 오래된 worktree와 브랜치를 정리합니다. "AI Slop"(중복 코드, 미사용 import)은 린터 규칙과 컨벤션으로 방지합니다. `docs/harness/ENTROPY.md` 참조.
+의존성 화살표는 **아래 방향으로만** 향합니다. `docs/architecture/LAYERS.md`를 참고하세요.
 
-### 5. 병합 철학
-단기 생명주기 PR. CI 통과 = 병합 가능. 사람의 리뷰는 아키텍처 게이트키핑에만 집중합니다. `docs/harness/FEEDBACK-LOOPS.md` 참조.
+### Symphony 7개 컴포넌트
 
----
+| # | 컴포넌트 | 역할 | 스펙 |
+|---|---|---|---|
+| 1 | **Workflow Loader** | `WORKFLOW.md` 파싱 — YAML front matter + 프롬프트 본문 | `docs/specs/workflow-loader.md` |
+| 2 | **Config Layer** | 타입 기반 설정 (Zod) + `$VAR` 환경 변수 해석 | `docs/specs/config-layer.md` |
+| 3 | **Tracker Client** | Linear GraphQL — 이슈 조회, 상태 전환, 코멘트, HMAC 검증 | `docs/specs/tracker-client.md` |
+| 4 | **Orchestrator** | 웹훅 이벤트 핸들러, 상태 머신, 재시도 큐, DAG 스케줄러 | `docs/specs/orchestrator.md` |
+| 5 | **Workspace Manager** | 이슈별 git worktree 생성, 병합/PR, 정리 | `docs/specs/workspace-manager.md` |
+| 6 | **Agent Runner** | AgentSession 추상화, 타임아웃 강제, 병렬 실행 | `docs/specs/agent-runner.md` |
+| 7 | **Observability** | 구조화된 JSON 로그, 시스템 메트릭, SSE 상태 표면 | `docs/specs/observability.md` |
 
-## AI 에이전트 스킬
+### Agent Session 플러그인
 
-### 내장 Symphony 스킬
-
-| 스킬 | 트리거 | 목적 |
+| 에이전트 | 프로토콜 | 모드 |
 |---|---|---|
-| `symphony-scaffold` | "scaffold symphony for [스택]" | 선택한 스택으로 전체 프로젝트 세팅 |
-| `symphony-component` | "implement [컴포넌트명]" | Symphony 컴포넌트 단일 구현 |
-| `symphony-conformance` | "audit symphony" / "check conformance" | SPEC 준수 감사 보고서 |
-| `harness-gc` | "run gc" / "clean worktrees" | 가이드된 worktree 가비지 컬렉션 |
+| **Claude** | NDJSON 스트리밍 (`claude --print --output-format stream-json`) | Stateless — 실행마다 새 프로세스 |
+| **Codex** | JSON-RPC 2.0 over stdio (`codex app-server --listen stdio://`) | Persistent 연결 |
+| **Gemini** | ACP persistent / one-shot JSON 폴백 | 기능 감지를 통한 듀얼 모드 |
 
-### Claude Code 서브에이전트
+`SessionFactory.registerSession()`을 통해 확장 가능 — `AgentSession` 인터페이스를 구현하여 커스텀 에이전트를 추가하세요.
 
-| 에이전트 | 설명 |
-|---|---|
-| `symphony-architect` | 아키텍처 결정, SPEC 해석, 계층 경계 질문 |
-| `symphony-implementer` | 사전 아키텍처 체크 후 기능 구현 |
-| `symphony-reviewer` | PR 템플릿을 기반으로 한 코드 리뷰 |
+---
 
-### 기타 oh-my-agent 스킬
+## 대시보드
 
-`backend-agent`, `frontend-agent`, `db-agent`, `debug-agent`, `qa-agent`, `pm-agent`, `commit`, `brainstorm` 등 — `_shared/` 프로토콜을 통해 모두 스택 무관으로 동작합니다.
+실시간 에이전트 상태를 보여주는 PixiJS 렌더링 오피스 장면:
+
+- **에이전트 캐릭터** — 이슈 식별자 말풍선이 있는 책상의 에이전트
+- **오피스 시각화** — 책상이 `MAX_PARALLEL`에 맞게 조정, 커피 머신, 서버 랙 등
+- **시스템 메트릭** — CPU, 메모리, 가동 시간
+- **SSE 실시간 이벤트** — agent.start, agent.done, agent.failed 즉시 업데이트
+- **팀 HUD** — 멀티 노드 뷰 (Supabase 설정 필요)
+
+### API 엔드포인트
+
+| 엔드포인트 | 메서드 | 설명 |
+|---|---|---|
+| `/api/webhook` | POST | Linear 웹훅 수신기 (HMAC-SHA256 검증) |
+| `/api/events` | GET | 실시간 대시보드 업데이트를 위한 SSE 스트림 |
+| `/api/status` | GET | Orchestrator 상태 JSON 스냅샷 |
+| `/api/health` | GET | 헬스 체크 (Orchestrator 미초기화 시 503) |
+
+---
+
+## 주요 기능
+
+### DAG 의존성 스케줄링
+
+`blocked_by` 관계가 있는 이슈는 모든 차단 이슈가 완료될 때까지 대기합니다. 차단 이슈가 완료되면 DAG 스케줄러가 연쇄적으로 차단 해제된 이슈를 디스패치합니다. 순환 참조는 감지되어 무시됩니다.
+
+### 재시도 큐
+
+실패한 에이전트 실행은 지수 백오프로 재시도됩니다 (`60s × 2^(attempt-1)`, 최대 3회). 워크스페이스 생성 실패와 상태 전환 실패도 재시도됩니다. 최대 재시도 횟수 초과 시 → 에러 코멘트와 함께 이슈가 취소됩니다.
+
+### 안전망
+
+- 커밋되지 않은 에이전트 작업을 감지하여 전달 전에 자동 커밋
+- PR 모드에서 안전망 draft PR 생성
+- SIGTERM/SIGINT 시 우아한 종료 — 실행 중인 모든 에이전트 중지
+- 핫 리로드 정리 — 새 Orchestrator 인스턴스 시작 전에 이전 인스턴스 중지
+
+### 시작 동기화
+
+부팅 시 Orchestrator가 Linear에서 모든 Todo + In Progress 이슈를 가져와 DAG 캐시를 재조정합니다. 기존 진행 중인 이슈는 자동으로 재개됩니다.
+
+---
+
+## 개발
+
+```bash
+bun test                        # 테스트 실행 (vitest, 283개 테스트)
+bun run lint                    # 린트 (biome)
+bun run lint:fix                # 린트 이슈 자동 수정
+./scripts/harness/validate.sh   # 아키텍처 검증
+./scripts/dev.sh                # 개발 환경 부트스트랩
+./scripts/harness/gc.sh         # 오래된 worktree 가비지 컬렉션
+```
+
+### 기존 프로젝트에 하네스 설치
+
+```bash
+cd your-existing-project
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
+```
+
+### CI/CD
+
+| 워크플로우 | 트리거 | 목적 |
+|---|---|---|
+| `ci.yml` | main에 Push/PR | `validate.sh` + 테스트 |
+| `harness-gc.yml` | 매주 (일요일 00:00 UTC) | 오래된 worktree 정리 |
 
 ---
 
 ## 보안
 
-### 프롬프트 인젝션 방어
-- `WORKFLOW.md`는 신뢰 (버전 관리됨, 엔지니어가 작성)
-- 이슈 본문(`issue.description`)은 항상 비신뢰 — 프롬프트 삽입 전 진입점에서 sanitize
-- 최대 8,000자 제한 + 금지 패턴 제거
+- **HMAC-SHA256** 웹훅 서명 검증으로 모든 수신 Linear 이벤트 확인
+- **프롬프트 인젝션 방어** — `WORKFLOW.md`는 신뢰됨, 이슈 본문은 항상 진입점에서 살균
+- **최소 권한** — 에이전트는 할당된 worktree 내에서만 작동
+- **시크릿 관리** — 모든 시크릿은 `.env`에만 저장 (gitignore 처리), pre-commit 시크릿 탐지
+- **Fetch 타임아웃** — 모든 Linear API 호출에 30초 타임아웃
+- **감사 로깅** — 모든 에이전트 작업을 구조화된 JSON으로 기록
 
-### 최소 권한
-- 각 에이전트는 할당된 worktree (`{WORKSPACE_ROOT}/{key}/`) 내에서만 동작
-- `main`/`master`에 직접 push 불가 — PR만 허용
-- force push 불가
-
-### 비밀값 관리
-- 모든 비밀값은 `.env`에만 저장 (gitignore 등록)
-- `.env.example`에는 키 이름과 설명만, 실제 값 없음
-- Pre-commit 훅이 실수로 커밋되는 비밀값 감지
-
-### 감사 로그
-모든 에이전트 액션을 구조화된 JSON 형식으로 기록. `docs/specs/observability.md`에 전체 이벤트 카탈로그.
-
-전체 보안 문서: `docs/harness/SAFETY.md`
+전체 문서: `docs/harness/SAFETY.md`
 
 ---
 
-## 하네스 성숙도 레벨
+## 아키텍처 제약 사항
 
-| 레벨 | 대상 | 요구사항 |
+| # | 규칙 | 근거 |
 |---|---|---|
-| **Level 1** (기본) | 신규 프로젝트 | 6개 표준 섹션 포함 `AGENTS.md`, 사전커밋훅 (린트 + 기본 검사), 커버리지 임계값 포함 단위 테스트 |
-| **Level 2** (팀) | 에이전트 팀 규모 | CI 아키텍처 제약 검증, AI 인식 PR 체크리스트, CI에서 의존성 계층 린터 자동화 |
-| **Level 3** (프로덕션) | 엔터프라이즈 | 에이전트 행동 추적 커스텀 미들웨어, 전체 OpenTelemetry 스택, 자동화된 이상 감지 알림 |
+| 1 | Domain 레이어에 프레임워크 import 금지 | Domain은 순수하고 테스트 가능하게 유지 |
+| 2 | 라우터에 비즈니스 로직 금지 | Presentation은 Application에 위임 |
+| 3 | 하드코딩된 시크릿 금지 | `.env`만 사용 |
+| 4 | 이슈 본문은 신뢰할 수 없음 | 경계에서 살균 |
+| 5 | 파일당 최대 500줄 | 가독성 |
+| 6 | Orchestrator 외부에서 공유 가변 상태 금지 | 단일 상태 권한 |
+| 7 | 에러 메시지에 수정 지침 포함 필수 | 에이전트가 에러에서 자가 교정 |
 
-이 템플릿은 **Level 2** 준비 상태로 제공됩니다.
-
----
-
-## CI/CD
-
-### `ci.yml` — 메인 CI
-
-`main`에 push 및 PR 시 트리거.
-
-1. **validate** — `./scripts/harness/validate.sh` 실행 (비밀값 감지, 위험 패턴, 아키텍처 계층 위반)
-2. **test** — 스택별 테스트 러너 (스캐폴딩됨; 스택 선택 후 활성화)
-
-### `harness-gc.yml` — 주 1회 GC
-
-매주 일요일 00:00 UTC 실행 (수동 트리거도 가능).
-
-`./scripts/harness/gc.sh`를 실행하여:
-- 30일 이상 경과한 worktree/브랜치 제거 (`GC_DAYS`로 설정 가능)
-- 소프트 삭제 우선 (`.gc-flagged` 마커), 다음 사이클에서 실제 삭제
-
-### Pre-commit 훅
-
-```bash
-# 설치 (pre-commit 필요)
-pip install pre-commit
-pre-commit install
-```
-
-훅: 후행 공백, YAML/JSON 문법, 비밀값 감지 (`detect-secrets`), Ruff (Python), ESLint (TS), golangci-lint (Go), `validate.sh`.
-
----
-
-## 측정 지표
-
-| 지표 | 설명 |
-|---|---|
-| **PR까지 시간** | 이슈 할당 → PR 생성 소요 시간 |
-| **CI 통과율** | 첫 번째 실행에서 CI를 통과한 PR 비율 |
-| **PR당 검토 시간** | 리뷰어가 PR 하나에 소비한 평균 시간 |
-| **문서 신선도** | `AGENTS.md` 마지막 업데이트 이후 경과일 (30일 초과 시 검토 필요) |
+예제가 포함된 전체 목록: `docs/architecture/CONSTRAINTS.md`
 
 ---
 
 ## AI 에이전트를 위한 안내
 
-AI 에이전트인 경우 **[AGENT_SETUP.md](./AGENT_SETUP.md)**를 참조하세요. 기계 소비에 최적화된 상세한 설정 지침, 컨벤션, 구현 가이드가 포함되어 있습니다.
+이 저장소를 읽고 있는 AI 에이전트라면, 자세한 설정 지침, 규칙, 구현 가이드는 **[AGENTS.md](./AGENTS.md)**를 참고하세요.
+
+Claude Code 하위 에이전트는 `.claude/agents/`에서 사용 가능합니다:
+- `symphony-architect.md` — 아키텍처 결정, SPEC 해석
+- `symphony-implementer.md` — 프리플라이트 체크를 포함한 기능 구현
+- `symphony-reviewer.md` — PR 템플릿 프레임워크를 활용한 코드 리뷰
 
 ---
 
-## 기여하기
+## 메트릭
 
-1. Fork 및 클론
-2. `.env.example`을 `.env`로 복사하고 값 입력
-3. `./scripts/dev.sh`로 환경 검증
-4. 브랜치 생성: `git checkout -b issue/YOUR-KEY`
-5. 변경 후 `./scripts/harness/validate.sh` 실행
-6. PR 템플릿을 사용하여 PR 오픈
+| 메트릭 | 설명 |
+|---|---|
+| **Time to PR** | 이슈 할당 → PR 생성 |
+| **CI pass rate** | 첫 실행에서 CI를 통과한 PR 비율 |
+| **Review time per PR** | PR당 평균 사람 리뷰어 소요 시간 |
+| **Doc freshness** | `AGENTS.md` 마지막 업데이트 이후 일수 (30일 초과 시 경고) |
 
 ---
 
 ## 라이선스
 
-AGPL-3.0
+[AGPL-3.0](LICENSE)
