@@ -96,8 +96,20 @@ export class WorkspaceManager {
       throw new Error(`git worktree add failed: ${stderr}\n  Fix: Ensure ${this.rootPath} is a git repository`)
     }
 
-    // Create .symphony metadata directory after worktree
+    // Create metadata directory after worktree
     await mkdir(`${path}/.agent-valley/attempts`, { recursive: true })
+
+    // Ensure .agent-valley is gitignored to prevent auto-commit conflicts across branches
+    const gitignorePath = `${path}/.gitignore`
+    try {
+      const existing = await readFile(gitignorePath, "utf-8").catch(() => "")
+      if (!existing.includes(".agent-valley")) {
+        const entry = existing.endsWith("\n") || existing === "" ? ".agent-valley/\n" : "\n.agent-valley/\n"
+        await writeFile(gitignorePath, existing + entry)
+      }
+    } catch {
+      await writeFile(gitignorePath, ".agent-valley/\n")
+    }
 
     // Store issue metadata for workspace lookup
     await writeFile(
@@ -313,7 +325,7 @@ export class WorkspaceManager {
   async autoCommit(workspace: Workspace): Promise<{ ok: boolean }> {
     const cwd = workspace.path
 
-    await runCommand("git", ["add", "-A"], { cwd })
+    await runCommand("git", ["add", "-A", "--", ".", ":!.agent-valley"], { cwd })
     const { exitCode } = await runCommand("git", ["commit", "-m", "chore: auto-commit unfinished agent work"], { cwd })
 
     if (exitCode !== 0) {
