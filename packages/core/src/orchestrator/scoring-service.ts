@@ -3,6 +3,7 @@
  * Application layer: calls LLM, returns ScoreAnalysis. No Linear API calls.
  */
 
+import { spawn } from "node:child_process"
 import { sanitizeIssueBody } from "../config/workflow-loader"
 import type { Issue, ScoreAnalysis } from "../domain/models"
 import { logger } from "../observability/logger"
@@ -59,22 +60,30 @@ export class LlmScoringService implements ScoringService {
     return parseScoringOutput(output)
   }
 
-  private async callLlm(prompt: string): Promise<string> {
+  private callLlm(prompt: string): Promise<string> {
     const modelFlag = this.model !== "claude" ? ["--model", this.model] : []
-    const proc = Bun.spawn(["claude", "--print", "--no-session-persistence", ...modelFlag, "-p", prompt], {
-      stdout: "pipe",
-      stderr: "pipe",
+    const args = ["--print", "--no-session-persistence", ...modelFlag, "-p", prompt]
+
+    return new Promise((resolve, reject) => {
+      const proc = spawn("claude", args, { stdio: ["ignore", "pipe", "pipe"] })
+
+      let stdout = ""
+      let stderr = ""
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString()
+      })
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString()
+      })
+
+      proc.once("close", (code) => {
+        if (code !== 0) {
+          reject(new Error(`Scoring LLM call failed (exit ${code}): ${stderr.slice(0, 200)}`))
+        } else {
+          resolve(stdout.trim())
+        }
+      })
     })
-
-    const output = await new Response(proc.stdout).text()
-    await proc.exited
-
-    if (proc.exitCode !== 0) {
-      const stderr = await new Response(proc.stderr).text()
-      throw new Error(`Scoring LLM call failed (exit ${proc.exitCode}): ${stderr.slice(0, 200)}`)
-    }
-
-    return output.trim()
   }
 }
 
