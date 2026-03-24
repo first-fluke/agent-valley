@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic"
 export async function GET() {
   const orchestrator = getOrchestrator()
 
-  let intervalId: ReturnType<typeof setInterval> | null = null
   let closed = false
+  let intervalId: ReturnType<typeof setInterval> | null = null
 
   const stream = new ReadableStream({
     start(controller) {
@@ -18,7 +18,6 @@ export async function GET() {
         try {
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
         } catch {
-          // Controller closed — clean up
           cleanup()
         }
       }
@@ -29,11 +28,29 @@ export async function GET() {
           clearInterval(intervalId)
           intervalId = null
         }
+        // Unsubscribe event handlers
+        if (orchestrator) {
+          orchestrator.off("agent.start", onAgentEvent)
+          orchestrator.off("agent.done", onAgentEvent)
+          orchestrator.off("agent.failed", onAgentEvent)
+        }
+      }
+
+      // Real-time event handler: push agent events immediately
+      const onAgentEvent = (payload: unknown) => {
+        if (orchestrator) {
+          send("state", orchestrator.getStatus())
+        }
       }
 
       // Send initial state snapshot
       if (orchestrator) {
         send("state", orchestrator.getStatus())
+
+        // Subscribe to real-time orchestrator events
+        orchestrator.on("agent.start", onAgentEvent)
+        orchestrator.on("agent.done", onAgentEvent)
+        orchestrator.on("agent.failed", onAgentEvent)
       } else {
         send("state", {
           isRunning: false,
@@ -47,7 +64,7 @@ export async function GET() {
 
       send("keepalive", null)
 
-      // Poll for state changes
+      // Periodic full-state sync as fallback (less frequent since events push real-time updates)
       intervalId = setInterval(() => {
         if (closed) {
           cleanup()
@@ -56,13 +73,18 @@ export async function GET() {
         if (orchestrator) {
           send("state", orchestrator.getStatus())
         }
-      }, 2000)
+      }, 5000)
     },
     cancel() {
       closed = true
       if (intervalId) {
         clearInterval(intervalId)
         intervalId = null
+      }
+      if (orchestrator) {
+        orchestrator.off("agent.start", () => {})
+        orchestrator.off("agent.done", () => {})
+        orchestrator.off("agent.failed", () => {})
       }
     },
   })

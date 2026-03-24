@@ -66,8 +66,8 @@ export function createCompletionCallbacks(
       if (hasCodeChanges) {
         try {
           diffStat = await workspaceManager.getDiffStat(workspace)
-        } catch {
-          /* best-effort */
+        } catch (err) {
+          logger.debug("completion", "getDiffStat failed", { issueId: issue.id, error: String(err) })
         }
       }
 
@@ -95,8 +95,11 @@ export function createCompletionCallbacks(
               issue.id,
               `Symphony: Merge failed — manual resolution required\n\n${mergeResult.error}`,
             )
-          } catch {
-            /* best-effort */
+          } catch (err) {
+            logger.debug("completion", "Failed to post merge failure comment", {
+              issueId: issue.id,
+              error: String(err),
+            })
           }
         }
 
@@ -150,8 +153,11 @@ export function createCompletionCallbacks(
               issue.id,
               "Symphony: Agent exited without code changes — retrying with additional context.",
             )
-          } catch {
-            /* best-effort */
+          } catch (err) {
+            logger.debug("completion", "Failed to post premature-exit comment", {
+              issueId: issue.id,
+              error: String(err),
+            })
           }
           await deps.fillVacantSlots()
           return
@@ -166,8 +172,11 @@ export function createCompletionCallbacks(
             "Symphony: Agent exited without code changes after retry.\n" +
               "  → Consider adding more detail to the issue description.",
           )
-        } catch {
-          /* best-effort */
+        } catch (err) {
+          logger.debug("completion", "Failed to post retry-exhausted comment", {
+            issueId: issue.id,
+            error: String(err),
+          })
         }
       }
 
@@ -243,8 +252,11 @@ export function createCompletionCallbacks(
               issue.id,
               `Symphony: Agent failed (${config.agentMaxRetries} retries exceeded)\n\nError: ${err.message}`,
             )
-          } catch {
-            /* best-effort */
+          } catch (commentErr) {
+            logger.debug("completion", "Failed to post max-retries comment", {
+              issueId: issue.id,
+              error: String(commentErr),
+            })
           }
           try {
             await updateIssueState(config.linearApiKey, issue.id, config.workflowStates.cancelled)

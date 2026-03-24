@@ -29,6 +29,7 @@ export class CodexSession extends BaseSession {
   private rpcId = 0
   private threadId: string | null = null
   private filesChanged: string[] = []
+  private outputChunks: string[] = []
   private pendingResolvers = new Map<
     number,
     {
@@ -63,6 +64,7 @@ export class CodexSession extends BaseSession {
     if (!this.assertStarted()) return
 
     this.filesChanged = []
+    this.outputChunks = []
 
     const threadResult = (await this.rpc("thread/start", {
       cwd: this.config?.workspacePath,
@@ -162,6 +164,7 @@ export class CodexSession extends BaseSession {
     switch (msg.method) {
       case "item/agentMessage/delta": {
         const chunk = (msg.params?.delta as string | undefined) ?? ""
+        this.outputChunks.push(chunk)
         this.emit({ type: "output", chunk })
         break
       }
@@ -184,7 +187,7 @@ export class CodexSession extends BaseSession {
       }
 
       case "turn/completed": {
-        const result = this.buildRunResult("", this.filesChanged)
+        const result = this.buildRunResult(this.outputChunks.join(""), this.filesChanged)
         result.exitCode = 0
         this.emit({ type: "complete", result })
         break

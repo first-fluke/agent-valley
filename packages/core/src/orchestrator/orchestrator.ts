@@ -249,8 +249,8 @@ export class Orchestrator extends OrchestratorEventEmitter {
           this.config.linearApiKey,
           event.issueId,
           `Symphony: Received — starting agent for ${event.issue.identifier}`,
-        ).catch(() => {
-          /* best-effort, non-blocking */
+        ).catch((err) => {
+          logger.debug("orchestrator", "Failed to post webhook ack comment", { error: String(err) })
         })
       }
       await this.handleIssueTodo(event.issue)
@@ -300,7 +300,9 @@ export class Orchestrator extends OrchestratorEventEmitter {
         this.config.linearApiKey,
         issue.id,
         `Symphony: Waiting — blocked by ${blockers.length} issue(s). Will auto-start when dependencies complete.`,
-      ).catch(() => {})
+      ).catch((err) => {
+        logger.debug("orchestrator", "Failed to post blocker comment", { error: String(err) })
+      })
       logger.info("orchestrator", `${issue.identifier} blocked by ${blockers.length} issue(s), waiting`)
       return
     }
@@ -384,6 +386,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     } catch (err) {
       this.processingIssues.delete(issue.id)
       logger.error("orchestrator", "Failed to create workspace", { issueId: issue.id, error: String(err) })
+      this.retryQueue.add(issue.id, 0, `Workspace creation failed: ${err}`)
       return
     }
 
@@ -456,7 +459,9 @@ export class Orchestrator extends OrchestratorEventEmitter {
         this.config.linearApiKey,
         b.issueId,
         `Symphony: Blocker ${b.identifier} was cancelled. Manual review needed.`,
-      ).catch(() => {})
+      ).catch((err) => {
+        logger.debug("orchestrator", "Failed to post blocker-cancelled comment", { error: String(err) })
+      })
     }
   }
 

@@ -11,35 +11,49 @@ describe("Orchestrator Singleton", () => {
     expect(getOrchestrator()).toBeNull()
   })
 
-  test("returns the instance after set", () => {
+  test("returns the instance after set", async () => {
     const mock = {
       getStatus: () => ({ isRunning: true }),
       handleWebhook: async () => ({ status: 200, body: '{"ok":true}' }),
+      stop: async () => {},
+      on: () => {},
+      off: () => {},
     }
-    setOrchestrator(mock)
+    await setOrchestrator(mock)
     expect(getOrchestrator()).toBe(mock)
   })
 
-  test("overwrites previous instance", () => {
+  test("overwrites previous instance and stops the old one", async () => {
+    let stopCalled = false
     const first = {
       getStatus: () => ({ first: true }),
       handleWebhook: async () => ({ status: 200, body: "" }),
+      stop: async () => { stopCalled = true },
+      on: () => {},
+      off: () => {},
     }
     const second = {
       getStatus: () => ({ second: true }),
       handleWebhook: async () => ({ status: 200, body: "" }),
+      stop: async () => {},
+      on: () => {},
+      off: () => {},
     }
-    setOrchestrator(first)
-    setOrchestrator(second)
+    await setOrchestrator(first)
+    await setOrchestrator(second)
     expect(getOrchestrator()).toBe(second)
+    expect(stopCalled).toBe(true)
   })
 
-  test("shares state via globalThis across modules", () => {
+  test("shares state via globalThis across modules", async () => {
     const mock = {
       getStatus: () => ({ shared: true }),
       handleWebhook: async () => ({ status: 200, body: "" }),
+      stop: async () => {},
+      on: () => {},
+      off: () => {},
     }
-    setOrchestrator(mock)
+    await setOrchestrator(mock)
     // Verify via globalThis directly
     expect(globalThis.__agent_valley_orchestrator__).toBe(mock)
   })

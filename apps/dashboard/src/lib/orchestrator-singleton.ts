@@ -9,6 +9,9 @@
 export interface OrchestratorInstance {
   getStatus: () => Record<string, unknown>
   handleWebhook: (payload: string, signature: string) => Promise<{ status: number; body: string }>
+  stop: () => Promise<void>
+  on: (event: string, handler: (...args: unknown[]) => void) => void
+  off: (event: string, handler: (...args: unknown[]) => void) => void
 }
 
 declare global {
@@ -16,7 +19,12 @@ declare global {
   var __agent_valley_orchestrator__: OrchestratorInstance | undefined
 }
 
-export function setOrchestrator(instance: OrchestratorInstance) {
+export async function setOrchestrator(instance: OrchestratorInstance) {
+  // Stop previous instance on hot reload to prevent orphaned agent processes and timers
+  const prev = globalThis.__agent_valley_orchestrator__
+  if (prev) {
+    await prev.stop()
+  }
   globalThis.__agent_valley_orchestrator__ = instance
 }
 

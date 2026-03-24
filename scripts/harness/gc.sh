@@ -15,7 +15,7 @@
 #
 # Safety:
 #   - Never touches main, master, or trunk branches.
-#   - Only processes branches with issue/ or symphony/ prefix.
+#   - Only processes branches with agent-created prefixes (feature/, fix/, refactor/, hotfix/, release/).
 #   - Prints a summary report (also written to /tmp/gc-report-<timestamp>.txt).
 #
 # chmod +x scripts/harness/gc.sh
@@ -49,11 +49,12 @@ is_protected() {
   esac
 }
 
-# ── Check if branch targets issue/ or symphony/ prefix ───────────────────────
+# ── Check if branch matches agent-created prefixes ───────────────────────────
+# WorkspaceManager.deriveBranchName creates: feature/, fix/, refactor/, hotfix/, release/
 is_gc_candidate_branch() {
   local branch="$1"
   case "${branch}" in
-    issue/*|symphony/*) return 0 ;;
+    feature/*|fix/*|refactor/*|hotfix/*|release/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -134,7 +135,7 @@ process_one_worktree() {
     return
   fi
 
-  # Only process issue/ and symphony/ branches
+  # Only process agent-created branches
   if ! is_gc_candidate_branch "${branch}"; then
     SKIPPED_COUNT=$(( SKIPPED_COUNT + 1 ))
     return

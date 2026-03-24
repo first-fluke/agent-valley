@@ -176,11 +176,16 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 section "Stack lint / test"
 
-SRC_DIR="${REPO_ROOT}/src"
-if [ ! -d "${SRC_DIR}" ]; then
-  info "No src/ directory found — skipping lint/test."
-  info "Add your stack source code to src/ to enable this step."
-  add_warn "src/ not found — lint/test skipped"
+# Detect source directories: monorepo (packages/*/src, apps/*/src) or flat (src/)
+HAS_SRC=false
+if [ -d "${REPO_ROOT}/src" ] || [ -d "${REPO_ROOT}/packages" ] || [ -d "${REPO_ROOT}/apps" ]; then
+  HAS_SRC=true
+fi
+
+if [ "${HAS_SRC}" = "false" ]; then
+  info "No source directory found — skipping lint/test."
+  info "Expected: src/, packages/*, or apps/*"
+  add_warn "No source directory — lint/test skipped"
 else
   # TypeScript
   if [ -f "${REPO_ROOT}/package.json" ]; then

@@ -100,7 +100,7 @@ export function isTeamMode(config: Config): boolean {
   return !!(config.supabaseUrl && config.supabaseAnonKey && config.teamId)
 }
 
-function parseScoreRouting(raw: string | undefined): z.infer<typeof scoreRoutingSchema> | undefined {
+export function parseScoreRouting(raw: string | undefined): z.infer<typeof scoreRoutingSchema> | undefined {
   if (!raw || raw.trim() === "") return undefined
   try {
     const parsed = JSON.parse(raw)
@@ -127,7 +127,7 @@ function parseScoreRouting(raw: string | undefined): z.infer<typeof scoreRouting
   }
 }
 
-function parseRoutingRules(raw: string | undefined): RoutingRule[] {
+export function parseRoutingRules(raw: string | undefined): RoutingRule[] {
   if (!raw || raw.trim() === "") return []
   try {
     return JSON.parse(raw) as RoutingRule[]

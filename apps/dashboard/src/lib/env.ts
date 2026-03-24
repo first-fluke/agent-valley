@@ -1,5 +1,6 @@
 import { createEnv } from "@t3-oss/env-nextjs"
 import { z } from "zod"
+import { parseRoutingRules, parseScoreRouting } from "@agent-valley/core/config/env"
 
 export const env = createEnv({
   server: {
@@ -67,12 +68,12 @@ export function toOrchestratorConfig() {
     logLevel: env.LOG_LEVEL,
     logFormat: env.LOG_FORMAT,
     deliveryMode: env.DELIVERY_MODE,
-    routingRules: [],
-    scoringModel: undefined,
-    scoreRouting: undefined,
-    supabaseUrl: undefined,
-    supabaseAnonKey: undefined,
-    teamId: undefined,
-    displayName: undefined,
+    routingRules: parseRoutingRules(process.env.ROUTING_RULES),
+    scoringModel: process.env.SCORING_MODEL || undefined,
+    scoreRouting: parseScoreRouting(process.env.SCORE_ROUTING),
+    supabaseUrl: process.env.SUPABASE_URL || undefined,
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY || undefined,
+    teamId: process.env.TEAM_ID || undefined,
+    displayName: process.env.DISPLAY_NAME || undefined,
   }
 }

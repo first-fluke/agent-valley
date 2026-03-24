@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 let mockOrchestrator: {
   getStatus: () => Record<string, unknown>
+  on: (event: string, handler: (...args: unknown[]) => void) => void
+  off: (event: string, handler: (...args: unknown[]) => void) => void
 } | null = null
 
 let getStatusCallCount = 0
@@ -34,6 +36,8 @@ describe("SSE /api/events — interval cleanup", () => {
         getStatusCallCount++
         return { isRunning: true, activeCount: 0 }
       },
+      on: () => {},
+      off: () => {},
     }
     vi.useFakeTimers()
   })
@@ -95,8 +99,8 @@ describe("SSE /api/events — interval cleanup", () => {
     // Cancel only the first connection
     await reader1.cancel()
 
-    // Advance one poll interval
-    vi.advanceTimersByTime(2_000)
+    // Advance one poll interval (5s fallback sync)
+    vi.advanceTimersByTime(5_000)
 
     // Only one connection should still be polling (res2)
     // Exactly 1 new call from res2's interval

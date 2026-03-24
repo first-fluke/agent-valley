@@ -10,8 +10,9 @@ import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
 import { setOrchestrator } from "@/lib/orchestrator-singleton"
 
 export async function bootstrap() {
-  // CWD is apps/dashboard/ — move to project root so Orchestrator finds WORKFLOW.md
-  process.chdir(path.resolve(process.cwd(), "../.."))
+  // Resolve project root from known location (apps/dashboard/) rather than relying on CWD
+  const projectRoot = path.resolve(__dirname, "../../../..")
+  process.chdir(projectRoot)
 
   // Prevent orchestrator errors from crashing the Next.js process
   process.on("uncaughtException", (err) => {
@@ -28,10 +29,22 @@ export async function bootstrap() {
   await orchestrator.start()
 
   const handlers = orchestrator.getHandlers()
-  setOrchestrator({
+  await setOrchestrator({
     getStatus: handlers.getStatus,
     handleWebhook: handlers.onWebhook,
+    stop: () => orchestrator.stop(),
+    on: (event, handler) => orchestrator.on(event, handler),
+    off: (event, handler) => orchestrator.off(event, handler),
   })
+
+  // Graceful shutdown: stop orchestrator and kill agent processes on exit
+  const shutdown = async () => {
+    logger.info("process", "Received shutdown signal, stopping orchestrator...")
+    await orchestrator.stop()
+    process.exit(0)
+  }
+  process.on("SIGTERM", shutdown)
+  process.on("SIGINT", shutdown)
 
   logger.info("instrumentation", "Symphony Orchestrator initialized")
 }

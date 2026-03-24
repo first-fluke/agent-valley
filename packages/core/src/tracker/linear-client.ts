@@ -20,6 +20,7 @@ async function linearGraphQL<T>(apiKey: string, query: string, variables: Record
       Authorization: apiKey,
     },
     body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(30_000),
   })
 
   if (response.status === 401) {

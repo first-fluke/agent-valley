@@ -9,6 +9,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 let mockOrchestrator: {
   getStatus: () => Record<string, unknown>
   handleWebhook: (payload: string, signature: string) => Promise<{ status: number; body: string }>
+  stop: () => Promise<void>
+  on: (event: string, handler: (...args: unknown[]) => void) => void
+  off: (event: string, handler: (...args: unknown[]) => void) => void
 } | null = null
 
 vi.mock("@/lib/orchestrator-singleton", () => ({
@@ -32,11 +35,14 @@ const { POST: webhookPOST } = await import("@/app/api/webhook/route")
 describe("API Route Handlers", () => {
   beforeEach(() => {
     mockOrchestrator = {
-      getStatus: () => ({ running: true, activeCount: 0 }),
+      getStatus: () => ({ running: true, activeCount: 0, isRunning: true, activeAgents: 0 }),
       handleWebhook: async () => ({
         status: 200,
         body: JSON.stringify({ ok: true }),
       }),
+      stop: async () => {},
+      on: () => {},
+      off: () => {},
     }
   })
 
@@ -46,11 +52,21 @@ describe("API Route Handlers", () => {
 
   // ── /api/health ──────────────────────────────────────────────────
 
-  test("GET /health returns 200 with status ok", async () => {
+  test("GET /health returns 200 with status ok when orchestrator is initialized", async () => {
     const res = healthGET()
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body).toEqual({ status: "ok" })
+    expect(body.status).toBe("ok")
+    expect(body).toHaveProperty("isRunning")
+    expect(body).toHaveProperty("uptime")
+  })
+
+  test("GET /health returns 503 when orchestrator not initialized", async () => {
+    mockOrchestrator = null
+    const res = healthGET()
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.status).toBe("degraded")
   })
 
   // ── /api/status ──────────────────────────────────────────────────

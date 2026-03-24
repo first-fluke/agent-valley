@@ -66,15 +66,12 @@ const BRANCH_PREFIX_MAP: Record<string, string> = {
 
 export function deriveBranchName(identifier: string, title: string): string {
   const match = title.match(/^(\w+)[\s(:]/)
-  const prefix = match ? (BRANCH_PREFIX_MAP[match[1]!] ?? "feature") : "feature"
+  const prefix = match ? (BRANCH_PREFIX_MAP[match[1] ?? ""] ?? "feature") : "feature"
   return `${prefix}/${identifier}`
 }
 
 export class WorkspaceManager {
-  constructor(
-    private rootPath: string,
-    _retentionDays: number = 7,
-  ) {}
+  constructor(private rootPath: string) {}
 
   deriveKey(identifier: string): string {
     return identifier.replace(/[^A-Za-z0-9._-]/g, "_")
