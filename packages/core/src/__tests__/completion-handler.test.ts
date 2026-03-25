@@ -97,7 +97,13 @@ function makeMockWorkspaceManager(
     hasCodeChanges?: boolean
     diffStat?: string | null
     autoCommitOk?: boolean
+    autoCommitError?: string
+    autoCommitRetryable?: boolean
+    autoCommitRetryPrompt?: string
     mergeOk?: boolean
+    mergeError?: string
+    mergeRetryable?: boolean
+    mergeRetryPrompt?: string
     pushOk?: boolean
   } = {},
 ) {
@@ -106,9 +112,19 @@ function makeMockWorkspaceManager(
       hasUncommittedChanges: opts.hasUncommittedChanges ?? false,
       hasCodeChanges: opts.hasCodeChanges ?? false,
     }),
-    autoCommit: async () => ({ ok: opts.autoCommitOk ?? true }),
+    autoCommit: async () => ({
+      ok: opts.autoCommitOk ?? true,
+      error: opts.autoCommitError,
+      retryable: opts.autoCommitRetryable,
+      retryPrompt: opts.autoCommitRetryPrompt,
+    }),
     getDiffStat: async () => opts.diffStat ?? null,
-    mergeAndPush: async () => ({ ok: opts.mergeOk ?? true }),
+    mergeAndPush: async () => ({
+      ok: opts.mergeOk ?? true,
+      error: opts.mergeError,
+      retryable: opts.mergeRetryable,
+      retryPrompt: opts.mergeRetryPrompt,
+    }),
     pushBranch: async () => ({ ok: opts.pushOk ?? true }),
     cleanup: async () => {},
     saveAttempt: async () => {},
@@ -197,7 +213,7 @@ describe("createCompletionCallbacks", () => {
       })
       mockWm.autoCommit = async () => {
         autoCommitCalled = true
-        return { ok: true }
+        return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
       }
 
       const deps = makeDeps(mockWm)
@@ -211,6 +227,67 @@ describe("createCompletionCallbacks", () => {
       })
 
       expect(autoCommitCalled).toBe(false)
+    })
+
+    test("stops completion when auto-commit is blocked by workspace validation", async () => {
+      let mergeCalled = false
+      const mockWm = makeMockWorkspaceManager({
+        hasUncommittedChanges: true,
+        hasCodeChanges: true,
+        autoCommitOk: false,
+        autoCommitError: "Conflict markers detected in changed files: package.json",
+      })
+      mockWm.mergeAndPush = async () => {
+        mergeCalled = true
+        return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
+      }
+
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(mergeCalled).toBe(false)
+      expect(stateCleanups.at(-1)?.status).toBe("failed")
+      expect(filledSlots).toBe(1)
+      expect(events.length).toBe(0)
+    })
+
+    test("queues retry when auto-commit is blocked by regeneratable lockfiles", async () => {
+      let mergeCalled = false
+      const mockWm = makeMockWorkspaceManager({
+        hasUncommittedChanges: true,
+        hasCodeChanges: true,
+        autoCommitOk: false,
+        autoCommitError: "Conflict markers detected in regeneratable lockfiles: package-lock.json",
+        autoCommitRetryable: true,
+        autoCommitRetryPrompt: "Run npm install to regenerate package-lock.json",
+      })
+      mockWm.mergeAndPush = async () => {
+        mergeCalled = true
+        return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
+      }
+
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(mergeCalled).toBe(false)
+      expect(stateCleanups.at(-1)?.status).toBe("failed")
+      expect(retryAdds.at(-1)?.error).toContain("Run npm install")
+      expect(filledSlots).toBe(1)
+      expect(events.length).toBe(0)
     })
   })
 
@@ -297,7 +374,7 @@ describe("createCompletionCallbacks", () => {
       const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
       mockWm.mergeAndPush = async () => {
         merged = true
-        return { ok: true }
+        return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
       }
       mockWm.cleanup = async () => {
         cleaned = true
@@ -316,6 +393,37 @@ describe("createCompletionCallbacks", () => {
 
       expect(merged).toBe(true)
       expect(cleaned).toBe(true)
+    })
+
+    test("merge mode queues retry for regeneratable lockfile conflicts", async () => {
+      let cleaned = false
+      const mockWm = makeMockWorkspaceManager({
+        hasCodeChanges: true,
+        diffStat: "1 file",
+        mergeOk: false,
+        mergeError: "Rebase conflicted in regeneratable lockfiles: package-lock.json",
+        mergeRetryable: true,
+        mergeRetryPrompt: "Run npm install to regenerate package-lock.json",
+      })
+      mockWm.cleanup = async () => {
+        cleaned = true
+      }
+
+      const deps = makeDeps(mockWm)
+      const route = makeRoute({ deliveryMode: "merge" })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), route)
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(cleaned).toBe(false)
+      expect(stateCleanups.at(-1)?.status).toBe("failed")
+      expect(retryAdds.at(-1)?.error).toContain("Run npm install")
+      expect(events.length).toBe(0)
     })
 
     test("pr mode pushes branch when code changes exist", async () => {

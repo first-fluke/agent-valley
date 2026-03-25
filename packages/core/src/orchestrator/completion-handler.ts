@@ -26,6 +26,12 @@ export interface CompletionDeps {
   triggerUnblocked: (issueIds: string[]) => Promise<void>
 }
 
+interface WorkspaceFailure {
+  error: string
+  retryable?: boolean
+  retryPrompt?: string
+}
+
 export function createCompletionCallbacks(
   deps: CompletionDeps,
   issue: Issue,
@@ -35,6 +41,68 @@ export function createCompletionCallbacks(
 ): RunCallbacks {
   const { config, workspaceManager } = deps
 
+  const handleWorkspaceFailure = async (
+    failure: WorkspaceFailure,
+    options: {
+      retryComment: string
+      manualComment: string
+    },
+  ): Promise<boolean> => {
+    const nextRetryCount = (attempt.retryCount ?? 0) + 1
+
+    if (failure.retryable) {
+      const retryAdded = deps.addRetry(issue.id, nextRetryCount, failure.retryPrompt ?? failure.error)
+      deps.cleanupState(issue.id, "failed")
+
+      try {
+        await addIssueComment(
+          config.linearApiKey,
+          issue.id,
+          retryAdded ? `${options.retryComment}\n\n${failure.error}` : `${options.manualComment}\n\n${failure.error}`,
+        )
+      } catch (err) {
+        logger.debug("completion", "Failed to post retryable workspace failure comment", {
+          issueId: issue.id,
+          error: String(err),
+        })
+      }
+
+      if (!retryAdded) {
+        try {
+          await updateIssueState(config.linearApiKey, issue.id, config.workflowStates.cancelled)
+        } catch (err) {
+          logger.error("completion", "Failed to transition retry-exhausted issue state", {
+            issueId: issue.id,
+            error: String(err),
+          })
+        }
+      }
+
+      await deps.fillVacantSlots()
+      return true
+    }
+
+    deps.cleanupState(issue.id, "failed")
+    try {
+      await addIssueComment(config.linearApiKey, issue.id, `${options.manualComment}\n\n${failure.error}`)
+    } catch (err) {
+      logger.debug("completion", "Failed to post workspace failure comment", {
+        issueId: issue.id,
+        error: String(err),
+      })
+    }
+    try {
+      await updateIssueState(config.linearApiKey, issue.id, config.workflowStates.cancelled)
+    } catch (err) {
+      logger.error("completion", "Failed to transition blocked issue state", {
+        issueId: issue.id,
+        error: String(err),
+      })
+    }
+    await deps.fillVacantSlots()
+    return true
+  }
+
   return {
     onComplete: async (completedAttempt) => {
       deps.cleanupState(issue.id, "done")
@@ -43,6 +111,7 @@ export function createCompletionCallbacks(
       // ── Safety net: detect and rescue uncommitted agent work ──
       let autoCommitted = false
       let hasCodeChanges = false
+      let autoCommitBlockedFailure: WorkspaceFailure | null = null
 
       try {
         const unfinished = await workspaceManager.detectUnfinishedWork(workspace)
@@ -51,14 +120,35 @@ export function createCompletionCallbacks(
         if (unfinished.hasUncommittedChanges) {
           const commitResult = await workspaceManager.autoCommit(workspace)
           autoCommitted = commitResult.ok
-          if (autoCommitted) hasCodeChanges = true
-          logger.info("completion", `Auto-committed unfinished work for ${issue.identifier}`)
+          if (autoCommitted) {
+            hasCodeChanges = true
+            logger.info("completion", `Auto-committed unfinished work for ${issue.identifier}`)
+          } else {
+            autoCommitBlockedFailure = {
+              error: commitResult.error ?? "Auto-commit was blocked by workspace validation.",
+              retryable: commitResult.retryable,
+              retryPrompt: commitResult.retryPrompt,
+            }
+            logger.error("completion", `Auto-commit blocked for ${issue.identifier}`, {
+              issueId: issue.id,
+              error: autoCommitBlockedFailure.error,
+            })
+          }
         }
       } catch (err) {
         logger.warn("completion", "Safety-net check failed", {
           issueId: issue.id,
           error: String(err),
         })
+      }
+
+      if (autoCommitBlockedFailure) {
+        await handleWorkspaceFailure(autoCommitBlockedFailure, {
+          retryComment:
+            "Symphony: Auto-commit blocked by regeneratable lockfile conflict — retrying with repair instructions.",
+          manualComment: "Symphony: Auto-commit blocked — manual resolution required",
+        })
+        return
       }
 
       // Get diff stat after auto-commit
@@ -88,19 +178,21 @@ export function createCompletionCallbacks(
         if (!mergeResult.ok) {
           logger.error("completion", `Merge failed for ${issue.identifier}`, {
             error: mergeResult.error,
+            retryable: mergeResult.retryable ?? false,
           })
-          try {
-            await addIssueComment(
-              config.linearApiKey,
-              issue.id,
-              `Symphony: Merge failed — manual resolution required\n\n${mergeResult.error}`,
-            )
-          } catch (err) {
-            logger.debug("completion", "Failed to post merge failure comment", {
-              issueId: issue.id,
-              error: String(err),
-            })
-          }
+          await handleWorkspaceFailure(
+            {
+              error: mergeResult.error ?? "Merge failed during delivery.",
+              retryable: mergeResult.retryable,
+              retryPrompt: mergeResult.retryPrompt,
+            },
+            {
+              retryComment:
+                "Symphony: Merge hit a regeneratable lockfile conflict — retrying with repair instructions.",
+              manualComment: "Symphony: Merge failed — manual resolution required",
+            },
+          )
+          return
         }
 
         try {
@@ -139,11 +231,7 @@ export function createCompletionCallbacks(
 
       if (!hasCodeChanges && !hasOutput) {
         // Anti-premature-exit: retry once before giving up
-        const prematureRetryAdded = deps.addRetry(
-          issue.id,
-          (completedAttempt.exitCode ?? 0) === 0 ? 1 : 2,
-          "premature-exit",
-        )
+        const prematureRetryAdded = deps.addRetry(issue.id, (completedAttempt.retryCount ?? 0) + 1, "premature-exit")
         if (prematureRetryAdded) {
           logger.warn("completion", `Agent exited without changes for ${issue.identifier}, scheduling retry`)
           deps.cleanupState(issue.id, "failed")
@@ -243,7 +331,7 @@ export function createCompletionCallbacks(
       })
 
       if (err.recoverable) {
-        const added = deps.addRetry(issue.id, 1, err.message)
+        const added = deps.addRetry(issue.id, (attempt.retryCount ?? 0) + 1, err.message)
         if (!added) {
           // Max retries exceeded — cancel issue with error comment
           try {

@@ -87,9 +87,11 @@ export function renderPrompt(
   workspacePath: string,
   attempt: RunAttempt,
   retryCount: number,
+  retryReason = "",
 ): string {
   const sanitizedDescription = sanitizeIssueBody(issue.description)
   const sanitizedTitle = sanitizeIssueBody(issue.title)
+  const sanitizedRetryReason = sanitizeIssueBody(retryReason)
 
   return template
     .replace(/\{\{issue\.identifier\}\}/g, issue.identifier.slice(0, 50))
@@ -98,6 +100,7 @@ export function renderPrompt(
     .replace(/\{\{workspace_path\}\}/g, workspacePath)
     .replace(/\{\{attempt\.id\}\}/g, attempt.id)
     .replace(/\{\{retry_count\}\}/g, String(retryCount))
+    .replace(/\{\{retry_reason\}\}/g, sanitizedRetryReason)
 }
 
 function parseSimpleYaml(yaml: string): Record<string, unknown> {

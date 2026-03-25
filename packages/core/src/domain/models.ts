@@ -78,6 +78,7 @@ export interface RunAttempt {
   id: string
   issueId: string
   workspacePath: string
+  retryCount?: number
   startedAt: string
   finishedAt: string | null
   exitCode: number | null

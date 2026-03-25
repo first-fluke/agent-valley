@@ -9,6 +9,32 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 
+interface WorkspaceValidationResult {
+  ok: boolean
+  error?: string
+  retryable?: boolean
+  retryPrompt?: string
+}
+
+const CONFLICT_MARKER_PATTERN = /^(<<<<<<<|=======|>>>>>>>)( .*)?$/m
+
+const REGENERATABLE_LOCKFILE_PATTERNS = [
+  /(^|\/)package-lock\.json$/,
+  /(^|\/)bun\.lockb?$/,
+  /(^|\/)pnpm-lock\.yaml$/,
+  /(^|\/)yarn\.lock$/,
+  /(^|\/)uv\.lock$/,
+  /(^|\/)go\.sum$/,
+]
+
+const HIGH_RISK_CONFLICT_PATTERNS = [
+  /(^|\/)package\.json$/,
+  /(^|\/)pyproject\.toml$/,
+  /(^|\/)go\.mod$/,
+  /(^|\/)(middleware|auth|auth-client|auth-server|env|config)\.[^/]+$/,
+  /(^|\/)auth\//,
+]
+
 /** Run a command and return its exit code, stdout, and stderr. */
 function runCommand(
   cmd: string,
@@ -173,7 +199,190 @@ export class WorkspaceManager {
     return idx > 0 ? workspace.path.slice(0, idx) : this.rootPath
   }
 
-  async mergeAndPush(workspace: Workspace): Promise<{ ok: boolean; error?: string }> {
+  private parseNullSeparatedPaths(output: string): string[] {
+    const entries = output.split("\0").filter((entry) => entry.length > 0)
+    const files: string[] = []
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i] ?? ""
+      if (entry.length < 4) continue
+
+      const status = entry.slice(0, 2)
+      let path = entry.slice(3)
+
+      if (status.includes("R") || status.includes("C")) {
+        i++
+        path = entries[i] ?? path
+      }
+
+      if (path.length > 0) files.push(path)
+    }
+
+    return files
+  }
+
+  private isHighRiskConflictFile(file: string): boolean {
+    return HIGH_RISK_CONFLICT_PATTERNS.some((pattern) => pattern.test(file))
+  }
+
+  private isRegeneratableLockfile(file: string): boolean {
+    return REGENERATABLE_LOCKFILE_PATTERNS.some((pattern) => pattern.test(file))
+  }
+
+  private buildLockfileRetryPrompt(files: string[]): string {
+    return [
+      `Lockfile conflicts require regeneration in: ${files.join(", ")}`,
+      "Retry instruction:",
+      "- Sync your branch with the latest main changes before resolving the dependency graph.",
+      "- Run the repo's dependency install or sync command to regenerate the conflicted lockfile(s).",
+      "- Review the regenerated lockfile diff and keep only intentional dependency updates.",
+    ].join("\n")
+  }
+
+  private classifyConflictFiles(
+    files: string[],
+    options: {
+      retryablePrefix: string
+      retryableFix: string
+      manualPrefix: string
+      manualFix: string
+    },
+  ): WorkspaceValidationResult {
+    const lockfiles = files.filter((file) => this.isRegeneratableLockfile(file))
+    if (lockfiles.length === files.length) {
+      return {
+        ok: false,
+        retryable: true,
+        error: `${options.retryablePrefix}: ${lockfiles.join(", ")}\n  Fix: ${options.retryableFix}`,
+        retryPrompt: this.buildLockfileRetryPrompt(lockfiles),
+      }
+    }
+
+    return {
+      ok: false,
+      error: `${options.manualPrefix}: ${files.join(", ")}\n  Fix: ${options.manualFix}`,
+    }
+  }
+
+  private async findConflictMarkerFiles(root: string, files: string[]): Promise<string[]> {
+    const conflicts: string[] = []
+
+    for (const file of files) {
+      try {
+        const content = await readFile(`${root}/${file}`, "utf-8")
+        if (CONFLICT_MARKER_PATTERN.test(content)) {
+          conflicts.push(file)
+        }
+      } catch {
+        // Deleted, binary, or unreadable files are skipped.
+      }
+    }
+
+    return conflicts
+  }
+
+  private async validateWorktreeBeforeAutoCommit(cwd: string): Promise<WorkspaceValidationResult> {
+    const { stdout: unmergedOut } = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd })
+    const unmergedFiles = unmergedOut
+      .trim()
+      .split("\n")
+      .filter((file) => file.length > 0)
+    if (unmergedFiles.length > 0) {
+      return {
+        ok: false,
+        error: `Unmerged files present: ${unmergedFiles.join(", ")}\n  Fix: Resolve the merge conflicts manually before auto-commit.`,
+      }
+    }
+
+    const { stdout: statusOut } = await runCommand("git", ["status", "--porcelain", "--untracked-files=all", "-z"], {
+      cwd,
+    })
+    const changedFiles = this.parseNullSeparatedPaths(statusOut).filter((file) => !file.startsWith(".agent-valley/"))
+    const conflictMarkerFiles = await this.findConflictMarkerFiles(cwd, changedFiles)
+    if (conflictMarkerFiles.length > 0) {
+      return this.classifyConflictFiles(conflictMarkerFiles, {
+        retryablePrefix: "Conflict markers detected in regeneratable lockfiles",
+        retryableFix: "Regenerate the lockfile before auto-commit.",
+        manualPrefix: "Conflict markers detected in changed files",
+        manualFix: "Resolve the conflict markers before auto-commit.",
+      })
+    }
+
+    await runCommand("git", ["add", "-A", "--", ".", ":!.agent-valley"], { cwd })
+
+    const { stdout: stagedOut } = await runCommand("git", ["diff", "--cached", "--name-only", "-z"], { cwd })
+    const stagedFiles = this.parseNullSeparatedPaths(stagedOut).filter((file) => !file.startsWith(".agent-valley/"))
+    const stagedConflictFiles = await this.findConflictMarkerFiles(cwd, stagedFiles)
+    if (stagedConflictFiles.length > 0) {
+      await runCommand("git", ["reset"], { cwd })
+      return this.classifyConflictFiles(stagedConflictFiles, {
+        retryablePrefix: "Conflict markers detected in staged regeneratable lockfiles",
+        retryableFix: "Regenerate the lockfile before auto-commit.",
+        manualPrefix: "Conflict markers detected in staged files",
+        manualFix: "Resolve the conflict markers before auto-commit.",
+      })
+    }
+
+    const checkResult = await runCommand("git", ["diff", "--cached", "--check"], { cwd })
+    if (checkResult.exitCode !== 0) {
+      await runCommand("git", ["reset"], { cwd })
+      const details = (checkResult.stdout || checkResult.stderr).trim()
+      return {
+        ok: false,
+        error:
+          `git diff --cached --check failed.\n${details}\n` +
+          "  Fix: Resolve the reported diff problems before auto-commit.",
+      }
+    }
+
+    return { ok: true }
+  }
+
+  private async validateBranchBeforeMerge(root: string, branch: string): Promise<WorkspaceValidationResult> {
+    const { stdout: unmergedOut } = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: root })
+    const unmergedFiles = unmergedOut
+      .trim()
+      .split("\n")
+      .filter((file) => file.length > 0)
+    if (unmergedFiles.length > 0) {
+      return {
+        ok: false,
+        error: `Unmerged files present: ${unmergedFiles.join(", ")}\n  Fix: Resolve the merge conflicts manually before delivery.`,
+      }
+    }
+
+    const { stdout: branchOut } = await runCommand("git", ["diff", "--name-only", `main...${branch}`], { cwd: root })
+    const changedFiles = branchOut
+      .trim()
+      .split("\n")
+      .filter((file) => file.length > 0)
+    const conflictMarkerFiles = await this.findConflictMarkerFiles(root, changedFiles)
+    if (conflictMarkerFiles.length > 0) {
+      return this.classifyConflictFiles(conflictMarkerFiles, {
+        retryablePrefix: "Conflict markers detected in delivery lockfiles",
+        retryableFix: "Regenerate the lockfile before delivery.",
+        manualPrefix: "Conflict markers detected in branch files",
+        manualFix: "Resolve the conflict markers manually before delivery.",
+      })
+    }
+
+    const checkResult = await runCommand("git", ["diff", "--check", `main...${branch}`], { cwd: root })
+    if (checkResult.exitCode !== 0) {
+      const details = (checkResult.stdout || checkResult.stderr).trim()
+      return {
+        ok: false,
+        error:
+          `git diff --check failed for ${branch}.\n${details}\n` +
+          "  Fix: Resolve the reported diff problems before delivery.",
+      }
+    }
+
+    return { ok: true }
+  }
+
+  async mergeAndPush(
+    workspace: Workspace,
+  ): Promise<{ ok: boolean; error?: string; retryable?: boolean; retryPrompt?: string }> {
     const root = this.repoRoot(workspace)
     const branch = workspace.branch
     const maxAttempts = 3
@@ -194,6 +403,15 @@ export class WorkspaceManager {
         return { ok: true }
       }
 
+      const preRebaseValidation = await this.validateBranchBeforeMerge(root, branch)
+      if (!preRebaseValidation.ok) {
+        logger.error("workspace-manager", "Branch validation failed before merge delivery", {
+          branch,
+          error: preRebaseValidation.error,
+        })
+        return { ok: false, error: preRebaseValidation.error }
+      }
+
       // 3. Rebase feature branch onto latest main
       //    This puts agent's work on top of all other agents' merged work.
       //    If conflict: agent's code adapts to main, not the other way around.
@@ -207,16 +425,34 @@ export class WorkspaceManager {
         if (conflictCheck !== 0) {
           // Auto-resolve: accept ours (= feature branch in rebase context)
           const resolved = await this.autoResolveRebaseConflicts(root, branch)
-          if (!resolved) {
+          if (!resolved.ok) {
             await runCommand("git", ["rebase", "--abort"], { cwd: root })
-            logger.error("workspace-manager", "Rebase failed with unresolved conflicts", { branch, error: rebaseErr })
-            return { ok: false, error: `Rebase conflict on ${branch}: ${rebaseErr}` }
+            logger.error("workspace-manager", "Rebase failed with unresolved conflicts", {
+              branch,
+              error: resolved.error ?? rebaseErr,
+              retryable: resolved.retryable ?? false,
+            })
+            return {
+              ok: false,
+              error: resolved.error ?? `Rebase conflict on ${branch}: ${rebaseErr}`,
+              retryable: resolved.retryable,
+              retryPrompt: resolved.retryPrompt,
+            }
           }
         } else {
           // rerere resolved — continue rebase
           await runCommand("git", ["add", "."], { cwd: root })
           await runCommand("git", ["rebase", "--continue"], { cwd: root, env: { ...process.env, GIT_EDITOR: "true" } })
         }
+      }
+
+      const postRebaseValidation = await this.validateBranchBeforeMerge(root, branch)
+      if (!postRebaseValidation.ok) {
+        logger.error("workspace-manager", "Branch validation failed after rebase", {
+          branch,
+          error: postRebaseValidation.error,
+        })
+        return { ok: false, error: postRebaseValidation.error }
       }
 
       // 4. Fast-forward merge into main (guaranteed clean after rebase)
@@ -259,14 +495,43 @@ export class WorkspaceManager {
    * "theirs" = the feature branch commits being replayed.
    * We accept "theirs" (feature branch) to preserve agent's work.
    */
-  private async autoResolveRebaseConflicts(root: string, branch: string): Promise<boolean> {
+  private async autoResolveRebaseConflicts(
+    root: string,
+    branch: string,
+  ): Promise<{ ok: boolean; error?: string; retryable?: boolean; retryPrompt?: string }> {
     const { stdout: conflictList } = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: root })
     const conflictedFiles = conflictList
       .trim()
       .split("\n")
       .filter((f) => f.length > 0)
 
-    if (conflictedFiles.length === 0) return false
+    if (conflictedFiles.length === 0) return { ok: false, error: `Rebase conflict on ${branch}` }
+
+    const lockfiles = conflictedFiles.filter((file) => this.isRegeneratableLockfile(file))
+    if (lockfiles.length === conflictedFiles.length) {
+      logger.warn("workspace-manager", "Deferring lockfile rebase conflicts to agent retry", {
+        branch,
+        files: lockfiles.join(", "),
+      })
+      return {
+        ok: false,
+        retryable: true,
+        error: `Rebase conflicted in regeneratable lockfiles: ${lockfiles.join(", ")}`,
+        retryPrompt: this.buildLockfileRetryPrompt(lockfiles),
+      }
+    }
+
+    const highRiskFiles = conflictedFiles.filter((file) => this.isHighRiskConflictFile(file))
+    if (highRiskFiles.length > 0 || lockfiles.length > 0) {
+      logger.warn("workspace-manager", "Refusing to auto-resolve high-risk rebase conflicts", {
+        branch,
+        files: [...new Set([...highRiskFiles, ...lockfiles])].join(", "),
+      })
+      return {
+        ok: false,
+        error: `Rebase conflict on ${branch}: ${[...new Set([...highRiskFiles, ...lockfiles])].join(", ")}`,
+      }
+    }
 
     logger.info("workspace-manager", `Auto-resolving ${conflictedFiles.length} rebase conflict(s)`, {
       branch,
@@ -278,7 +543,7 @@ export class WorkspaceManager {
       const { exitCode } = await runCommand("git", ["checkout", "--theirs", "--", file], { cwd: root })
       if (exitCode !== 0) {
         logger.warn("workspace-manager", `Failed to resolve ${file}`, { branch })
-        return false
+        return { ok: false, error: `Rebase conflict on ${branch}: failed to resolve ${file}` }
       }
       await runCommand("git", ["add", file], { cwd: root })
     }
@@ -298,7 +563,7 @@ export class WorkspaceManager {
     }
 
     logger.info("workspace-manager", `Auto-resolved rebase conflicts for ${branch}`)
-    return true
+    return { ok: true }
   }
 
   // ── Safety-net: unfinished work detection ────────────────────────
@@ -322,15 +587,34 @@ export class WorkspaceManager {
     }
   }
 
-  async autoCommit(workspace: Workspace): Promise<{ ok: boolean }> {
+  async autoCommit(
+    workspace: Workspace,
+  ): Promise<{ ok: boolean; error?: string; retryable?: boolean; retryPrompt?: string }> {
     const cwd = workspace.path
 
-    await runCommand("git", ["add", "-A", "--", ".", ":!.agent-valley"], { cwd })
+    const validation = await this.validateWorktreeBeforeAutoCommit(cwd)
+    if (!validation.ok) {
+      logger.warn("workspace-manager", "Auto-commit blocked by workspace validation", {
+        workspacePath: workspace.path,
+        error: validation.error,
+        retryable: validation.retryable ?? false,
+      })
+      return {
+        ok: false,
+        error: validation.error,
+        retryable: validation.retryable,
+        retryPrompt: validation.retryPrompt,
+      }
+    }
+
     const { exitCode } = await runCommand("git", ["commit", "-m", "chore: auto-commit unfinished agent work"], { cwd })
 
     if (exitCode !== 0) {
       logger.warn("workspace-manager", "Auto-commit failed", { workspacePath: workspace.path })
-      return { ok: false }
+      return {
+        ok: false,
+        error: "git commit failed.\n  Fix: Inspect the worktree and resolve the remaining git issues.",
+      }
     }
 
     logger.info("workspace-manager", "Auto-committed unfinished work", { workspacePath: workspace.path })

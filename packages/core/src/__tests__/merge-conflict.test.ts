@@ -139,4 +139,96 @@ describe("mergeAndPush — rebase-based delivery", () => {
 
     expect(result.ok).toBe(true)
   })
+
+  test("refuses to auto-resolve high-risk conflicts such as package.json", async () => {
+    writeFileSync(
+      resolve(repoDir, "package.json"),
+      '{\n  "name": "demo",\n  "dependencies": {\n    "left-pad": "1.0.0"\n  }\n}\n',
+    )
+    git(repoDir, ["add", "package.json"])
+    git(repoDir, ["commit", "-m", "chore: add package manifest"])
+    git(repoDir, ["push", "origin", "main"])
+
+    git(repoDir, ["checkout", "-b", "feature/TEST-4"])
+    writeFileSync(
+      resolve(repoDir, "package.json"),
+      '{\n  "name": "demo",\n  "dependencies": {\n    "left-pad": "2.0.0"\n  }\n}\n',
+    )
+    git(repoDir, ["add", "package.json"])
+    git(repoDir, ["commit", "-m", "feat: update package manifest"])
+
+    git(repoDir, ["checkout", "main"])
+    writeFileSync(
+      resolve(repoDir, "package.json"),
+      '{\n  "name": "demo",\n  "dependencies": {\n    "right-pad": "1.0.0"\n  }\n}\n',
+    )
+    git(repoDir, ["add", "package.json"])
+    git(repoDir, ["commit", "-m", "chore: conflicting manifest change"])
+    git(repoDir, ["push", "origin", "main"])
+
+    const workspace = {
+      id: "t",
+      key: "TEST-4",
+      path: resolve(repoDir, "TEST-4"),
+      issueId: "t",
+      branch: "feature/TEST-4",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("Rebase conflict")
+
+    git(repoDir, ["checkout", "main"])
+    expect(readFile(resolve(repoDir, "package.json"))).toContain('"right-pad": "1.0.0"')
+    expect(readFile(resolve(repoDir, "package.json"))).not.toContain('"left-pad": "2.0.0"')
+
+    const remoteMain = git(bareDir, ["show", "main:package.json"])
+    expect(remoteMain).toContain('"right-pad": "1.0.0"')
+    expect(remoteMain).not.toContain('"left-pad": "2.0.0"')
+  })
+
+  test("returns retryable failure for regeneratable lockfile conflicts", async () => {
+    writeFileSync(resolve(repoDir, "package-lock.json"), '{\n  "name": "demo",\n  "lockfileVersion": 3\n}\n')
+    git(repoDir, ["add", "package-lock.json"])
+    git(repoDir, ["commit", "-m", "chore: add lockfile"])
+    git(repoDir, ["push", "origin", "main"])
+
+    git(repoDir, ["checkout", "-b", "feature/TEST-5"])
+    writeFileSync(
+      resolve(repoDir, "package-lock.json"),
+      '{\n  "name": "demo",\n  "lockfileVersion": 3,\n  "packages": {\n    "": { "version": "1.0.1" }\n  }\n}\n',
+    )
+    git(repoDir, ["add", "package-lock.json"])
+    git(repoDir, ["commit", "-m", "chore: update lockfile"])
+
+    git(repoDir, ["checkout", "main"])
+    writeFileSync(
+      resolve(repoDir, "package-lock.json"),
+      '{\n  "name": "demo",\n  "lockfileVersion": 3,\n  "packages": {\n    "": { "version": "2.0.0" }\n  }\n}\n',
+    )
+    git(repoDir, ["add", "package-lock.json"])
+    git(repoDir, ["commit", "-m", "chore: conflicting lockfile change"])
+    git(repoDir, ["push", "origin", "main"])
+
+    const workspace = {
+      id: "t",
+      key: "TEST-5",
+      path: resolve(repoDir, "TEST-5"),
+      issueId: "t",
+      branch: "feature/TEST-5",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.error).toContain("regeneratable lockfiles")
+    expect(result.retryPrompt).toContain("dependency install or sync")
+
+    git(repoDir, ["checkout", "main"])
+    expect(readFile(resolve(repoDir, "package-lock.json"))).toContain('"version": "2.0.0"')
+  })
 })

@@ -27,6 +27,11 @@ import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
 import { RetryQueue } from "./retry-queue"
 import { analyzeScoreInBackground } from "./scoring-service"
 
+interface RetryContext {
+  attemptCount: number
+  lastError: string
+}
+
 export class Orchestrator extends OrchestratorEventEmitter {
   private state: OrchestratorRuntimeState = {
     isRunning: false,
@@ -286,7 +291,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     return false
   }
 
-  private async handleIssueTodo(issue: Issue): Promise<void> {
+  private async handleIssueTodo(issue: Issue, retryContext?: RetryContext): Promise<void> {
     // DAG: check if issue has unresolved blockers
     const blockers = this.dagScheduler.getUnresolvedBlockers(issue.id)
     if (blockers.length > 0 && !this.state.waitingIssues.has(issue.id)) {
@@ -330,20 +335,20 @@ export class Orchestrator extends OrchestratorEventEmitter {
     // Update local issue status and delegate to In Progress handler
     // Note: handleIssueInProgress will inherit the processingIssues lock
     issue.status = { ...issue.status, id: this.config.workflowStates.inProgress, name: "In Progress" }
-    await this.handleIssueInProgressInternal(issue)
+    await this.handleIssueInProgressInternal(issue, retryContext)
   }
 
-  private async handleIssueInProgress(issue: Issue): Promise<void> {
+  private async handleIssueInProgress(issue: Issue, retryContext?: RetryContext): Promise<void> {
     if (!this.tryAcceptOrQueue(issue.id)) return
     this.processingIssues.add(issue.id)
-    await this.handleIssueInProgressInternal(issue)
+    await this.handleIssueInProgressInternal(issue, retryContext)
   }
 
   /**
    * Internal handler that does workspace creation + agent spawn.
    * Caller must have already added issue.id to processingIssues.
    */
-  private async handleIssueInProgressInternal(issue: Issue): Promise<void> {
+  private async handleIssueInProgressInternal(issue: Issue, retryContext?: RetryContext): Promise<void> {
     // Fallback: if webhook didn't include labels and routing rules exist, fetch from API
     if ((!issue.labels || issue.labels.length === 0) && this.config.routingRules.length > 0) {
       try {
@@ -398,6 +403,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
       id: crypto.randomUUID(),
       issueId: issue.id,
       workspacePath: workspace.path,
+      retryCount: retryContext?.attemptCount ?? 0,
       startedAt: new Date().toISOString(),
       finishedAt: null,
       exitCode: null,
@@ -411,7 +417,14 @@ export class Orchestrator extends OrchestratorEventEmitter {
     this.processingIssues.delete(issue.id)
 
     // Render prompt
-    const prompt = renderPrompt(this.promptTemplate, issue, workspace.path, attempt, 0)
+    const prompt = renderPrompt(
+      this.promptTemplate,
+      issue,
+      workspace.path,
+      attempt,
+      retryContext?.attemptCount ?? 0,
+      retryContext?.lastError ?? "",
+    )
 
     this.emitEvent("agent.start", {
       agentType: route.agentType,
@@ -504,8 +517,12 @@ export class Orchestrator extends OrchestratorEventEmitter {
     for (const entry of ready) {
       const issue = issues.find((i) => i.id === entry.issueId)
       if (issue) {
-        if (issue.status.id === this.config.workflowStates.todo) await this.handleIssueTodo(issue)
-        else await this.handleIssueInProgress(issue)
+        const retryContext = {
+          attemptCount: entry.attemptCount,
+          lastError: entry.lastError,
+        }
+        if (issue.status.id === this.config.workflowStates.todo) await this.handleIssueTodo(issue, retryContext)
+        else await this.handleIssueInProgress(issue, retryContext)
       } else {
         logger.info("orchestrator", "Retry issue no longer in Todo/InProgress, dropping", { issueId: entry.issueId })
       }

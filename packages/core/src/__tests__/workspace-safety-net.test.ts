@@ -132,6 +132,36 @@ describe("autoCommit", () => {
 
     expect(result.ok).toBe(false)
   })
+
+  test("blocks auto-commit when conflict markers are present", async () => {
+    await writeFile(
+      join(worktreeDir, "feature.ts"),
+      "<<<<<<< HEAD\nconst x = 1\n=======\nconst x = 2\n>>>>>>> branch\n",
+    )
+
+    const result = await manager.autoCommit(makeWorkspace())
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("Conflict markers detected")
+    const log = git("log --oneline -1", worktreeDir)
+    expect(log).not.toContain("auto-commit unfinished agent work")
+    const status = git("status --porcelain", worktreeDir)
+    expect(status).not.toBe("")
+  })
+
+  test("returns retryable failure for lockfile conflict markers", async () => {
+    await writeFile(
+      join(worktreeDir, "package-lock.json"),
+      '<<<<<<< HEAD\n{\n  "name": "demo"\n}\n=======\n{\n  "name": "demo-app"\n}\n>>>>>>> branch\n',
+    )
+
+    const result = await manager.autoCommit(makeWorkspace())
+
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.error).toContain("regeneratable lockfiles")
+    expect(result.retryPrompt).toContain("dependency install or sync")
+  })
 })
 
 describe("getDiffStat", () => {
