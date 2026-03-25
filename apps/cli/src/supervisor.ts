@@ -6,7 +6,7 @@
  */
 
 import { spawn } from "node:child_process"
-import { appendFileSync, existsSync, rmSync, symlinkSync } from "node:fs"
+import { appendFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 const dashboardCwd = process.argv[2] ?? "."
@@ -41,45 +41,23 @@ function startDashboard(): void {
   // Ensure previous process is dead before starting a new one
   killCurrentProc()
 
+  const envFile = resolve(dashboardCwd, "../../.env")
   let proc: ReturnType<typeof spawn>
 
-  // Production: run standalone server.js directly (no node_modules needed)
-  // Monorepo standalone output mirrors the workspace structure
-  const standaloneDir = resolve(dashboardCwd, ".next/standalone/apps/dashboard")
-  const standaloneServer = resolve(standaloneDir, "server.js")
-  if (mode === "start" && existsSync(standaloneServer)) {
-    // Standalone requires static + public to be copied/linked alongside server.js
-    const staticLink = resolve(standaloneDir, ".next/static")
-    const publicLink = resolve(standaloneDir, "public")
-    const staticSrc = resolve(dashboardCwd, ".next/static")
-    const publicSrc = resolve(dashboardCwd, "public")
-
-    try {
-      rmSync(staticLink, { recursive: true, force: true })
-    } catch {
-      /* ignore */
-    }
-    try {
-      rmSync(publicLink, { recursive: true, force: true })
-    } catch {
-      /* ignore */
-    }
-    if (existsSync(staticSrc)) symlinkSync(staticSrc, staticLink)
-    if (existsSync(publicSrc)) symlinkSync(publicSrc, publicLink)
-
-    proc = spawn("node", [standaloneServer], {
-      cwd: standaloneDir,
+  if (mode === "start") {
+    proc = spawn("bun", [`--env-file=${envFile}`, "next", "start", "-p", port], {
+      cwd: dashboardCwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, PORT: port, HOSTNAME: "0.0.0.0" },
     })
-    log(`Dashboard started via standalone (pid: ${proc.pid}, port: ${port})`)
+    log(`Dashboard started via next start (pid: ${proc.pid}, port: ${port})`)
   } else {
-    // Dev mode or standalone not available
-    proc = spawn("bun", ["run", mode === "start" ? "start" : "dev"], {
+    proc = spawn("bun", [`--env-file=${envFile}`, "next", "dev", "--turbopack", "-p", port], {
       cwd: dashboardCwd,
       stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PORT: port, HOSTNAME: "0.0.0.0" },
     })
-    log(`Dashboard started via bun run ${mode} (pid: ${proc.pid})`)
+    log(`Dashboard started via next dev (pid: ${proc.pid}, port: ${port})`)
   }
 
   currentProc = proc

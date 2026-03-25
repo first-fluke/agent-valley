@@ -2,6 +2,7 @@
  * Linear Client — GraphQL API for issue queries and mutations.
  */
 
+import { request as httpsRequest } from "node:https"
 import type { Issue, IssueRelation } from "../domain/models"
 import { parseScoreFromLabels } from "../domain/models"
 import { logger } from "../observability/logger"
@@ -12,16 +13,82 @@ const LINEAR_API_URL = "https://api.linear.app/graphql"
 
 // ── GraphQL Helper ──────────────────────────────────────────────────
 
-async function linearGraphQL<T>(apiKey: string, query: string, variables: Record<string, unknown>): Promise<T> {
-  const response = await fetch(LINEAR_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: apiKey,
-    },
-    body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(30_000),
+interface LinearHttpResponse {
+  status: number
+  statusText: string
+  headers: Map<string, string>
+  body: string
+}
+
+function postGraphQLWithNodeHttps(
+  apiKey: string,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<LinearHttpResponse> {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ query, variables })
+    const req = httpsRequest(
+      LINEAR_API_URL,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          Authorization: apiKey,
+        },
+        family: 4,
+        timeout: 30_000,
+      },
+      (res) => {
+        let responseBody = ""
+        res.setEncoding("utf8")
+        res.on("data", (chunk) => {
+          responseBody += chunk
+        })
+        res.on("end", () => {
+          const headers = new Map<string, string>()
+          for (const [key, value] of Object.entries(res.headers)) {
+            if (typeof value === "string") headers.set(key.toLowerCase(), value)
+            else if (Array.isArray(value)) headers.set(key.toLowerCase(), value.join(", "))
+          }
+
+          resolve({
+            status: res.statusCode ?? 0,
+            statusText: res.statusMessage ?? "",
+            headers,
+            body: responseBody,
+          })
+        })
+      },
+    )
+
+    req.on("timeout", () => {
+      req.destroy(new Error("Linear API request timed out"))
+    })
+    req.on("error", reject)
+    req.write(body)
+    req.end()
   })
+}
+
+async function linearGraphQL<T>(apiKey: string, query: string, variables: Record<string, unknown>): Promise<T> {
+  const response =
+    typeof Bun !== "undefined"
+      ? await fetch(LINEAR_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: apiKey,
+          },
+          body: JSON.stringify({ query, variables }),
+          signal: AbortSignal.timeout(30_000),
+        }).then(async (res) => ({
+          status: res.status,
+          statusText: res.statusText,
+          headers: new Map([["retry-after", res.headers.get("Retry-After") ?? ""]]),
+          body: await res.text(),
+        }))
+      : await postGraphQLWithNodeHttps(apiKey, query, variables)
 
   if (response.status === 401) {
     throw new Error(
@@ -32,16 +99,15 @@ async function linearGraphQL<T>(apiKey: string, query: string, variables: Record
   }
 
   if (response.status === 429) {
-    const retryAfter = response.headers.get("Retry-After") ?? "60"
+    const retryAfter = response.headers.get("retry-after") ?? "60"
     throw new Error(`Linear rate limit hit. Retry after ${retryAfter}s`)
   }
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Linear API error: ${response.status} ${response.statusText}\n  Body: ${body}`)
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Linear API error: ${response.status} ${response.statusText}\n  Body: ${response.body}`)
   }
 
-  const result = (await response.json()) as LinearGraphQLResponse<T>
+  const result = JSON.parse(response.body) as LinearGraphQLResponse<T>
 
   if (result.errors?.length) {
     const msg = result.errors.map((e) => e.message).join("; ")

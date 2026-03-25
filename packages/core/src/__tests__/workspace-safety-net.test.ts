@@ -4,11 +4,11 @@
  */
 
 import { execSync } from "node:child_process"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import type { Workspace } from "../domain/models"
+import type { Issue, Workspace } from "../domain/models"
 import { WorkspaceManager } from "../workspace/workspace-manager"
 
 let repoDir: string
@@ -106,6 +106,70 @@ describe("detectUnfinishedWork", () => {
     expect(result.hasUncommittedChanges).toBe(false)
     // Branch has commits but net diff from main is zero
     expect(result.hasCodeChanges).toBe(false)
+  })
+})
+
+describe("create", () => {
+  test("re-attaches an existing branch when stale branch metadata remains", async () => {
+    const issue: Issue = {
+      id: "issue-2",
+      identifier: "TEST-2",
+      title: "fix: resume stale branch",
+      description: "",
+      status: { id: "state-todo", name: "Todo", type: "unstarted" },
+      team: { id: "team-1", key: "TEST" },
+      labels: [],
+      url: "https://example.test/TEST-2",
+      score: null,
+      parentId: null,
+      children: [],
+      relations: [],
+    }
+
+    git("checkout -b fix/TEST-2", repoDir)
+    git("checkout main", repoDir)
+
+    const stalePath = join(repoDir, "TEST-2")
+    await mkdir(stalePath, { recursive: true })
+
+    const workspace = await manager.create(issue)
+
+    expect(workspace.branch).toBe("fix/TEST-2")
+    expect(workspace.path).toBe(stalePath)
+
+    const currentBranch = git("branch --show-current", stalePath)
+    expect(currentBranch).toBe("fix/TEST-2")
+  })
+
+  test("reuses an existing workspace when routed through a root override", async () => {
+    const issue: Issue = {
+      id: "issue-3",
+      identifier: "TEST-3",
+      title: "fix: reuse existing routed workspace",
+      description: "",
+      status: { id: "state-todo", name: "Todo", type: "unstarted" },
+      team: { id: "team-1", key: "TEST" },
+      labels: [],
+      url: "https://example.test/TEST-3",
+      score: null,
+      parentId: null,
+      children: [],
+      relations: [],
+    }
+
+    const routedManager = new WorkspaceManager(join(repoDir, "unrelated-root"))
+    const routedPath = join(repoDir, "TEST-3")
+    git(`worktree add ${routedPath} -b fix/TEST-3`, repoDir)
+    await mkdir(join(routedPath, ".agent-valley", "attempts"), { recursive: true })
+    await writeFile(
+      join(routedPath, ".agent-valley", "issue.json"),
+      JSON.stringify({ issueId: issue.id, identifier: issue.identifier, branch: "fix/TEST-3" }),
+    )
+
+    const workspace = await routedManager.create(issue, repoDir)
+
+    expect(workspace.path).toBe(routedPath)
+    expect(workspace.branch).toBe("fix/TEST-3")
   })
 })
 

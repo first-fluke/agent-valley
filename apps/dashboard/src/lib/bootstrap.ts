@@ -3,26 +3,16 @@
  * Separated from instrumentation.ts to avoid Edge Runtime static analysis warnings.
  */
 
-import path from "node:path"
 import { toOrchestratorConfig } from "@/lib/env"
 import { configureLogger, logger } from "@agent-valley/core/observability/logger"
 import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
 import { setOrchestrator } from "@/lib/orchestrator-singleton"
+import { resolveProjectRoot } from "@/lib/project-root"
 
 export async function bootstrap() {
   // Resolve project root: works in both dev (apps/dashboard/src/lib/) and standalone (.next/standalone/apps/dashboard/)
-  // Walk up from CWD until we find WORKFLOW.md
-  let projectRoot = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    try {
-      const candidate = i === 0 ? projectRoot : path.resolve(projectRoot, "../".repeat(i))
-      await import("node:fs/promises").then((fs) => fs.access(path.join(candidate, "WORKFLOW.md")))
-      projectRoot = candidate
-      break
-    } catch {
-      continue
-    }
-  }
+  // Walk up until we find WORKFLOW.md, regardless of standalone nesting depth.
+  const projectRoot = await resolveProjectRoot(process.cwd())
   process.chdir(projectRoot)
 
   // Prevent orchestrator errors from crashing the Next.js process

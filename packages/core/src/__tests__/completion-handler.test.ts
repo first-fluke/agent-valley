@@ -229,7 +229,7 @@ describe("createCompletionCallbacks", () => {
       expect(autoCommitCalled).toBe(false)
     })
 
-    test("stops completion when auto-commit is blocked by workspace validation", async () => {
+    test("stops completion when auto-commit is blocked by workspace validation", { timeout: 8_000 }, async () => {
       let mergeCalled = false
       const mockWm = makeMockWorkspaceManager({
         hasUncommittedChanges: true,

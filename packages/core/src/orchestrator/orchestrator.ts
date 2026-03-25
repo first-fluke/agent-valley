@@ -47,6 +47,8 @@ export class Orchestrator extends OrchestratorEventEmitter {
   private completionDeps: CompletionDeps
   private retryTimer: ReturnType<typeof setInterval> | null = null
   private promptTemplate: string = ""
+  private startupSyncCompleted = false
+  private startupSyncInFlight = false
 
   /** Guards against TOCTOU race: tracks issues currently being processed (between check and activeWorkspaces.set). */
   private processingIssues = new Set<string>()
@@ -103,29 +105,18 @@ export class Orchestrator extends OrchestratorEventEmitter {
 
     // Startup sync — run in background so server starts immediately
     const runStartupSync = async () => {
-      // Small delay to let the server bind first
       await new Promise((r) => setTimeout(r, 2_000))
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          await this.startupSync()
-          return
-        } catch (err) {
-          if (attempt < 3) {
-            logger.warn("orchestrator", `Startup sync attempt ${attempt} failed, retrying in 3s...`)
-            await new Promise((r) => setTimeout(r, 3_000))
-          } else {
-            logger.error("orchestrator", "Startup sync failed after 3 attempts", {
-              error: String(err),
-              stack: (err as Error).stack,
-            })
-          }
-        }
-      }
+      await this.ensureStartupSync()
     }
-    runStartupSync()
+    void runStartupSync()
 
     // Periodic retry queue processing
-    this.retryTimer = setInterval(() => this.processRetryQueue(), 30_000)
+    this.retryTimer = setInterval(() => {
+      void this.processRetryQueue()
+      if (!this.startupSyncCompleted) {
+        void this.ensureStartupSync()
+      }
+    }, 30_000)
 
     this.emitEvent("node.join", {
       defaultAgentType: this.config.agentType,
@@ -177,6 +168,36 @@ export class Orchestrator extends OrchestratorEventEmitter {
     for (const issue of issues) {
       if (issue.status.id === this.config.workflowStates.todo) await this.handleIssueTodo(issue)
       else await this.handleIssueInProgress(issue)
+    }
+  }
+
+  private async ensureStartupSync(): Promise<void> {
+    if (this.startupSyncCompleted || this.startupSyncInFlight) return
+
+    this.startupSyncInFlight = true
+    try {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await this.startupSync()
+          this.startupSyncCompleted = true
+          return
+        } catch (err) {
+          const cause = err instanceof Error && "cause" in err && err.cause ? `; cause=${String(err.cause)}` : ""
+          if (attempt < 3) {
+            logger.warn("orchestrator", `Startup sync attempt ${attempt} failed, retrying in 3s...`, {
+              error: `${String(err)}${cause}`,
+            })
+            await new Promise((r) => setTimeout(r, 3_000))
+          } else {
+            logger.error("orchestrator", "Startup sync failed after 3 attempts", {
+              error: `${String(err)}${cause}`,
+              stack: err instanceof Error ? err.stack : undefined,
+            })
+          }
+        }
+      }
+    } finally {
+      this.startupSyncInFlight = false
     }
   }
 

@@ -103,23 +103,48 @@ export class WorkspaceManager {
     return identifier.replace(/[^A-Za-z0-9._-]/g, "_")
   }
 
+  private async removeEmptyDirectory(path: string): Promise<void> {
+    try {
+      const entries = await readdir(path)
+      if (entries.length === 0) {
+        await rm(path, { recursive: true, force: true })
+      }
+    } catch {
+      // Directory does not exist or cannot be inspected — ignore here and let git report real errors later.
+    }
+  }
+
+  private async localBranchExists(root: string, branch: string): Promise<boolean> {
+    const result = await runCommand("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: root })
+    return result.exitCode === 0
+  }
+
   async create(issue: Issue, rootOverride?: string): Promise<Workspace> {
     const root = rootOverride ?? this.rootPath
     const key = this.deriveKey(issue.identifier)
     const path = `${root}/${key}`
     const branch = deriveBranchName(issue.identifier, issue.title)
 
+    await this.removeEmptyDirectory(path)
+
     // Create git worktree from the target repo
-    const { exitCode, stderr } = await runCommand("git", ["worktree", "add", path, "-b", branch], { cwd: root })
+    let { exitCode, stderr } = await runCommand("git", ["worktree", "add", path, "-b", branch], { cwd: root })
+
+    if (exitCode !== 0 && (await this.localBranchExists(root, branch))) {
+      await this.removeEmptyDirectory(path)
+      const reuseResult = await runCommand("git", ["worktree", "add", path, branch], { cwd: root })
+      exitCode = reuseResult.exitCode
+      stderr = reuseResult.stderr
+    }
 
     if (exitCode !== 0) {
       // Worktree might already exist — try reusing
-      const existing = await this.get(issue.id)
+      const existing = await this.get(issue.id, root)
       if (existing) {
         logger.info("workspace-manager", "Reusing existing workspace", { issueId: issue.id, workspacePath: path })
         return existing
       }
-      throw new Error(`git worktree add failed: ${stderr}\n  Fix: Ensure ${this.rootPath} is a git repository`)
+      throw new Error(`git worktree add failed: ${stderr}\n  Fix: Ensure ${root} is a git repository`)
     }
 
     // Create metadata directory after worktree
@@ -156,24 +181,26 @@ export class WorkspaceManager {
     return workspace
   }
 
-  async get(issueId: string): Promise<Workspace | null> {
+  async get(issueId: string, rootOverride?: string): Promise<Workspace | null> {
+    const root = rootOverride ?? this.rootPath
+
     // Scan existing workspaces — match by issueId stored in metadata
     let entries: string[]
     try {
-      entries = await readdir(this.rootPath)
+      entries = await readdir(root)
     } catch {
       return null
     }
 
     for (const entry of entries) {
-      const metaFile = `${this.rootPath}/${entry}/.agent-valley/issue.json`
+      const metaFile = `${root}/${entry}/.agent-valley/issue.json`
       try {
         const raw = await readFile(metaFile, "utf-8")
         const meta = JSON.parse(raw) as { issueId: string; branch?: string; identifier?: string }
         if (meta.issueId === issueId) {
           return {
             issueId,
-            path: `${this.rootPath}/${entry}`,
+            path: `${root}/${entry}`,
             key: entry,
             branch: meta.branch ?? `feature/${meta.identifier ?? entry}`,
             status: "idle",
