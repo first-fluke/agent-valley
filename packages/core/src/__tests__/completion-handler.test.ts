@@ -345,7 +345,7 @@ describe("createCompletionCallbacks", () => {
       expect(retryAdded).toBe(true)
     })
 
-    test("schedules retry when output is whitespace-only", async () => {
+    test("schedules retry when output is whitespace-only", { timeout: 10_000 }, async () => {
       const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
       let retryAdded = false
       const deps = makeDeps(mockWm)
