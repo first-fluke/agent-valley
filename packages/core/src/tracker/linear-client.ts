@@ -72,23 +72,24 @@ function postGraphQLWithNodeHttps(
 }
 
 async function linearGraphQL<T>(apiKey: string, query: string, variables: Record<string, unknown>): Promise<T> {
-  const response =
-    typeof Bun !== "undefined"
-      ? await fetch(LINEAR_API_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: apiKey,
-          },
-          body: JSON.stringify({ query, variables }),
-          signal: AbortSignal.timeout(30_000),
-        }).then(async (res) => ({
-          status: res.status,
-          statusText: res.statusText,
-          headers: new Map([["retry-after", res.headers.get("Retry-After") ?? ""]]),
-          body: await res.text(),
-        }))
-      : await postGraphQLWithNodeHttps(apiKey, query, variables)
+  const useNodeHttpsTransport = typeof Bun === "undefined" && !process.env.VITEST
+
+  const response = !useNodeHttpsTransport
+    ? await fetch(LINEAR_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: apiKey,
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(30_000),
+      }).then(async (res) => ({
+        status: res.status,
+        statusText: res.statusText,
+        headers: new Map([["retry-after", res.headers.get("Retry-After") ?? ""]]),
+        body: await res.text(),
+      }))
+    : await postGraphQLWithNodeHttps(apiKey, query, variables)
 
   if (response.status === 401) {
     throw new Error(
