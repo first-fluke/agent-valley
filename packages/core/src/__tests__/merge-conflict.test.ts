@@ -121,6 +121,102 @@ describe("mergeAndPush — rebase-based delivery", () => {
     expect(readFile(resolve(repoDir, "file.txt"))).toContain("feature change")
   })
 
+  test("blocks delivery when feature branch has committed conflict markers", { timeout: 10000 }, async () => {
+    // Feature branch commits a file with conflict markers (agent messed up)
+    git(repoDir, ["checkout", "-b", "feature/TEST-CM"])
+    const conflictContent = "<<<<<<< HEAD\nour version\n=======\ntheir version\n>>>>>>> branch\n"
+    writeFileSync(resolve(repoDir, "broken.ts"), conflictContent)
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: broken commit with markers"])
+
+    git(repoDir, ["checkout", "main"])
+
+    const workspace = {
+      id: "t",
+      key: "TEST-CM",
+      path: resolve(repoDir, "TEST-CM"),
+      issueId: "t",
+      branch: "feature/TEST-CM",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("conflict markers")
+
+    // Verify origin/main was NOT updated with the bad commit
+    git(repoDir, ["checkout", "main"])
+    const mainLog = git(repoDir, ["log", "--oneline"])
+    expect(mainLog).not.toContain("broken commit")
+  })
+
+  test("refuses auto-resolve for high-risk files (package.json)", { timeout: 10000 }, async () => {
+    // Create package.json on main
+    writeFileSync(resolve(repoDir, "package.json"), '{"name": "initial"}\n')
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "chore: add package.json"])
+    git(repoDir, ["push", "origin", "main"])
+
+    // Feature branch modifies package.json
+    git(repoDir, ["checkout", "-b", "feature/TEST-HR"])
+    writeFileSync(resolve(repoDir, "package.json"), '{"name": "feature-version"}\n')
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: update package.json"])
+
+    // Main also modifies package.json (conflict!)
+    git(repoDir, ["checkout", "main"])
+    writeFileSync(resolve(repoDir, "package.json"), '{"name": "main-version"}\n')
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "chore: update package.json on main"])
+    git(repoDir, ["push", "origin", "main"])
+
+    const workspace = {
+      id: "t",
+      key: "TEST-HR",
+      path: resolve(repoDir, "TEST-HR"),
+      issueId: "t",
+      branch: "feature/TEST-HR",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    // Should fail because package.json is high-risk and shouldn't be auto-resolved
+    expect(result.ok).toBe(false)
+    expect(result.error).toBeDefined()
+  })
+
+  test("origin/main is not pushed when post-merge validation fails", { timeout: 10000 }, async () => {
+    // Get the current origin/main HEAD before the test
+    const originMainBefore = git(repoDir, ["rev-parse", "origin/main"])
+
+    // Feature branch commits a file with conflict markers
+    git(repoDir, ["checkout", "-b", "feature/TEST-NP"])
+    writeFileSync(resolve(repoDir, "bad.ts"), "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: commit with markers"])
+
+    git(repoDir, ["checkout", "main"])
+
+    const workspace = {
+      id: "t",
+      key: "TEST-NP",
+      path: resolve(repoDir, "TEST-NP"),
+      issueId: "t",
+      branch: "feature/TEST-NP",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    expect(result.ok).toBe(false)
+
+    // Verify origin/main was NOT updated
+    const originMainAfter = git(repoDir, ["rev-parse", "origin/main"])
+    expect(originMainAfter).toBe(originMainBefore)
+  })
+
   test("clean merge with no changes returns ok", async () => {
     git(repoDir, ["checkout", "-b", "feature/TEST-3"])
     // No changes

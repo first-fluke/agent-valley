@@ -44,21 +44,73 @@ export function createCompletionCallbacks(
       let autoCommitted = false
       let hasCodeChanges = false
 
+      let conflictBlocked = false
+
       try {
         const unfinished = await workspaceManager.detectUnfinishedWork(workspace)
         hasCodeChanges = unfinished.hasCodeChanges
 
         if (unfinished.hasUncommittedChanges) {
           const commitResult = await workspaceManager.autoCommit(workspace)
-          autoCommitted = commitResult.ok
-          if (autoCommitted) hasCodeChanges = true
-          logger.info("completion", `Auto-committed unfinished work for ${issue.identifier}`)
+
+          // Conflict detection: abort delivery if conflicts found in uncommitted files
+          if (commitResult.diagnostics) {
+            conflictBlocked = true
+            logger.error("completion", `Auto-commit blocked for ${issue.identifier}: conflict artifacts`, {
+              issueId: issue.id,
+              conflictFiles: commitResult.conflictFiles,
+            })
+            try {
+              await addIssueComment(
+                config.linearApiKey,
+                issue.id,
+                `Symphony: Auto-commit blocked — conflict artifacts detected\n\n${commitResult.diagnostics}\n\nRun failed. Manual resolution required.`,
+              )
+            } catch (commentErr) {
+              logger.debug("completion", "Failed to post conflict diagnostics", {
+                issueId: issue.id,
+                error: String(commentErr),
+              })
+            }
+          } else {
+            autoCommitted = commitResult.ok
+            if (autoCommitted) hasCodeChanges = true
+            if (autoCommitted) logger.info("completion", `Auto-committed unfinished work for ${issue.identifier}`)
+          }
         }
       } catch (err) {
         logger.warn("completion", "Safety-net check failed", {
           issueId: issue.id,
           error: String(err),
         })
+      }
+
+      // Pre-delivery validation: check branch for committed conflict markers
+      if (!conflictBlocked && hasCodeChanges) {
+        try {
+          const branchCheck = await workspaceManager.validateBranchContent(workspace)
+          if (!branchCheck.ok) {
+            conflictBlocked = true
+            logger.error("completion", `Delivery blocked for ${issue.identifier}: conflict markers in branch`, {
+              issueId: issue.id,
+              conflictFiles: branchCheck.conflictFiles,
+            })
+            try {
+              await addIssueComment(
+                config.linearApiKey,
+                issue.id,
+                `Symphony: Delivery blocked — conflict markers in committed files\n\n${branchCheck.diagnostics}\n\nRun failed. Manual resolution required.`,
+              )
+            } catch (commentErr) {
+              logger.debug("completion", "Failed to post conflict diagnostics", {
+                issueId: issue.id,
+                error: String(commentErr),
+              })
+            }
+          }
+        } catch (err) {
+          logger.warn("completion", "Branch validation failed", { issueId: issue.id, error: String(err) })
+        }
       }
 
       // Get diff stat after auto-commit
@@ -82,7 +134,31 @@ export function createCompletionCallbacks(
         })
       }
 
-      // ── Delivery ──
+      // ── Delivery (skipped when conflict-blocked) ──
+      if (conflictBlocked) {
+        try {
+          await updateIssueState(config.linearApiKey, issue.id, config.workflowStates.cancelled)
+        } catch (err) {
+          logger.error("completion", "Failed to transition to Cancelled", { issueId: issue.id, error: String(err) })
+        }
+        if (route.deliveryMode === "merge") {
+          try {
+            await workspaceManager.cleanup(workspace)
+          } catch (err) {
+            logger.warn("completion", "Worktree cleanup failed", { issueId: issue.id, error: String(err) })
+          }
+        }
+        deps.emitEvent("agent.done", {
+          issueKey: issue.identifier,
+          issueId: issue.id,
+          durationMs: Date.now() - new Date(attempt.startedAt).getTime(),
+          autoCommitted: false,
+          conflictBlocked: true,
+        })
+        await deps.fillVacantSlots()
+        return
+      }
+
       if (route.deliveryMode === "merge") {
         const mergeResult = await workspaceManager.mergeAndPush(workspace)
         if (!mergeResult.ok) {

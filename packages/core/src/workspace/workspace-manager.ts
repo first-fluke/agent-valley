@@ -8,9 +8,10 @@ import { spawn } from "node:child_process"
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
+import { buildConflictDiagnostics, getUnmergedFiles, isHighRiskFile, scanConflictMarkers } from "./conflict-guard"
 
 /** Run a command and return its exit code, stdout, and stderr. */
-function runCommand(
+export function runCommand(
   cmd: string,
   args: string[],
   options: { cwd?: string; ignoreStdio?: boolean; env?: Record<string, string | undefined> } = {},
@@ -187,6 +188,10 @@ export class WorkspaceManager {
         await runCommand("git", ["pull", "--ff-only", "origin", "main"], { cwd: root })
       }
 
+      // Save pre-merge ref for post-merge validation
+      const { stdout: preRef } = await runCommand("git", ["rev-parse", "main"], { cwd: root })
+      const preMainRef = preRef.trim()
+
       // 2. Check if branch has any commits ahead of main
       const { exitCode: diffExit } = await runCommand("git", ["diff", "--quiet", `main...${branch}`], { cwd: root })
       if (diffExit === 0) {
@@ -225,6 +230,26 @@ export class WorkspaceManager {
       if (mergeExit !== 0) {
         logger.warn("workspace-manager", "ff-only merge failed, falling back to regular merge", { branch })
         await runCommand("git", ["merge", branch, "--no-edit"], { cwd: root })
+      }
+
+      // 4b. Pre-push validation: scan merged content for conflict markers
+      const { stdout: changedOut } = await runCommand("git", ["diff", "--name-only", `${preMainRef}..HEAD`], {
+        cwd: root,
+      })
+      const changedInMerge = changedOut.trim().split("\n").filter(Boolean)
+      if (changedInMerge.length > 0) {
+        const markerFiles = await scanConflictMarkers(root, { ref: "HEAD", files: changedInMerge })
+        if (markerFiles.length > 0) {
+          logger.error("workspace-manager", "Delivery blocked: conflict markers in merged files", {
+            branch,
+            conflictFiles: markerFiles,
+          })
+          await runCommand("git", ["reset", "--hard", preMainRef], { cwd: root })
+          return {
+            ok: false,
+            error: `Delivery blocked — conflict markers found in: ${markerFiles.join(", ")}. origin/main was NOT updated.`,
+          }
+        }
       }
 
       // 5. Push main
@@ -268,6 +293,16 @@ export class WorkspaceManager {
 
     if (conflictedFiles.length === 0) return false
 
+    // Refuse auto-resolve for high-risk files (manifests, lockfiles)
+    const highRisk = conflictedFiles.filter(isHighRiskFile)
+    if (highRisk.length > 0) {
+      logger.error("workspace-manager", "Auto-resolve refused for high-risk files", {
+        branch,
+        highRiskFiles: highRisk,
+      })
+      return false
+    }
+
     logger.info("workspace-manager", `Auto-resolving ${conflictedFiles.length} rebase conflict(s)`, {
       branch,
       files: conflictedFiles.join(", "),
@@ -301,6 +336,22 @@ export class WorkspaceManager {
     return true
   }
 
+  /** Validate that the branch has no conflict markers in files changed from main. */
+  async validateBranchContent(
+    workspace: Workspace,
+  ): Promise<{ ok: boolean; conflictFiles?: string[]; diagnostics?: string }> {
+    const { stdout } = await runCommand("git", ["diff", "--name-only", "main...HEAD"], { cwd: workspace.path })
+    const changed = stdout.trim().split("\n").filter(Boolean)
+    if (!changed.length) return { ok: true }
+    const bad = await scanConflictMarkers(workspace.path, { ref: "HEAD", files: changed })
+    if (!bad.length) return { ok: true }
+    return {
+      ok: false,
+      conflictFiles: bad,
+      diagnostics: buildConflictDiagnostics(bad, "Conflict markers found in committed files"),
+    }
+  }
+
   // ── Safety-net: unfinished work detection ────────────────────────
 
   async detectUnfinishedWork(
@@ -322,10 +373,46 @@ export class WorkspaceManager {
     }
   }
 
-  async autoCommit(workspace: Workspace): Promise<{ ok: boolean }> {
+  async autoCommit(workspace: Workspace): Promise<{ ok: boolean; conflictFiles?: string[]; diagnostics?: string }> {
     const cwd = workspace.path
 
+    // Block: unmerged entries (active merge/rebase conflict state)
+    const unmerged = await getUnmergedFiles(cwd)
+    if (unmerged.length > 0) {
+      logger.error("workspace-manager", "Auto-commit blocked: unmerged entries", {
+        workspacePath: cwd,
+        files: unmerged,
+      })
+      return {
+        ok: false,
+        conflictFiles: unmerged,
+        diagnostics: buildConflictDiagnostics(unmerged, "Unmerged entries (active merge conflicts) found"),
+      }
+    }
+
+    // Stage everything except metadata
     await runCommand("git", ["add", "-A", "--", ".", ":!.agent-valley"], { cwd })
+
+    // Block: conflict markers in staged files
+    const { stdout: stagedOut } = await runCommand("git", ["diff", "--cached", "--name-only"], { cwd })
+    const stagedFiles = stagedOut.trim().split("\n").filter(Boolean)
+
+    if (stagedFiles.length > 0) {
+      const markerFiles = await scanConflictMarkers(cwd, { cached: true, files: stagedFiles })
+      if (markerFiles.length > 0) {
+        await runCommand("git", ["reset", "HEAD"], { cwd })
+        logger.error("workspace-manager", "Auto-commit blocked: conflict markers in staged files", {
+          workspacePath: cwd,
+          conflictFiles: markerFiles,
+        })
+        return {
+          ok: false,
+          conflictFiles: markerFiles,
+          diagnostics: buildConflictDiagnostics(markerFiles, "Conflict markers found in staged files"),
+        }
+      }
+    }
+
     const { exitCode } = await runCommand("git", ["commit", "-m", "chore: auto-commit unfinished agent work"], { cwd })
 
     if (exitCode !== 0) {

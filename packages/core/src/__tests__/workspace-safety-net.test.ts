@@ -132,6 +132,74 @@ describe("autoCommit", () => {
 
     expect(result.ok).toBe(false)
   })
+
+  test("refuses to commit files with conflict markers", async () => {
+    const conflictContent = [
+      "normal line",
+      "<<<<<<< HEAD",
+      "our change",
+      "=======",
+      "their change",
+      ">>>>>>> feature",
+      "normal line",
+    ].join("\n")
+    await writeFile(join(worktreeDir, "conflicted.ts"), conflictContent)
+
+    const result = await manager.autoCommit(makeWorkspace())
+
+    expect(result.ok).toBe(false)
+    expect(result.conflictFiles).toBeDefined()
+    expect(result.conflictFiles).toContain("conflicted.ts")
+    expect(result.diagnostics).toContain("Conflict markers")
+
+    // Verify file was NOT committed
+    const log = git("log --oneline -1", worktreeDir)
+    expect(log).not.toContain("auto-commit")
+  })
+
+  test("refuses when clean files mixed with conflicted files", async () => {
+    await writeFile(join(worktreeDir, "clean.ts"), "export const x = 1\n")
+    await writeFile(join(worktreeDir, "broken.ts"), "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n")
+
+    const result = await manager.autoCommit(makeWorkspace())
+
+    expect(result.ok).toBe(false)
+    expect(result.conflictFiles).toContain("broken.ts")
+    // Ensure nothing was committed
+    const status = git("status --porcelain", worktreeDir)
+    expect(status).toContain("clean.ts")
+  })
+})
+
+describe("validateBranchContent", () => {
+  test("returns ok for branch with clean committed files", async () => {
+    await writeFile(join(worktreeDir, "feature.ts"), "export const x = 1\n")
+    git("add .", worktreeDir)
+    git("commit -m 'add feature'", worktreeDir)
+
+    const result = await manager.validateBranchContent(makeWorkspace())
+
+    expect(result.ok).toBe(true)
+  })
+
+  test("detects conflict markers in committed files on branch", async () => {
+    const conflictContent = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n"
+    await writeFile(join(worktreeDir, "broken.ts"), conflictContent)
+    git("add .", worktreeDir)
+    git("commit -m 'commit with conflict markers'", worktreeDir)
+
+    const result = await manager.validateBranchContent(makeWorkspace())
+
+    expect(result.ok).toBe(false)
+    expect(result.conflictFiles).toContain("broken.ts")
+    expect(result.diagnostics).toContain("Conflict markers")
+  })
+
+  test("returns ok when branch has no changes from main", async () => {
+    const result = await manager.validateBranchContent(makeWorkspace())
+
+    expect(result.ok).toBe(true)
+  })
 })
 
 describe("getDiffStat", () => {

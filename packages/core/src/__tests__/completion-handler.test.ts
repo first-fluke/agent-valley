@@ -97,6 +97,11 @@ function makeMockWorkspaceManager(
     hasCodeChanges?: boolean
     diffStat?: string | null
     autoCommitOk?: boolean
+    autoCommitConflictFiles?: string[]
+    autoCommitDiagnostics?: string
+    branchValidationOk?: boolean
+    branchConflictFiles?: string[]
+    branchDiagnostics?: string
     mergeOk?: boolean
     pushOk?: boolean
   } = {},
@@ -106,12 +111,22 @@ function makeMockWorkspaceManager(
       hasUncommittedChanges: opts.hasUncommittedChanges ?? false,
       hasCodeChanges: opts.hasCodeChanges ?? false,
     }),
-    autoCommit: async () => ({ ok: opts.autoCommitOk ?? true }),
+    autoCommit: async () => ({
+      ok: opts.autoCommitOk ?? true,
+      conflictFiles: opts.autoCommitConflictFiles,
+      diagnostics: opts.autoCommitDiagnostics,
+    }),
+    validateBranchContent: async () => ({
+      ok: opts.branchValidationOk ?? true,
+      conflictFiles: opts.branchConflictFiles,
+      diagnostics: opts.branchDiagnostics,
+    }),
     getDiffStat: async () => opts.diffStat ?? null,
     mergeAndPush: async () => ({ ok: opts.mergeOk ?? true }),
     pushBranch: async () => ({ ok: opts.pushOk ?? true }),
     cleanup: async () => {},
     saveAttempt: async () => {},
+    createDraftPR: async () => ({ created: false }),
   }
 }
 
@@ -211,6 +226,85 @@ describe("createCompletionCallbacks", () => {
       })
 
       expect(autoCommitCalled).toBe(false)
+    })
+  })
+
+  describe("onComplete — conflict blocking", () => {
+    test("aborts delivery when autoCommit detects conflict markers", async () => {
+      const mockWm = makeMockWorkspaceManager({
+        hasUncommittedChanges: true,
+        hasCodeChanges: true,
+        autoCommitOk: false,
+        autoCommitConflictFiles: ["broken.ts"],
+        autoCommitDiagnostics: "Conflict markers found in staged files:\n  - broken.ts",
+      })
+
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      // Should emit agent.done with conflictBlocked flag
+      const doneEvent = events.find((e) => e.event === "agent.done")
+      expect(doneEvent?.payload.conflictBlocked).toBe(true)
+      // Should NOT trigger merge
+      expect(filledSlots).toBe(1)
+    })
+
+    test("aborts delivery when branch has committed conflict markers", async () => {
+      const mockWm = makeMockWorkspaceManager({
+        hasUncommittedChanges: false,
+        hasCodeChanges: true,
+        diffStat: "1 file changed",
+        branchValidationOk: false,
+        branchConflictFiles: ["corrupted.ts"],
+        branchDiagnostics: "Conflict markers found in committed files:\n  - corrupted.ts",
+      })
+
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      const doneEvent = events.find((e) => e.event === "agent.done")
+      expect(doneEvent?.payload.conflictBlocked).toBe(true)
+    })
+
+    test("proceeds with delivery when branch validation passes", async () => {
+      let merged = false
+      const mockWm = makeMockWorkspaceManager({
+        hasCodeChanges: true,
+        diffStat: "1 file",
+        branchValidationOk: true,
+        mergeOk: true,
+      })
+      mockWm.mergeAndPush = async () => {
+        merged = true
+        return { ok: true }
+      }
+
+      const deps = makeDeps(mockWm)
+      const route = makeRoute({ deliveryMode: "merge" })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), route)
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(merged).toBe(true)
     })
   })
 
