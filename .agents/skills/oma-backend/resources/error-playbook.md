@@ -7,11 +7,11 @@ Do NOT stop or ask for help until you have exhausted the playbook.
 
 ## Import / Module Not Found
 
-**Symptoms**: `ModuleNotFoundError`, `ImportError`, `No module named X`
+**Symptoms**: Module/package not found errors
 
 1. Check the import path — typo? wrong package name?
-2. Verify the dependency exists in `pyproject.toml` or `requirements.txt`
-3. If missing: note it in your result as "requires `pip install X`" — do NOT install yourself
+2. Verify the dependency exists in your package manifest
+3. If missing: note it in your result as "requires install the missing dependency" — do NOT install yourself
 4. If it's a local module: check the directory structure with `get_symbols_overview`
 5. If the path changed: use `search_for_pattern("class ClassName")` to find the new location
 
@@ -19,14 +19,14 @@ Do NOT stop or ask for help until you have exhausted the playbook.
 
 ## Test Failure
 
-**Symptoms**: `pytest` returns FAILED, assertion errors
+**Symptoms**: test runner returns FAILED, assertion errors
 
 1. Read the full error output — which test, which assertion, expected vs actual
 2. `find_symbol("test_function_name")` to read the test code
 3. Determine: is the test wrong or is the implementation wrong?
    - Test expects old behavior → update test
    - Implementation has a bug → fix implementation
-4. Re-run the specific test: `pytest path/to/test.py::test_name -v`
+4. Run the specific failing test with verbose output
 5. After fix, run full test suite to check for regressions
 6. **After 3 failures**: Try a different approach. Record current attempt in progress and implement alternative
 
@@ -34,13 +34,13 @@ Do NOT stop or ask for help until you have exhausted the playbook.
 
 ## Database Migration Error
 
-**Symptoms**: `alembic upgrade head` fails, `IntegrityError`, duplicate column
+**Symptoms**: Migration command fails, `IntegrityError`, duplicate column
 
 1. Read the error — is it a conflict with existing migration?
-2. Check current DB state: `alembic current`
-3. If migration conflicts: `alembic downgrade -1` then fix migration script
+2. Check current DB state: Check current migration state
+3. If migration conflicts: Rollback one migration step then fix migration script
 4. If schema mismatch: compare model with actual DB schema
-5. **NEVER do this**: `alembic stamp head` (risk of data loss)
+5. **NEVER do this**: Force-mark migrations as applied (risk of data loss)
 
 ---
 
@@ -60,9 +60,9 @@ Do NOT stop or ask for help until you have exhausted the playbook.
 
 **Symptoms**: API response > 500ms, many similar SQL queries in logs
 
-1. Enable SQL logging: `echo=True` on engine
+1. Enable SQL logging on the database connection
 2. Count queries for a single request
-3. If N+1: add `joinedload()` or `selectinload()` to the query
+3. If N+1: add eager loading strategy appropriate for your ORM to the query
 4. If slow single query: check indexes with `EXPLAIN ANALYZE`
 5. If still slow: consider caching with Redis
 

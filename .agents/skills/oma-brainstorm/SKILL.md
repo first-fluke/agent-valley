@@ -52,4 +52,4 @@ Source files live under `../_shared/runtime/execution-protocols/{vendor}.md`.
 - Reasoning templates: `../_shared/core/reasoning-templates.md`
 - Clarification protocol: `../_shared/core/clarification-protocol.md`
 - Quality principles: `../_shared/core/quality-principles.md`
-- Skill routing: `../_shared/core/skill-routing.md`
+- Skill-to-agent mapping: `../_shared/core/skill-routing.md`

@@ -15,6 +15,10 @@ description: Initialize project harness — AGENTS.md as table of contents, ARCH
 
 ---
 
+> **Vendor note:** This workflow executes inline (no subagent spawning). All vendors use their native file exploration, code analysis, and file writing tools.
+
+---
+
 ## Core Philosophy
 
 **AGENTS.md is a table of contents, not an encyclopedia.**

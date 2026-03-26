@@ -7,15 +7,15 @@ Routing rules for oma-orchestrator and oma-coordination to assign tasks to the c
 Skills use two-stage loading to optimize context usage:
 
 1. **Stage 1 (always loaded)**: `name` and `description` from SKILL.md frontmatter
-2. **Stage 2 (on match)**: Full SKILL.md body loaded only when the description matches the user's request
+2. **Stage 2 (on explicit invocation)**: Full SKILL.md body loaded only when skill is explicitly requested via /command or agent skills field
 
-Match the user's request keywords against each skill's `description`. Load full instructions only for matched skills.
+Skills are explicitly loaded via /command invocation or agent skills field. Load full instructions only for explicitly requested skills.
 
 ---
 
-## Keyword → Skill Mapping
+## Skill → Agent Mapping
 
-| User Request Keywords | Primary Skill | Notes |
+| Skill Domain | Primary Skill | Notes |
 |----------------------|---------------|-------|
 | API, endpoint, REST, GraphQL, database, migration | **oma-backend** | |
 | auth, JWT, login, register, password | **oma-backend** | Auth UI task can also be created for frontend |
@@ -26,6 +26,7 @@ Match the user's request keywords against each skill's `description`. Load full 
 | bug, error, crash, broken, slow | **oma-debug** | |
 | review, security, performance | **oma-qa** | |
 | accessibility, WCAG, a11y | **oma-qa** | |
+| UI design, design system, landing page, DESIGN.md, color palette, typography, glassmorphism, responsive design | **oma-design** | |
 | brainstorm, ideate, design, explore, idea, concept | **oma-brainstorm** | Run before oma-pm |
 | plan, breakdown, task, sprint | **oma-pm** | |
 | automatic, parallel, orchestrate | **oma-orchestrator** | |
@@ -46,6 +47,9 @@ Match the user's request keywords against each skill's `description`. Load full 
 | "Let's design something new" | oma-brainstorm → oma-pm → relevant agents → oma-qa |
 | "Do everything automatically" | oma-orchestrator (internally oma-pm → agents → oma-qa) |
 | "I'll manage manually" | oma-coordination |
+| "Design and build a landing page" | oma-design → oma-frontend |
+| "Design, build, and review" | oma-design → oma-frontend → oma-qa |
+| "Redesign based on this URL" | oma-design (Phase 2 EXTRACT) → oma-frontend |
 
 ---
 

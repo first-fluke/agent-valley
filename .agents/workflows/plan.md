@@ -15,6 +15,10 @@ description: PM planning workflow — analyze requirements, select tech stack, d
 
 ---
 
+> **Vendor note:** This workflow executes inline (no subagent spawning). All vendors use their native code analysis tools. The saved plan (`.agents/plan.json`) is consumed by `/orchestrate` or `/coordinate`, which handle their own vendor detection.
+
+---
+
 ## Step 1: Gather Requirements
 
 Ask the user to describe what they want to build. Clarify:

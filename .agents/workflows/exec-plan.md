@@ -10,6 +10,10 @@ description: Create, manage, and track execution plans as first-class repository
 
 ---
 
+> **Vendor note:** This workflow executes inline (no subagent spawning). All vendors use their native file and code analysis tools. Execution handoff in Step 5 delegates to `/orchestrate` or `/coordinate`, which handle their own vendor detection.
+
+---
+
 ## Core Philosophy
 
 **Execution plans are first-class artifacts, checked into the repository.**

@@ -5,18 +5,18 @@
  * Follow this structure for consistency.
  */
 
-import type { ReactNode } from "react"
-import { cn } from "@/lib/utils"
+import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 // 1. Type Definitions
 interface ComponentNameProps {
-  className?: string
-  children: ReactNode
+  className?: string;
+  children: ReactNode;
   // Add specific props here
-  variant?: "default" | "primary" | "secondary"
-  size?: "sm" | "md" | "lg"
-  onClick?: () => void
-  disabled?: boolean
+  variant?: "default" | "primary" | "secondary";
+  size?: "sm" | "md" | "lg";
+  onClick?: () => void;
+  disabled?: boolean;
 }
 
 // 2. Main Component
@@ -36,9 +36,9 @@ export function ComponentName({
 
   // 5. Event Handlers
   const handleClick = () => {
-    if (disabled) return
-    onClick?.()
-  }
+    if (disabled) return;
+    onClick?.();
+  };
 
   // 6. Computed Values
   const classes = cn(
@@ -46,8 +46,10 @@ export function ComponentName({
     "inline-flex items-center justify-center rounded-md font-medium transition-colors",
     // Variants
     {
-      "bg-primary text-primary-foreground hover:bg-primary/90": variant === "primary",
-      "bg-secondary text-secondary-foreground hover:bg-secondary/80": variant === "secondary",
+      "bg-primary text-primary-foreground hover:bg-primary/90":
+        variant === "primary",
+      "bg-secondary text-secondary-foreground hover:bg-secondary/80":
+        variant === "secondary",
       "bg-background text-foreground hover:bg-accent": variant === "default",
     },
     // Sizes
@@ -61,20 +63,31 @@ export function ComponentName({
       "opacity-50 cursor-not-allowed": disabled,
     },
     className,
-  )
+  );
 
   // 7. Render
   return (
-    <button type="button" className={classes} onClick={handleClick} disabled={disabled} aria-disabled={disabled}>
+    <button
+      type="button"
+      className={classes}
+      onClick={handleClick}
+      disabled={disabled}
+      aria-disabled={disabled}
+    >
       {children}
     </button>
-  )
+  );
 }
 
 // 8. Sub-components (if needed)
-ComponentName.Slot = function ComponentNameSlot({ className, children }: ComponentNameProps) {
-  return <div className={cn("flex items-center gap-2", className)}>{children}</div>
-}
+ComponentName.Slot = function ComponentNameSlot({
+  className,
+  children,
+}: ComponentNameProps) {
+  return (
+    <div className={cn("flex items-center gap-2", className)}>{children}</div>
+  );
+};
 
 // 9. Display Name (for debugging)
-ComponentName.displayName = "ComponentName"
+ComponentName.displayName = "ComponentName";

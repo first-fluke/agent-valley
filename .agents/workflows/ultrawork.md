@@ -17,6 +17,13 @@ description: Ultrawork - high-quality 5-phase development workflow with 11 revie
 
 ---
 
+## Vendor Detection
+
+Before starting, determine your runtime environment by following `.agents/skills/_shared/core/vendor-detection.md`.
+The detected vendor determines how agents are spawned in Phase 2 (IMPL), Phase 3 (VERIFY), Phase 4 (REFINE), and Phase 5 (SHIP).
+
+---
+
 ## Phase 0: Initialization (DO NOT SKIP)
 
 1. Read `.agents/skills/oma-coordination/SKILL.md` and confirm Core Rules.
@@ -74,7 +81,17 @@ Activate PM Agent to execute Steps 1-4:
 ### Step 5: Implementation
 // turbo
 Spawn Implementation Agents (Backend/Frontend/Mobile) in parallel.
-Command:
+
+#### If Claude Code
+Use the Agent tool to spawn subagents:
+- `Agent(subagent_type="backend-engineer", prompt="Implement backend tasks per plan. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
+- `Agent(subagent_type="frontend-engineer", prompt="Implement frontend tasks per plan. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
+- Multiple Agent tool calls in the same message = true parallel execution
+
+#### If Codex CLI
+Request parallel subagent execution with the specific implementation tasks per plan.
+
+#### If Gemini CLI or Antigravity or CLI Fallback
 ```bash
 oh-my-ag agent:spawn backend "Implement backend tasks per plan. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id -w ./backend &
 oh-my-ag agent:spawn frontend "Implement frontend tasks per plan. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id -w ./frontend &
@@ -122,7 +139,18 @@ If no measurement tools: skip — gates fall back to binary checklist.
 ### Step 6-8: QA Verification
 // turbo
 Spawn QA Agent to execute Steps 6-8.
-Command: `oh-my-ag agent:spawn qa-agent "Execute Phase 3 Verification. Step 6: Alignment Review. Step 7: Security/Bug Review (npm audit, OWASP). Step 8: Improvement/Regression Review. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id`
+
+#### If Claude Code
+Use the Agent tool to spawn subagent:
+- `Agent(subagent_type="qa-reviewer", prompt="Execute Phase 3 Verification. Step 6: Alignment Review. Step 7: Security/Bug Review (npm audit, OWASP). Step 8: Improvement/Regression Review. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
+
+#### If Codex CLI
+Request parallel subagent execution with the QA verification tasks.
+
+#### If Gemini CLI or Antigravity or CLI Fallback
+```bash
+oh-my-ag agent:spawn qa-agent "Execute Phase 3 Verification. Step 6: Alignment Review. Step 7: Security/Bug Review (npm audit, OWASP). Step 8: Improvement/Regression Review. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id
+```
 
 ---
 
@@ -179,7 +207,18 @@ If baseline was measured at Step 5.2:
 ### Step 9-13: Deep Refinement
 // turbo
 Spawn Debug Agent (or Senior Dev Agent) to execute Steps 9-13.
-Command: `oh-my-ag agent:spawn debug-agent "Execute Phase 4 Refine. Step 9: Split large files. Step 10: Integration check. Step 11: Side Effect analysis (find_referencing_symbols). Step 12: Consistency review. Step 13: Cleanup dead code. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id`
+
+#### If Claude Code
+Use the Agent tool to spawn subagent:
+- `Agent(subagent_type="debug-investigator", prompt="Execute Phase 4 Refine. Step 9: Split large files. Step 10: Integration check. Step 11: Side Effect analysis (find_referencing_symbols). Step 12: Consistency review. Step 13: Cleanup dead code. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
+
+#### If Codex CLI
+Request parallel subagent execution with the refinement tasks.
+
+#### If Gemini CLI or Antigravity or CLI Fallback
+```bash
+oh-my-ag agent:spawn debug-agent "Execute Phase 4 Refine. Step 9: Split large files. Step 10: Integration check. Step 11: Side Effect analysis (find_referencing_symbols). Step 12: Consistency review. Step 13: Cleanup dead code. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id
+```
 
 ---
 
@@ -236,7 +275,18 @@ If baseline was measured at Step 5.2:
 ### Step 14-17: Final QA & Deployment Readiness
 // turbo
 Spawn QA Agent to execute Steps 14-17.
-Command: `oh-my-ag agent:spawn qa-agent "Execute Phase 5 Ship. Step 14: Quality Review (lint/coverage). Step 15: UX Flow Verification. Step 16: Related Issues Review. Step 17: Deployment Readiness. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id`
+
+#### If Claude Code
+Use the Agent tool to spawn subagent:
+- `Agent(subagent_type="qa-reviewer", prompt="Execute Phase 5 Ship. Step 14: Quality Review (lint/coverage). Step 15: UX Flow Verification. Step 16: Related Issues Review. Step 17: Deployment Readiness. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
+
+#### If Codex CLI
+Request parallel subagent execution with the final QA and deployment readiness tasks.
+
+#### If Gemini CLI or Antigravity or CLI Fallback
+```bash
+oh-my-ag agent:spawn qa-agent "Execute Phase 5 Ship. Step 14: Quality Review (lint/coverage). Step 15: UX Flow Verification. Step 16: Related Issues Review. Step 17: Deployment Readiness. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id
+```
 
 ---
 
@@ -262,13 +312,22 @@ Command: `oh-my-ag agent:spawn qa-agent "Execute Phase 5 Ship. Step 14: Quality 
 ### Step 17: Deployment Readiness Review (Final)
 - **Executed by QA Agent**: Secrets, Migrations, checklist.
 
-### Step 17.1: Final Quality Score & Experiment Ledger Summary (Conditional)
+### Step 17.1: Final Quality Score & Session Summary (Conditional)
 
 If Quality Score was measured during this session:
 1. Measure final Quality Score
 2. Generate Experiment Ledger summary (total experiments, keep rate, net delta)
 3. Auto-generate lessons from discarded experiments (delta <= -5) into `lessons-learned.md`
 4. Append Quality Score Progression and Experiment Summary to session metrics
+
+**Always** (regardless of Quality Score availability):
+5. Record Evaluator Accuracy events for this session:
+   - Review all QA findings: any disputed by impl agents? → `false_positive`
+   - Review runtime verification results: any stubs caught that static review missed? → `missed_stub`
+   - Review impl agent self-check results: any bugs caught by QA that self-check missed? → `good_catch`
+6. Append EA events to `session-metrics.md`
+7. If rolling 3-session EA >= 30: Flag in final report
+   → "QA tuning suggested. Run `oh-my-ag retro` to review."
 
 ### SHIP_GATE
 - [ ] Quality checks pass

@@ -22,15 +22,15 @@
 ### Security
 - [x] All endpoints require JWT auth
 - [x] User can only access own todos (user_id filter)
-- [x] Input validated with Pydantic
+- [x] Input validated with schema validation
 
 ### Files Created
-- app/models/todo.py
-- app/schemas/todo.py
-- app/services/todo_service.py
-- app/api/todos.py
-- tests/test_todos.py
-- alembic/versions/xxx_add_todos.py
+- app/models/todo.*
+- app/schemas/todo.*
+- app/services/todo_service.*
+- app/api/todos.*
+- tests/test_todos.*
+- migrations/xxx_add_todos.*
 ```
 
 ## Example 2: Authentication System
@@ -51,15 +51,15 @@
 - [x] Access token: 15min expiry
 - [x] Refresh token: 7 day expiry, single-use rotation
 - [x] Rate limiting: 5 attempts/min on login
-- [x] Email validation with Pydantic EmailStr
+- [x] Email validation enforced
 
 ### Files Created
-- app/models/user.py
-- app/schemas/auth.py
-- app/services/auth_service.py
-- app/api/auth.py
-- app/core/security.py (JWT helpers, password hashing)
-- tests/test_auth.py
+- app/models/user.*
+- app/schemas/auth.*
+- app/services/auth_service.*
+- app/api/auth.*
+- app/core/security.* (JWT helpers, password hashing)
+- tests/test_auth.*
 ```
 
 ## Example 3: Fixing N+1 Query
@@ -74,12 +74,12 @@
 Each post triggers a separate query for its author (N+1 problem).
 
 ### Fix
-Added joinedload(Post.author) to the query.
+Added eager loading for the Post.author relation.
 
 ### Before: 51 queries (1 + 50)
 ### After: 1 query with JOIN
 
 ### Files Modified
-- app/api/posts.py (added eager loading)
-- tests/test_posts.py (added performance assertion)
+- app/api/posts.* (added eager loading)
+- tests/test_posts.* (added performance assertion)
 ```

@@ -16,6 +16,13 @@ description: Automated CLI-based parallel agent execution — spawn subagents vi
 
 ---
 
+## Vendor Detection
+
+Before starting, determine your runtime environment by following `.agents/skills/_shared/core/vendor-detection.md`.
+The detected vendor determines how agents are spawned (Step 3) and monitored (Step 4).
+
+---
+
 ## Step 0: Preparation (DO NOT SKIP)
 
 1. Read `.agents/skills/oma-coordination/SKILL.md` and confirm Core Rules.
@@ -65,9 +72,42 @@ Check if `.agents/plan.json` exists.
 // turbo
 For each priority tier (P0 first, then P1, etc.):
 
-- Spawn agents using `oh-my-ag agent:spawn {agent_id} {prompt_file} {session_id} -w {workspace}`.
 - Each agent gets: task description, API contracts, relevant context from `_shared/core/context-loading.md`.
 - Use memory edit tool to update `task-board.md` with agent status.
+
+### If Claude Code
+
+Spawn agents via **Agent tool** using `.claude/agents/{agent}.md` definitions.
+
+- **Multiple Agent tool calls in same message** = true parallel execution
+- Agent mapping:
+
+| Domain | Subagent File |
+|:------|:---------------|
+| backend | `.claude/agents/backend-engineer.md` |
+| frontend | `.claude/agents/frontend-engineer.md` |
+| mobile | `.claude/agents/mobile-engineer.md` |
+| db | `.claude/agents/db-engineer.md` |
+| qa | `.claude/agents/qa-reviewer.md` |
+| debug | `.claude/agents/debug-investigator.md` |
+| pm | `.claude/agents/pm-planner.md` |
+
+- Include API contracts from `.agents/skills/_shared/api-contracts/` if they exist
+- Load only task-relevant context (check codebase structure around affected domains)
+
+### If Codex CLI
+
+Request parallel subagent execution via model-mediated parallel subagent request.
+Each subagent receives task description, API contracts, and relevant context.
+Results are returned as JSON output.
+
+### If Gemini CLI
+
+Spawn agents using `oh-my-ag agent:spawn {agent_id} {prompt_file} {session_id} -w {workspace}`.
+
+### If Antigravity or CLI Fallback
+
+Spawn agents using `oh-my-ag agent:spawn {agent_id} {prompt_file} {session_id} -w {workspace}` only (custom subagents not available).
 
 ---
 
@@ -78,6 +118,28 @@ Also use memory read tool to poll `progress-{agent}.md` for logic updates.
 
 - Use memory edit tool to update `task-board.md` with turn counts and status changes.
 - Watch for: completion, failures, crashes.
+
+### Context Anxiety Check (per polling cycle)
+
+At each poll, evaluate for every in-progress agent:
+
+1. **Turn budget ratio**: `turns_used / expected_turns` from difficulty guide
+2. **Progress ratio**: `completed_criteria / total_criteria` from task-board
+
+| Turn Budget | Progress | Action |
+|-------------|----------|--------|
+| < 80% | any | Continue monitoring |
+| >= 80% | >= 50% | Continue — agent is on track to finish |
+| >= 80% | < 50% | **Context Reset**: Checkpoint + re-spawn (see `_shared/core/context-budget.md`) |
+| 100% (max turns) | < 100% | **Context Reset**: Force checkpoint + re-spawn with remaining items |
+
+Record reset events in `task-board.md`:
+```
+| Agent | Status | Note |
+| backend | reset-1 | Turn budget 80%, progress 40%, checkpoint saved |
+```
+
+> **Claude Code note**: Agent tool returns results synchronously — no polling needed. Check status, files changed, and issues directly in each agent's return value.
 
 ---
 

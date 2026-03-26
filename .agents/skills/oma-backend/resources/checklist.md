@@ -5,12 +5,12 @@ Run through every item before submitting your work.
 ## API Design
 - [ ] RESTful conventions followed (proper HTTP methods, status codes)
 - [ ] OpenAPI documentation complete (all endpoints documented)
-- [ ] Request/response schemas defined with Pydantic
+- [ ] Request/response schemas defined with validation library
 - [ ] Pagination for list endpoints returning > 20 items
 - [ ] Consistent error response format
 
 ## Database
-- [ ] Migrations created (Alembic) and tested
+- [ ] Migrations created and tested
 - [ ] Indexes on foreign keys and frequently queried columns
 - [ ] No N+1 queries; relation loading strategy chosen explicitly for the ORM in use
 - [ ] No over-fetching; selected only required fields/columns/attributes
@@ -22,7 +22,7 @@ Run through every item before submitting your work.
 - [ ] JWT authentication on protected endpoints
 - [ ] Password hashing with bcrypt (cost 10-12)
 - [ ] Rate limiting on auth endpoints
-- [ ] Input validation with Pydantic (no raw user input in queries)
+- [ ] Input validation enforced (no raw user input in queries)
 - [ ] SQL injection protected (ORM or parameterized queries)
 - [ ] No secrets in code or logs
 
@@ -36,4 +36,4 @@ Run through every item before submitting your work.
 - [ ] Clean architecture layers: router -> service -> repository
 - [ ] No business logic in route handlers
 - [ ] Async/await used consistently
-- [ ] Type hints on all function signatures
+- [ ] Type annotations on all function signatures

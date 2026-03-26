@@ -30,11 +30,11 @@ Follow these steps in order (adjust depth by difficulty).
 ## Step 3: Implement
 - Create/modify files in this order:
   1. Database models + migrations
-  2. Pydantic schemas (request/response)
+  2. Validation schemas (request/response)
   3. Service layer (business logic)
   4. API routes (thin, delegate to services)
   5. Tests (unit + integration)
-- Use `resources/api-template.py` as reference
+- Use `stack/api-template.*` as reference
 - Follow clean architecture: router -> service -> repository -> models
 
 ## Step 4: Verify

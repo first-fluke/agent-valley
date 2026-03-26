@@ -17,6 +17,13 @@ description: Coordinate multiple agents for a complex multi-domain project using
 
 ---
 
+## Vendor Detection
+
+Before starting, determine your runtime environment by following `.agents/skills/_shared/core/vendor-detection.md`.
+The detected vendor determines how agents are spawned (Step 4) and monitored (Step 5).
+
+---
+
 ## Step 0: Preparation (DO NOT SKIP)
 
 1. Read `.agents/skills/oma-coordination/SKILL.md` and confirm Core Rules.
@@ -66,18 +73,26 @@ Present the PM Agent's task breakdown to the user:
 ## Step 4: Spawn Agents by Priority Tier
 
 // turbo
-Spawn agents using CLI for each task:
+Spawn agents for each task by priority tier (P0 first, then P1, etc.).
+Spawn all same-priority tasks in parallel. Assign separate workspaces to avoid file conflicts.
 
+### If Claude Code
+Use the Agent tool to spawn subagents:
+- `Agent(subagent_type="backend-engineer", prompt="Implement backend tasks per plan.", run_in_background=true)`
+- `Agent(subagent_type="frontend-engineer", prompt="Implement frontend tasks per plan.", run_in_background=true)`
+- Multiple Agent tool calls in the same message = true parallel execution
+- Agent definitions: `.claude/agents/{agent}.md`
+
+### If Codex CLI
+Request parallel subagent execution with the specific tasks.
+Pass each agent its task description, API contracts, and relevant context.
+
+### If Gemini CLI or Antigravity or CLI Fallback
 ```bash
-# Example: spawn backend and frontend in parallel
 oh-my-ag agent:spawn backend "task description" session-id -w ./backend &
 oh-my-ag agent:spawn frontend "task description" session-id -w ./frontend &
 wait
 ```
-
-1. Use spawn-agent.sh for each task (respects agent_cli_mapping from user-preferences.yaml)
-2. Spawn all same-priority tasks in parallel using background processes
-3. Assign separate workspaces to avoid file conflicts
 
 ---
 

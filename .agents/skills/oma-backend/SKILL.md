@@ -1,6 +1,6 @@
 ---
 name: oma-backend
-description: Backend specialist for APIs, databases, authentication using FastAPI with clean architecture (Repository/Service/Router pattern). Use for API, endpoint, REST, database, server, migration, and auth work.
+description: Backend specialist for APIs, databases, authentication with clean architecture (Repository/Service/Router pattern). Use for API, endpoint, REST, database, server, migration, and auth work.
 ---
 
 # Backend Agent - API & Server Specialist
@@ -16,12 +16,12 @@ description: Backend specialist for APIs, databases, authentication using FastAP
 - Frontend UI -> use Frontend Agent
 - Mobile-specific code -> use Mobile Agent
 
-## Core Rules
+## Core Principles
 
 1. **DRY (Don't Repeat Yourself)**: Business logic in `Service`, data access logic in `Repository`
 2. **SOLID**:
    - **Single Responsibility**: Classes and functions should have one responsibility
-   - **Dependency Inversion**: Use FastAPI's `Depends` for dependency injection
+   - **Dependency Inversion**: Use your framework's DI mechanism
 3. **KISS**: Keep it simple and clear
 
 ## Architecture Pattern
@@ -31,55 +31,42 @@ Router (HTTP) → Service (Business Logic) → Repository (Data Access) → Mode
 ```
 
 ### Repository Layer
-- **File**: `src/[domain]/repository.py`
-- **Role**: Encapsulate DB CRUD and query logic
-- **Principle**: No business logic, return SQLAlchemy models
+- Encapsulate DB CRUD and query logic
+- No business logic, return ORM entities
 
 ### Service Layer
-- **File**: `src/[domain]/service.py`
-- **Role**: Business logic, Repository composition, external API calls
-- **Principle**: Business decisions only here
+- Business logic, Repository composition, external API calls
+- Business decisions only here
 
 ### Router Layer
-- **File**: `src/[domain]/router.py`
-- **Role**: Receive HTTP requests, input validation, call Service, return response
-- **Principle**: No business logic, inject Service via DI
+- Receive HTTP requests, input validation, call Service, return response
+- No business logic, inject Service via DI
 
 ## Core Rules
 
 1. **Clean architecture**: router → service → repository → models
 2. **No business logic in route handlers**
-3. **All inputs validated with Pydantic**
+3. **All inputs validated** with your stack's validation library
 4. **Parameterized queries only** (never string interpolation)
 5. **JWT + bcrypt for auth**; rate limit auth endpoints
-6. **Async/await consistently**; type hints on all signatures
-7. **Custom exceptions** via `src/lib/exceptions.py` (not raw HTTPException)
+6. **Async where supported**; type annotations on all signatures
+7. **Custom exceptions** via centralized error module (not raw HTTP exceptions)
 8. **Explicit ORM loading strategy**: do not rely on default relation loading when query shape matters
 9. **Explicit transaction boundaries**: group one business operation into one request/service-scoped unit of work
 10. **Safe ORM lifecycle**: do not share mutable ORM session/entity manager/client objects across concurrent work unless the ORM explicitly supports it
 
-## Dependency Injection
+## Stack Detection (Priority Order)
 
-```python
-# src/recipes/routers/dependencies.py
-async def get_recipe_service(db: AsyncSession = Depends(get_db)) -> RecipeService:
-    repository = RecipeRepository(db)
-    return RecipeService(repository)
+1. **Project files first** — Read existing code, package manifests (pyproject.toml, package.json, Cargo.toml, go.mod, pom.xml, etc.) to determine the tech stack
+2. **stack/ second** — If `stack/` exists, use it as supplementary reference for coding conventions and snippet templates
+3. **Neither exists** — Ask the user or suggest running `/stack-set`
 
-# src/recipes/routers/base_router.py
-@router.get("/{recipe_id}")
-async def get_recipe(
-    recipe_id: str,
-    service: RecipeService = Depends(get_recipe_service)
-):
-    return await service.get_recipe(recipe_id)
-```
+## Stack-Specific Reference
 
-## Code Quality
-
-- **Python 3.12+**: Strict type hints (mypy)
-- **Async/Await**: Required for I/O-bound operations
-- **Ruff**: Linting/formatting (Double Quotes, Line Length 100)
+- Tech stack & libraries: `stack/tech-stack.md`
+- Code snippets (copy-paste ready): `stack/snippets.md`
+- API template: `stack/api-template.*`
+- Stack config: `stack/stack.yaml`
 
 ## How to Execute
 
@@ -97,17 +84,11 @@ Source files live under `../_shared/runtime/execution-protocols/{vendor}.md`.
 
 - Execution steps: `resources/execution-protocol.md`
 - Code examples: `resources/examples.md`
-- Code snippets: `resources/snippets.md`
 - Checklist: `resources/checklist.md`
 - ORM reference: `resources/orm-reference.md`
 - Error recovery: `resources/error-playbook.md`
-- Tech stack: `resources/tech-stack.md`
-- API template: `resources/api-template.py`
 - Context loading: `../_shared/core/context-loading.md`
 - Reasoning templates: `../_shared/core/reasoning-templates.md`
 - Clarification: `../_shared/core/clarification-protocol.md`
 - Context budget: `../_shared/core/context-budget.md`
 - Lessons learned: `../_shared/core/lessons-learned.md`
-
-> [!IMPORTANT]
-> When adding new modules, always include `__init__.py` to maintain package structure
