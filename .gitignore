@@ -47,3 +47,4 @@ docs/plans/
 # av daemon
 .av.pid
 .av.log
+.agent-valley/

@@ -231,4 +231,117 @@ describe("mergeAndPush — rebase-based delivery", () => {
     git(repoDir, ["checkout", "main"])
     expect(readFile(resolve(repoDir, "package-lock.json"))).toContain('"version": "2.0.0"')
   })
+
+  test("blocks merge when feature branch has pre-committed conflict markers", async () => {
+    // Simulate an agent that accidentally committed conflict markers
+    git(repoDir, ["checkout", "-b", "feature/TEST-6"])
+    mkdirSync(resolve(repoDir, "src", "store"), { recursive: true })
+    writeFileSync(
+      resolve(repoDir, "src/store/auth.ts"),
+      [
+        "<<<<<<< HEAD",
+        'import { authClient } from "./auth-client"',
+        "=======",
+        'import { betterAuth } from "better-auth"',
+        ">>>>>>> 2c83c4e",
+        "",
+        "export const store = {}",
+      ].join("\n") + "\n",
+    )
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat(web,api): integrate better-auth for authentication"])
+
+    const workspace = {
+      id: "t",
+      key: "TEST-6",
+      path: resolve(repoDir, "TEST-6"),
+      issueId: "t",
+      branch: "feature/TEST-6",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("conflict marker")
+
+    // Verify origin/main was NOT corrupted
+    const remoteMain = git(bareDir, ["log", "--oneline", "main"])
+    expect(remoteMain).not.toContain("better-auth")
+  })
+
+  test("blocks merge when feature branch has conflict markers in package.json", async () => {
+    // Pre-committed conflict markers in a high-risk file
+    git(repoDir, ["checkout", "-b", "feature/TEST-7"])
+    writeFileSync(
+      resolve(repoDir, "package.json"),
+      [
+        "{",
+        '  "name": "demo",',
+        "<<<<<<< HEAD",
+        '  "dependencies": { "left-pad": "1.0.0" }',
+        "=======",
+        '  "dependencies": { "right-pad": "2.0.0" }',
+        ">>>>>>>",
+        "}",
+      ].join("\n") + "\n",
+    )
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: add dependencies"])
+
+    const workspace = {
+      id: "t",
+      key: "TEST-7",
+      path: resolve(repoDir, "TEST-7"),
+      issueId: "t",
+      branch: "feature/TEST-7",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("conflict marker")
+
+    // Verify origin/main is untouched — still has original initial commit only
+    const remoteLog = git(bareDir, ["log", "--oneline", "main"])
+    expect(remoteLog).not.toContain("add dependencies")
+
+    // Verify local main is also clean
+    git(repoDir, ["checkout", "main"])
+    const localLog = git(repoDir, ["log", "--oneline"])
+    expect(localLog).not.toContain("add dependencies")
+  })
+
+  test("origin/main is never pushed when pre-rebase validation fails", async () => {
+    // Record the remote main HEAD before the merge attempt
+    const remoteHeadBefore = git(bareDir, ["rev-parse", "main"])
+
+    // Feature branch with conflict markers in multiple files
+    git(repoDir, ["checkout", "-b", "feature/TEST-8"])
+    writeFileSync(
+      resolve(repoDir, "middleware.ts"),
+      "<<<<<<< HEAD\nexport default {}\n=======\nexport default { auth: true }\n>>>>>>>\n",
+    )
+    writeFileSync(resolve(repoDir, "clean-file.ts"), "export const clean = true\n")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: add middleware"])
+
+    const workspace = {
+      id: "t",
+      key: "TEST-8",
+      path: resolve(repoDir, "TEST-8"),
+      issueId: "t",
+      branch: "feature/TEST-8",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    expect(result.ok).toBe(false)
+
+    // The critical guarantee: origin/main HEAD has not moved
+    const remoteHeadAfter = git(bareDir, ["rev-parse", "main"])
+    expect(remoteHeadAfter).toBe(remoteHeadBefore)
+  })
 })
