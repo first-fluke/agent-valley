@@ -1,5 +1,5 @@
 import { getOrchestrator } from "@/lib/orchestrator-singleton"
-import { env } from "@/lib/env"
+import { toOrchestratorConfig } from "@/lib/env"
 
 export const dynamic = "force-dynamic"
 
@@ -58,7 +58,7 @@ export async function GET() {
           activeWorkspaces: [],
           activeAgents: 0,
           retryQueueSize: 0,
-          config: { agentType: env.AGENT_TYPE, maxParallel: env.MAX_PARALLEL, serverPort: env.SERVER_PORT },
+          config: (() => { try { const c = toOrchestratorConfig(); return { agentType: c.agentType, maxParallel: c.maxParallel, serverPort: c.serverPort } } catch { return {} } })(),
         })
       }
 
