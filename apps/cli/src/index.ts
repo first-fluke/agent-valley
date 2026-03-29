@@ -1,7 +1,5 @@
-#!/usr/bin/env bun
-
 /**
- * CLI entry point — `bun av`
+ * CLI entry point — `av` / `agent-valley`
  *
  * Commands:
  *   up       Start dashboard + ngrok as background daemon
@@ -140,7 +138,7 @@ program
 
     const port = process.env.SERVER_PORT ?? "9741"
     const dashboardCwd = resolve(ROOT, "apps/dashboard")
-    const supervisorScript = resolve(import.meta.dirname, "supervisor.ts")
+    const supervisorScript = resolve(import.meta.dirname, "supervisor.js")
 
     // Build first, then run in production mode (Turbopack dev eats 100% CPU)
     console.log(pc.dim("  Building dashboard..."))

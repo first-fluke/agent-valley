@@ -1,13 +1,35 @@
 {
-  "name": "@agent-valley/cli",
+  "name": "agent-valley",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "bin": {
-    "av": "src/index.ts"
+  "description": "AI agent orchestrator — dispatch Linear issues to Claude, Codex, and Gemini agents in isolated git worktrees",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/first-fluke/agent-valley.git",
+    "directory": "apps/cli"
   },
+  "keywords": [
+    "ai",
+    "agent",
+    "orchestrator",
+    "linear",
+    "claude",
+    "codex",
+    "gemini",
+    "cli"
+  ],
+  "bin": {
+    "av": "dist/index.js",
+    "agent-valley": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "av": "bun run src/index.ts"
+    "av": "bun run src/index.ts",
+    "build": "bun run build.ts",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
     "@agent-valley/core": "workspace:*",
