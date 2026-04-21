@@ -44,17 +44,19 @@ Tests run via `bun test` (vitest). CI runs `validate.sh` + tests.
 **Clean architecture layers — dependencies point downward only:**
 
 ```
-Presentation   dashboard/src/app/api/ Next.js Route Handlers (/api/webhook, /api/status, /api/health)
+Presentation   apps/dashboard/src/app/api/   Next.js Route Handlers (/api/webhook, /api/status, /api/events, /api/health)
+               apps/cli/src/                 commander-based `av` CLI
      ↓
-Application    src/orchestrator/    Orchestrator (state machine), AgentRunnerService, RetryQueue
+Application    packages/core/src/orchestrator/   Orchestrator (state machine), AgentRunnerService, RetryQueue, DagScheduler
      ↓
-Domain         src/domain/          Pure types: Issue, Workspace, RunAttempt, OrchestratorRuntimeState
+Domain         packages/core/src/domain/         Pure types: Issue, Workspace, RunAttempt, OrchestratorRuntimeState, DAG, Ledger
      ↓
-Infrastructure src/tracker/         Linear GraphQL client + webhook HMAC + state mutations + comments
-               src/workspace/       Git worktree lifecycle
-               src/sessions/        AgentSession implementations (Claude, Codex, Gemini)
-               src/config/          Zod-based YAML config validation (settings.yaml + valley.yaml)
-               src/observability/   Structured JSON/text logger
+Infrastructure packages/core/src/tracker/        Linear GraphQL client + webhook HMAC + state mutations + comments
+               packages/core/src/workspace/      Git worktree lifecycle
+               packages/core/src/sessions/       AgentSession implementations (Claude, Codex, Gemini)
+               packages/core/src/config/         Zod-based YAML config validation (settings.yaml + valley.yaml)
+               packages/core/src/observability/  Structured JSON/text logger
+               packages/core/src/relay/          Supabase ledger bridge (team dashboard event sourcing)
 ```
 
 **Key invariant:** Orchestrator is the single authority for in-memory runtime state (`OrchestratorRuntimeState`). No other component mutates it.
@@ -63,7 +65,7 @@ Infrastructure src/tracker/         Linear GraphQL client + webhook HMAC + state
 
 ## Agent Session Plugin System
 
-`src/sessions/agent-session.ts` defines the `AgentSession` interface. Each agent type extends `BaseSession` (shared event emitter + process management):
+`packages/core/src/sessions/agent-session.ts` defines the `AgentSession` interface. Each agent type extends `BaseSession` (shared event emitter + process management):
 
 - `ClaudeSession` — spawns a new process per `execute()` (stateless)
 - `CodexSession` — persistent JSON-RPC connection via stdio
@@ -78,12 +80,12 @@ Two YAML config files, merged at startup (project wins over global):
 - **Global:** `~/.config/agent-valley/settings.yaml` — user credentials (LINEAR_API_KEY), agent defaults, team dashboard settings
 - **Project:** `valley.yaml` — team config, workspace root, workflow states, prompt template, routing rules
 
-Zod schema in `src/config/yaml-loader.ts` validates the merged config. Fails fast with actionable error messages. Prompt template in `valley.yaml` supports `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.description}}`, `{{workspace_path}}` variables.
+Zod schema in `packages/core/src/config/yaml-loader.ts` validates the merged config. Fails fast with actionable error messages. Prompt template in `valley.yaml` supports `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.description}}`, `{{workspace_path}}` variables.
 
 ## Event Flow
 
-1. Linear sends webhook → `dashboard/src/app/api/webhook/route.ts` receives it
-2. `src/tracker/webhook-handler.ts` verifies HMAC-SHA256 signature
+1. Linear sends webhook → `apps/dashboard/src/app/api/webhook/route.ts` receives it
+2. `packages/core/src/tracker/webhook-handler.ts` verifies HMAC-SHA256 signature
 3. Orchestrator routes the event:
    - Todo → transition to In Progress via Linear API, then start agent
    - In Progress → start agent directly
