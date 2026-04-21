@@ -1,53 +1,55 @@
-import { getOrchestrator } from "@/lib/orchestrator-singleton"
+import { authorizeStatusRequest } from "@/lib/dashboard-auth"
 import { toOrchestratorConfig } from "@/lib/env"
+import { getOrchestrator } from "@/lib/orchestrator-singleton"
 
 export const dynamic = "force-dynamic"
 
-export async function GET() {
+export async function GET(request: Request) {
+  const unauthorized = authorizeStatusRequest(request)
+  if (unauthorized) return unauthorized
+
   const orchestrator = getOrchestrator()
 
   let closed = false
   let intervalId: ReturnType<typeof setInterval> | null = null
+  const onAgentEvent = (_payload: unknown) => {
+    if (orchestrator) {
+      send("state", orchestrator.getStatus())
+    }
+  }
 
-  const stream = new ReadableStream({
+  const encoder = new TextEncoder()
+  let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
+
+  const send = (event: string, data: unknown) => {
+    if (closed || !controllerRef) return
+    try {
+      controllerRef.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+    } catch {
+      cleanup()
+    }
+  }
+
+  const cleanup = () => {
+    if (closed) return
+    closed = true
+    if (intervalId) {
+      clearInterval(intervalId)
+      intervalId = null
+    }
+    if (orchestrator) {
+      orchestrator.off("agent.start", onAgentEvent)
+      orchestrator.off("agent.done", onAgentEvent)
+      orchestrator.off("agent.failed", onAgentEvent)
+    }
+  }
+
+  const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const encoder = new TextEncoder()
+      controllerRef = controller
 
-      const send = (event: string, data: unknown) => {
-        if (closed) return
-        try {
-          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
-        } catch {
-          cleanup()
-        }
-      }
-
-      const cleanup = () => {
-        closed = true
-        if (intervalId) {
-          clearInterval(intervalId)
-          intervalId = null
-        }
-        // Unsubscribe event handlers
-        if (orchestrator) {
-          orchestrator.off("agent.start", onAgentEvent)
-          orchestrator.off("agent.done", onAgentEvent)
-          orchestrator.off("agent.failed", onAgentEvent)
-        }
-      }
-
-      // Real-time event handler: push agent events immediately
-      const onAgentEvent = (payload: unknown) => {
-        if (orchestrator) {
-          send("state", orchestrator.getStatus())
-        }
-      }
-
-      // Send initial state snapshot
       if (orchestrator) {
         send("state", orchestrator.getStatus())
-
-        // Subscribe to real-time orchestrator events
         orchestrator.on("agent.start", onAgentEvent)
         orchestrator.on("agent.done", onAgentEvent)
         orchestrator.on("agent.failed", onAgentEvent)
@@ -58,13 +60,19 @@ export async function GET() {
           activeWorkspaces: [],
           activeAgents: 0,
           retryQueueSize: 0,
-          config: (() => { try { const c = toOrchestratorConfig(); return { agentType: c.agentType, maxParallel: c.maxParallel, serverPort: c.serverPort } } catch { return {} } })(),
+          config: (() => {
+            try {
+              const c = toOrchestratorConfig()
+              return { agentType: c.agentType, maxParallel: c.maxParallel, serverPort: c.serverPort }
+            } catch {
+              return {}
+            }
+          })(),
         })
       }
 
       send("keepalive", null)
 
-      // Periodic full-state sync as fallback (less frequent since events push real-time updates)
       intervalId = setInterval(() => {
         if (closed) {
           cleanup()
@@ -76,16 +84,7 @@ export async function GET() {
       }, 5000)
     },
     cancel() {
-      closed = true
-      if (intervalId) {
-        clearInterval(intervalId)
-        intervalId = null
-      }
-      if (orchestrator) {
-        orchestrator.off("agent.start", () => {})
-        orchestrator.off("agent.done", () => {})
-        orchestrator.off("agent.failed", () => {})
-      }
+      cleanup()
     },
   })
 

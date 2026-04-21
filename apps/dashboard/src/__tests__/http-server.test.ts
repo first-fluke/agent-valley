@@ -71,9 +71,12 @@ describe("API Route Handlers", () => {
 
   // ── /api/status ──────────────────────────────────────────────────
 
+  const localStatusRequest = () =>
+    new Request("http://localhost/api/status", { headers: { host: "localhost" } })
+
   test("GET /status returns handler result", async () => {
     if (mockOrchestrator) mockOrchestrator.getStatus = () => ({ running: true, activeCount: 5 })
-    const res = statusGET()
+    const res = statusGET(localStatusRequest())
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toEqual({ running: true, activeCount: 5 })
@@ -81,8 +84,48 @@ describe("API Route Handlers", () => {
 
   test("GET /status returns 503 when orchestrator not initialized", async () => {
     mockOrchestrator = null
-    const res = statusGET()
+    const res = statusGET(localStatusRequest())
     expect(res.status).toBe(503)
+  })
+
+  test("GET /status rejects remote host without token", async () => {
+    const req = new Request("http://example.com/api/status", { headers: { host: "evil.ngrok-free.app" } })
+    const res = statusGET(req)
+    expect(res.status).toBe(403)
+  })
+
+  test("GET /status accepts remote host when SYMPHONY_ALLOW_REMOTE_STATUS=1", async () => {
+    const prev = process.env.SYMPHONY_ALLOW_REMOTE_STATUS
+    process.env.SYMPHONY_ALLOW_REMOTE_STATUS = "1"
+    try {
+      const req = new Request("http://example.com/api/status", { headers: { host: "evil.ngrok-free.app" } })
+      const res = statusGET(req)
+      expect(res.status).toBe(200)
+    } finally {
+      if (prev === undefined) delete process.env.SYMPHONY_ALLOW_REMOTE_STATUS
+      else process.env.SYMPHONY_ALLOW_REMOTE_STATUS = prev
+    }
+  })
+
+  test("GET /status accepts bearer token when SYMPHONY_DASHBOARD_TOKEN is set", async () => {
+    const prev = process.env.SYMPHONY_DASHBOARD_TOKEN
+    process.env.SYMPHONY_DASHBOARD_TOKEN = "secret-token-123"
+    try {
+      const req = new Request("http://example.com/api/status", {
+        headers: { host: "evil.ngrok-free.app", authorization: "Bearer secret-token-123" },
+      })
+      const res = statusGET(req)
+      expect(res.status).toBe(200)
+
+      const bad = new Request("http://example.com/api/status", {
+        headers: { host: "evil.ngrok-free.app", authorization: "Bearer wrong-token" },
+      })
+      const badRes = statusGET(bad)
+      expect(badRes.status).toBe(401)
+    } finally {
+      if (prev === undefined) delete process.env.SYMPHONY_DASHBOARD_TOKEN
+      else process.env.SYMPHONY_DASHBOARD_TOKEN = prev
+    }
   })
 
   // ── /api/webhook ─────────────────────────────────────────────────

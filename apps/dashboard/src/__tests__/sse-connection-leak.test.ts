@@ -24,9 +24,17 @@ vi.mock("@/lib/env", () => ({
     MAX_PARALLEL: 3,
     SERVER_PORT: 9741,
   },
+  toOrchestratorConfig: () => ({
+    agentType: "claude",
+    maxParallel: 3,
+    serverPort: 9741,
+  }),
 }))
 
 const { GET: eventsGET } = await import("@/app/api/events/route")
+
+const localRequest = () =>
+  new Request("http://localhost:3000/api/events", { headers: { host: "localhost:3000" } })
 
 describe("SSE /api/events — interval cleanup", () => {
   beforeEach(() => {
@@ -48,7 +56,7 @@ describe("SSE /api/events — interval cleanup", () => {
   })
 
   test("interval stops after stream is cancelled", async () => {
-    const res = await eventsGET()
+    const res = await eventsGET(localRequest())
     const reader = res.body!.getReader()
 
     // Read initial events (state + keepalive)
@@ -68,7 +76,7 @@ describe("SSE /api/events — interval cleanup", () => {
   })
 
   test("interval self-terminates when send throws", async () => {
-    const res = await eventsGET()
+    const res = await eventsGET(localRequest())
     const reader = res.body!.getReader()
 
     // Read initial events
@@ -86,8 +94,8 @@ describe("SSE /api/events — interval cleanup", () => {
   })
 
   test("multiple concurrent SSE connections each get their own cleanup", async () => {
-    const res1 = await eventsGET()
-    const res2 = await eventsGET()
+    const res1 = await eventsGET(localRequest())
+    const res2 = await eventsGET(localRequest())
     const reader1 = res1.body!.getReader()
     const reader2 = res2.body!.getReader()
 
