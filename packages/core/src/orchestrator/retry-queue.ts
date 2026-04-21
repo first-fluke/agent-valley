@@ -27,7 +27,7 @@ export class RetryQueue {
     if (existing) {
       existing.attemptCount = Math.max(existing.attemptCount, attemptCount)
       existing.lastError = lastError
-      const delay = this.backoffSec * 2 ** (existing.attemptCount - 1)
+      const delay = this.backoffSec * 2 ** Math.max(0, existing.attemptCount - 1)
       existing.nextRetryAt = new Date(Date.now() + delay * 1000).toISOString()
 
       logger.warn("orchestrator", "Retry updated (dedup)", {
@@ -39,7 +39,7 @@ export class RetryQueue {
       return true
     }
 
-    const delay = this.backoffSec * 2 ** (attemptCount - 1)
+    const delay = this.backoffSec * 2 ** Math.max(0, attemptCount - 1)
     const nextRetryAt = new Date(Date.now() + delay * 1000).toISOString()
 
     this.queue.push({ issueId, attemptCount, nextRetryAt, lastError })

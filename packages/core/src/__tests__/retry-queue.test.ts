@@ -116,6 +116,16 @@ describe("RetryQueue", () => {
     expect(delay2).toBeLessThan(125_000)
   })
 
+  test("attemptCount=0 uses full backoff (no fractional exponent)", () => {
+    const q = new RetryQueue(5, 60)
+    const now = Date.now()
+    q.add("issue-0", 0, "queued")
+    const delay = new Date(q.entries[0]?.nextRetryAt ?? 0).getTime() - now
+    // Previously 2 ** (0-1) = 0.5 made delay ~30s; clamped to 2 ** 0 = 1 → ~60s.
+    expect(delay).toBeGreaterThan(55_000)
+    expect(delay).toBeLessThan(65_000)
+  })
+
   test("duplicate issueId updates existing entry (dedup)", () => {
     // Stream D dedup fix: duplicate issueId updates in place rather than accumulating.
     queue.add("issue-1", 1, "first error")
