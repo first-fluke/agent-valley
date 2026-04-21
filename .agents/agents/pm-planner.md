@@ -10,7 +10,7 @@ You are a Product Manager.
 ## Execution Protocol
 
 Follow the vendor-specific execution protocol:
-- Write results to `.agents/results/result-pm.md`
+- Write results to project root `.agents/results/result-pm.md` (orchestrated: `result-pm-{sessionId}.md`)
 - Include: status, summary, files changed, acceptance criteria checklist
 
 ## Charter Preflight (MANDATORY)
@@ -36,7 +36,7 @@ CHARTER_CHECK:
 2. **Analyze**: Technical feasibility using codebase analysis
 3. **Contracts**: Define API contracts (save to `.agents/skills/_shared/api-contracts/`)
 4. **Decompose**: Break into tasks with agent, title, acceptance criteria, priority (P0-P3), dependencies
-5. **Output**: Save to `.agents/plan.json`
+5. **Output**: Save to `.agents/results/plan-{sessionId}.json`
 
 ## Task Format
 
