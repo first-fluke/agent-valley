@@ -137,3 +137,23 @@ FAIL: WORKSPACE_ROOT is not set.
   → Add WORKSPACE_ROOT=/absolute/path to .env
   → Copy from .env.example if unsure
 ```
+
+---
+
+## Step 5: Dashboard Status Endpoints (Optional)
+
+`/api/status` and `/api/events` expose orchestrator runtime state (active
+workspaces, issue identifiers, retry queue). `bun av dev` tunnels the dashboard
+through ngrok for Linear webhook delivery, so by default these endpoints are
+**blocked for any request whose `Host` header is not `localhost`**.
+
+If you only open the dashboard at `http://localhost:PORT`, you need nothing —
+it works out of the box. Remote access requires one of:
+
+| Env var | Effect |
+|---|---|
+| `SYMPHONY_DASHBOARD_TOKEN=<token>` | Remote requests must include `Authorization: Bearer <token>` |
+| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | Disables the host gate entirely (not recommended for ngrok) |
+
+`/api/webhook` is always public — it verifies Linear's HMAC signature
+independently, so the host gate does not apply.
