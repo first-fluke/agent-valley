@@ -12,7 +12,8 @@
 # Checks:
 #   1. Hardcoded secrets (API key patterns)
 #   2. Dangerous shell commands (rm -rf /, force push to main)
-#   3. Architecture violations (domain/ importing from infrastructure/)
+#   3. Architecture violations (domain/ importing from other layers; also legacy infrastructure/ rule)
+#   4. File length cap (CONSTRAINTS.md §5: no single file over 500 lines)
 #
 # References:
 #   docs/harness/SAFETY.md     — secret management, safety rails
@@ -102,7 +103,7 @@ check_pattern() {
 # Detects common API key / token patterns that should never appear in code.
 # Reference: docs/harness/SAFETY.md section 1, CONSTRAINTS.md section 3
 # ─────────────────────────────────────────────────────────────────────────────
-info "Check 1/3: Hardcoded secrets"
+info "Check 1/4: Hardcoded secrets"
 
 # Exclude .env.example (it shows key names only, not values),
 # this script itself, and binary/lock files.
@@ -160,7 +161,7 @@ done <<< "${FILES}"
 # CHECK 2: Dangerous shell commands
 # Reference: docs/harness/SAFETY.md section 1, AGENTS.md section 3 Security
 # ─────────────────────────────────────────────────────────────────────────────
-info "Check 2/3: Dangerous shell commands"
+info "Check 2/4: Dangerous shell commands"
 
 VIOLATIONS_BEFORE_2="${VIOLATIONS}"
 
@@ -228,9 +229,13 @@ done <<< "${FILES}"
 # Reference: docs/architecture/CONSTRAINTS.md section 1
 #            docs/architecture/LAYERS.md
 # ─────────────────────────────────────────────────────────────────────────────
-info "Check 3/3: Architecture layer violations (domain → infrastructure)"
+info "Check 3/4: Architecture layer violations (domain must be pure)"
 
 VIOLATIONS_BEFORE_3="${VIOLATIONS}"
+
+# Layer directories this project actually uses. Domain must not import any of them.
+# Matched against relative import specifiers inside files under */domain/*.
+NON_DOMAIN_LAYER_DIRS="tracker|workspace|sessions|observability|config|orchestrator|relay|server|infrastructure"
 
 while IFS= read -r file; do
   [ -f "${file}" ] || continue
@@ -241,7 +246,21 @@ while IFS= read -r file; do
     *) continue ;;
   esac
 
-  # TypeScript / JavaScript: import from infrastructure
+  # TypeScript / JavaScript: domain imports any non-domain layer directory
+  if grep -qE "from ['\"][^'\"]*(/|^)(${NON_DOMAIN_LAYER_DIRS})(/|['\"])" "${file}" 2>/dev/null; then
+    matches=$(grep -nE "from ['\"][^'\"]*(/|^)(${NON_DOMAIN_LAYER_DIRS})(/|['\"])" "${file}" 2>/dev/null || true)
+    if [ -n "${matches}" ]; then
+      violation "Architecture violation: domain/ imports from non-domain layer"
+      violation "  Fix: Domain must be pure. Define an interface in domain/, implement it in the outer layer, and inject it."
+      violation "  See: docs/architecture/LAYERS.md, docs/architecture/CONSTRAINTS.md section 1"
+      while IFS= read -r match_line; do
+        violation "  ${file}:${match_line}"
+      done <<< "${matches}"
+      VIOLATIONS=$(( VIOLATIONS + 1 ))
+    fi
+  fi
+
+  # Legacy: some older stacks still use an infrastructure/ dir name — keep the check.
   if grep -qE "from ['\"].*infrastructure" "${file}" 2>/dev/null; then
     matches=$(grep -nE "from ['\"].*infrastructure" "${file}" 2>/dev/null || true)
     if [ -n "${matches}" ]; then
@@ -301,6 +320,62 @@ while IFS= read -r file; do
 done <<< "${FILES}"
 
 [ "${VIOLATIONS}" -eq "${VIOLATIONS_BEFORE_3}" ] && ok "No architecture layer violations found" || true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHECK 4: File length cap (CONSTRAINTS.md §5 — no single file over 500 lines)
+# ─────────────────────────────────────────────────────────────────────────────
+info "Check 4/4: File length cap (CONSTRAINTS.md §5: max 500 lines per file)"
+
+VIOLATIONS_BEFORE_4="${VIOLATIONS}"
+MAX_LINES=500
+
+# Grandfathered files: pre-existing violations tracked in docs/plans/architecture-debt.md.
+# Each entry is "path:ceiling" — fail only if the file grows above its ceiling.
+# Shrink the ceiling as you split these files; delete the entry when it drops under MAX_LINES.
+GRANDFATHERED=(
+  "packages/core/src/workspace/workspace-manager.ts:724"
+  "packages/core/src/orchestrator/orchestrator.ts:543"
+  "apps/cli/src/setup.ts:723"
+)
+
+get_ceiling() {
+  local path="$1"
+  for entry in "${GRANDFATHERED[@]}"; do
+    case "${entry}" in
+      "${path}:"*) printf '%s' "${entry#*:}"; return 0 ;;
+    esac
+  done
+  printf '%s' "${MAX_LINES}"
+}
+
+while IFS= read -r file; do
+  [ -f "${file}" ] || continue
+
+  # Scope: hand-written code files only. Skip generated, vendored, binary, docs.
+  case "${file}" in
+    *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.py|*.go|*.rs) ;;
+    *) continue ;;
+  esac
+  case "${file}" in
+    */node_modules/*|*/dist/*|*/build/*|*.d.ts|*/__tests__/*|*.test.ts|*.test.tsx|*.test.js) continue ;;
+    apps/dashboard/src/lib/canvas/*|*/apps/dashboard/src/lib/canvas/*) continue ;;  # visual canvas code, not subject to backend SRP
+  esac
+
+  lines=$(wc -l < "${file}" | tr -d ' ')
+  ceiling="$(get_ceiling "${file}")"
+  if [ "${lines}" -gt "${ceiling}" ]; then
+    if [ "${ceiling}" = "${MAX_LINES}" ]; then
+      violation "File exceeds ${MAX_LINES}-line cap: ${file} has ${lines} lines"
+      violation "  Fix: Split by responsibility. See CONSTRAINTS.md §5 for an example decomposition."
+    else
+      violation "Grandfathered file grew above its ceiling: ${file} has ${lines} lines (ceiling ${ceiling})"
+      violation "  Fix: Do not add to this file until it is split. See CONSTRAINTS.md §5."
+    fi
+    VIOLATIONS=$(( VIOLATIONS + 1 ))
+  fi
+done <<< "${FILES}"
+
+[ "${VIOLATIONS}" -eq "${VIOLATIONS_BEFORE_4}" ] && ok "No oversized files found" || true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Result
