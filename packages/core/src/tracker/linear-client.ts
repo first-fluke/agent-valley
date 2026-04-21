@@ -207,7 +207,11 @@ export async function updateIssueState(apiKey: string, issueId: string, stateId:
   const data = await linearGraphQL<LinearMutationData>(apiKey, UPDATE_ISSUE_STATE_MUTATION, { issueId, stateId })
 
   if (!data?.issueUpdate?.success) {
-    throw new Error(`Failed to update issue state: issueId=${issueId}, stateId=${stateId}`)
+    throw new Error(
+      `Failed to update issue state: issueId=${issueId}, stateId=${stateId}\n` +
+        "  Fix: Verify stateId exists on the target team and that LINEAR_API_KEY has edit permission.\n" +
+        "  Run `bun av setup` to re-discover workflow_states UUIDs.",
+    )
   }
 }
 
@@ -223,7 +227,11 @@ export async function addIssueComment(apiKey: string, issueId: string, body: str
   const data = await linearGraphQL<LinearMutationData>(apiKey, ADD_COMMENT_MUTATION, { issueId, body })
 
   if (!data?.commentCreate?.success) {
-    throw new Error(`Failed to add comment to issue: issueId=${issueId}`)
+    throw new Error(
+      `Failed to add comment to issue: issueId=${issueId}\n` +
+        "  Fix: Verify LINEAR_API_KEY has comment:create permission for this team.\n" +
+        "  If the issue was archived/deleted, the caller should skip the comment instead of retrying.",
+    )
   }
 }
 
@@ -337,7 +345,11 @@ export async function createSubIssue(
     stateId,
   })
   if (!data?.issueCreate?.success || !data.issueCreate.issue) {
-    throw new Error(`Failed to create sub-issue under parent ${parentId}`)
+    throw new Error(
+      `Failed to create sub-issue under parent ${parentId}\n` +
+        "  Fix: Verify parentId exists and LINEAR_API_KEY has issue:create permission on its team.\n" +
+        `  If the parent was moved between teams, re-fetch the parent issue before retrying.`,
+    )
   }
   return data.issueCreate.issue
 }
