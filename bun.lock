@@ -16,10 +16,11 @@
       },
     },
     "apps/cli": {
-      "name": "@agent-valley/cli",
+      "name": "agent-valley",
       "version": "0.1.0",
       "bin": {
-        "av": "src/index.ts",
+        "av": "dist/index.js",
+        "agent-valley": "dist/index.js",
       },
       "dependencies": {
         "@agent-valley/core": "workspace:*",
@@ -63,8 +64,6 @@
     },
   },
   "packages": {
-    "@agent-valley/cli": ["@agent-valley/cli@workspace:apps/cli"],
-
     "@agent-valley/core": ["@agent-valley/core@workspace:packages/core"],
 
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
@@ -334,6 +333,8 @@
     "@webgpu/types": ["@webgpu/types@0.1.69", "", {}, "sha512-RPmm6kgRbI8e98zSD3RVACvnuktIja5+yLgDAkTmxLr90BEwdTXRQWNLF3ETTTyH/8mKhznZuN5AveXYFEsMGQ=="],
 
     "@xmldom/xmldom": ["@xmldom/xmldom@0.8.11", "", {}, "sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw=="],
+
+    "agent-valley": ["agent-valley@workspace:apps/cli"],
 
     "agent-valley-dashboard": ["agent-valley-dashboard@workspace:apps/dashboard"],
 
