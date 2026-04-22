@@ -2,17 +2,20 @@
  * WebhookRouter unit tests.
  *
  * Covers the dispatching contract extracted from Orchestrator (PR3).
+ * PR4: all event fixtures use the tracker-agnostic domain union.
+ *
  * Focus: signature verification gate, non-issue skip, relation routing,
  * Todo/InProgress/left-InProgress dispatch, and retry queue drive.
  *
- * Design: docs/plans/v0-2-bigbang-design.md § 5.3 (PR3).
+ * Design: docs/plans/v0-2-bigbang-design.md § 5.3 (PR3),
+ *         docs/plans/v0-2-bigbang-design.md § 4.2 (PR4).
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { Issue } from "../domain/models"
+import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import { OrchestratorCore } from "../orchestrator/orchestrator-core"
 import { WebhookRouter } from "../orchestrator/webhook-router"
-import type { ParsedWebhookEvent } from "../tracker/types"
 import { makeConfig, makeIssue } from "./characterization/helpers"
 import { FakeIssueTracker } from "./fakes/fake-tracker"
 import { FakeWebhookReceiver } from "./fakes/fake-webhook-receiver"
@@ -111,14 +114,14 @@ describe("WebhookRouter — relation events", () => {
     harness = buildRouter()
   })
 
-  test("routes relation:create to DagScheduler.addRelation and skips lifecycle", async () => {
+  test("routes relation add to DagScheduler.addRelation and skips lifecycle", async () => {
     const spy = vi.spyOn(harness.core.dagScheduler, "addRelation")
     harness.webhook.nextEvent = {
-      kind: "relation",
-      action: "create",
+      kind: "issue.relation_changed",
       issueId: "issue-a",
       relatedIssueId: "issue-b",
-      relationType: "blocks",
+      relation: "blocks",
+      added: true,
     }
 
     const response = await harness.router.handleWebhook("{}", "ok")
@@ -128,14 +131,14 @@ describe("WebhookRouter — relation events", () => {
     expect(harness.lifecycle.todoCalls).toHaveLength(0)
   })
 
-  test("routes relation:remove to DagScheduler.removeRelation and triggers reevaluate", async () => {
+  test("routes relation remove to DagScheduler.removeRelation and triggers reevaluate", async () => {
     const removeSpy = vi.spyOn(harness.core.dagScheduler, "removeRelation")
     harness.webhook.nextEvent = {
-      kind: "relation",
-      action: "remove",
+      kind: "issue.relation_changed",
       issueId: "issue-a",
       relatedIssueId: "issue-b",
-      relationType: "blocks",
+      relation: "blocks",
+      added: false,
     }
 
     await harness.router.handleWebhook("{}", "ok")
@@ -154,13 +157,13 @@ describe("WebhookRouter — issue events dispatch", () => {
     issue = makeIssue({ id: "issue-1", identifier: "PROJ-1" })
   })
 
-  test("Todo stateId dispatches to lifecycle.handleIssueTodo and posts ack comment", async () => {
+  test("transition to=todo dispatches to lifecycle.handleIssueTodo and posts ack comment", async () => {
     harness.webhook.nextEvent = {
-      action: "update",
+      kind: "issue.transitioned",
       issueId: issue.id,
+      from: null,
+      to: "todo",
       issue,
-      stateId: harness.config.workflowStates.todo,
-      prevStateId: null,
     }
 
     const response = await harness.router.handleWebhook("{}", "ok")
@@ -179,11 +182,11 @@ describe("WebhookRouter — issue events dispatch", () => {
   test("skips ack comment when the issue is already active or being processed", async () => {
     harness.core.markProcessing(issue.id)
     harness.webhook.nextEvent = {
-      action: "update",
+      kind: "issue.transitioned",
       issueId: issue.id,
+      from: null,
+      to: "todo",
       issue,
-      stateId: harness.config.workflowStates.todo,
-      prevStateId: null,
     }
 
     await harness.router.handleWebhook("{}", "ok")
@@ -195,13 +198,13 @@ describe("WebhookRouter — issue events dispatch", () => {
     expect(ack).toBeUndefined()
   })
 
-  test("InProgress stateId dispatches to lifecycle.handleIssueInProgress without ack comment", async () => {
+  test("transition to=in_progress dispatches to lifecycle.handleIssueInProgress without ack comment", async () => {
     harness.webhook.nextEvent = {
-      action: "update",
+      kind: "issue.transitioned",
       issueId: issue.id,
+      from: "todo",
+      to: "in_progress",
       issue,
-      stateId: harness.config.workflowStates.inProgress,
-      prevStateId: harness.config.workflowStates.todo,
     }
 
     await harness.router.handleWebhook("{}", "ok")
@@ -210,13 +213,13 @@ describe("WebhookRouter — issue events dispatch", () => {
     expect(harness.lifecycle.todoCalls).toHaveLength(0)
   })
 
-  test("prevStateId=InProgress dispatches to handleIssueLeftInProgress", async () => {
+  test("transition from=in_progress to=done dispatches to handleIssueLeftInProgress", async () => {
     harness.webhook.nextEvent = {
-      action: "update",
+      kind: "issue.transitioned",
       issueId: issue.id,
+      from: "in_progress",
+      to: "done",
       issue,
-      stateId: harness.config.workflowStates.done,
-      prevStateId: harness.config.workflowStates.inProgress,
     }
 
     await harness.router.handleWebhook("{}", "ok")
@@ -228,11 +231,11 @@ describe("WebhookRouter — issue events dispatch", () => {
     expect(harness.core.state.lastEventAt).toBeNull()
 
     harness.webhook.nextEvent = {
-      action: "update",
+      kind: "issue.transitioned",
       issueId: issue.id,
+      from: "todo",
+      to: "in_progress",
       issue,
-      stateId: harness.config.workflowStates.inProgress,
-      prevStateId: harness.config.workflowStates.todo,
     }
 
     await harness.router.handleWebhook("{}", "ok")

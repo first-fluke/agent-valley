@@ -15,8 +15,8 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { Issue } from "../domain/models"
+import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import { OrchestratorCore } from "../orchestrator/orchestrator-core"
-import type { ParsedWebhookEvent } from "../tracker/types"
 import { makeConfig, makeIssue, makeWorkspace } from "./characterization/helpers"
 import { FakeIssueTracker } from "./fakes/fake-tracker"
 import { FakeWebhookReceiver } from "./fakes/fake-webhook-receiver"

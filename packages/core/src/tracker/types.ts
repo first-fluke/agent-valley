@@ -1,11 +1,15 @@
 /**
  * Tracker types — Linear webhook and API response types.
+ *
+ * PR4: the `LinearParsedWebhookEvent` union (formerly exported as
+ * `ParsedWebhookEvent`) is now adapter-internal. Orchestrator consumes
+ * the domain-level `ParsedWebhookEvent` from `domain/parsed-webhook-event.ts`.
  */
 
 import { z } from "zod"
 import type { Issue } from "../domain/models"
 
-export interface WebhookEvent {
+export interface LinearIssueWebhookEvent {
   kind?: undefined
   action: "create" | "update" | "remove"
   issueId: string
@@ -14,7 +18,7 @@ export interface WebhookEvent {
   prevStateId: string | null
 }
 
-export interface RelationWebhookEvent {
+export interface LinearRelationWebhookEvent {
   kind: "relation"
   action: "create" | "remove"
   issueId: string
@@ -22,7 +26,18 @@ export interface RelationWebhookEvent {
   relationType: string
 }
 
-export type ParsedWebhookEvent = WebhookEvent | RelationWebhookEvent
+export type LinearParsedWebhookEvent = LinearIssueWebhookEvent | LinearRelationWebhookEvent
+
+/**
+ * @deprecated Kept for `tracker/webhook-handler.ts` and existing unit tests
+ * only. Use `domain/parsed-webhook-event.ts::ParsedWebhookEvent` at the
+ * Orchestrator boundary.
+ */
+export type WebhookEvent = LinearIssueWebhookEvent
+/** @deprecated See `WebhookEvent`. */
+export type RelationWebhookEvent = LinearRelationWebhookEvent
+/** @deprecated See `WebhookEvent`. */
+export type ParsedWebhookEvent = LinearParsedWebhookEvent
 
 export interface LinearGraphQLResponse<T = LinearTeamIssuesData> {
   data?: T

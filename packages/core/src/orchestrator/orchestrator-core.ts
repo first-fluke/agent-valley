@@ -10,11 +10,12 @@
 
 import type { Config } from "../config/yaml-loader"
 import type { Issue, OrchestratorRuntimeState, Workspace } from "../domain/models"
+import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
 import { logger } from "../observability/logger"
-import type { ParsedWebhookEvent } from "../tracker/types"
-import { AgentRunnerService } from "./agent-runner"
+import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
+import type { AgentRunnerService } from "./agent-runner"
 import type { CompletionDeps } from "./completion-handler"
 import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
@@ -54,6 +55,11 @@ export interface OrchestratorCoreDeps {
   tracker: IssueTracker
   webhook: WebhookReceiver<ParsedWebhookEvent>
   workspace: WorkspaceGateway
+  /**
+   * AgentRunnerPort adapter. Optional — when omitted, the core creates
+   * its own SpawnAgentRunnerAdapter (preserving v0.1 behavior).
+   */
+  agentRunner?: SpawnAgentRunnerAdapter
   /** Emit events onto the facade's public event stream. */
   emit: CoreEventEmit
 }
@@ -65,6 +71,8 @@ export class OrchestratorCore {
   readonly workspace: WorkspaceGateway
 
   readonly agentRunner: AgentRunnerService
+  /** Port-shaped view of the runner (spawn RunHandle + capabilities()). */
+  readonly agentRunnerPort: SpawnAgentRunnerAdapter
   readonly retryQueue: RetryQueue
   readonly dagScheduler: DagScheduler
 
@@ -98,7 +106,11 @@ export class OrchestratorCore {
     this.workspace = deps.workspace
     this.emit = deps.emit
 
-    this.agentRunner = new AgentRunnerService()
+    // Port seam: orchestrator-core depends on AgentRunnerPort via the
+    // SpawnAgentRunnerAdapter. When no adapter is injected, build a
+    // fresh one wrapping a new AgentRunnerService (v0.1 behavior).
+    this.agentRunnerPort = deps.agentRunner ?? new SpawnAgentRunnerAdapter()
+    this.agentRunner = this.agentRunnerPort.service
     this.retryQueue = new RetryQueue(this.config.agentMaxRetries, this.config.agentRetryDelay)
     this.dagScheduler = new DagScheduler(`${this.config.workspaceRoot}/.agent-valley/dag-cache.json`)
   }

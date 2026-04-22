@@ -19,7 +19,20 @@ vi.mock("../tracker/linear-client", () => ({
 
 vi.mock("../tracker/webhook-handler", () => ({
   verifyWebhookSignature: vi.fn(async (_p: string, s: string) => s === "good-sig"),
-  parseWebhookEvent: vi.fn((p: string) => (p === "unknown" ? null : { action: "update" })),
+  // Return a minimal Linear-shaped issue event so the adapter exercises its
+  // state-translation path. With no workflowStates configured on the
+  // receiver, the mapping falls through to `issue.updated`.
+  parseWebhookEvent: vi.fn((p: string) =>
+    p === "unknown"
+      ? null
+      : {
+          action: "update",
+          issueId: "issue-1",
+          issue: { id: "issue-1", identifier: "PROJ-1" },
+          stateId: "state-ip",
+          prevStateId: "state-todo",
+        },
+  ),
 }))
 
 import { LinearTrackerAdapter } from "../tracker/adapters/linear-adapter"
@@ -99,8 +112,29 @@ describe("LinearWebhookReceiver", () => {
   test("delegates parseEvent and returns null for non-domain payloads", () => {
     const receiver = new LinearWebhookReceiver({ secret: "whsec" })
     expect(receiver.parseEvent("unknown")).toBeNull()
+    // With no workflowStates configured, the adapter still translates to a
+    // domain event — a content-only `issue.updated` signal.
     const ev = receiver.parseEvent("{}")
-    expect(ev).toEqual({ action: "update" })
+    expect(ev).toMatchObject({ kind: "issue.updated", issueId: "issue-1" })
+  })
+
+  test("parseEvent maps Linear state IDs to logical IssueStateType when workflowStates is provided", () => {
+    const receiver = new LinearWebhookReceiver({
+      secret: "whsec",
+      workflowStates: {
+        todo: "state-todo",
+        inProgress: "state-ip",
+        done: "state-done",
+        cancelled: "state-cancelled",
+      },
+    })
+    const ev = receiver.parseEvent("{}")
+    expect(ev).toMatchObject({
+      kind: "issue.transitioned",
+      from: "todo",
+      to: "in_progress",
+      issueId: "issue-1",
+    })
   })
 })
 

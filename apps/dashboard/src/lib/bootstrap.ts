@@ -34,7 +34,10 @@ export async function bootstrap() {
     teamId: config.linearTeamId,
     teamUuid: config.linearTeamUuid,
   })
-  const webhook = new LinearWebhookReceiver({ secret: config.linearWebhookSecret })
+  const webhook = new LinearWebhookReceiver({
+    secret: config.linearWebhookSecret,
+    workflowStates: config.workflowStates,
+  })
   const workspace = new FileSystemWorkspaceGateway(new WorkspaceManager(config.workspaceRoot))
 
   const orchestrator = new Orchestrator(config, tracker, webhook, workspace)

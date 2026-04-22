@@ -16,9 +16,10 @@
  */
 
 import type { Config } from "../config/yaml-loader"
+import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
-import type { ParsedWebhookEvent } from "../tracker/types"
+import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
 import { OrchestratorEventEmitter } from "./event-emitter"
 import { IssueLifecycle } from "./issue-lifecycle"
 import { OrchestratorCore } from "./orchestrator-core"
@@ -34,14 +35,23 @@ export class Orchestrator extends OrchestratorEventEmitter {
     tracker: IssueTracker,
     webhook: WebhookReceiver<ParsedWebhookEvent>,
     workspace: WorkspaceGateway,
+    agentRunner?: SpawnAgentRunnerAdapter,
   ) {
     super()
+
+    // Default: construct the adapter here so v0.1 callers with no
+    // explicit injection keep bit-identical behavior. External callers
+    // (bootstrap, integration tests) may pass a pre-built adapter so
+    // they can observe capability queries and RunHandle events through
+    // the same instance the orchestrator uses internally.
+    const runner: SpawnAgentRunnerAdapter = agentRunner ?? new SpawnAgentRunnerAdapter()
 
     this.core = new OrchestratorCore({
       config,
       tracker,
       webhook,
       workspace,
+      agentRunner: runner,
       emit: (event, payload) => this.emitEvent(event, payload),
     })
 

@@ -121,7 +121,10 @@ beforeEach(async () => {
     teamId: runtimeConfig.linearTeamId,
     teamUuid: runtimeConfig.linearTeamUuid,
   })
-  const webhook = new LinearWebhookReceiver({ secret: runtimeConfig.linearWebhookSecret })
+  const webhook = new LinearWebhookReceiver({
+    secret: runtimeConfig.linearWebhookSecret,
+    workflowStates: runtimeConfig.workflowStates,
+  })
   const workspaceGateway = new FileSystemWorkspaceGateway(new WorkspaceManager(runtimeConfig.workspaceRoot))
 
   orchestrator = new Orchestrator(runtimeConfig, tracker, webhook, workspaceGateway)
@@ -374,7 +377,10 @@ describe("Orchestrator.handleWebhook — concurrency and duplicate-event guards"
       teamId: slimConfig.linearTeamId,
       teamUuid: slimConfig.linearTeamUuid,
     })
-    const slimWebhook = new LinearWebhookReceiver({ secret: slimConfig.linearWebhookSecret })
+    const slimWebhook = new LinearWebhookReceiver({
+      secret: slimConfig.linearWebhookSecret,
+      workflowStates: slimConfig.workflowStates,
+    })
     const slimWorkspace = new FileSystemWorkspaceGateway(new WorkspaceManager(slimConfig.workspaceRoot))
     const slimOrch = new Orchestrator(slimConfig, slimTracker, slimWebhook, slimWorkspace)
 

@@ -4,10 +4,13 @@
  * unit test that relies on them.
  */
 import { describe, expect, test } from "vitest"
-import type { ParsedWebhookEvent } from "../tracker/types"
+import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
+import { makeIssue, makeWorkspace } from "./characterization/helpers"
+import { runAgentRunnerContract } from "./contracts/agent-runner.contract"
 import { runIssueTrackerContract } from "./contracts/issue-tracker.contract"
 import { runWebhookReceiverContract } from "./contracts/webhook-receiver.contract"
 import { runWorkspaceGatewayContract } from "./contracts/workspace-gateway.contract"
+import { FakeAgentRunner } from "./fakes/fake-agent-runner"
 import { FakeIssueTracker } from "./fakes/fake-tracker"
 import { FakeWebhookReceiver } from "./fakes/fake-webhook-receiver"
 import { FakeWorkspaceGateway } from "./fakes/fake-workspace-gateway"
@@ -56,6 +59,26 @@ describe("FakeWebhookReceiver — modes", () => {
     receiver.nextEvent = { x: 42 }
     expect(receiver.parseEvent("irrelevant")).toEqual({ x: 42 })
   })
+})
+
+// ── AgentRunner ─────────────────────────────────────────────────────
+
+runAgentRunnerContract("FakeAgentRunner", async () => {
+  const runner = new FakeAgentRunner()
+  return {
+    runner,
+    buildSpawnInput: (overrides) => {
+      const issue = makeIssue({ id: "issue-arc-1", identifier: "CON-AR-1" })
+      return {
+        issue,
+        workspace: makeWorkspace(issue),
+        prompt: "contract prompt",
+        agentType: overrides?.agentType ?? "claude",
+        timeoutMs: 1_000,
+        attemptId: overrides?.attemptId ?? "att-contract-fake",
+      }
+    },
+  }
 })
 
 // ── WorkspaceGateway ────────────────────────────────────────────────
