@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [0.3.0](https://github.com/first-fluke/agent-valley/compare/v0.2.0...v0.3.0) (2026-04-22)
+
+
+### Features
+
+* **cli:** add cloudflare tunnel support with provider abstraction ([ea23989](https://github.com/first-fluke/agent-valley/commit/ea23989397d43e3a0b2fe961d7aa05661115792e))
+
 ## [0.2.0](https://github.com/first-fluke/agent-valley/compare/v0.1.0...v0.2.0) (2026-04-22)
 
 
