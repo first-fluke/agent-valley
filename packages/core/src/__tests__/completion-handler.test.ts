@@ -656,4 +656,100 @@ describe("createCompletionCallbacks", () => {
       expect(retryAdds.length).toBe(0)
     })
   })
+
+  describe("onComplete — budget recordUsage wiring", () => {
+    function makeRecordingBudget(overrides: Partial<import("../orchestrator/budget-service").BudgetService> = {}) {
+      const calls: Array<{ attemptId: string; issueId: string; usage: unknown }> = []
+      const budget: import("../orchestrator/budget-service").BudgetService = {
+        checkBeforeSpawn: async () => ({ allow: true }),
+        recordUsage: async (attemptId, issueId, usage) => {
+          calls.push({ attemptId, issueId, usage })
+        },
+        getDailyUsed: () => ({ tokens: 0, usd: 0 }),
+        getIssueUsed: () => ({ tokens: 0, usd: 0 }),
+        ...overrides,
+      }
+      return { budget, calls }
+    }
+
+    test("forwards tokenUsage to BudgetService.recordUsage on onComplete", async () => {
+      const { budget, calls } = makeRecordingBudget()
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file" })
+      const deps = makeDeps(mockWm, {}, { budget })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+        tokenUsage: { input: 1200, output: 340, model: "claude-sonnet-4.5" },
+      })
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toEqual({
+        attemptId: "attempt-1",
+        issueId: "issue-1",
+        usage: { input: 1200, output: 340, model: "claude-sonnet-4.5" },
+      })
+    })
+
+    test("skips recordUsage when tokenUsage is absent (e.g. gemini CLI fallback)", async () => {
+      const { budget, calls } = makeRecordingBudget()
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file" })
+      const deps = makeDeps(mockWm, {}, { budget })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+        // tokenUsage intentionally omitted
+      })
+
+      expect(calls).toHaveLength(0)
+    })
+
+    test("swallows recordUsage failures — completion pipeline continues", async () => {
+      const { budget } = makeRecordingBudget({
+        recordUsage: async () => {
+          throw new Error("boom")
+        },
+      })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file" })
+      const deps = makeDeps(mockWm, {}, { budget })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await expect(
+        callbacks.onComplete({
+          ...makeAttempt(),
+          finishedAt: new Date().toISOString(),
+          exitCode: 0,
+          agentOutput: "Done",
+          tokenUsage: { input: 50, output: 10, model: "claude-sonnet-4.5" },
+        }),
+      ).resolves.toBeUndefined()
+
+      // agent.done still emitted and DAG cascade path ran
+      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+      expect(filledSlots).toBe(1)
+    })
+
+    test("no-op when budget is not wired on deps", async () => {
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file" })
+      const deps = makeDeps(mockWm) // no budget
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await expect(
+        callbacks.onComplete({
+          ...makeAttempt(),
+          finishedAt: new Date().toISOString(),
+          exitCode: 0,
+          agentOutput: "Done",
+          tokenUsage: { input: 1, output: 1, model: "claude" },
+        }),
+      ).resolves.toBeUndefined()
+    })
+  })
 })

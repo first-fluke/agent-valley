@@ -263,6 +263,8 @@ export class CodexSession extends BaseSession {
       case "turn/completed": {
         const result = this.buildRunResult(this.outputChunks.join(""), this.filesChanged)
         result.exitCode = 0
+        const usage = this.extractTokenUsage(msg.params)
+        if (usage) result.tokenUsage = usage
         this.emit({ type: "complete", result })
         break
       }
@@ -276,5 +278,36 @@ export class CodexSession extends BaseSession {
       default:
         this.emit({ type: "heartbeat", timestamp: new Date().toISOString() })
     }
+  }
+
+  /**
+   * Extract token usage from a `turn/completed` notification. The exact
+   * wire schema for Codex app-server is not publicly pinned; this
+   * parser tolerates several field naming conventions (`prompt_tokens` /
+   * `completion_tokens` from the OpenAI REST shape, and the plain
+   * `input` / `output` JSON-RPC convention). Returns `undefined` when no
+   * usage block is present — BudgetService then skips accumulation for
+   * this attempt (docs/plans/v0-2-bigbang-design.md § 6.4 E19).
+   */
+  private extractTokenUsage(
+    params: Record<string, unknown> | undefined,
+  ): { input: number; output: number; model: string } | undefined {
+    if (!params) return undefined
+    const usage = params.usage as Record<string, unknown> | undefined
+    if (!usage) return undefined
+    const input =
+      (usage.input as number | undefined) ??
+      (usage.input_tokens as number | undefined) ??
+      (usage.prompt_tokens as number | undefined) ??
+      0
+    const output =
+      (usage.output as number | undefined) ??
+      (usage.output_tokens as number | undefined) ??
+      (usage.completion_tokens as number | undefined) ??
+      0
+    if (input === 0 && output === 0) return undefined
+    const model =
+      (usage.model as string | undefined) ?? (params.model as string | undefined) ?? this.config?.model ?? "codex"
+    return { input, output, model }
   }
 }

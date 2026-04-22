@@ -39,9 +39,17 @@ export interface RunResult {
   durationMs: number
   /** List of file paths changed during execution */
   filesChanged: string[]
+  /**
+   * Token usage reported by the session adapter. Shape matches
+   * `TokenUsage` in `../domain/budget` so it can be forwarded to
+   * `BudgetService.recordUsage()` without re-mapping. Sessions that
+   * cannot discover usage (e.g. gemini CLI fallback) return `undefined`
+   * and BudgetService skips accumulation for that attempt.
+   */
   tokenUsage?: {
     input: number
     output: number
+    model: string
   }
 }
 

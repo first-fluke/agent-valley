@@ -182,11 +182,21 @@ export class ClaudeSession extends BaseSession {
     }
   }
 
-  private extractTokenUsage(resultEvent: Record<string, unknown>): { input: number; output: number } | undefined {
+  private extractTokenUsage(
+    resultEvent: Record<string, unknown>,
+  ): { input: number; output: number; model: string } | undefined {
     const usage = resultEvent.usage as Record<string, unknown> | undefined
     if (!usage) return undefined
-    const input = (usage.input_tokens as number | undefined) ?? 0
+    const inputTokens = (usage.input_tokens as number | undefined) ?? 0
+    const cacheRead = (usage.cache_read_input_tokens as number | undefined) ?? 0
+    const cacheCreation = (usage.cache_creation_input_tokens as number | undefined) ?? 0
     const output = (usage.output_tokens as number | undefined) ?? 0
-    return { input, output }
+    const model =
+      (resultEvent.model as string | undefined) ?? (usage.model as string | undefined) ?? this.config?.model ?? "claude"
+    return {
+      input: inputTokens + cacheRead + cacheCreation,
+      output,
+      model,
+    }
   }
 }

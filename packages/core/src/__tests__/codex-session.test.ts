@@ -7,12 +7,14 @@ import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import type { AgentEvent } from "../sessions/agent-session"
+import type { AgentEvent, RunResult } from "../sessions/agent-session"
 
 const MOCK_DIR = resolve(tmpdir(), "av-test-codex-mock")
 const MOCK_SCRIPT = resolve(MOCK_DIR, "codex")
 
-function writeMockCodex(behavior: "init-only" | "full-turn" | "error-turn" | "file-change" | "rpc-error"): void {
+function writeMockCodex(
+  behavior: "init-only" | "full-turn" | "error-turn" | "file-change" | "rpc-error" | "turn-with-usage",
+): void {
   mkdirSync(MOCK_DIR, { recursive: true })
 
   // Script reads JSON-RPC requests from stdin, responds accordingly
@@ -111,6 +113,32 @@ done
 while IFS= read -r line; do
   id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
   echo '{"jsonrpc":"2.0","id":'$id',"error":{"code":-32600,"message":"Invalid request"}}'
+done
+`
+      break
+
+    case "turn-with-usage":
+      // Emit a turn/completed notification with a usage block (prompt_tokens /
+      // completion_tokens convention, which the session is expected to map
+      // onto RunResult.tokenUsage).
+      script = `#!/bin/bash
+while IFS= read -r line; do
+  id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+  method=$(echo "$line" | grep -o '"method":"[^"]*"' | head -1 | sed 's/"method":"//;s/"//')
+  case "$method" in
+    initialize)
+      echo '{"jsonrpc":"2.0","id":'$id',"result":{}}'
+      ;;
+    thread/start)
+      echo '{"jsonrpc":"2.0","id":'$id',"result":{"thread":{"id":"thread-usage"}}}'
+      ;;
+    turn/start)
+      echo '{"jsonrpc":"2.0","id":'$id',"result":{}}'
+      sleep 0.05
+      echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Hello"}}'
+      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"usage":{"prompt_tokens":800,"completion_tokens":200,"model":"gpt-5.3-codex"}}}'
+      ;;
+  esac
 done
 `
       break
@@ -290,6 +318,50 @@ describe("CodexSession", () => {
     // This tests that start doesn't throw with model option
     await session.start({ type: "codex", timeout: 10, workspacePath: "/tmp", model: "gpt-5.3-codex" })
     expect(session.isAlive()).toBe(true)
+    await session.dispose()
+  })
+
+  test("parses token usage from turn/completed notification", async () => {
+    writeMockCodex("turn-with-usage")
+
+    const { CodexSession } = await import("../sessions/codex-session")
+    const session = new CodexSession()
+
+    const completions: RunResult[] = []
+    session.on("complete", (e) => completions.push(e.result))
+
+    await session.start({ type: "codex", timeout: 10, workspacePath: "/tmp" })
+    await session.execute("test")
+
+    await new Promise((r) => setTimeout(r, 300))
+
+    expect(completions).toHaveLength(1)
+    expect(completions[0]?.tokenUsage).toEqual({
+      input: 800,
+      output: 200,
+      model: "gpt-5.3-codex",
+    })
+
+    await session.dispose()
+  })
+
+  test("omits tokenUsage when turn/completed has no usage block", async () => {
+    writeMockCodex("full-turn")
+
+    const { CodexSession } = await import("../sessions/codex-session")
+    const session = new CodexSession()
+
+    const completions: RunResult[] = []
+    session.on("complete", (e) => completions.push(e.result))
+
+    await session.start({ type: "codex", timeout: 10, workspacePath: "/tmp" })
+    await session.execute("test")
+
+    await new Promise((r) => setTimeout(r, 300))
+
+    expect(completions).toHaveLength(1)
+    expect(completions[0]?.tokenUsage).toBeUndefined()
+
     await session.dispose()
   })
 

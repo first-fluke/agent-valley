@@ -83,6 +83,18 @@ export interface RunAttempt {
   finishedAt: string | null
   exitCode: number | null
   agentOutput: string | null
+  /**
+   * Token usage reported by the session adapter on run completion.
+   * Forwarded by the Orchestrator to `BudgetService.recordUsage()` on
+   * `onComplete` / `onError`. Missing when the underlying session could
+   * not discover usage (e.g. gemini CLI fallback); BudgetService skips
+   * accumulation for that attempt.
+   */
+  tokenUsage?: {
+    input: number
+    output: number
+    model: string
+  }
 }
 
 export interface RetryEntry {

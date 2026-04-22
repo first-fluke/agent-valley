@@ -20,7 +20,13 @@ follows [Semantic Versioning](https://semver.org/) and
 - **Agent budget caps** — `BudgetService` evaluates per-issue and
   per-day token / USD limits before each spawn; exceeding a cap
   transitions the issue to `cancelled` with an actionable comment.
-  Configure via the new `budget:` section in `valley.yaml`.
+  Configure via the new `budget:` section in `valley.yaml`. Post-run
+  token usage reported by each session adapter (`ClaudeSession` NDJSON
+  `result.usage`, `CodexSession` `turn/completed.usage`, `GeminiSession`
+  `usageMetadata`) is forwarded through `RunAttempt.tokenUsage` into
+  `BudgetService.recordUsage()` so the per-issue and per-day counters
+  accumulate automatically; sessions that cannot surface usage (e.g.
+  Gemini CLI fallback) leave the hop a no-op per § 6.4 E19.
 - **Live intervention** — `InterventionBus` + `POST /api/intervention`
   for `pause` / `resume` / `append_prompt` / `abort`. Dashboard ships
   an `InterventionPanel` UI. Commands are FIFO per attempt

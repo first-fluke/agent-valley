@@ -78,6 +78,7 @@ export class AgentRunnerService {
         finishedAt: new Date().toISOString(),
         exitCode: e.result.exitCode,
         agentOutput: e.result.output,
+        tokenUsage: e.result.tokenUsage,
       }
       cleanup()
       callbacks.onComplete(completed)

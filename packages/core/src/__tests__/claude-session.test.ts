@@ -207,6 +207,66 @@ describe("ClaudeSession — streaming output", () => {
     expect((error as unknown as { error: { message: string } }).error.message).toBe("something went wrong")
   })
 
+  test("extracts tokenUsage from result event (including cache tokens)", async () => {
+    writeMockClaude([
+      JSON.stringify({
+        type: "result",
+        result: "done",
+        duration_ms: 1000,
+        is_error: false,
+        model: "claude-sonnet-4.5",
+        usage: {
+          input_tokens: 1000,
+          output_tokens: 500,
+          cache_read_input_tokens: 100,
+          cache_creation_input_tokens: 50,
+          service_tier: "standard",
+        },
+      }),
+    ])
+
+    const { ClaudeSession } = await import("../sessions/claude-session")
+    const session = new ClaudeSession()
+
+    let tokenUsage: { input: number; output: number; model: string } | undefined
+    session.on("complete", (e) => {
+      tokenUsage = e.result.tokenUsage
+    })
+
+    await session.start({ type: "claude", timeout: 30, workspacePath: "/tmp", model: "claude-sonnet-4.5" })
+    await session.execute("test")
+
+    expect(tokenUsage).toEqual({
+      input: 1150, // 1000 + 100 + 50
+      output: 500,
+      model: "claude-sonnet-4.5",
+    })
+  })
+
+  test("result without usage leaves tokenUsage undefined", async () => {
+    writeMockClaude([
+      JSON.stringify({
+        type: "result",
+        result: "done",
+        duration_ms: 1000,
+        is_error: false,
+      }),
+    ])
+
+    const { ClaudeSession } = await import("../sessions/claude-session")
+    const session = new ClaudeSession()
+
+    let tokenUsage: unknown = "unset"
+    session.on("complete", (e) => {
+      tokenUsage = e.result.tokenUsage
+    })
+
+    await session.start({ type: "claude", timeout: 30, workspacePath: "/tmp" })
+    await session.execute("test")
+
+    expect(tokenUsage).toBeUndefined()
+  })
+
   test("result output is capped at 10KB", async () => {
     const bigResult = "y".repeat(20_000)
     writeMockClaude([

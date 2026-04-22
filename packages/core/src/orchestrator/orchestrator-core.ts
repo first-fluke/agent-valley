@@ -186,6 +186,7 @@ export class OrchestratorCore {
         if (this.reevaluateWaiting) await this.reevaluateWaiting()
       },
       observability: this.observability,
+      budget: this.budget,
     }
   }
 

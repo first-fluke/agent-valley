@@ -12,6 +12,7 @@ import type { ObservabilityHooks } from "../observability/hooks"
 import { createNoopObservabilityHooks } from "../observability/hooks"
 import { logger } from "../observability/logger"
 import type { RunCallbacks } from "./agent-runner"
+import type { BudgetService } from "./budget-service"
 import type { DagScheduler } from "./dag-scheduler"
 import { buildParentSummary, buildWorkSummary } from "./helpers"
 
@@ -29,6 +30,13 @@ export interface CompletionDeps {
   triggerUnblocked: (issueIds: string[]) => Promise<void>
   /** Observability hooks (OTel + Prom). Defaults to no-op when omitted. */
   observability?: ObservabilityHooks
+  /**
+   * Budget service for post-run token / USD accumulation. When omitted,
+   * the completion handler skips the `recordUsage` hop (useful for unit
+   * tests that do not exercise budget wiring). Reference: design § 4.5,
+   * § 6.4 (E19).
+   */
+  budget?: BudgetService
 }
 
 interface WorkspaceFailure {
@@ -296,18 +304,12 @@ export function createCompletionCallbacks(
         durationMs,
       })
 
-      // TODO(budget): usage reporting integration with per-session adapters.
-      //   When RunResult.tokenUsage reaches this callback (currently
-      //   collected inside AgentRunnerService but not forwarded on
-      //   RunAttempt), call:
-      //     deps.budget?.recordUsage(attempt.id, issue.id, {
-      //       input: result.tokenUsage.input,
-      //       output: result.tokenUsage.output,
-      //       model: route.model ?? route.agentType,
-      //     })
-      //   Blocked by: RunAttempt does not carry tokenUsage. Planned as a
-      //   separate session-layer change (see docs/plans/v0-2-bigbang-design.md
-      //   § 6.4 E19 — "토큰 사용량 미보고 시 skip + WARN").
+      // Budget post-run accounting (§ 4.5, § 6.4 E19). When the session
+      // did not surface tokenUsage (e.g. gemini CLI fallback), skip the
+      // hop — `BudgetService.recordUsage` must only be called with real
+      // numbers. Any failure inside recordUsage is logged as WARN and
+      // swallowed so the completion pipeline keeps running.
+      await recordBudgetUsage(deps.budget, completedAttempt, issue.id)
 
       logger.info("completion", `Agent completed for ${issue.identifier}`, {
         issueId: issue.id,
@@ -397,5 +399,39 @@ export function createCompletionCallbacks(
     onHeartbeat: (_timestamp) => {
       // Liveness tracking placeholder
     },
+  }
+}
+
+/**
+ * Forward session-reported token usage into the BudgetService. Skips
+ * silently when the attempt carries no usage block (session could not
+ * report) or when no budget is wired on the deps. Any error thrown by
+ * recordUsage is downgraded to a WARN log so a flaky observability
+ * exporter can never break the completion pipeline.
+ *
+ * Exported for direct unit testing.
+ */
+export async function recordBudgetUsage(
+  budget: BudgetService | undefined,
+  completed: RunAttempt,
+  issueId: string,
+): Promise<void> {
+  if (!budget) return
+  const usage = completed.tokenUsage
+  if (!usage) {
+    logger.debug("completion", "Session reported no tokenUsage — skipping BudgetService.recordUsage", {
+      attemptId: completed.id,
+      issueId,
+    })
+    return
+  }
+  try {
+    await budget.recordUsage(completed.id, issueId, usage)
+  } catch (err) {
+    logger.warn("completion", "BudgetService.recordUsage failed — usage not accumulated", {
+      attemptId: completed.id,
+      issueId,
+      error: String(err),
+    })
   }
 }

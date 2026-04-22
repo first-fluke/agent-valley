@@ -226,6 +226,74 @@ describe("GeminiSession — fallback mode", () => {
     await session.dispose()
   })
 
+  test("extracts tokenUsage from JSON response with usageMetadata", async () => {
+    mkdirSync(MOCK_DIR, { recursive: true })
+    const script = `#!/bin/bash
+cat > /dev/null
+echo '{"response":"Hi","usageMetadata":{"promptTokenCount":400,"candidatesTokenCount":120},"model":"gemini-2.5-pro"}'
+exit 0
+`
+    writeFileSync(MOCK_SCRIPT, script, "utf-8")
+    chmodSync(MOCK_SCRIPT, 0o755)
+
+    const { GeminiSession } = await import("../sessions/gemini-session")
+    const session = new GeminiSession()
+
+    let tokenUsage: { input: number; output: number; model: string } | undefined
+    session.on("complete", (e) => {
+      tokenUsage = e.result.tokenUsage
+    })
+
+    await session.start({ type: "gemini", timeout: 10, workspacePath: "/tmp", model: "gemini-2.5-pro" })
+    await session.execute("test")
+
+    expect(tokenUsage).toEqual({
+      input: 400,
+      output: 120,
+      model: "gemini-2.5-pro",
+    })
+  })
+
+  test("leaves tokenUsage undefined when JSON has no usage block", async () => {
+    writeMockGemini("json-response")
+
+    const { GeminiSession } = await import("../sessions/gemini-session")
+    const session = new GeminiSession()
+
+    let tokenUsage: unknown = "unset"
+    session.on("complete", (e) => {
+      tokenUsage = e.result.tokenUsage
+    })
+
+    await session.start({ type: "gemini", timeout: 10, workspacePath: "/tmp" })
+    await session.execute("test")
+
+    expect(tokenUsage).toBeUndefined()
+  })
+
+  test("extractGeminiUsage helper maps alternate field names", async () => {
+    const { extractGeminiUsage } = await import("../sessions/gemini-session")
+
+    // generationStats + snake_case variants
+    expect(
+      extractGeminiUsage(
+        {
+          generationStats: {
+            prompt_token_count: 10,
+            candidates_token_count: 5,
+          },
+        },
+        "gemini-fallback",
+      ),
+    ).toEqual({ input: 10, output: 5, model: "gemini-fallback" })
+
+    // Missing usage block returns undefined
+    expect(extractGeminiUsage({ response: "hi" })).toBeUndefined()
+
+    // Zero tokens returns undefined (treated as "no usage recorded")
+    expect(extractGeminiUsage({ usageMetadata: { promptTokenCount: 0, candidatesTokenCount: 0 } })).toBeUndefined()
+  })
+
   test("dispose is safe to call multiple times", async () => {
     writeMockGemini("json-response")
 

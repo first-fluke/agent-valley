@@ -153,13 +153,14 @@ export class GeminiSession extends BaseSession {
 
         // Parse the JSON response (gemini outputs a single JSON object)
         if (exitCode === 0) {
+          let parsed: Record<string, unknown> | null = null
           try {
             // Find the JSON object in the output (skip stderr-like noise that leaked to stdout)
             const jsonStart = raw.indexOf("{")
             if (jsonStart >= 0) {
               const jsonStr = raw.slice(jsonStart)
-              const result = JSON.parse(jsonStr) as Record<string, unknown>
-              this.output = (result.response as string | undefined) ?? (result.text as string | undefined) ?? raw
+              parsed = JSON.parse(jsonStr) as Record<string, unknown>
+              this.output = (parsed.response as string | undefined) ?? (parsed.text as string | undefined) ?? raw
             } else {
               this.output = raw
             }
@@ -167,11 +168,16 @@ export class GeminiSession extends BaseSession {
             this.output = raw
           }
 
+          // CLI fallback has no stable usage surface. Only emit token
+          // usage when the JSON response embeds `usageMetadata` (ACP-ish
+          // payload echoed by some Gemini builds); otherwise leave
+          // tokenUsage undefined so BudgetService skips accumulation.
+          const result = this.buildRunResult(this.output, this.filesChanged)
+          const usage = parsed ? extractGeminiUsage(parsed, this.config?.model) : undefined
+          if (usage) result.tokenUsage = usage
+
           this.emit({ type: "output", chunk: this.output })
-          this.emit({
-            type: "complete",
-            result: this.buildRunResult(this.output, this.filesChanged),
-          })
+          this.emit({ type: "complete", result })
         } else {
           this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `gemini exited with code ${exitCode}`, true)
         }
@@ -192,4 +198,40 @@ export class GeminiSession extends BaseSession {
     this.acpSupportCache = false
     return this.acpSupportCache
   }
+}
+
+/**
+ * Extract Gemini token usage from a parsed CLI JSON response or an ACP
+ * message. Checks both `usageMetadata` (ACP / generateContent response
+ * shape: promptTokenCount + candidatesTokenCount) and
+ * `generationStats` (older CLI builds: promptTokenCount +
+ * candidatesTokenCount). Returns `undefined` when no usage block is
+ * present, triggering the BudgetService skip path (docs/plans/v0-2-bigbang-design.md § 6.4 E19).
+ *
+ * Note: this parser is estimated — Gemini has published multiple
+ * response shapes across SDK versions. Fields that remain zero are
+ * treated as "no usage recorded" to avoid polluting the budget ledger.
+ */
+export function extractGeminiUsage(
+  payload: Record<string, unknown>,
+  fallbackModel?: string,
+): { input: number; output: number; model: string } | undefined {
+  const candidate =
+    (payload.usageMetadata as Record<string, unknown> | undefined) ??
+    (payload.generationStats as Record<string, unknown> | undefined)
+  if (!candidate) return undefined
+  const input =
+    (candidate.promptTokenCount as number | undefined) ??
+    (candidate.prompt_token_count as number | undefined) ??
+    (candidate.input as number | undefined) ??
+    0
+  const output =
+    (candidate.candidatesTokenCount as number | undefined) ??
+    (candidate.candidates_token_count as number | undefined) ??
+    (candidate.output as number | undefined) ??
+    0
+  if (input === 0 && output === 0) return undefined
+  const model =
+    (payload.model as string | undefined) ?? (candidate.model as string | undefined) ?? fallbackModel ?? "gemini"
+  return { input, output, model }
 }

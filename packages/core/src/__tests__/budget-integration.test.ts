@@ -106,6 +106,90 @@ describe("Budget integration — spawn gate", () => {
     expect(h.core.canAcceptIssue("i-blocked").ok).toBe(true)
   })
 
+  test("spawn → complete with tokenUsage accumulates per-issue + per-day budget", async () => {
+    const budget = createInMemoryBudgetService({
+      caps: {
+        perIssue: { tokens: 10_000, usd: 1000 },
+        perDay: { tokens: 100_000, usd: 1000 },
+        onExceed: "block",
+        allowOverrideLabel: false,
+        pricing: {
+          "claude-sonnet-4.5": { inputPerMtok: 3, outputPerMtok: 15 },
+        },
+      },
+    })
+
+    const h = buildLifecycleWithBudget(budget)
+    const issue = makeIssue({ id: "i-usage", identifier: "PROJ-77" })
+
+    await h.lifecycle.handleIssueInProgress(issue)
+
+    expect(FakeAgentSession.instances).toHaveLength(1)
+    const session = FakeAgentSession.instances[0]
+    if (!session) throw new Error("expected FakeAgentSession instance")
+
+    // Drive the agent to completion with a known token usage payload.
+    session.emit("complete", {
+      type: "complete",
+      result: {
+        exitCode: 0,
+        output: "all done",
+        durationMs: 1234,
+        filesChanged: [],
+        tokenUsage: { input: 1000, output: 500, model: "claude-sonnet-4.5" },
+      },
+    })
+
+    // Allow microtasks + any onComplete async work to settle
+    await new Promise((r) => setTimeout(r, 20))
+
+    // Per-issue accumulator reflects the reported usage
+    const issueUsed = budget.getIssueUsed("i-usage")
+    expect(issueUsed.tokens).toBe(1500)
+    // cost = (1000 * 3 + 500 * 15) / 1_000_000 = 0.0105
+    expect(issueUsed.usd).toBeCloseTo(0.0105, 6)
+
+    // Per-day accumulator also incremented
+    const dayUsed = budget.getDailyUsed()
+    expect(dayUsed.tokens).toBe(1500)
+    expect(dayUsed.usd).toBeCloseTo(0.0105, 6)
+  })
+
+  test("spawn → complete without tokenUsage leaves budget counters at zero", async () => {
+    const budget = createInMemoryBudgetService({
+      caps: {
+        perIssue: { tokens: 10_000, usd: 1000 },
+        perDay: { tokens: 100_000, usd: 1000 },
+        onExceed: "block",
+        allowOverrideLabel: false,
+        pricing: {},
+      },
+    })
+
+    const h = buildLifecycleWithBudget(budget)
+    const issue = makeIssue({ id: "i-no-usage", identifier: "PROJ-78" })
+
+    await h.lifecycle.handleIssueInProgress(issue)
+    const session = FakeAgentSession.instances[0]
+    if (!session) throw new Error("expected FakeAgentSession instance")
+
+    session.emit("complete", {
+      type: "complete",
+      result: {
+        exitCode: 0,
+        output: "no usage surfaced",
+        durationMs: 500,
+        filesChanged: [],
+        // tokenUsage omitted
+      },
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(budget.getIssueUsed("i-no-usage")).toEqual({ tokens: 0, usd: 0 })
+    expect(budget.getDailyUsed()).toEqual({ tokens: 0, usd: 0 })
+  })
+
   test("warn mode allows spawn even when cap is reached", async () => {
     const budget = createInMemoryBudgetService({
       caps: {
