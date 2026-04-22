@@ -337,17 +337,19 @@ MAX_LINES=500
 # Grandfathered files: pre-existing violations tracked in docs/plans/architecture-debt.md.
 # Each entry is "path:ceiling" — fail only if the file grows above its ceiling.
 # Shrink the ceiling as you split these files; delete the entry when it drops under MAX_LINES.
-GRANDFATHERED=(
-  "apps/cli/src/setup.ts:723"
-)
+# (Currently empty — all prior entries were split below the 500-line cap.)
+GRANDFATHERED=()
 
 get_ceiling() {
   local path="$1"
-  for entry in "${GRANDFATHERED[@]}"; do
-    case "${entry}" in
-      "${path}:"*) printf '%s' "${entry#*:}"; return 0 ;;
-    esac
-  done
+  # Guard against empty arrays under bash 3.x + set -u on macOS.
+  if [ "${#GRANDFATHERED[@]}" -gt 0 ]; then
+    for entry in "${GRANDFATHERED[@]}"; do
+      case "${entry}" in
+        "${path}:"*) printf '%s' "${entry#*:}"; return 0 ;;
+      esac
+    done
+  fi
   printf '%s' "${MAX_LINES}"
 }
 

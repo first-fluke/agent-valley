@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { WorkflowState } from "../setup"
-import { buildGlobalYaml, buildProjectYaml, findWorkflowState, linearQuery, maskApiKey } from "../setup"
+import type { WorkflowState } from "../setup/index"
+import { buildGlobalYaml, buildProjectYaml, findWorkflowState, linearQuery, maskApiKey } from "../setup/index"
 
 // ── findWorkflowState ────────────────────────────────────────────────────────
 

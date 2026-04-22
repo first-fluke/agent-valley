@@ -104,10 +104,10 @@ program
   .option("--edit", "Modify specific values in existing config")
   .action(async (opts: { edit?: boolean }) => {
     if (opts.edit) {
-      const { setupEdit } = await import("./setup")
+      const { setupEdit } = await import("./setup/index")
       await setupEdit()
     } else {
-      const { setup } = await import("./setup")
+      const { setup } = await import("./setup/index")
       await setup()
     }
   })
