@@ -246,9 +246,14 @@ while IFS= read -r file; do
     *) continue ;;
   esac
 
-  # TypeScript / JavaScript: domain imports any non-domain layer directory
+  # TypeScript / JavaScript: domain imports any non-domain layer directory.
+  # Exclude relative imports that stay inside domain/ (e.g. "./ports/tracker"
+  # from domain/parsed-webhook-event.ts is a within-domain reference, not an
+  # outbound dependency). Relative imports that escape the domain subtree
+  # would need "../../" and would not match this check's starting anchor.
   if grep -qE "from ['\"][^'\"]*(/|^)(${NON_DOMAIN_LAYER_DIRS})(/|['\"])" "${file}" 2>/dev/null; then
-    matches=$(grep -nE "from ['\"][^'\"]*(/|^)(${NON_DOMAIN_LAYER_DIRS})(/|['\"])" "${file}" 2>/dev/null || true)
+    matches=$(grep -nE "from ['\"][^'\"]*(/|^)(${NON_DOMAIN_LAYER_DIRS})(/|['\"])" "${file}" 2>/dev/null \
+      | grep -vE "from ['\"]\./" || true)
     if [ -n "${matches}" ]; then
       violation "Architecture violation: domain/ imports from non-domain layer"
       violation "  Fix: Domain must be pure. Define an interface in domain/, implement it in the outer layer, and inject it."

@@ -65,6 +65,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
+    trackerKind: "linear",
     linearApiKey: "lin_api_test",
     linearTeamId: "TEST",
     linearTeamUuid: "uuid-test",

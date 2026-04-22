@@ -31,6 +31,7 @@ export function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 export function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
+    trackerKind: "linear",
     linearApiKey: "lin_api_test",
     linearTeamId: "PROJ",
     linearTeamUuid: "team-uuid",

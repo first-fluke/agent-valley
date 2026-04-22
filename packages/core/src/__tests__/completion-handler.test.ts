@@ -64,6 +64,7 @@ function makeRoute(overrides: Partial<ResolvedRoute> = {}): ResolvedRoute {
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
+    trackerKind: "linear",
     linearApiKey: "lin_api_test",
     linearTeamId: "PROJ",
     linearTeamUuid: "team-uuid",

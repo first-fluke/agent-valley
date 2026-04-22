@@ -109,6 +109,7 @@ describe("buildOrchestratorStatus", () => {
 
   function makeConfig(): Config {
     return {
+      trackerKind: "linear",
       linearApiKey: "key",
       linearTeamId: "PROJ",
       linearTeamUuid: "uuid",

@@ -6,6 +6,8 @@
 import { toOrchestratorConfig } from "@/lib/env"
 import { configureLogger, logger } from "@agent-valley/core/observability/logger"
 import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
+import { GithubTrackerAdapter } from "@agent-valley/core/tracker/adapters/github-adapter"
+import { GithubWebhookReceiver } from "@agent-valley/core/tracker/adapters/github-webhook-receiver"
 import { LinearTrackerAdapter } from "@agent-valley/core/tracker/adapters/linear-adapter"
 import { LinearWebhookReceiver } from "@agent-valley/core/tracker/adapters/linear-webhook-receiver"
 import { FileSystemWorkspaceGateway } from "@agent-valley/core/workspace/adapters/fs-workspace-gateway"
@@ -29,15 +31,29 @@ export async function bootstrap() {
   const config = toOrchestratorConfig(projectRoot)
   configureLogger(config.logLevel, config.logFormat)
 
-  const tracker = new LinearTrackerAdapter({
-    apiKey: config.linearApiKey,
-    teamId: config.linearTeamId,
-    teamUuid: config.linearTeamUuid,
-  })
-  const webhook = new LinearWebhookReceiver({
-    secret: config.linearWebhookSecret,
-    workflowStates: config.workflowStates,
-  })
+  const tracker =
+    config.trackerKind === "github" && config.github
+      ? new GithubTrackerAdapter({
+          token: config.github.token,
+          owner: config.github.owner,
+          repo: config.github.repo,
+          labels: config.github.labels,
+        })
+      : new LinearTrackerAdapter({
+          apiKey: config.linearApiKey,
+          teamId: config.linearTeamId,
+          teamUuid: config.linearTeamUuid,
+        })
+  const webhook =
+    config.trackerKind === "github" && config.github
+      ? new GithubWebhookReceiver({
+          secret: config.github.webhookSecret,
+          labels: config.github.labels,
+        })
+      : new LinearWebhookReceiver({
+          secret: config.linearWebhookSecret,
+          workflowStates: config.workflowStates,
+        })
   const workspace = new FileSystemWorkspaceGateway(new WorkspaceManager(config.workspaceRoot))
 
   const orchestrator = new Orchestrator(config, tracker, webhook, workspace)

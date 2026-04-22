@@ -86,6 +86,11 @@ export type GlobalConfig = z.infer<typeof globalConfigSchema>
 /** Schema for <project>/valley.yaml */
 export const projectConfigSchema = z
   .object({
+    tracker: z
+      .object({
+        kind: z.enum(["linear", "github"]).optional(),
+      })
+      .optional(),
     linear: z
       .object({
         api_key: z.string().min(1).optional(),
@@ -93,6 +98,23 @@ export const projectConfigSchema = z
         team_uuid: z.string().min(1).optional(),
         webhook_secret: z.string().min(1).optional(),
         workflow_states: z
+          .object({
+            todo: z.string().min(1).optional(),
+            in_progress: z.string().min(1).optional(),
+            done: z.string().min(1).optional(),
+            cancelled: z.string().min(1).optional(),
+          })
+          .optional(),
+      })
+      .optional(),
+    github: z
+      .object({
+        /** Name of the env var that holds the token (e.g. "GITHUB_TOKEN"). */
+        token_env: z.string().min(1).optional(),
+        owner: z.string().min(1).optional(),
+        repo: z.string().min(1).optional(),
+        webhook_secret: z.string().min(1).optional(),
+        labels: z
           .object({
             todo: z.string().min(1).optional(),
             in_progress: z.string().min(1).optional(),
@@ -158,56 +180,112 @@ export type ProjectConfig = z.infer<typeof projectConfigSchema>
 
 // ── Merged Config (validated output) ────────────────────────────────
 
-const mergedConfigSchema = z.object({
-  linearApiKey: z
+const githubConfigSchema = z.object({
+  token: z
     .string()
-    .min(1, "linear.api_key is not set.\n  Fix: Add linear.api_key to ~/.config/agent-valley/settings.yaml"),
-  linearTeamId: z.string().min(1, "linear.team_id is not set.\n  Fix: Add linear.team_id to valley.yaml"),
-  linearTeamUuid: z.string().min(1, "linear.team_uuid is not set.\n  Fix: Add linear.team_uuid to valley.yaml"),
-  linearWebhookSecret: z
+    .min(1, "github token resolved from token_env is empty.\n  Fix: export the env var named in github.token_env."),
+  owner: z.string().min(1, "github.owner is not set.\n  Fix: Add github.owner to valley.yaml"),
+  repo: z.string().min(1, "github.repo is not set.\n  Fix: Add github.repo to valley.yaml"),
+  webhookSecret: z
     .string()
-    .min(1, "linear.webhook_secret is not set.\n  Fix: Add linear.webhook_secret to valley.yaml"),
-  workflowStates: z.object({
-    todo: z.string().min(1, "linear.workflow_states.todo is not set.\n  Fix: Add it to valley.yaml"),
-    inProgress: z.string().min(1, "linear.workflow_states.in_progress is not set.\n  Fix: Add it to valley.yaml"),
-    done: z.string().min(1, "linear.workflow_states.done is not set.\n  Fix: Add it to valley.yaml"),
-    cancelled: z.string().min(1, "linear.workflow_states.cancelled is not set.\n  Fix: Add it to valley.yaml"),
+    .min(1, "github.webhook_secret is not set.\n  Fix: Add github.webhook_secret to valley.yaml"),
+  labels: z.object({
+    todo: z.string().min(1, "github.labels.todo is not set.\n  Fix: Add it to valley.yaml"),
+    inProgress: z.string().min(1, "github.labels.in_progress is not set.\n  Fix: Add it to valley.yaml"),
+    done: z.string().min(1, "github.labels.done is not set.\n  Fix: Add it to valley.yaml"),
+    cancelled: z.string().min(1, "github.labels.cancelled is not set.\n  Fix: Add it to valley.yaml"),
   }),
-  workspaceRoot: z
-    .string()
-    .min(1, "workspace.root is not set.\n  Fix: Add workspace.root to valley.yaml")
-    .refine(
-      (v) => v.startsWith("/"),
-      "workspace.root must be an absolute path.\n  Fix: Set workspace.root: /absolute/path in valley.yaml",
-    ),
-  agentType: z.enum(["claude", "codex", "gemini"]),
-  agentTimeout: z.number().min(30),
-  agentMaxRetries: z.number().min(1),
-  agentRetryDelay: z.number().min(1),
-  maxParallel: z.number().min(1),
-  serverPort: z.number().min(1),
-  logLevel: z.enum(["debug", "info", "warn", "error"]),
-  logFormat: z.enum(["json", "text"]),
-  deliveryMode: z.enum(["merge", "pr"]),
-  promptTemplate: z.string().min(1, "prompt is not set.\n  Fix: Add prompt field to valley.yaml"),
-  routingRules: z.array(
-    z.object({
-      label: z.string().min(1),
-      workspaceRoot: z
-        .string()
-        .min(1)
-        .refine((v) => v.startsWith("/"), "workspaceRoot must be absolute"),
-      agentType: z.enum(["claude", "codex", "gemini"]).optional(),
-      deliveryMode: z.enum(["merge", "pr"]).optional(),
-    }),
-  ),
-  scoringModel: z.string().optional(),
-  scoreRouting: scoreRoutingSchema.optional(),
-  supabaseUrl: z.string().optional(),
-  supabaseAnonKey: z.string().optional(),
-  teamId: z.string().optional(),
-  displayName: z.string().optional(),
 })
+
+export type GithubTrackerConfig = z.infer<typeof githubConfigSchema>
+
+const mergedConfigSchema = z
+  .object({
+    trackerKind: z.enum(["linear", "github"]),
+    linearApiKey: z.string(),
+    linearTeamId: z.string(),
+    linearTeamUuid: z.string(),
+    linearWebhookSecret: z.string(),
+    workflowStates: z.object({
+      todo: z.string(),
+      inProgress: z.string(),
+      done: z.string(),
+      cancelled: z.string(),
+    }),
+    github: githubConfigSchema.optional(),
+    workspaceRoot: z
+      .string()
+      .min(1, "workspace.root is not set.\n  Fix: Add workspace.root to valley.yaml")
+      .refine(
+        (v) => v.startsWith("/"),
+        "workspace.root must be an absolute path.\n  Fix: Set workspace.root: /absolute/path in valley.yaml",
+      ),
+    agentType: z.enum(["claude", "codex", "gemini"]),
+    agentTimeout: z.number().min(30),
+    agentMaxRetries: z.number().min(1),
+    agentRetryDelay: z.number().min(1),
+    maxParallel: z.number().min(1),
+    serverPort: z.number().min(1),
+    logLevel: z.enum(["debug", "info", "warn", "error"]),
+    logFormat: z.enum(["json", "text"]),
+    deliveryMode: z.enum(["merge", "pr"]),
+    promptTemplate: z.string().min(1, "prompt is not set.\n  Fix: Add prompt field to valley.yaml"),
+    routingRules: z.array(
+      z.object({
+        label: z.string().min(1),
+        workspaceRoot: z
+          .string()
+          .min(1)
+          .refine((v) => v.startsWith("/"), "workspaceRoot must be absolute"),
+        agentType: z.enum(["claude", "codex", "gemini"]).optional(),
+        deliveryMode: z.enum(["merge", "pr"]).optional(),
+      }),
+    ),
+    scoringModel: z.string().optional(),
+    scoreRouting: scoreRoutingSchema.optional(),
+    supabaseUrl: z.string().optional(),
+    supabaseAnonKey: z.string().optional(),
+    teamId: z.string().optional(),
+    displayName: z.string().optional(),
+  })
+  .superRefine((cfg, ctx) => {
+    if (cfg.trackerKind === "linear") {
+      const linearRequired: Array<[string, string, string]> = [
+        [cfg.linearApiKey, "linearApiKey", "linear.api_key in ~/.config/agent-valley/settings.yaml or valley.yaml"],
+        [cfg.linearTeamId, "linearTeamId", "linear.team_id in valley.yaml"],
+        [cfg.linearTeamUuid, "linearTeamUuid", "linear.team_uuid in valley.yaml"],
+        [cfg.linearWebhookSecret, "linearWebhookSecret", "linear.webhook_secret in valley.yaml"],
+        [cfg.workflowStates.todo, "workflowStates.todo", "linear.workflow_states.todo in valley.yaml"],
+        [
+          cfg.workflowStates.inProgress,
+          "workflowStates.inProgress",
+          "linear.workflow_states.in_progress in valley.yaml",
+        ],
+        [cfg.workflowStates.done, "workflowStates.done", "linear.workflow_states.done in valley.yaml"],
+        [cfg.workflowStates.cancelled, "workflowStates.cancelled", "linear.workflow_states.cancelled in valley.yaml"],
+      ]
+      for (const [value, path, fix] of linearRequired) {
+        if (!value) {
+          ctx.addIssue({
+            code: "custom",
+            path: path.split("."),
+            message: `${path} is not set.\n  Fix: Add ${fix}.`,
+          })
+        }
+      }
+    }
+    if (cfg.trackerKind === "github") {
+      if (!cfg.github) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["github"],
+          message:
+            "github config is required when tracker.kind === 'github'.\n" +
+            "  Fix: Add a github: section with token_env, owner, repo, webhook_secret, and labels.",
+        })
+      }
+    }
+  })
 
 export type Config = z.infer<typeof mergedConfigSchema>
 
@@ -284,8 +362,36 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
     deliveryMode: "merge" as const,
   }
 
+  // Tracker kind: explicit > inferred. Linear block present -> linear; else
+  // github block present -> github; fall back to linear for backwards compat.
+  let trackerKind: "linear" | "github" = project?.tracker?.kind ?? "linear"
+  if (!project?.tracker?.kind) {
+    if (!project?.linear && project?.github) trackerKind = "github"
+  }
+
+  // GitHub: resolve token from named env var. Empty string fails validation
+  // later via the trackerKind=github refinement.
+  let githubMerged: Record<string, unknown> | undefined
+  if (project?.github) {
+    const envName = project.github.token_env ?? "GITHUB_TOKEN"
+    const token = process.env[envName] ?? ""
+    githubMerged = {
+      token,
+      owner: project.github.owner ?? "",
+      repo: project.github.repo ?? "",
+      webhookSecret: project.github.webhook_secret ?? "",
+      labels: {
+        todo: project.github.labels?.todo ?? "",
+        inProgress: project.github.labels?.in_progress ?? "",
+        done: project.github.labels?.done ?? "",
+        cancelled: project.github.labels?.cancelled ?? "",
+      },
+    }
+  }
+
   // Build merged config: project > global > defaults
   return {
+    trackerKind,
     linearApiKey: project?.linear?.api_key ?? global?.linear?.api_key ?? "",
     linearTeamId: project?.linear?.team_id ?? "",
     linearTeamUuid: project?.linear?.team_uuid ?? "",
@@ -296,6 +402,7 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
       done: project?.linear?.workflow_states?.done ?? "",
       cancelled: project?.linear?.workflow_states?.cancelled ?? "",
     },
+    github: githubMerged,
     workspaceRoot: project?.workspace?.root ?? "",
     agentType: project?.agent?.type ?? global?.agent?.type ?? defaults.agentType,
     agentTimeout: project?.agent?.timeout ?? global?.agent?.timeout ?? defaults.agentTimeout,

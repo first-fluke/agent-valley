@@ -34,6 +34,7 @@ function makeRetryQueue(): RetryQueue {
 
 function makeConfig(): Config {
   return {
+    trackerKind: "linear",
     agentType: "claude",
     maxParallel: 3,
     serverPort: 9741,
