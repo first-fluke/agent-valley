@@ -4,7 +4,14 @@
  * throwing so the caller (index.ts) can surface a 5-field error.
  */
 
-import type { AgentType, GithubSetupValues, LinearSetupValues, SetupContext, TrackerKind } from "./types"
+import type {
+  AgentType,
+  GithubSetupValues,
+  LinearSetupValues,
+  SetupContext,
+  TrackerKind,
+  TunnelSetupValues,
+} from "./types"
 
 export interface ResolvedSetupContext {
   trackerKind: TrackerKind
@@ -15,6 +22,7 @@ export interface ResolvedSetupContext {
   workspaceRoot: string
   agentType: AgentType
   maxParallel: number
+  tunnel: TunnelSetupValues
 }
 
 /**
@@ -55,6 +63,12 @@ export function resolveContext(
     if (!g.labels?.cancelled) missing.push("github.labels.cancelled")
   }
 
+  // Tunnel: defaults to ngrok when the step is skipped (backwards compat).
+  const tunnel: TunnelSetupValues = ctx.tunnel ?? { provider: "ngrok" }
+  if (tunnel.provider === "cloudflare" && tunnel.cloudflare?.mode === "named" && !tunnel.cloudflare.name) {
+    missing.push("tunnel.cloudflare.name")
+  }
+
   if (missing.length > 0) {
     return {
       ok: false,
@@ -76,6 +90,7 @@ export function resolveContext(
       workspaceRoot: ctx.workspaceRoot as string,
       agentType: ctx.agentType as AgentType,
       maxParallel: ctx.maxParallel as number,
+      tunnel,
     },
   }
 }

@@ -13,8 +13,10 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { loadConfig } from "@agent-valley/core/config/yaml-loader"
 import { program } from "commander"
 import pc from "picocolors"
+import { spawnTunnel, type TunnelHandle, type TunnelLogger } from "./tunnel"
 
 /** Project root = cwd where user runs `bunx av` */
 const ROOT = process.cwd()
@@ -25,6 +27,8 @@ const LOG_FILE = resolve(ROOT, ".av.log")
 
 interface PidState {
   dashboard: number
+  /** Tunnel process pid (null when no tunnel was spawned). Name kept as
+   * `ngrok` for backwards compatibility with .av.pid files from v0.2. */
   ngrok?: number
   port: number
   startedAt: string
@@ -59,40 +63,35 @@ function ensureConfig(): void {
   }
 }
 
-// ── ngrok helper ─────────────────────────────────────────────────────────────
+// ── Tunnel helper ────────────────────────────────────────────────────────────
 
-function spawnNgrok(port: string): ChildProcess | null {
-  const which = spawnSync("which", ["ngrok"])
-  if (which.status !== 0) {
-    console.log(pc.yellow("⚠ ngrok not found — Linear webhooks won't reach localhost"))
-    console.log(pc.dim("  Install: brew install ngrok"))
-    return null
+/**
+ * Console-backed logger adapter for the tunnel module. Keeps picocolors
+ * in the Presentation layer so the tunnel adapters stay printer-agnostic
+ * and easy to unit-test.
+ */
+const tunnelLogger: TunnelLogger = {
+  info: (msg: string) => console.log(pc.green(msg)),
+  warn: (msg: string) => console.log(pc.yellow(msg)),
+  dim: (msg: string) => console.log(pc.dim(msg)),
+}
+
+/**
+ * Read the merged tunnel config and spawn the selected provider. Falls
+ * back to the ngrok default (backwards compat) when config loading
+ * fails for any reason — we never want tunnel configuration to block
+ * the dashboard from starting.
+ */
+function startTunnel(port: string): TunnelHandle {
+  try {
+    const cfg = loadConfig(ROOT)
+    return spawnTunnel(cfg.tunnel, { port, logger: tunnelLogger })
+  } catch {
+    // loadConfig calls process.exit on fatal validation errors; any
+    // thrown error here is unexpected — fall back to legacy ngrok
+    // behaviour to preserve v0.2 semantics.
+    return spawnTunnel({ provider: "ngrok", cloudflare: { mode: "quick" } }, { port, logger: tunnelLogger })
   }
-
-  const proc = spawn("ngrok", ["http", port, "--log", "stdout", "--log-format", "json"], {
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-  })
-
-  let found = false
-  proc.stdout?.on("data", (chunk: Buffer) => {
-    if (found) return
-    for (const line of chunk.toString().split("\n")) {
-      if (!line.trim()) continue
-      try {
-        const log = JSON.parse(line)
-        if (log.url?.startsWith("https://")) {
-          found = true
-          console.log(pc.green(`▶ ngrok → ${log.url}`))
-          console.log(pc.dim(`  Webhook URL: ${log.url}/api/webhook`))
-        }
-      } catch {
-        // not JSON
-      }
-    }
-  })
-
-  return proc
 }
 
 program.name("av").description("Agent Valley — AI agent orchestrator").version("0.1.0")
@@ -156,14 +155,14 @@ program
     })
     dashProc.unref()
 
-    // Start ngrok
-    const ngrokProc = spawnNgrok(port)
-    ngrokProc?.unref()
+    // Start tunnel (ngrok / cloudflared / none — from valley.yaml)
+    const tunnel = startTunnel(port)
+    tunnel.child?.unref()
 
     // Write PID file
     writePids({
       dashboard: dashProc.pid ?? 0,
-      ngrok: ngrokProc?.pid,
+      ngrok: tunnel.child?.pid,
       port: Number(port),
       startedAt: new Date().toISOString(),
     })
@@ -206,7 +205,7 @@ program
       } catch {
         process.kill(state.ngrok, "SIGTERM")
       }
-      console.log(pc.green(`▪ ngrok stopped (pid: ${state.ngrok})`))
+      console.log(pc.green(`▪ Tunnel stopped (pid: ${state.ngrok})`))
       stopped++
     }
 
@@ -246,8 +245,8 @@ program
 
     startDashboard()
 
-    // ngrok
-    const ngrokProc = spawnNgrok(port)
+    // tunnel (ngrok / cloudflared / none — from valley.yaml)
+    const tunnel = startTunnel(port)
 
     // Watch config files
     const chokidar = await import("chokidar")
@@ -268,7 +267,7 @@ program
       shuttingDown = true
       watcher.close()
       dashProc?.kill()
-      ngrokProc?.kill()
+      tunnel.kill()
       process.exit(0)
     }
 
@@ -314,9 +313,9 @@ program
     // Daemon status
     if (pids) {
       const dashAlive = isProcessAlive(pids.dashboard)
-      const ngrokAlive = pids.ngrok ? isProcessAlive(pids.ngrok) : false
+      const tunnelAlive = pids.ngrok ? isProcessAlive(pids.ngrok) : false
       console.log(dashAlive ? pc.green(`● Dashboard running (pid: ${pids.dashboard})`) : pc.red("○ Dashboard dead"))
-      console.log(ngrokAlive ? pc.green(`● ngrok running (pid: ${pids.ngrok})`) : pc.dim("○ ngrok not running"))
+      console.log(tunnelAlive ? pc.green(`● Tunnel running (pid: ${pids.ngrok})`) : pc.dim("○ Tunnel not running"))
       console.log()
     }
 

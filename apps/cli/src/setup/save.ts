@@ -50,6 +50,7 @@ export async function saveConfig(ctx: ResolvedSetupContext): Promise<void> {
           doneStateId: ctx.linear.doneStateId,
           cancelledStateId: ctx.linear.cancelledStateId,
           workspaceRoot: ctx.workspaceRoot,
+          tunnel: ctx.tunnel,
         })
       : buildProjectYamlGithub({
           tokenEnv: ctx.github.tokenEnv,
@@ -58,6 +59,7 @@ export async function saveConfig(ctx: ResolvedSetupContext): Promise<void> {
           webhookSecret: ctx.github.webhookSecret,
           labels: ctx.github.labels,
           workspaceRoot: ctx.workspaceRoot,
+          tunnel: ctx.tunnel,
         })
 
   writeFileSync("valley.yaml", projectContent, "utf-8")

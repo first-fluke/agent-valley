@@ -9,7 +9,7 @@
 
 import type { GlobalConfig, ProjectConfig } from "@agent-valley/core/config/yaml-loader"
 import { stringify as yamlStringify } from "yaml"
-import type { AgentType } from "./types"
+import type { AgentType, TunnelSetupValues } from "./types"
 
 export const DEFAULT_PROMPT = `You are working on {{issue.identifier}}: {{issue.title}}.
 
@@ -48,6 +48,28 @@ export function buildGlobalYamlGithub(config: { agentType: string; maxParallel: 
   return yamlStringify(obj, { lineWidth: 0 })
 }
 
+/**
+ * Translate the in-memory tunnel context into the shape persisted to
+ * `valley.yaml`. Returns `undefined` when the context is absent OR when
+ * the provider is the ngrok default with no extra fields — omitting the
+ * block keeps the on-disk YAML minimal and preserves v0.2 compatibility.
+ */
+function buildTunnelBlock(tunnel: TunnelSetupValues | undefined): ProjectConfig["tunnel"] {
+  if (!tunnel) return undefined
+  if (tunnel.provider === "ngrok") return undefined
+  if (tunnel.provider === "none") {
+    return { provider: "none", cloudflare: { mode: "quick" } }
+  }
+  return {
+    provider: "cloudflare",
+    cloudflare: {
+      mode: tunnel.cloudflare?.mode ?? "quick",
+      name: tunnel.cloudflare?.name,
+      hostname: tunnel.cloudflare?.hostname,
+    },
+  }
+}
+
 export function buildProjectYaml(config: {
   teamKey: string
   teamUuid: string
@@ -58,6 +80,7 @@ export function buildProjectYaml(config: {
   cancelledStateId: string
   workspaceRoot: string
   prompt?: string
+  tunnel?: TunnelSetupValues
 }): string {
   const obj: ProjectConfig = {
     tracker: { kind: "linear" },
@@ -76,6 +99,8 @@ export function buildProjectYaml(config: {
     delivery: { mode: "merge" },
     prompt: config.prompt ?? DEFAULT_PROMPT,
   }
+  const tunnel = buildTunnelBlock(config.tunnel)
+  if (tunnel) obj.tunnel = tunnel
   return yamlStringify(obj, { lineWidth: 0 })
 }
 
@@ -91,6 +116,7 @@ export function buildProjectYamlGithub(config: {
   labels: { todo: string; inProgress: string; done: string; cancelled: string }
   workspaceRoot: string
   prompt?: string
+  tunnel?: TunnelSetupValues
 }): string {
   const obj: ProjectConfig = {
     tracker: { kind: "github" },
@@ -110,5 +136,7 @@ export function buildProjectYamlGithub(config: {
     delivery: { mode: "merge" },
     prompt: config.prompt ?? DEFAULT_PROMPT,
   }
+  const tunnel = buildTunnelBlock(config.tunnel)
+  if (tunnel) obj.tunnel = tunnel
   return yamlStringify(obj, { lineWidth: 0 })
 }

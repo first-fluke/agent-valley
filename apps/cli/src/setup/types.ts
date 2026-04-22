@@ -60,6 +60,22 @@ export interface GithubSetupValues {
   }
 }
 
+export type TunnelProvider = "cloudflare" | "ngrok" | "none"
+export type TunnelMode = "quick" | "named"
+
+export interface TunnelCloudflareValues {
+  mode: TunnelMode
+  /** Required when mode === "named". */
+  name?: string
+  /** Optional UI-only hint — used to render the webhook URL. */
+  hostname?: string
+}
+
+export interface TunnelSetupValues {
+  provider: TunnelProvider
+  cloudflare?: TunnelCloudflareValues
+}
+
 /**
  * Setup context accumulated across steps. Fields are partial while the
  * wizard is running; the orchestrator (index.ts) asserts required fields
@@ -72,6 +88,7 @@ export interface SetupContext {
   workspaceRoot?: string
   agentType?: AgentType
   maxParallel?: number
+  tunnel?: TunnelSetupValues
 }
 
 export type StepFn = (ctx: SetupContext, step: number, total: number) => Promise<StepResult>

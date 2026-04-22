@@ -100,6 +100,28 @@ prompt: |
 #     tokens: 20000000              # Team-wide daily token ceiling
 #     usd: 50.00                    # Team-wide daily USD ceiling
 
+# ── Tunnel (v0.3+, optional) ──────────────────────────────────────────
+# Public URL tunnel used to receive webhooks on localhost. Omit the
+# block to keep the v0.2 default (ngrok).
+#   provider: cloudflare | ngrok | none
+#     cloudflare — spawn `cloudflared`; see cloudflare.mode below.
+#     ngrok      — default; requires `brew install ngrok` on PATH.
+#     none       — no tunnel; use an external reverse proxy or a
+#                  pre-configured cloudflared sidecar.
+# Cloudflare modes:
+#   quick — spawns `cloudflared tunnel --url http://localhost:{port}`.
+#           Cloudflare mints a random *.trycloudflare.com URL. No account
+#           or DNS setup required.
+#   named — runs a pre-registered tunnel (`cloudflared tunnel create <name>`).
+#           Requires `name`; `hostname` is optional and only used to
+#           display the webhook URL to the operator.
+# tunnel:
+#   provider: cloudflare
+#   cloudflare:
+#     mode: quick
+#     # name: av-webhook          # required when mode: named
+#     # hostname: webhook.example.com  # UI-only, used when mode: named
+
 # ── Observability (v0.2+, optional) ───────────────────────────────────
 # OpenTelemetry OTLP HTTP tracing + Prometheus metrics. Both default to
 # off — enable per deployment. Exporter errors are swallowed inside the

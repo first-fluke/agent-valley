@@ -60,6 +60,7 @@ describe("saveConfig", () => {
       workspaceRoot: join(tmpRoot, "workspaces"),
       agentType: "claude",
       maxParallel: 2,
+      tunnel: { provider: "ngrok" },
     }
 
     await saveConfig(ctx)
@@ -105,6 +106,7 @@ describe("saveConfig", () => {
       workspaceRoot: join(tmpRoot, "workspaces"),
       agentType: "codex",
       maxParallel: 1,
+      tunnel: { provider: "ngrok" },
     }
 
     await saveConfig(ctx)

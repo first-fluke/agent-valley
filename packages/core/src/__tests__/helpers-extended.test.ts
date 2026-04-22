@@ -131,6 +131,7 @@ describe("buildOrchestratorStatus", () => {
         otel: { enabled: false, endpoint: "http://localhost:4318", serviceName: "agent-valley" },
         prometheus: { enabled: false, path: "/api/metrics" },
       },
+      tunnel: { provider: "ngrok", cloudflare: { mode: "quick" } },
     } as Config
   }
 

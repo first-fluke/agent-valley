@@ -46,11 +46,12 @@ bun av setup
 # 또는 템플릿 복사 후 수동 설정
 cp valley.example.yaml valley.yaml
 
-# 시작 (dashboard + orchestrator + ngrok 터널)
+# 시작 (dashboard + orchestrator + 터널 — 기본 ngrok, Cloudflare Tunnel 선택 가능)
 bun av dev
 ```
 
-콘솔에 출력된 ngrok URL을 Linear 웹훅 설정에 복사합니다 → `{url}/api/webhook`.
+콘솔에 출력된 터널 URL을 Linear 웹훅 설정에 복사합니다 → `{url}/api/webhook`.
+터널 프로바이더 기본값은 ngrok 이며, `valley.yaml` 의 `tunnel.provider: cloudflare` 로 Cloudflare Tunnel 을 선택할 수 있습니다 (아래 설정 섹션 참조).
 
 ---
 
@@ -182,6 +183,14 @@ scoring:
 #   per_day:
 #     tokens: 20_000_000
 #     usd: 50.00
+
+# 웹훅 터널 (선택 사항, v0.3+). 생략 시 v0.2 기본값 ngrok.
+# tunnel:
+#   provider: cloudflare   # cloudflare | ngrok | none
+#   cloudflare:
+#     mode: quick          # quick (랜덤 *.trycloudflare.com URL) | named
+#     # name: av-webhook           # mode: named 일 때 필수
+#     # hostname: webhook.example.com  # mode: named 일 때 UI 표시용
 
 # 관측성 (선택 사항, v0.2+). 둘 다 기본값 off.
 # observability:

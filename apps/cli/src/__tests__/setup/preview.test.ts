@@ -45,6 +45,7 @@ const linearCtx: ResolvedSetupContext = {
   workspaceRoot: "/home/x/workspaces",
   agentType: "claude",
   maxParallel: 3,
+  tunnel: { provider: "ngrok" },
 }
 
 const githubCtx: ResolvedSetupContext = {
@@ -78,6 +79,7 @@ const githubCtx: ResolvedSetupContext = {
   workspaceRoot: "/home/x/workspaces",
   agentType: "codex",
   maxParallel: 2,
+  tunnel: { provider: "ngrok" },
 }
 
 describe("renderPreview (linear)", () => {
@@ -92,6 +94,28 @@ describe("renderPreview (linear)", () => {
 
   it("includes tracker.kind = linear", () => {
     expect(strip(renderPreview(linearCtx))).toContain("tracker.kind           = linear")
+  })
+})
+
+describe("renderPreview — tunnel", () => {
+  it("always includes tunnel.provider", () => {
+    expect(strip(renderPreview(linearCtx))).toContain("tunnel.provider        = ngrok")
+  })
+
+  it("includes cloudflare named mode fields when selected", () => {
+    const out = strip(
+      renderPreview({
+        ...linearCtx,
+        tunnel: {
+          provider: "cloudflare",
+          cloudflare: { mode: "named", name: "av-webhook", hostname: "hooks.example.com" },
+        },
+      }),
+    )
+    expect(out).toContain("tunnel.provider        = cloudflare")
+    expect(out).toContain("tunnel.cloudflare.mode = named")
+    expect(out).toContain("tunnel.cloudflare.name = av-webhook")
+    expect(out).toContain("tunnel.cloudflare.host = hooks.example.com")
   })
 })
 

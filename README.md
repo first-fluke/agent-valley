@@ -46,11 +46,12 @@ bun av setup
 # Or copy template and fill in manually
 cp valley.example.yaml valley.yaml
 
-# Start (dashboard + orchestrator + ngrok tunnel)
+# Start (dashboard + orchestrator + tunnel — ngrok by default, or Cloudflare Tunnel)
 bun av dev
 ```
 
-Copy the ngrok URL printed to the console into Linear webhook settings → `{url}/api/webhook`.
+Copy the tunnel URL printed to the console into Linear webhook settings → `{url}/api/webhook`.
+The default tunnel provider is ngrok; set `tunnel.provider: cloudflare` in `valley.yaml` to use Cloudflare Tunnel (see Configuration below).
 
 ---
 
@@ -182,6 +183,14 @@ scoring:
 #   per_day:
 #     tokens: 20_000_000
 #     usd: 50.00
+
+# Webhook tunnel (optional, v0.3+). Omit to keep the v0.2 default (ngrok).
+# tunnel:
+#   provider: cloudflare   # cloudflare | ngrok | none
+#   cloudflare:
+#     mode: quick          # quick (random *.trycloudflare.com URL) | named
+#     # name: av-webhook           # required when mode: named
+#     # hostname: webhook.example.com  # UI-only, used when mode: named
 
 # Observability (optional, v0.2+). Both default to off.
 # observability:

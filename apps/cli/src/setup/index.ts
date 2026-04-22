@@ -34,6 +34,7 @@ import { renderPreview } from "./preview"
 import { resolveContext } from "./resolve"
 import { saveConfig } from "./save"
 import { stepTrackerKind } from "./tracker-step"
+import { stepTunnel } from "./tunnel-step"
 import { BACK, CANCEL, type SetupContext, type StepFn } from "./types"
 import { stepWorkspace } from "./workspace-step"
 
@@ -54,7 +55,7 @@ function githubSteps(): StepFn[] {
 }
 
 function commonSteps(): StepFn[] {
-  return [stepWorkspace, stepAgentType, stepParallel]
+  return [stepWorkspace, stepTunnel, stepAgentType, stepParallel]
 }
 
 function buildStepList(kind: SetupContext["trackerKind"]): StepFn[] {

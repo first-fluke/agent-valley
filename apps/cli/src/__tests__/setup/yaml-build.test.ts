@@ -56,6 +56,84 @@ describe("buildProjectYaml (linear)", () => {
   })
 })
 
+describe("buildProjectYaml — tunnel block", () => {
+  const base = {
+    teamKey: "FIR",
+    teamUuid: "uuid-1",
+    webhookSecret: "lin_wh_sec",
+    todoStateId: "t",
+    inProgressStateId: "ip",
+    doneStateId: "d",
+    cancelledStateId: "c",
+    workspaceRoot: "/ws",
+  }
+
+  it("omits tunnel block entirely when provider is the ngrok default", () => {
+    const out = buildProjectYaml({ ...base, tunnel: { provider: "ngrok" } })
+    expect(out).not.toContain("tunnel:")
+  })
+
+  it("omits tunnel block when no tunnel is supplied (back-compat)", () => {
+    const out = buildProjectYaml(base)
+    expect(out).not.toContain("tunnel:")
+  })
+
+  it("writes provider: none with a cloudflare stub", () => {
+    const out = buildProjectYaml({ ...base, tunnel: { provider: "none" } })
+    const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
+    expect(parsed.tunnel?.provider).toBe("none")
+  })
+
+  it("writes cloudflare quick mode without name/hostname", () => {
+    const out = buildProjectYaml({
+      ...base,
+      tunnel: { provider: "cloudflare", cloudflare: { mode: "quick" } },
+    })
+    const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
+    expect(parsed.tunnel?.provider).toBe("cloudflare")
+    const cf = parsed.tunnel?.cloudflare as Record<string, unknown>
+    expect(cf.mode).toBe("quick")
+    expect(cf.name).toBeUndefined()
+    expect(cf.hostname).toBeUndefined()
+  })
+
+  it("writes cloudflare named mode with name and hostname", () => {
+    const out = buildProjectYaml({
+      ...base,
+      tunnel: {
+        provider: "cloudflare",
+        cloudflare: { mode: "named", name: "av-webhook", hostname: "hooks.example.com" },
+      },
+    })
+    const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
+    const cf = parsed.tunnel?.cloudflare as Record<string, unknown>
+    expect(cf.mode).toBe("named")
+    expect(cf.name).toBe("av-webhook")
+    expect(cf.hostname).toBe("hooks.example.com")
+  })
+})
+
+describe("buildProjectYamlGithub — tunnel block", () => {
+  const base = {
+    tokenEnv: "GITHUB_TOKEN",
+    owner: "first-fluke",
+    repo: "agent-valley",
+    webhookSecret: "whsec_x",
+    labels: { todo: "a", inProgress: "b", done: "c", cancelled: "d" },
+    workspaceRoot: "/ws",
+  }
+
+  it("serialises cloudflare quick tunnel alongside github config", () => {
+    const out = buildProjectYamlGithub({
+      ...base,
+      tunnel: { provider: "cloudflare", cloudflare: { mode: "quick" } },
+    })
+    const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
+    expect(parsed.tracker?.kind).toBe("github")
+    expect(parsed.tunnel?.provider).toBe("cloudflare")
+  })
+})
+
 describe("buildProjectYamlGithub", () => {
   const base = {
     tokenEnv: "GITHUB_TOKEN",

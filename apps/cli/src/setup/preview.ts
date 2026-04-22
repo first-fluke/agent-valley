@@ -45,5 +45,14 @@ export function renderPreview(ctx: ResolvedSetupContext): string {
 
   lines.push(`  workspace.root         = ${ctx.workspaceRoot}`)
   lines.push(`  delivery.mode          = merge`)
+  lines.push(`  tunnel.provider        = ${pc.cyan(ctx.tunnel.provider)}`)
+  if (ctx.tunnel.provider === "cloudflare") {
+    const cf = ctx.tunnel.cloudflare
+    lines.push(`  tunnel.cloudflare.mode = ${cf?.mode ?? "quick"}`)
+    if (cf?.mode === "named") {
+      lines.push(`  tunnel.cloudflare.name = ${cf.name ?? pc.red("(missing)")}`)
+      if (cf.hostname) lines.push(`  tunnel.cloudflare.host = ${cf.hostname}`)
+    }
+  }
   return lines.join("\n")
 }

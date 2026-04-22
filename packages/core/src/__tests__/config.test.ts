@@ -733,6 +733,165 @@ workspace:
     }
   })
 
+  test("tunnel defaults to provider=ngrok when the tunnel block is omitted", () => {
+    const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
+    writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+    const config = loadConfig(projectDir, globalPath)
+    expect(config.tunnel.provider).toBe("ngrok")
+    expect(config.tunnel.cloudflare.mode).toBe("quick")
+    expect(config.tunnel.cloudflare.name).toBeUndefined()
+    expect(config.tunnel.cloudflare.hostname).toBeUndefined()
+  })
+
+  test("tunnel cloudflare quick mode parses without name/hostname", () => {
+    const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: T
+  team_uuid: U
+  webhook_secret: W
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test
+tunnel:
+  provider: cloudflare
+  cloudflare:
+    mode: quick
+`,
+    )
+    const config = loadConfig(projectDir, globalPath)
+    expect(config.tunnel.provider).toBe("cloudflare")
+    expect(config.tunnel.cloudflare.mode).toBe("quick")
+  })
+
+  test("tunnel cloudflare named mode requires name — error is actionable", () => {
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: T
+  team_uuid: U
+  webhook_secret: W
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test
+tunnel:
+  provider: cloudflare
+  cloudflare:
+    mode: named
+`,
+    )
+    // Fires at loadProjectConfig via superRefine — before the merged
+    // validator runs. Message must be actionable.
+    try {
+      loadProjectConfig(projectDir)
+      throw new Error("expected loadProjectConfig to throw")
+    } catch (err) {
+      const msg = (err as Error).message
+      expect(msg).toContain("Project config validation failed")
+      expect(msg).toContain("tunnel.cloudflare.name is required")
+      expect(msg).toContain("Fix:")
+    }
+  })
+
+  test("tunnel cloudflare named mode accepted when name is set", () => {
+    const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: T
+  team_uuid: U
+  webhook_secret: W
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test
+tunnel:
+  provider: cloudflare
+  cloudflare:
+    mode: named
+    name: av-webhook
+    hostname: hooks.example.com
+`,
+    )
+    const config = loadConfig(projectDir, globalPath)
+    expect(config.tunnel.provider).toBe("cloudflare")
+    expect(config.tunnel.cloudflare.mode).toBe("named")
+    expect(config.tunnel.cloudflare.name).toBe("av-webhook")
+    expect(config.tunnel.cloudflare.hostname).toBe("hooks.example.com")
+  })
+
+  test("tunnel provider=none is accepted", () => {
+    const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: T
+  team_uuid: U
+  webhook_secret: W
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test
+tunnel:
+  provider: none
+`,
+    )
+    const config = loadConfig(projectDir, globalPath)
+    expect(config.tunnel.provider).toBe("none")
+  })
+
+  test("tunnel provider with invalid enum value fails validation", () => {
+    writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: T
+  team_uuid: U
+  webhook_secret: W
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test
+tunnel:
+  provider: bogus
+`,
+    )
+    expect(() => loadProjectConfig(projectDir)).toThrow("Project config validation failed")
+  })
+
   test("scoring routes are passed through to merged config", () => {
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(

@@ -45,6 +45,75 @@ describe("resolveContext (linear)", () => {
   })
 })
 
+describe("resolveContext (tunnel)", () => {
+  const baseLinearCtx = {
+    trackerKind: "linear" as const,
+    linear: {
+      apiKey: "k",
+      teams: [],
+      orgUrlKey: "a",
+      teamUuid: "u",
+      selectedTeam: { id: "u", key: "ACR", name: "Acme" },
+      states: [],
+      todoStateId: "t",
+      inProgressStateId: "ip",
+      doneStateId: "d",
+      cancelledStateId: "c",
+      webhookSecret: "w",
+    },
+    workspaceRoot: "/ws",
+    agentType: "claude" as const,
+    maxParallel: 2,
+  }
+
+  it("defaults tunnel.provider to ngrok when the step was skipped", () => {
+    const result = resolveContext(baseLinearCtx)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.ctx.tunnel.provider).toBe("ngrok")
+    }
+  })
+
+  it("passes cloudflare quick mode through untouched", () => {
+    const result = resolveContext({
+      ...baseLinearCtx,
+      tunnel: { provider: "cloudflare", cloudflare: { mode: "quick" } },
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.ctx.tunnel.provider).toBe("cloudflare")
+      expect(result.ctx.tunnel.cloudflare?.mode).toBe("quick")
+    }
+  })
+
+  it("flags tunnel.cloudflare.name when named mode is missing the name", () => {
+    const result = resolveContext({
+      ...baseLinearCtx,
+      tunnel: { provider: "cloudflare", cloudflare: { mode: "named" } },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain("tunnel.cloudflare.name")
+      expect(result.error).toContain("fix:")
+    }
+  })
+
+  it("accepts named mode with name + hostname", () => {
+    const result = resolveContext({
+      ...baseLinearCtx,
+      tunnel: {
+        provider: "cloudflare",
+        cloudflare: { mode: "named", name: "av-webhook", hostname: "hooks.example.com" },
+      },
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.ctx.tunnel.cloudflare?.name).toBe("av-webhook")
+      expect(result.ctx.tunnel.cloudflare?.hostname).toBe("hooks.example.com")
+    }
+  })
+})
+
 describe("resolveContext (github)", () => {
   const validGithubCtx = {
     trackerKind: "github" as const,

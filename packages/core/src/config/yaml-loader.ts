@@ -13,6 +13,7 @@ import { z } from "zod"
 import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
 import { detectHardware } from "./hardware"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
+import { buildTunnelConfig, tunnelMergedSchema, tunnelProjectSchema } from "./tunnel-schema"
 
 // ── Schemas ─────────────────────────────────────────────────────────
 
@@ -177,6 +178,7 @@ export const projectConfigSchema = z
       .optional(),
     observability: observabilityProjectSchema,
     budget: budgetProjectSchema,
+    tunnel: tunnelProjectSchema,
   })
   .strict()
 
@@ -253,6 +255,7 @@ const mergedConfigSchema = z
     displayName: z.string().optional(),
     observability: observabilityMergedSchema,
     budget: budgetMergedSchema,
+    tunnel: tunnelMergedSchema,
   })
   .superRefine((cfg, ctx) => {
     if (cfg.trackerKind === "linear") {
@@ -298,6 +301,7 @@ export type Config = z.infer<typeof mergedConfigSchema>
 // Re-export for backward compatibility
 export type RoutingRule = z.infer<typeof routingRuleSchema>
 export type ScoreRoutingConfig = z.infer<typeof scoreRoutingSchema>
+export type { TunnelConfig } from "./tunnel-schema"
 
 // ── File Loading ────────────────────────────────────────────────────
 
@@ -434,6 +438,7 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
     displayName: project?.team?.display_name ?? global?.team?.display_name ?? undefined,
     observability: buildObservabilityConfig(project),
     budget: buildBudgetConfig(project),
+    tunnel: buildTunnelConfig(project),
   }
 }
 

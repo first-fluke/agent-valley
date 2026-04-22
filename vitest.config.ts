@@ -103,6 +103,7 @@ export default defineConfig({
         "apps/cli/src/setup/linear-step.ts",
         "apps/cli/src/setup/parallel-step.ts",
         "apps/cli/src/setup/tracker-step.ts",
+        "apps/cli/src/setup/tunnel-step.ts",
         "apps/cli/src/setup/ui.ts",
         "apps/cli/src/setup/workspace-step.ts",
         "apps/cli/src/setup/types.ts",
