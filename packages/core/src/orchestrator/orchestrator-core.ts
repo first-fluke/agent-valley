@@ -18,6 +18,8 @@ import { createNoopObservabilityHooks } from "../observability/hooks"
 import { logger } from "../observability/logger"
 import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
 import type { AgentRunnerService } from "./agent-runner"
+import type { BudgetService } from "./budget-service"
+import { createNoopBudgetService } from "./budget-service"
 import type { CompletionDeps } from "./completion-handler"
 import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
@@ -70,6 +72,11 @@ export interface OrchestratorCoreDeps {
    * and never propagate into orchestrator flow.
    */
   observability?: ObservabilityHooks
+  /**
+   * Optional per-issue + per-day budget service. Omit to fall back to a
+   * no-op implementation that always allows spawn. Design § 4.5.
+   */
+  budget?: BudgetService
 }
 
 export class OrchestratorCore {
@@ -86,6 +93,9 @@ export class OrchestratorCore {
 
   /** Observability hooks — defaults to no-op. Exposed read-only. */
   readonly observability: ObservabilityHooks
+
+  /** Budget service — defaults to no-op. Exposed read-only. */
+  readonly budget: BudgetService
 
   readonly state: OrchestratorRuntimeState = {
     isRunning: false,
@@ -125,6 +135,7 @@ export class OrchestratorCore {
     this.retryQueue = new RetryQueue(this.config.agentMaxRetries, this.config.agentRetryDelay)
     this.dagScheduler = new DagScheduler(`${this.config.workspaceRoot}/.agent-valley/dag-cache.json`)
     this.observability = deps.observability ?? createNoopObservabilityHooks()
+    this.budget = deps.budget ?? createNoopBudgetService()
     this.dagScheduler.setCycleObserver(() => this.observability.onDagCycle())
   }
 

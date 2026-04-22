@@ -13,6 +13,7 @@ import { resolveRouteWithScore } from "../config/routing"
 import { renderPrompt } from "../config/workflow-loader"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
+import { formatBudgetBlockComment } from "./budget-service"
 import { createCompletionCallbacks } from "./completion-handler"
 import type { OrchestratorCore } from "./orchestrator-core"
 import { analyzeScoreInBackground } from "./scoring-service"
@@ -93,6 +94,15 @@ export class IssueLifecycle {
           error: String(err),
         })
       }
+    }
+
+    // Budget gate (§ 4.5): deny spawn if per-issue or per-day cap reached.
+    // Follows the same cancellation path as max-retry exhaustion so state
+    // ownership stays inside the completion pipeline / orchestrator core.
+    const budgetDecision = await core.budget.checkBeforeSpawn(issue)
+    if (!budgetDecision.allow) {
+      await this.cancelForBudget(issue, budgetDecision)
+      return
     }
 
     // Resolve routing
@@ -184,6 +194,53 @@ export class IssueLifecycle {
     )
 
     logger.info("orchestrator", `Starting agent for ${issue.identifier}`, { issueId: issue.id })
+  }
+
+  /**
+   * Cancel an issue that failed the budget pre-spawn check. Posts a
+   * block comment to the tracker and transitions the issue to the
+   * configured cancelled state. Mirrors the retry-exhausted cancellation
+   * path so callers do not need to mutate runtime state directly.
+   *
+   * Design: docs/plans/v0-2-bigbang-design.md § 4.5 / § 6.4 (E16, E17).
+   */
+  private async cancelForBudget(
+    issue: Issue,
+    decision: { allow: false; reason: "issue_cap" | "daily_cap"; used: number; cap: number; unit: "tokens" | "usd" },
+  ): Promise<void> {
+    const { core } = this
+    core.releaseProcessing(issue.id)
+
+    const body = formatBudgetBlockComment(decision, issue.identifier)
+    try {
+      await core.tracker.addIssueComment(issue.id, body)
+    } catch (err) {
+      logger.debug("orchestrator", "Failed to post budget-cap comment", {
+        issueId: issue.id,
+        error: String(err),
+      })
+    }
+    try {
+      await core.tracker.updateIssueState(issue.id, core.config.workflowStates.cancelled)
+    } catch (err) {
+      logger.error("orchestrator", "Failed to transition budget-blocked issue to cancelled", {
+        issueId: issue.id,
+        error: String(err),
+      })
+    }
+
+    core.emitEvent("issue.transitioned", {
+      issueKey: issue.identifier,
+      issueId: issue.id,
+      to: "cancelled",
+      reason: "budget_cap",
+      budget: {
+        scope: decision.reason,
+        unit: decision.unit,
+        used: decision.used,
+        cap: decision.cap,
+      },
+    })
   }
 
   async handleIssueLeftInProgress(issueId: string): Promise<void> {

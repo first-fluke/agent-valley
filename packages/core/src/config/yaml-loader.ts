@@ -10,6 +10,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
 import { z } from "zod"
+import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
 import { detectHardware } from "./hardware"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
 
@@ -175,6 +176,7 @@ export const projectConfigSchema = z
       })
       .optional(),
     observability: observabilityProjectSchema,
+    budget: budgetProjectSchema,
   })
   .strict()
 
@@ -250,6 +252,7 @@ const mergedConfigSchema = z
     teamId: z.string().optional(),
     displayName: z.string().optional(),
     observability: observabilityMergedSchema,
+    budget: budgetMergedSchema,
   })
   .superRefine((cfg, ctx) => {
     if (cfg.trackerKind === "linear") {
@@ -430,6 +433,7 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
     teamId: project?.team?.id ?? global?.team?.id ?? undefined,
     displayName: project?.team?.display_name ?? global?.team?.display_name ?? undefined,
     observability: buildObservabilityConfig(project),
+    budget: buildBudgetConfig(project),
   }
 }
 

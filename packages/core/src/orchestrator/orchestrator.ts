@@ -21,6 +21,7 @@ import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
 import type { ObservabilityHooks } from "../observability/hooks"
 import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
+import type { BudgetService } from "./budget-service"
 import { OrchestratorEventEmitter } from "./event-emitter"
 import { IssueLifecycle } from "./issue-lifecycle"
 import { OrchestratorCore } from "./orchestrator-core"
@@ -38,6 +39,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     workspace: WorkspaceGateway,
     agentRunner?: SpawnAgentRunnerAdapter,
     observability?: ObservabilityHooks,
+    budget?: BudgetService,
   ) {
     super()
 
@@ -56,6 +58,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
       agentRunner: runner,
       emit: (event, payload) => this.emitEvent(event, payload),
       observability,
+      budget,
     })
 
     this.lifecycle = new IssueLifecycle(this.core)

@@ -296,6 +296,19 @@ export function createCompletionCallbacks(
         durationMs,
       })
 
+      // TODO(budget): usage reporting integration with per-session adapters.
+      //   When RunResult.tokenUsage reaches this callback (currently
+      //   collected inside AgentRunnerService but not forwarded on
+      //   RunAttempt), call:
+      //     deps.budget?.recordUsage(attempt.id, issue.id, {
+      //       input: result.tokenUsage.input,
+      //       output: result.tokenUsage.output,
+      //       model: route.model ?? route.agentType,
+      //     })
+      //   Blocked by: RunAttempt does not carry tokenUsage. Planned as a
+      //   separate session-layer change (see docs/plans/v0-2-bigbang-design.md
+      //   § 6.4 E19 — "토큰 사용량 미보고 시 skip + WARN").
+
       logger.info("completion", `Agent completed for ${issue.identifier}`, {
         issueId: issue.id,
         exitCode: completedAttempt.exitCode ?? undefined,

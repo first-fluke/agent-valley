@@ -4,6 +4,10 @@
  */
 
 import { toOrchestratorConfig } from "@/lib/env"
+import {
+  createInMemoryBudgetService,
+  createNoopBudgetService,
+} from "@agent-valley/core/orchestrator/budget-service"
 import { createObservabilityHooks } from "@agent-valley/core/observability/hooks"
 import { configureLogger, logger } from "@agent-valley/core/observability/logger"
 import { createOtelExporter } from "@agent-valley/core/observability/otel-exporter"
@@ -76,7 +80,14 @@ export async function bootstrap() {
     metrics,
   })
 
-  const orchestrator = new Orchestrator(config, tracker, webhook, workspace, undefined, observability)
+  // Budget service — configured via valley.yaml budget: section. When the
+  // section is absent the no-op service is used so spawn is never gated.
+  // Design § 4.5 / § 6.4 (E16–E19).
+  const budget = config.budget
+    ? createInMemoryBudgetService({ caps: config.budget, observability })
+    : createNoopBudgetService()
+
+  const orchestrator = new Orchestrator(config, tracker, webhook, workspace, undefined, observability, budget)
   await orchestrator.start()
 
   const handlers = orchestrator.getHandlers()
