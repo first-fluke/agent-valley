@@ -94,4 +94,25 @@ export interface AgentSession {
 
   /** Release all resources (process, connections, temp files) */
   dispose(): Promise<void>
+
+  // ── Live intervention (optional — capability-gated) ──────────────────
+  // Each session advertises support at the port level via
+  // `SpawnAgentRunnerAdapter.capabilities(agentType)`. Calling an
+  // unsupported method should be avoided; if called, the session MAY
+  // throw or no-op. Callers (InterventionBus / spawn-agent-runner) are
+  // expected to pre-check capability before dispatch.
+
+  /** Native pause (Codex JSON-RPC or SIGSTOP). Optional. */
+  pause?(): Promise<void>
+
+  /** Native resume (Codex JSON-RPC or SIGCONT). Optional. */
+  resume?(): Promise<void>
+
+  /**
+   * Send a mid-run user message to the agent without restarting.
+   * Supported by Codex (persistent JSON-RPC) and Gemini ACP.
+   * Claude (stateless) does not implement this — it must be handled
+   * via cancel + respawn at a higher layer.
+   */
+  sendUserMessage?(text: string): Promise<void>
 }

@@ -17,6 +17,14 @@ export async function GET(request: Request) {
       send("state", orchestrator.getStatus())
     }
   }
+  const onInterventionEvent = (eventName: string) => (payload: unknown) => {
+    send(eventName, payload)
+    if (orchestrator) send("state", orchestrator.getStatus())
+  }
+  const onPaused = onInterventionEvent("agent.paused")
+  const onResumed = onInterventionEvent("agent.resumed")
+  const onPromptAppended = onInterventionEvent("agent.prompt_appended")
+  const onAborted = onInterventionEvent("agent.aborted")
 
   const encoder = new TextEncoder()
   let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
@@ -41,6 +49,10 @@ export async function GET(request: Request) {
       orchestrator.off("agent.start", onAgentEvent)
       orchestrator.off("agent.done", onAgentEvent)
       orchestrator.off("agent.failed", onAgentEvent)
+      orchestrator.off("agent.paused", onPaused)
+      orchestrator.off("agent.resumed", onResumed)
+      orchestrator.off("agent.prompt_appended", onPromptAppended)
+      orchestrator.off("agent.aborted", onAborted)
     }
   }
 
@@ -53,6 +65,10 @@ export async function GET(request: Request) {
         orchestrator.on("agent.start", onAgentEvent)
         orchestrator.on("agent.done", onAgentEvent)
         orchestrator.on("agent.failed", onAgentEvent)
+        orchestrator.on("agent.paused", onPaused)
+        orchestrator.on("agent.resumed", onResumed)
+        orchestrator.on("agent.prompt_appended", onPromptAppended)
+        orchestrator.on("agent.aborted", onAborted)
       } else {
         send("state", {
           isRunning: false,

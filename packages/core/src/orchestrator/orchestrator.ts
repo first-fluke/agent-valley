@@ -20,9 +20,12 @@ import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
 import type { ObservabilityHooks } from "../observability/hooks"
+import { logger } from "../observability/logger"
 import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
 import type { BudgetService } from "./budget-service"
 import { OrchestratorEventEmitter } from "./event-emitter"
+import type { InterventionBus } from "./intervention-bus"
+import { InterventionBus as InterventionBusImpl } from "./intervention-bus"
 import { IssueLifecycle } from "./issue-lifecycle"
 import { OrchestratorCore } from "./orchestrator-core"
 import { WebhookRouter } from "./webhook-router"
@@ -31,6 +34,8 @@ export class Orchestrator extends OrchestratorEventEmitter {
   private readonly core: OrchestratorCore
   private readonly lifecycle: IssueLifecycle
   private readonly router: WebhookRouter
+  /** Live intervention mediator (C). Exposed for the HTTP surface. */
+  public readonly intervention: InterventionBus
 
   constructor(
     config: Config,
@@ -40,6 +45,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     agentRunner?: SpawnAgentRunnerAdapter,
     observability?: ObservabilityHooks,
     budget?: BudgetService,
+    intervention?: InterventionBus,
   ) {
     super()
 
@@ -60,6 +66,25 @@ export class Orchestrator extends OrchestratorEventEmitter {
       observability,
       budget,
     })
+
+    // Construct the intervention bus if one was not injected. It shares
+    // the same AgentRunnerService / Port used for spawn so command
+    // dispatch hits the same live session instances. Telemetry is wired
+    // directly into this facade's public event stream.
+    this.intervention =
+      intervention ??
+      new InterventionBusImpl({
+        runner: this.core.agentRunner,
+        port: this.core.agentRunnerPort,
+        logger,
+        telemetry: {
+          onPaused: (ctx) => this.emitEvent("agent.paused", ctx as unknown as Record<string, unknown>),
+          onResumed: (ctx) => this.emitEvent("agent.resumed", ctx as unknown as Record<string, unknown>),
+          onPromptAppended: (ctx) => this.emitEvent("agent.prompt_appended", ctx as unknown as Record<string, unknown>),
+          onAborted: (ctx) => this.emitEvent("agent.aborted", ctx as unknown as Record<string, unknown>),
+        },
+      })
+    this.core.attachIntervention(this.intervention)
 
     this.lifecycle = new IssueLifecycle(this.core)
     this.router = new WebhookRouter(this.core, this.lifecycle)

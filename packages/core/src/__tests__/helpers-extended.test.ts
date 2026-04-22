@@ -134,10 +134,13 @@ describe("buildOrchestratorStatus", () => {
     } as Config
   }
 
-  function mockRunner(overrides: Partial<Pick<AgentRunnerService, "activeCount" | "getLastOutput">> = {}) {
+  function mockRunner(
+    overrides: Partial<Pick<AgentRunnerService, "activeCount" | "getLastOutput" | "getAgentType">> = {},
+  ) {
     return {
       activeCount: overrides.activeCount ?? 0,
       getLastOutput: overrides.getLastOutput ?? (() => undefined),
+      getAgentType: overrides.getAgentType ?? (() => undefined),
     } as AgentRunnerService
   }
 

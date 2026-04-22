@@ -154,6 +154,26 @@ export class IssueLifecycle {
 
     core.registerAttempt(issue.id, attempt.id)
 
+    // Register the attempt with the intervention bus so the dashboard
+    // can send pause / resume / append_prompt / abort. When the session
+    // is stateless (claude / gemini-CLI), `requestRetry` re-queues the
+    // issue with the extra instruction appended.
+    const bus = core.getInterventionBus()
+    if (bus) {
+      bus.registerAttempt({
+        attemptId: attempt.id,
+        issueKey: issue.identifier,
+        agentType: route.agentType,
+        requestRetry: async (extraText: string) => {
+          const previousError = retryContext?.lastError ?? ""
+          const mergedReason = previousError
+            ? `${previousError}\n\nOperator append_prompt:\n${extraText}`
+            : `Operator append_prompt:\n${extraText}`
+          core.enqueueRetry(issue.id, retryContext?.attemptCount ?? 0, mergedReason)
+        },
+      })
+    }
+
     // Release the processing lock now that activeWorkspaces is set
     core.releaseProcessing(issue.id)
 
@@ -254,6 +274,7 @@ export class IssueLifecycle {
     if (attemptId) {
       await core.agentRunner.kill(attemptId)
       core.clearAttempt(issueId)
+      core.getInterventionBus()?.unregisterAttempt(attemptId)
     }
 
     core.observability.onAgentCancelled({

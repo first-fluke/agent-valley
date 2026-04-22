@@ -60,6 +60,31 @@ export class GeminiSession extends BaseSession {
     return this.process.exitCode === null
   }
 
+  // ── Live intervention (C) ──────────────────────────────────────────────
+
+  /**
+   * Send a mid-run user message when running in ACP mode. In CLI
+   * fallback mode this throws — the caller (spawn-agent-runner) must
+   * fall back to the Claude-style cancel + respawn strategy.
+   */
+  async sendUserMessage(text: string): Promise<void> {
+    if (!this.useAcp) {
+      throw new Error(
+        "GeminiSession.sendUserMessage: CLI fallback mode is stateless.\n" +
+          "  Fix: enable options.useAcp=true in the agent config to use persistent ACP mode,\n" +
+          "  or dispatch via cancel + respawn at the runner layer.",
+      )
+    }
+    if (!this.process?.stdin) {
+      throw new Error(
+        "GeminiSession.sendUserMessage: ACP session has no stdin.\n" +
+          "  Fix: ensure start() was called successfully before appending prompts.",
+      )
+    }
+    const message = JSON.stringify({ type: "prompt", content: text })
+    this.process.stdin.write(`${message}\n`)
+  }
+
   // ── Args builders ───────────────────────────────────────────────────────
 
   private buildAcpArgs(config: AgentConfig): string[] {

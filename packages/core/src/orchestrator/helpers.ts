@@ -131,6 +131,11 @@ export function buildOrchestratorStatus(
       status: ws.status,
       startedAt: ws.createdAt,
       lastOutput: attemptId ? agentRunner.getLastOutput(attemptId) : undefined,
+      // Exposed so the dashboard InterventionPanel can target the
+      // running session without an extra /api/status round-trip.
+      // Design: docs/plans/v0-2-bigbang-design.md § 5.7.
+      attemptId,
+      agentType: attemptId ? agentRunner.getAgentType(attemptId) : undefined,
     }
   })
 

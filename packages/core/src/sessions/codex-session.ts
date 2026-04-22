@@ -92,6 +92,80 @@ export class CodexSession extends BaseSession {
     }
   }
 
+  // ── Live intervention (C) ──────────────────────────────────────────────
+
+  /**
+   * Pause the Codex process via SIGSTOP. Unix-only — Windows has no
+   * equivalent signal, so we throw with an actionable hint.
+   */
+  async pause(): Promise<void> {
+    if (!this.process || !this.isAlive() || this.process.pid == null) {
+      throw new Error(
+        "CodexSession.pause: no live process to pause.\n" +
+          "  Fix: check session.isAlive() before dispatching a pause intervention.\n" +
+          "  Source: InterventionBus should gate on RunHandle.isAlive().",
+      )
+    }
+    if (process.platform === "win32") {
+      throw new Error(
+        "CodexSession.pause: SIGSTOP is not supported on Windows.\n" +
+          "  Fix: pause/resume interventions require a POSIX platform. Use `abort` instead.\n" +
+          "  Tracking: docs/plans/v0-2-bigbang-design.md § 6.3 (E12).",
+      )
+    }
+    try {
+      process.kill(this.process.pid, "SIGSTOP")
+    } catch (err) {
+      throw new Error(
+        `CodexSession.pause: failed to SIGSTOP pid=${this.process.pid}: ${String(err)}.\n` +
+          "  Fix: verify the process is still running and owned by this user.",
+      )
+    }
+  }
+
+  /** Resume a paused Codex process via SIGCONT. Unix-only. */
+  async resume(): Promise<void> {
+    if (!this.process || this.process.pid == null) {
+      throw new Error(
+        "CodexSession.resume: no process to resume.\n" +
+          "  Fix: ensure the session was previously paused before calling resume.",
+      )
+    }
+    if (process.platform === "win32") {
+      throw new Error(
+        "CodexSession.resume: SIGCONT is not supported on Windows.\n" +
+          "  Fix: pause/resume interventions require a POSIX platform.",
+      )
+    }
+    try {
+      process.kill(this.process.pid, "SIGCONT")
+    } catch (err) {
+      throw new Error(
+        `CodexSession.resume: failed to SIGCONT pid=${this.process.pid}: ${String(err)}.\n` +
+          "  Fix: verify the process is still present and previously paused.",
+      )
+    }
+  }
+
+  /**
+   * Deliver a mid-run user message via JSON-RPC. Works without
+   * restarting the turn — the server treats it as another input chunk
+   * on the active thread.
+   */
+  async sendUserMessage(text: string): Promise<void> {
+    if (!this.threadId) {
+      throw new Error(
+        "CodexSession.sendUserMessage: no active thread.\n" +
+          "  Fix: wait for execute() to initialize the thread before appending a prompt.",
+      )
+    }
+    if (!this.assertStarted()) return
+    await this.rpc("turn/append", {
+      threadId: this.threadId,
+      input: [{ type: "text", text }],
+    })
+  }
+
   override async dispose(): Promise<void> {
     for (const [id, { reject }] of Array.from(this.pendingResolvers.entries())) {
       reject(new Error(`Session disposed while waiting for RPC id=${id}`))

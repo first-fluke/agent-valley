@@ -189,32 +189,47 @@ class ServiceBackedRunHandle implements RunHandle {
       throw new InterventionUnsupportedError(cmd.kind, this.agentType)
     }
 
-    // Supported branches.
     if (cmd.kind === "abort") {
       await this.cancel()
       return
     }
 
-    if (cmd.kind === "append_prompt") {
-      // TODO(PR4-C): implement per-agent append_prompt delivery.
-      //   - claude (stateless): cancel current session + respawn with merged prompt
-      //   - codex: JSON-RPC user_message
-      //   - gemini (ACP): message queue
-      // For now the capability is advertised but delivery is stubbed so
-      // callers get a clear, actionable failure rather than silent drop.
+    const session = this.service.getSession(this.attemptId)
+    if (!session || !session.isAlive()) {
       throw new Error(
-        `SpawnAgentRunnerAdapter.send(append_prompt): not yet implemented for agent "${this.agentType}".\n` +
-          `  Fix: wait for PR4-C wiring, or use send({ kind: "abort", ... }) instead.\n` +
-          `  Tracking: docs/plans/v0-2-bigbang-design.md § 4.4.`,
+        `SpawnAgentRunnerAdapter.send(${cmd.kind}): attempt "${this.attemptId}" has no live session.\n` +
+          "  Fix: check RunHandle.isAlive() before dispatching interventions.",
       )
     }
 
-    if (cmd.kind === "pause" || cmd.kind === "resume") {
-      // TODO(PR4-C): wire pause/resume into CodexSession JSON-RPC (interrupt / resume).
+    if (cmd.kind === "pause") {
+      if (typeof session.pause !== "function") {
+        throw new InterventionUnsupportedError(cmd.kind, this.agentType)
+      }
+      await session.pause()
+      return
+    }
+
+    if (cmd.kind === "resume") {
+      if (typeof session.resume !== "function") {
+        throw new InterventionUnsupportedError(cmd.kind, this.agentType)
+      }
+      await session.resume()
+      return
+    }
+
+    if (cmd.kind === "append_prompt") {
+      // Prefer the session's native user-message path when available.
+      if (typeof session.sendUserMessage === "function") {
+        await session.sendUserMessage(cmd.text)
+        return
+      }
+      // Stateless sessions (claude, gemini-CLI) have no native path; the
+      // InterventionBus (Application layer) is responsible for cancel +
+      // respawn there. The port layer surfaces the same error shape.
       throw new Error(
-        `SpawnAgentRunnerAdapter.send(${cmd.kind}): not yet implemented for agent "${this.agentType}".\n` +
-          `  Fix: wait for PR4-C wiring of Codex interrupt/resume.\n` +
-          `  Tracking: docs/plans/v0-2-bigbang-design.md § 4.4.`,
+        `SpawnAgentRunnerAdapter.send(append_prompt): agent "${this.agentType}" is stateless at the port level.\n` +
+          "  Fix: route append_prompt through InterventionBus, which will cancel + request a retry.",
       )
     }
   }

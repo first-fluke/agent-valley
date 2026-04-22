@@ -123,10 +123,14 @@ describe("SpawnAgentRunnerAdapter — send dispatch", () => {
     await handle.kill()
   })
 
-  test("send(append_prompt) is still stubbed in PR4 — throws with a PR4-C tracking hint", async () => {
+  test("send(append_prompt) on claude (stateless) throws an actionable error at the port layer", async () => {
+    // PR4-C wires append_prompt through the InterventionBus' cancel+retry
+    // fallback for stateless agents. At the raw port level, claude
+    // sessions cannot append without a higher-level coordinator, so the
+    // adapter throws a fix-hint error instead of silently dropping.
     const adapter = new SpawnAgentRunnerAdapter()
     const handle = await adapter.spawn(buildSpawnInput({ agentType: "claude", attemptId: "att-ap" }))
-    await expect(handle.send({ kind: "append_prompt", text: "hi" })).rejects.toThrow(/not yet implemented/)
+    await expect(handle.send({ kind: "append_prompt", text: "hi" })).rejects.toThrow(/stateless/)
     await handle.kill()
   })
 
@@ -139,10 +143,13 @@ describe("SpawnAgentRunnerAdapter — send dispatch", () => {
     expect(handle.isAlive()).toBe(false)
   })
 
-  test("send({kind:'pause'}) on codex is currently stubbed — throws PR4-C tracking hint", async () => {
+  test("send({kind:'pause'}) on codex requires a session.pause() implementation", async () => {
+    // The FakeAgentSession used here does not implement pause(), so
+    // PR4-C's port-layer check returns an InterventionUnsupportedError
+    // (capability advertised but session cannot honor it).
     const adapter = new SpawnAgentRunnerAdapter()
     const handle = await adapter.spawn(buildSpawnInput({ agentType: "codex", attemptId: "att-codex-pause" }))
-    await expect(handle.send({ kind: "pause" })).rejects.toThrow(/not yet implemented/)
+    await expect(handle.send({ kind: "pause" })).rejects.toBeInstanceOf(InterventionUnsupportedError)
     await handle.kill()
   })
 })

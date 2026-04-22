@@ -28,7 +28,18 @@ export class AgentRunnerService {
   private activeSessions = new Map<string, AgentSession>()
   private activeTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private lastOutputs = new Map<string, string>()
+  private activeAgentTypes = new Map<string, string>()
   private sessionsRegistered = false
+
+  /** Read-only accessor used by InterventionBus (C). */
+  getSession(attemptId: string): AgentSession | undefined {
+    return this.activeSessions.get(attemptId)
+  }
+
+  /** Read-only accessor for agent type used by InterventionBus (C). */
+  getAgentType(attemptId: string): string | undefined {
+    return this.activeAgentTypes.get(attemptId)
+  }
 
   async ensureRegistered(): Promise<void> {
     if (!this.sessionsRegistered) {
@@ -42,6 +53,7 @@ export class AgentRunnerService {
 
     const session = createSession(options.agentType)
     this.activeSessions.set(attempt.id, session)
+    this.activeAgentTypes.set(attempt.id, options.agentType)
 
     // Guard against double-handling of complete/error events
     let handled = false
@@ -51,6 +63,7 @@ export class AgentRunnerService {
       if (timer) clearTimeout(timer)
       this.activeTimers.delete(attempt.id)
       this.activeSessions.delete(attempt.id)
+      this.activeAgentTypes.delete(attempt.id)
       this.lastOutputs.delete(attempt.id)
       session.off("complete", onComplete)
       session.off("error", onError)
@@ -174,6 +187,7 @@ export class AgentRunnerService {
     }
 
     this.activeSessions.delete(attemptId)
+    this.activeAgentTypes.delete(attemptId)
   }
 
   async killAll(): Promise<void> {

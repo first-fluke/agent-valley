@@ -23,6 +23,7 @@ import { createNoopBudgetService } from "./budget-service"
 import type { CompletionDeps } from "./completion-handler"
 import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
+import type { InterventionBus } from "./intervention-bus"
 import { RetryQueue } from "./retry-queue"
 
 /** Reason returned by slot-availability check; callers map to retry / skip. */
@@ -119,6 +120,8 @@ export class OrchestratorCore {
   /** Wired by the facade before start() so the core can trigger lifecycle flows. */
   private dispatcher: LifecycleDispatcher | null = null
   private reevaluateWaiting: ReevaluateWaitingHook | null = null
+  /** Wired by the facade so spawn/cancel flows can keep the bus in sync. */
+  private interventionBus: InterventionBus | null = null
 
   constructor(deps: OrchestratorCoreDeps) {
     this.config = deps.config
@@ -146,6 +149,16 @@ export class OrchestratorCore {
     this.reevaluateWaiting = reevaluate
   }
 
+  /** Wire the intervention bus so spawn/cancel flows can keep it in sync. */
+  attachIntervention(bus: InterventionBus): void {
+    this.interventionBus = bus
+  }
+
+  /** Read-only accessor for collaborators that need to register attempts. */
+  getInterventionBus(): InterventionBus | null {
+    return this.interventionBus
+  }
+
   buildCompletionDeps(): CompletionDeps {
     return {
       config: this.config,
@@ -155,8 +168,12 @@ export class OrchestratorCore {
       cleanupState: (issueId, status) => {
         const ws = this.state.activeWorkspaces.get(issueId)
         if (ws) ws.status = status
+        const attemptId = this.activeAttempts.get(issueId)
         this.state.activeWorkspaces.delete(issueId)
         this.activeAttempts.delete(issueId)
+        if (attemptId && this.interventionBus) {
+          this.interventionBus.unregisterAttempt(attemptId)
+        }
       },
       saveAttempt: (ws, att) => this.workspace.saveAttempt(ws, att),
       addRetry: (issueId, count, error) => this.retryQueue.add(issueId, count, error),

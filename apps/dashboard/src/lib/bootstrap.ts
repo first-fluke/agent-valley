@@ -97,6 +97,7 @@ export async function bootstrap() {
     stop: () => orchestrator.stop(),
     on: (event: string, handler: (...args: unknown[]) => void) => orchestrator.on(event, handler),
     off: (event: string, handler: (...args: unknown[]) => void) => orchestrator.off(event, handler),
+    intervention: orchestrator.intervention,
   })
 
   // Graceful shutdown: stop orchestrator and kill agent processes on exit
