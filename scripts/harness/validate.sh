@@ -333,7 +333,6 @@ MAX_LINES=500
 # Each entry is "path:ceiling" — fail only if the file grows above its ceiling.
 # Shrink the ceiling as you split these files; delete the entry when it drops under MAX_LINES.
 GRANDFATHERED=(
-  "packages/core/src/workspace/workspace-manager.ts:724"
   "packages/core/src/orchestrator/orchestrator.ts:543"
   "apps/cli/src/setup.ts:723"
 )
