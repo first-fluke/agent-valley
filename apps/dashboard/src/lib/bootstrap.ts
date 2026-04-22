@@ -6,6 +6,10 @@
 import { toOrchestratorConfig } from "@/lib/env"
 import { configureLogger, logger } from "@agent-valley/core/observability/logger"
 import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
+import { LinearTrackerAdapter } from "@agent-valley/core/tracker/adapters/linear-adapter"
+import { LinearWebhookReceiver } from "@agent-valley/core/tracker/adapters/linear-webhook-receiver"
+import { FileSystemWorkspaceGateway } from "@agent-valley/core/workspace/adapters/fs-workspace-gateway"
+import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { setOrchestrator } from "@/lib/orchestrator-singleton"
 import { resolveProjectRoot } from "@/lib/project-root"
 
@@ -25,7 +29,15 @@ export async function bootstrap() {
   const config = toOrchestratorConfig(projectRoot)
   configureLogger(config.logLevel, config.logFormat)
 
-  const orchestrator = new Orchestrator(config)
+  const tracker = new LinearTrackerAdapter({
+    apiKey: config.linearApiKey,
+    teamId: config.linearTeamId,
+    teamUuid: config.linearTeamUuid,
+  })
+  const webhook = new LinearWebhookReceiver({ secret: config.linearWebhookSecret })
+  const workspace = new FileSystemWorkspaceGateway(new WorkspaceManager(config.workspaceRoot))
+
+  const orchestrator = new Orchestrator(config, tracker, webhook, workspace)
   await orchestrator.start()
 
   const handlers = orchestrator.getHandlers()

@@ -90,9 +90,9 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
   } as Config
 }
 
-// ── Mock workspace manager ─────────────────────────────────────────
+// ── Fake WorkspaceGateway ──────────────────────────────────────────
 
-function makeMockWorkspaceManager(
+function makeFakeWorkspaceGateway(
   opts: {
     hasUncommittedChanges?: boolean
     hasCodeChanges?: boolean
@@ -109,6 +109,8 @@ function makeMockWorkspaceManager(
   } = {},
 ) {
   return {
+    create: async () => makeWorkspace(),
+    get: async () => null,
     detectUnfinishedWork: async () => ({
       hasUncommittedChanges: opts.hasUncommittedChanges ?? false,
       hasCodeChanges: opts.hasCodeChanges ?? false,
@@ -127,8 +129,21 @@ function makeMockWorkspaceManager(
       retryPrompt: opts.mergeRetryPrompt,
     }),
     pushBranch: async () => ({ ok: opts.pushOk ?? true }),
+    createDraftPR: async () => ({ created: false }),
     cleanup: async () => {},
     saveAttempt: async () => {},
+  }
+}
+
+// ── Fake IssueTracker ──────────────────────────────────────────────
+
+function makeFakeTracker() {
+  return {
+    fetchIssuesByState: async () => [],
+    fetchIssueLabels: async () => [],
+    updateIssueState: async () => {},
+    addIssueComment: async () => {},
+    addIssueLabel: async () => {},
   }
 }
 
@@ -141,13 +156,14 @@ describe("createCompletionCallbacks", () => {
   let filledSlots: number
 
   function makeDeps(
-    mockWm: ReturnType<typeof makeMockWorkspaceManager>,
+    mockWm: ReturnType<typeof makeFakeWorkspaceGateway>,
     configOverrides: Partial<Config> = {},
     depsOverrides: Partial<CompletionDeps> = {},
   ): CompletionDeps {
     return {
       config: makeConfig(configOverrides),
-      workspaceManager: mockWm as unknown as CompletionDeps["workspaceManager"],
+      workspace: mockWm as unknown as CompletionDeps["workspace"],
+      tracker: makeFakeTracker() as unknown as CompletionDeps["tracker"],
       dagScheduler: {
         updateNodeStatus: () => {},
         getUnblockedByCompletion: () => [],
@@ -179,7 +195,7 @@ describe("createCompletionCallbacks", () => {
   describe("onComplete — safety net", () => {
     test("auto-commits when agent leaves uncommitted changes", async () => {
       let autoCommitCalled = false
-      const mockWm = makeMockWorkspaceManager({
+      const mockWm = makeFakeWorkspaceGateway({
         hasUncommittedChanges: true,
         hasCodeChanges: true,
         diffStat: "3 files changed, 45 insertions(+)",
@@ -207,7 +223,7 @@ describe("createCompletionCallbacks", () => {
 
     test("does not auto-commit when no uncommitted changes", async () => {
       let autoCommitCalled = false
-      const mockWm = makeMockWorkspaceManager({
+      const mockWm = makeFakeWorkspaceGateway({
         hasUncommittedChanges: false,
         hasCodeChanges: true,
         diffStat: "2 files changed",
@@ -232,7 +248,7 @@ describe("createCompletionCallbacks", () => {
 
     test("stops completion when auto-commit is blocked by workspace validation", { timeout: 8_000 }, async () => {
       let mergeCalled = false
-      const mockWm = makeMockWorkspaceManager({
+      const mockWm = makeFakeWorkspaceGateway({
         hasUncommittedChanges: true,
         hasCodeChanges: true,
         autoCommitOk: false,
@@ -261,7 +277,7 @@ describe("createCompletionCallbacks", () => {
 
     test("queues retry when auto-commit is blocked by regeneratable lockfiles", async () => {
       let mergeCalled = false
-      const mockWm = makeMockWorkspaceManager({
+      const mockWm = makeFakeWorkspaceGateway({
         hasUncommittedChanges: true,
         hasCodeChanges: true,
         autoCommitOk: false,
@@ -294,7 +310,7 @@ describe("createCompletionCallbacks", () => {
 
   describe("onComplete — exit assessment", () => {
     test("transitions to Done when code changes exist", async () => {
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file changed" })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file changed" })
       const deps = makeDeps(mockWm)
       const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
 
@@ -311,7 +327,7 @@ describe("createCompletionCallbacks", () => {
     })
 
     test("transitions to Done when no changes but has output", async () => {
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: false })
       const deps = makeDeps(mockWm)
       const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
 
@@ -326,7 +342,7 @@ describe("createCompletionCallbacks", () => {
     })
 
     test("schedules retry when no changes and no output (anti-premature-exit)", async () => {
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: false })
       let retryAdded = false
       const deps = makeDeps(mockWm)
       const origAddRetry = deps.addRetry
@@ -347,7 +363,7 @@ describe("createCompletionCallbacks", () => {
     })
 
     test("schedules retry when output is whitespace-only", { timeout: 10_000 }, async () => {
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: false })
       let retryAdded = false
       const deps = makeDeps(mockWm)
       const origAddRetry = deps.addRetry
@@ -372,7 +388,7 @@ describe("createCompletionCallbacks", () => {
     test("merge mode calls mergeAndPush + cleanup", async () => {
       let merged = false
       let cleaned = false
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
       mockWm.mergeAndPush = async () => {
         merged = true
         return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
@@ -398,7 +414,7 @@ describe("createCompletionCallbacks", () => {
 
     test("merge mode queues retry for regeneratable lockfile conflicts", async () => {
       let cleaned = false
-      const mockWm = makeMockWorkspaceManager({
+      const mockWm = makeFakeWorkspaceGateway({
         hasCodeChanges: true,
         diffStat: "1 file",
         mergeOk: false,
@@ -429,7 +445,7 @@ describe("createCompletionCallbacks", () => {
 
     test("pr mode pushes branch when code changes exist", async () => {
       let pushed = false
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file", pushOk: true })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", pushOk: true })
       mockWm.pushBranch = async () => {
         pushed = true
         return { ok: true }
@@ -451,7 +467,7 @@ describe("createCompletionCallbacks", () => {
 
     test("pr mode skips push when no code changes", async () => {
       let pushed = false
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: false })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: false })
       mockWm.pushBranch = async () => {
         pushed = true
         return { ok: true }
@@ -484,7 +500,7 @@ describe("createCompletionCallbacks", () => {
 
     test("calls dagScheduler.updateNodeStatus with done", async () => {
       const dagCalls: string[] = []
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file changed" })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file changed" })
       const deps = makeDeps(
         mockWm,
         {},
@@ -506,7 +522,7 @@ describe("createCompletionCallbacks", () => {
 
     test("triggers unblocked issues when getUnblockedByCompletion returns IDs", async () => {
       const triggeredIds: string[][] = []
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file changed" })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file changed" })
       const deps = makeDeps(
         mockWm,
         {},
@@ -532,7 +548,7 @@ describe("createCompletionCallbacks", () => {
 
     test("does not trigger when no issues unblocked", async () => {
       const triggeredIds: string[][] = []
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file changed" })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file changed" })
       const deps = makeDeps(
         mockWm,
         {},
@@ -556,7 +572,7 @@ describe("createCompletionCallbacks", () => {
     })
 
     test("auto-completes parent when allChildrenDone returns true", async () => {
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file changed" })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file changed" })
       const issue = makeIssue({ parentId: "parent-1" })
       let allChildrenDoneCalled = false
       let getChildrenSummariesCalled = false
@@ -589,7 +605,7 @@ describe("createCompletionCallbacks", () => {
     })
 
     test("does not auto-complete parent when allChildrenDone returns false", async () => {
-      const mockWm = makeMockWorkspaceManager({ hasCodeChanges: true, diffStat: "1 file changed" })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file changed" })
       const issue = makeIssue({ parentId: "parent-1" })
       let getChildrenSummariesCalled = false
       const deps = makeDeps(
@@ -617,7 +633,7 @@ describe("createCompletionCallbacks", () => {
 
   describe("onError", () => {
     test("cleans up state and emits agent.failed", async () => {
-      const mockWm = makeMockWorkspaceManager()
+      const mockWm = makeFakeWorkspaceGateway()
       const deps = makeDeps(mockWm)
       const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
 
@@ -630,7 +646,7 @@ describe("createCompletionCallbacks", () => {
     })
 
     test("non-recoverable error does not queue retry", async () => {
-      const mockWm = makeMockWorkspaceManager()
+      const mockWm = makeFakeWorkspaceGateway()
       const deps = makeDeps(mockWm)
       const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
 

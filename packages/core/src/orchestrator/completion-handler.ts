@@ -6,16 +6,17 @@
 import type { ResolvedRoute } from "../config/routing"
 import type { Config } from "../config/yaml-loader"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import type { IssueTracker } from "../domain/ports/tracker"
+import type { WorkspaceGateway } from "../domain/ports/workspace"
 import { logger } from "../observability/logger"
-import { addIssueComment, updateIssueState } from "../tracker/linear-client"
-import type { WorkspaceManager } from "../workspace/workspace-manager"
 import type { RunCallbacks } from "./agent-runner"
 import type { DagScheduler } from "./dag-scheduler"
 import { buildParentSummary, buildWorkSummary } from "./helpers"
 
 export interface CompletionDeps {
   config: Config
-  workspaceManager: WorkspaceManager
+  workspace: WorkspaceGateway
+  tracker: IssueTracker
   dagScheduler: DagScheduler
   /** Update orchestrator state on completion/failure. Orchestrator remains sole state authority. */
   cleanupState: (issueId: string, status: "done" | "failed") => void
@@ -39,7 +40,7 @@ export function createCompletionCallbacks(
   attempt: RunAttempt,
   route: ResolvedRoute,
 ): RunCallbacks {
-  const { config, workspaceManager } = deps
+  const { config, workspace: wsGateway, tracker } = deps
 
   const handleWorkspaceFailure = async (
     failure: WorkspaceFailure,
@@ -55,8 +56,7 @@ export function createCompletionCallbacks(
       deps.cleanupState(issue.id, "failed")
 
       try {
-        await addIssueComment(
-          config.linearApiKey,
+        await tracker.addIssueComment(
           issue.id,
           retryAdded ? `${options.retryComment}\n\n${failure.error}` : `${options.manualComment}\n\n${failure.error}`,
         )
@@ -69,7 +69,7 @@ export function createCompletionCallbacks(
 
       if (!retryAdded) {
         try {
-          await updateIssueState(config.linearApiKey, issue.id, config.workflowStates.cancelled)
+          await tracker.updateIssueState(issue.id, config.workflowStates.cancelled)
         } catch (err) {
           logger.error("completion", "Failed to transition retry-exhausted issue state", {
             issueId: issue.id,
@@ -84,7 +84,7 @@ export function createCompletionCallbacks(
 
     deps.cleanupState(issue.id, "failed")
     try {
-      await addIssueComment(config.linearApiKey, issue.id, `${options.manualComment}\n\n${failure.error}`)
+      await tracker.addIssueComment(issue.id, `${options.manualComment}\n\n${failure.error}`)
     } catch (err) {
       logger.debug("completion", "Failed to post workspace failure comment", {
         issueId: issue.id,
@@ -92,7 +92,7 @@ export function createCompletionCallbacks(
       })
     }
     try {
-      await updateIssueState(config.linearApiKey, issue.id, config.workflowStates.cancelled)
+      await tracker.updateIssueState(issue.id, config.workflowStates.cancelled)
     } catch (err) {
       logger.error("completion", "Failed to transition blocked issue state", {
         issueId: issue.id,
@@ -114,11 +114,11 @@ export function createCompletionCallbacks(
       let autoCommitBlockedFailure: WorkspaceFailure | null = null
 
       try {
-        const unfinished = await workspaceManager.detectUnfinishedWork(workspace)
+        const unfinished = await wsGateway.detectUnfinishedWork(workspace)
         hasCodeChanges = unfinished.hasCodeChanges
 
         if (unfinished.hasUncommittedChanges) {
-          const commitResult = await workspaceManager.autoCommit(workspace)
+          const commitResult = await wsGateway.autoCommit(workspace)
           autoCommitted = commitResult.ok
           if (autoCommitted) {
             hasCodeChanges = true
@@ -155,7 +155,7 @@ export function createCompletionCallbacks(
       let diffStat: string | null = null
       if (hasCodeChanges) {
         try {
-          diffStat = await workspaceManager.getDiffStat(workspace)
+          diffStat = await wsGateway.getDiffStat(workspace)
         } catch (err) {
           logger.debug("completion", "getDiffStat failed", { issueId: issue.id, error: String(err) })
         }
@@ -164,7 +164,7 @@ export function createCompletionCallbacks(
       // ── Work summary ──
       try {
         const summary = buildWorkSummary(completedAttempt, { autoCommitted, diffStat })
-        await addIssueComment(config.linearApiKey, issue.id, summary)
+        await tracker.addIssueComment(issue.id, summary)
       } catch (err) {
         logger.warn("completion", "Failed to post work summary", {
           issueId: issue.id,
@@ -174,7 +174,7 @@ export function createCompletionCallbacks(
 
       // ── Delivery ──
       if (route.deliveryMode === "merge") {
-        const mergeResult = await workspaceManager.mergeAndPush(workspace)
+        const mergeResult = await wsGateway.mergeAndPush(workspace)
         if (!mergeResult.ok) {
           logger.error("completion", `Merge failed for ${issue.identifier}`, {
             error: mergeResult.error,
@@ -196,7 +196,7 @@ export function createCompletionCallbacks(
         }
 
         try {
-          await workspaceManager.cleanup(workspace)
+          await wsGateway.cleanup(workspace)
         } catch (err) {
           logger.warn("completion", "Worktree cleanup failed", {
             issueId: issue.id,
@@ -206,9 +206,9 @@ export function createCompletionCallbacks(
       } else if (hasCodeChanges) {
         // PR mode: push branch + safety-net draft PR creation
         try {
-          await workspaceManager.pushBranch(workspace)
+          await wsGateway.pushBranch(workspace)
           // Safety-net: create draft PR if agent didn't
-          const prResult = await workspaceManager.createDraftPR(workspace, {
+          const prResult = await wsGateway.createDraftPR(workspace, {
             title: `${issue.identifier}: ${issue.title}`,
             body: completedAttempt.agentOutput
               ? `## Summary\n${completedAttempt.agentOutput.slice(0, 2000)}`
@@ -236,8 +236,7 @@ export function createCompletionCallbacks(
           logger.warn("completion", `Agent exited without changes for ${issue.identifier}, scheduling retry`)
           deps.cleanupState(issue.id, "failed")
           try {
-            await addIssueComment(
-              config.linearApiKey,
+            await tracker.addIssueComment(
               issue.id,
               "Symphony: Agent exited without code changes — retrying with additional context.",
             )
@@ -254,8 +253,7 @@ export function createCompletionCallbacks(
         // Retry exhausted — cancel
         targetState = config.workflowStates.cancelled
         try {
-          await addIssueComment(
-            config.linearApiKey,
+          await tracker.addIssueComment(
             issue.id,
             "Symphony: Agent exited without code changes after retry.\n" +
               "  → Consider adding more detail to the issue description.",
@@ -269,7 +267,7 @@ export function createCompletionCallbacks(
       }
 
       try {
-        await updateIssueState(config.linearApiKey, issue.id, targetState)
+        await tracker.updateIssueState(issue.id, targetState)
       } catch (err) {
         logger.error("completion", "Failed to transition issue state", {
           issueId: issue.id,
@@ -305,8 +303,8 @@ export function createCompletionCallbacks(
       if (issue.parentId && deps.dagScheduler.allChildrenDone(issue.parentId)) {
         const children = deps.dagScheduler.getChildrenSummaries(issue.parentId)
         try {
-          await addIssueComment(config.linearApiKey, issue.parentId, buildParentSummary(children))
-          await updateIssueState(config.linearApiKey, issue.parentId, config.workflowStates.done)
+          await tracker.addIssueComment(issue.parentId, buildParentSummary(children))
+          await tracker.updateIssueState(issue.parentId, config.workflowStates.done)
           logger.info("completion", `Parent ${issue.parentId} auto-completed (all children done)`)
         } catch (err) {
           logger.warn("completion", "Failed to auto-complete parent", { parentId: issue.parentId, error: String(err) })
@@ -335,8 +333,7 @@ export function createCompletionCallbacks(
         if (!added) {
           // Max retries exceeded — cancel issue with error comment
           try {
-            await addIssueComment(
-              config.linearApiKey,
+            await tracker.addIssueComment(
               issue.id,
               `Symphony: Agent failed (${config.agentMaxRetries} retries exceeded)\n\nError: ${err.message}`,
             )
@@ -347,7 +344,7 @@ export function createCompletionCallbacks(
             })
           }
           try {
-            await updateIssueState(config.linearApiKey, issue.id, config.workflowStates.cancelled)
+            await tracker.updateIssueState(issue.id, config.workflowStates.cancelled)
           } catch (stateErr) {
             logger.error("completion", "Failed to transition to Cancelled", {
               issueId: issue.id,

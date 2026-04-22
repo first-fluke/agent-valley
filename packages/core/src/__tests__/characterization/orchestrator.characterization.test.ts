@@ -21,6 +21,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { Issue } from "../../domain/models"
 import { Orchestrator } from "../../orchestrator/orchestrator"
 import { registerSession } from "../../sessions/session-factory"
+import { LinearTrackerAdapter } from "../../tracker/adapters/linear-adapter"
+import { LinearWebhookReceiver } from "../../tracker/adapters/linear-webhook-receiver"
+import { FileSystemWorkspaceGateway } from "../../workspace/adapters/fs-workspace-gateway"
 import { WorkspaceManager } from "../../workspace/workspace-manager"
 import { FakeAgentSession, flushMicrotasks, makeConfig, makeIssue, makeWorkspace } from "./helpers"
 
@@ -112,7 +115,16 @@ beforeEach(async () => {
     makeWorkspace(issue, { path: join(root ?? workspaceRoot, issue.identifier) }),
   )
 
-  orchestrator = new Orchestrator({ ...config, workspaceRoot })
+  const runtimeConfig = { ...config, workspaceRoot }
+  const tracker = new LinearTrackerAdapter({
+    apiKey: runtimeConfig.linearApiKey,
+    teamId: runtimeConfig.linearTeamId,
+    teamUuid: runtimeConfig.linearTeamUuid,
+  })
+  const webhook = new LinearWebhookReceiver({ secret: runtimeConfig.linearWebhookSecret })
+  const workspaceGateway = new FileSystemWorkspaceGateway(new WorkspaceManager(runtimeConfig.workspaceRoot))
+
+  orchestrator = new Orchestrator(runtimeConfig, tracker, webhook, workspaceGateway)
   startCalled = false
 })
 
@@ -356,7 +368,15 @@ describe("Orchestrator.handleWebhook — IssueRelation events", () => {
 
 describe("Orchestrator.handleWebhook — concurrency and duplicate-event guards", () => {
   test("currently enqueues a retry when maxParallel is reached instead of spawning a second agent", async () => {
-    const slimOrch = new Orchestrator({ ...config, workspaceRoot, maxParallel: 1 })
+    const slimConfig = { ...config, workspaceRoot, maxParallel: 1 }
+    const slimTracker = new LinearTrackerAdapter({
+      apiKey: slimConfig.linearApiKey,
+      teamId: slimConfig.linearTeamId,
+      teamUuid: slimConfig.linearTeamUuid,
+    })
+    const slimWebhook = new LinearWebhookReceiver({ secret: slimConfig.linearWebhookSecret })
+    const slimWorkspace = new FileSystemWorkspaceGateway(new WorkspaceManager(slimConfig.workspaceRoot))
+    const slimOrch = new Orchestrator(slimConfig, slimTracker, slimWebhook, slimWorkspace)
 
     const payloadA = makeIssuePayload({
       data: {

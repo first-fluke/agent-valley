@@ -8,16 +8,10 @@ import { resolveRouteWithScore } from "../config/routing"
 import { renderPrompt } from "../config/workflow-loader"
 import type { Config } from "../config/yaml-loader"
 import type { Issue, OrchestratorRuntimeState, RunAttempt, Workspace } from "../domain/models"
+import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
+import type { WorkspaceGateway } from "../domain/ports/workspace"
 import { logger } from "../observability/logger"
-import {
-  addIssueComment,
-  addIssueLabel,
-  fetchIssueLabels,
-  fetchIssuesByState,
-  updateIssueState,
-} from "../tracker/linear-client"
-import { parseWebhookEvent, verifyWebhookSignature } from "../tracker/webhook-handler"
-import { WorkspaceManager } from "../workspace/workspace-manager"
+import type { ParsedWebhookEvent } from "../tracker/types"
 import { AgentRunnerService } from "./agent-runner"
 import { type CompletionDeps, createCompletionCallbacks } from "./completion-handler"
 import { DagScheduler } from "./dag-scheduler"
@@ -39,7 +33,6 @@ export class Orchestrator extends OrchestratorEventEmitter {
     lastEventAt: null,
   }
 
-  private workspaceManager: WorkspaceManager
   private agentRunner: AgentRunnerService
   private retryQueue: RetryQueue
   private dagScheduler: DagScheduler
@@ -55,15 +48,20 @@ export class Orchestrator extends OrchestratorEventEmitter {
   /** Maps issueId -> attemptId for active agent sessions, enabling kill on left-in-progress. */
   private activeAttempts = new Map<string, string>()
 
-  constructor(private config: Config) {
+  constructor(
+    private config: Config,
+    private tracker: IssueTracker,
+    private webhook: WebhookReceiver<ParsedWebhookEvent>,
+    private workspace: WorkspaceGateway,
+  ) {
     super()
-    this.workspaceManager = new WorkspaceManager(config.workspaceRoot)
     this.agentRunner = new AgentRunnerService()
     this.retryQueue = new RetryQueue(config.agentMaxRetries, config.agentRetryDelay)
     this.dagScheduler = new DagScheduler(`${config.workspaceRoot}/.agent-valley/dag-cache.json`)
     this.completionDeps = {
       config,
-      workspaceManager: this.workspaceManager,
+      workspace: this.workspace,
+      tracker: this.tracker,
       dagScheduler: this.dagScheduler,
       cleanupState: (issueId, status) => {
         const ws = this.state.activeWorkspaces.get(issueId)
@@ -71,7 +69,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
         this.state.activeWorkspaces.delete(issueId)
         this.activeAttempts.delete(issueId)
       },
-      saveAttempt: (ws, att) => this.workspaceManager.saveAttempt(ws, att),
+      saveAttempt: (ws, att) => this.workspace.saveAttempt(ws, att),
       addRetry: (issueId, count, error) => this.retryQueue.add(issueId, count, error),
       emitEvent: (event, payload) => this.emitEvent(event, payload),
       fillVacantSlots: () => this.fillVacantSlots(),
@@ -145,7 +143,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
   }
 
   private async startupSync(): Promise<void> {
-    const issues = await fetchIssuesByState(this.config.linearApiKey, this.config.linearTeamUuid, [
+    const issues = await this.tracker.fetchIssuesByState([
       this.config.workflowStates.todo,
       this.config.workflowStates.inProgress,
     ])
@@ -193,9 +191,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     if (available <= 0) return
 
     try {
-      const issues = await fetchIssuesByState(this.config.linearApiKey, this.config.linearTeamUuid, [
-        this.config.workflowStates.todo,
-      ])
+      const issues = await this.tracker.fetchIssuesByState([this.config.workflowStates.todo])
 
       sortByIssueNumber(issues)
 
@@ -221,14 +217,14 @@ export class Orchestrator extends OrchestratorEventEmitter {
 
   private async handleWebhook(payload: string, signature: string): Promise<{ status: number; body: string }> {
     // Verify signature
-    const valid = await verifyWebhookSignature(payload, signature, this.config.linearWebhookSecret)
+    const valid = await this.webhook.verifySignature(payload, signature)
     if (!valid) {
       logger.warn("orchestrator", "Webhook signature invalid")
       return { status: 403, body: '{"error":"Invalid signature"}' }
     }
 
     // Parse event
-    const event = parseWebhookEvent(payload)
+    const event = this.webhook.parseEvent(payload)
     if (!event) {
       return { status: 200, body: '{"ok":true,"skipped":"not an issue event"}' }
     }
@@ -258,13 +254,11 @@ export class Orchestrator extends OrchestratorEventEmitter {
     if (event.stateId === this.config.workflowStates.todo) {
       // Instant acknowledgment — webhook-triggered only (not startup sync or retry)
       if (!this.processingIssues.has(event.issueId) && !this.state.activeWorkspaces.has(event.issueId)) {
-        addIssueComment(
-          this.config.linearApiKey,
-          event.issueId,
-          `Symphony: Received — starting agent for ${event.issue.identifier}`,
-        ).catch((err) => {
-          logger.debug("orchestrator", "Failed to post webhook ack comment", { error: String(err) })
-        })
+        this.tracker
+          .addIssueComment(event.issueId, `Symphony: Received — starting agent for ${event.issue.identifier}`)
+          .catch((err) => {
+            logger.debug("orchestrator", "Failed to post webhook ack comment", { error: String(err) })
+          })
       }
       await this.handleIssueTodo(event.issue)
     } else if (event.stateId === this.config.workflowStates.inProgress) {
@@ -309,13 +303,14 @@ export class Orchestrator extends OrchestratorEventEmitter {
         blockedBy: blockers,
         enqueuedAt: new Date().toISOString(),
       })
-      addIssueComment(
-        this.config.linearApiKey,
-        issue.id,
-        `Symphony: Waiting — blocked by ${blockers.length} issue(s). Will auto-start when dependencies complete.`,
-      ).catch((err) => {
-        logger.debug("orchestrator", "Failed to post blocker comment", { error: String(err) })
-      })
+      this.tracker
+        .addIssueComment(
+          issue.id,
+          `Symphony: Waiting — blocked by ${blockers.length} issue(s). Will auto-start when dependencies complete.`,
+        )
+        .catch((err) => {
+          logger.debug("orchestrator", "Failed to post blocker comment", { error: String(err) })
+        })
       logger.info("orchestrator", `${issue.identifier} blocked by ${blockers.length} issue(s), waiting`)
       return
     }
@@ -328,7 +323,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
 
     // Transition Todo -> In Progress on Linear
     try {
-      await updateIssueState(this.config.linearApiKey, issue.id, this.config.workflowStates.inProgress)
+      await this.tracker.updateIssueState(issue.id, this.config.workflowStates.inProgress)
       logger.info("orchestrator", `Transitioned ${issue.identifier} from Todo to In Progress`)
     } catch (err) {
       this.processingIssues.delete(issue.id)
@@ -360,7 +355,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     // Fallback: if webhook didn't include labels and routing rules exist, fetch from API
     if ((!issue.labels || issue.labels.length === 0) && this.config.routingRules.length > 0) {
       try {
-        issue.labels = await fetchIssueLabels(this.config.linearApiKey, issue.id)
+        issue.labels = await this.tracker.fetchIssueLabels(issue.id)
       } catch (err) {
         logger.warn("orchestrator", "Failed to fetch issue labels for routing, using default", {
           issueId: issue.id,
@@ -381,11 +376,10 @@ export class Orchestrator extends OrchestratorEventEmitter {
     // Background scoring: if no score yet and score routing is configured, analyze async.
     // Current run uses defaultAgentType; score label takes effect on subsequent runs.
     if (issue.score === null && this.config.scoreRouting && this.config.scoringModel) {
-      const apiKey = this.config.linearApiKey
-      const teamId = this.config.linearTeamUuid
+      const tracker = this.tracker
       analyzeScoreInBackground(issue, this.config.scoringModel, async (issueId, score) => {
         try {
-          await addIssueLabel(apiKey, teamId, issueId, `score:${score}`)
+          await tracker.addIssueLabel(issueId, `score:${score}`)
         } catch (err) {
           logger.warn("orchestrator", "Failed to attach score label", { issueId, error: String(err) })
         }
@@ -395,7 +389,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     // Create workspace in the resolved repo root
     let workspace: Workspace
     try {
-      workspace = await this.workspaceManager.create(issue, route.workspaceRoot)
+      workspace = await this.workspace.create(issue, route.workspaceRoot)
     } catch (err) {
       this.processingIssues.delete(issue.id)
       logger.error("orchestrator", "Failed to create workspace", { issueId: issue.id, error: String(err) })
@@ -476,13 +470,11 @@ export class Orchestrator extends OrchestratorEventEmitter {
     // DAG: mark as cancelled and notify blocked issues
     this.dagScheduler.updateNodeStatus(issueId, "cancelled")
     for (const b of this.dagScheduler.getBlockedIssues(issueId)) {
-      addIssueComment(
-        this.config.linearApiKey,
-        b.issueId,
-        `Symphony: Blocker ${b.identifier} was cancelled. Manual review needed.`,
-      ).catch((err) => {
-        logger.debug("orchestrator", "Failed to post blocker-cancelled comment", { error: String(err) })
-      })
+      this.tracker
+        .addIssueComment(b.issueId, `Symphony: Blocker ${b.identifier} was cancelled. Manual review needed.`)
+        .catch((err) => {
+          logger.debug("orchestrator", "Failed to post blocker-cancelled comment", { error: String(err) })
+        })
     }
   }
 
@@ -493,9 +485,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     )
     if (unblockedIds.length === 0) return
 
-    const issues = await fetchIssuesByState(this.config.linearApiKey, this.config.linearTeamUuid, [
-      this.config.workflowStates.todo,
-    ]).catch(() => [] as Issue[])
+    const issues = await this.tracker.fetchIssuesByState([this.config.workflowStates.todo]).catch(() => [] as Issue[])
 
     for (const id of unblockedIds) {
       const entry = this.state.waitingIssues.get(id)
@@ -513,7 +503,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     if (ready.length === 0) return
     let issues: Issue[] = []
     try {
-      issues = await fetchIssuesByState(this.config.linearApiKey, this.config.linearTeamUuid, [
+      issues = await this.tracker.fetchIssuesByState([
         this.config.workflowStates.todo,
         this.config.workflowStates.inProgress,
       ])
