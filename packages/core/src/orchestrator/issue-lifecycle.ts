@@ -163,6 +163,13 @@ export class IssueLifecycle {
       issueId: issue.id,
     })
 
+    core.observability.onAgentStart({
+      agentType: route.agentType,
+      issueKey: issue.identifier,
+      issueId: issue.id,
+      attemptId: attempt.id,
+    })
+
     const callbacks = createCompletionCallbacks(core.buildCompletionDeps(), issue, workspace, attempt, route)
 
     await core.agentRunner.spawn(
@@ -191,6 +198,12 @@ export class IssueLifecycle {
       await core.agentRunner.kill(attemptId)
       core.clearAttempt(issueId)
     }
+
+    core.observability.onAgentCancelled({
+      issueKey: workspace.key,
+      issueId,
+      attemptId,
+    })
 
     core.removeActiveWorkspace(issueId)
     core.removeRetry(issueId)

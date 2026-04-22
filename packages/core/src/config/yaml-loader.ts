@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
 import { z } from "zod"
 import { detectHardware } from "./hardware"
+import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
 
 // ── Schemas ─────────────────────────────────────────────────────────
 
@@ -173,6 +174,7 @@ export const projectConfigSchema = z
         display_name: z.string().optional(),
       })
       .optional(),
+    observability: observabilityProjectSchema,
   })
   .strict()
 
@@ -247,6 +249,7 @@ const mergedConfigSchema = z
     supabaseAnonKey: z.string().optional(),
     teamId: z.string().optional(),
     displayName: z.string().optional(),
+    observability: observabilityMergedSchema,
   })
   .superRefine((cfg, ctx) => {
     if (cfg.trackerKind === "linear") {
@@ -426,6 +429,7 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
     supabaseAnonKey: project?.team?.supabase_anon_key ?? global?.team?.supabase_anon_key ?? undefined,
     teamId: project?.team?.id ?? global?.team?.id ?? undefined,
     displayName: project?.team?.display_name ?? global?.team?.display_name ?? undefined,
+    observability: buildObservabilityConfig(project),
   }
 }
 

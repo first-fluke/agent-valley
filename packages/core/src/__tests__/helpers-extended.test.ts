@@ -127,6 +127,10 @@ describe("buildOrchestratorStatus", () => {
       deliveryMode: "merge",
       routingRules: [],
       promptTemplate: "test",
+      observability: {
+        otel: { enabled: false, endpoint: "http://localhost:4318", serviceName: "agent-valley" },
+        prometheus: { enabled: false, path: "/api/metrics" },
+      },
     } as Config
   }
 

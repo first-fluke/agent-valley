@@ -4,7 +4,10 @@
  */
 
 import { toOrchestratorConfig } from "@/lib/env"
+import { createObservabilityHooks } from "@agent-valley/core/observability/hooks"
 import { configureLogger, logger } from "@agent-valley/core/observability/logger"
+import { createOtelExporter } from "@agent-valley/core/observability/otel-exporter"
+import { createPromMetrics } from "@agent-valley/core/observability/prom-metrics"
 import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
 import { GithubTrackerAdapter } from "@agent-valley/core/tracker/adapters/github-adapter"
 import { GithubWebhookReceiver } from "@agent-valley/core/tracker/adapters/github-webhook-receiver"
@@ -12,6 +15,7 @@ import { LinearTrackerAdapter } from "@agent-valley/core/tracker/adapters/linear
 import { LinearWebhookReceiver } from "@agent-valley/core/tracker/adapters/linear-webhook-receiver"
 import { FileSystemWorkspaceGateway } from "@agent-valley/core/workspace/adapters/fs-workspace-gateway"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
+import { setMetricsEndpoint } from "@/lib/metrics-singleton"
 import { setOrchestrator } from "@/lib/orchestrator-singleton"
 import { resolveProjectRoot } from "@/lib/project-root"
 
@@ -56,7 +60,23 @@ export async function bootstrap() {
         })
   const workspace = new FileSystemWorkspaceGateway(new WorkspaceManager(config.workspaceRoot))
 
-  const orchestrator = new Orchestrator(config, tracker, webhook, workspace)
+  // Observability — both OTel and Prometheus are opt-in via valley.yaml.
+  // When disabled (default), the hooks become zero-cost no-ops.
+  const metrics = createPromMetrics({ enabled: config.observability.prometheus.enabled })
+  const otel = createOtelExporter({
+    enabled: config.observability.otel.enabled,
+    endpoint: config.observability.otel.endpoint,
+    serviceName: config.observability.otel.serviceName,
+    metrics,
+  })
+  const observability = createObservabilityHooks({ metrics, otel })
+  setMetricsEndpoint({
+    enabled: config.observability.prometheus.enabled,
+    path: config.observability.prometheus.path,
+    metrics,
+  })
+
+  const orchestrator = new Orchestrator(config, tracker, webhook, workspace, undefined, observability)
   await orchestrator.start()
 
   const handlers = orchestrator.getHandlers()
@@ -72,6 +92,7 @@ export async function bootstrap() {
   const shutdown = async () => {
     logger.info("process", "Received shutdown signal, stopping orchestrator...")
     await orchestrator.stop()
+    await otel.shutdown()
     process.exit(0)
   }
   process.on("SIGTERM", shutdown)

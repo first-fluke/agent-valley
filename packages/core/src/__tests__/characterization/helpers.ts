@@ -54,6 +54,10 @@ export function makeConfig(overrides: Partial<Config> = {}): Config {
     deliveryMode: "merge",
     routingRules: [],
     promptTemplate: "Prompt for {{issue.identifier}}: {{issue.title}}",
+    observability: {
+      otel: { enabled: false, endpoint: "http://localhost:4318", serviceName: "agent-valley" },
+      prometheus: { enabled: false, path: "/api/metrics" },
+    },
     ...overrides,
   } as Config
 }

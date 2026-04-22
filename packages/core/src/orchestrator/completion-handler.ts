@@ -8,6 +8,8 @@ import type { Config } from "../config/yaml-loader"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import type { IssueTracker } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
+import type { ObservabilityHooks } from "../observability/hooks"
+import { createNoopObservabilityHooks } from "../observability/hooks"
 import { logger } from "../observability/logger"
 import type { RunCallbacks } from "./agent-runner"
 import type { DagScheduler } from "./dag-scheduler"
@@ -25,6 +27,8 @@ export interface CompletionDeps {
   emitEvent: (event: string, payload: Record<string, unknown>) => void
   fillVacantSlots: () => Promise<void>
   triggerUnblocked: (issueIds: string[]) => Promise<void>
+  /** Observability hooks (OTel + Prom). Defaults to no-op when omitted. */
+  observability?: ObservabilityHooks
 }
 
 interface WorkspaceFailure {
@@ -41,6 +45,7 @@ export function createCompletionCallbacks(
   route: ResolvedRoute,
 ): RunCallbacks {
   const { config, workspace: wsGateway, tracker } = deps
+  const observability = deps.observability ?? createNoopObservabilityHooks()
 
   const handleWorkspaceFailure = async (
     failure: WorkspaceFailure,
@@ -283,6 +288,14 @@ export function createCompletionCallbacks(
         autoCommitted,
       })
 
+      observability.onAgentDone({
+        agentType: route.agentType,
+        issueKey: issue.identifier,
+        issueId: issue.id,
+        attemptId: attempt.id,
+        durationMs,
+      })
+
       logger.info("completion", `Agent completed for ${issue.identifier}`, {
         issueId: issue.id,
         exitCode: completedAttempt.exitCode ?? undefined,
@@ -317,10 +330,21 @@ export function createCompletionCallbacks(
     onError: async (err) => {
       deps.cleanupState(issue.id, "failed")
 
+      const durationMs = Date.now() - new Date(attempt.startedAt).getTime()
+
       deps.emitEvent("agent.failed", {
         issueKey: issue.identifier,
         issueId: issue.id,
         error: { code: err.code, message: err.message, retryable: err.recoverable },
+      })
+
+      observability.onAgentFailed({
+        agentType: route.agentType,
+        issueKey: issue.identifier,
+        issueId: issue.id,
+        attemptId: attempt.id,
+        durationMs,
+        retryable: err.recoverable,
       })
 
       logger.warn("completion", `Agent failed for ${issue.identifier}`, {

@@ -19,8 +19,20 @@ import { logger } from "../observability/logger"
 export class DagScheduler {
   private cache: DagCache = { version: 1, updatedAt: "", nodes: {} }
   private writeQueue: Promise<void> = Promise.resolve()
+  /**
+   * Optional callback invoked once per buildFromIssues() call that detects
+   * at least one cycle. Wired by the Orchestrator to increment
+   * `av_dag_cycles_total`. Exceptions thrown by the callback are
+   * swallowed so the DAG build path is unaffected.
+   */
+  private onCycleDetected: (() => void) | null = null
 
   constructor(private cachePath: string) {}
+
+  /** Register a one-line observability callback. Calling again replaces it. */
+  setCycleObserver(fn: () => void): void {
+    this.onCycleDetected = fn
+  }
 
   // ── Construction ──────────────────────────────────────────────────
 
@@ -69,6 +81,13 @@ export class DagScheduler {
       logger.warn("dag-scheduler", "Cycle detected in dependency graph, ignoring cyclic edges", {
         cycles: JSON.stringify(cycles),
       })
+      if (this.onCycleDetected) {
+        try {
+          this.onCycleDetected()
+        } catch {
+          /* observability must never break DAG building */
+        }
+      }
       // Remove cyclic edges — for simplicity, remove all blockedBy edges for nodes in cycles
       for (const cycle of cycles) {
         const cycleSet = new Set(cycle)

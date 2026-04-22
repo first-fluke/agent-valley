@@ -13,6 +13,8 @@ import type { Issue, OrchestratorRuntimeState, Workspace } from "../domain/model
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
+import type { ObservabilityHooks } from "../observability/hooks"
+import { createNoopObservabilityHooks } from "../observability/hooks"
 import { logger } from "../observability/logger"
 import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
 import type { AgentRunnerService } from "./agent-runner"
@@ -62,6 +64,12 @@ export interface OrchestratorCoreDeps {
   agentRunner?: SpawnAgentRunnerAdapter
   /** Emit events onto the facade's public event stream. */
   emit: CoreEventEmit
+  /**
+   * Optional observability hooks (OTel + Prometheus). Omit for no-op
+   * behavior (default). Exporter errors are swallowed inside the hooks
+   * and never propagate into orchestrator flow.
+   */
+  observability?: ObservabilityHooks
 }
 
 export class OrchestratorCore {
@@ -75,6 +83,9 @@ export class OrchestratorCore {
   readonly agentRunnerPort: SpawnAgentRunnerAdapter
   readonly retryQueue: RetryQueue
   readonly dagScheduler: DagScheduler
+
+  /** Observability hooks — defaults to no-op. Exposed read-only. */
+  readonly observability: ObservabilityHooks
 
   readonly state: OrchestratorRuntimeState = {
     isRunning: false,
@@ -113,6 +124,8 @@ export class OrchestratorCore {
     this.agentRunner = this.agentRunnerPort.service
     this.retryQueue = new RetryQueue(this.config.agentMaxRetries, this.config.agentRetryDelay)
     this.dagScheduler = new DagScheduler(`${this.config.workspaceRoot}/.agent-valley/dag-cache.json`)
+    this.observability = deps.observability ?? createNoopObservabilityHooks()
+    this.dagScheduler.setCycleObserver(() => this.observability.onDagCycle())
   }
 
   // ── Facade wiring ──────────────────────────────────────────────────
@@ -144,6 +157,7 @@ export class OrchestratorCore {
         }
         if (this.reevaluateWaiting) await this.reevaluateWaiting()
       },
+      observability: this.observability,
     }
   }
 
@@ -171,6 +185,7 @@ export class OrchestratorCore {
     if (guard.ok) return true
     if (guard.reason === "concurrency") {
       this.retryQueue.add(issueId, 0, "Concurrency limit reached")
+      this.observability.onRetryQueueChanged(this.retryQueue.size)
     }
     return false
   }
@@ -208,11 +223,14 @@ export class OrchestratorCore {
   }
 
   enqueueRetry(issueId: string, attemptCount: number, lastError: string): boolean {
-    return this.retryQueue.add(issueId, attemptCount, lastError)
+    const added = this.retryQueue.add(issueId, attemptCount, lastError)
+    this.observability.onRetryQueueChanged(this.retryQueue.size)
+    return added
   }
 
   removeRetry(issueId: string): void {
     this.retryQueue.remove(issueId)
+    this.observability.onRetryQueueChanged(this.retryQueue.size)
   }
 
   addWaitingIssue(
@@ -386,6 +404,7 @@ export class OrchestratorCore {
     } catch (err) {
       logger.warn("orchestrator", "Retry fetch failed, re-queuing entries", { error: String(err) })
       for (const entry of ready) this.retryQueue.add(entry.issueId, entry.attemptCount, entry.lastError)
+      this.observability.onRetryQueueChanged(this.retryQueue.size)
       return
     }
     for (const entry of ready) {

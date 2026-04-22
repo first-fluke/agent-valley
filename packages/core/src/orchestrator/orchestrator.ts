@@ -19,6 +19,7 @@ import type { Config } from "../config/yaml-loader"
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
+import type { ObservabilityHooks } from "../observability/hooks"
 import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
 import { OrchestratorEventEmitter } from "./event-emitter"
 import { IssueLifecycle } from "./issue-lifecycle"
@@ -36,6 +37,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     webhook: WebhookReceiver<ParsedWebhookEvent>,
     workspace: WorkspaceGateway,
     agentRunner?: SpawnAgentRunnerAdapter,
+    observability?: ObservabilityHooks,
   ) {
     super()
 
@@ -53,6 +55,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
       workspace,
       agentRunner: runner,
       emit: (event, payload) => this.emitEvent(event, payload),
+      observability,
     })
 
     this.lifecycle = new IssueLifecycle(this.core)
