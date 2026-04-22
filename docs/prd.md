@@ -1,6 +1,6 @@
 # Agent Valley — Product Requirements Document (PRD)
 
-- **문서 버전:** v0.1
+- **문서 버전:** v0.2
 - **최종 업데이트:** 2026-04-22
 - **오너:** otti.nuna@gmail.com
 - **상태:** Draft (현행 구현 기준 역공학 + 차기 릴리스 요구사항)
@@ -95,16 +95,26 @@
 | 스코어링 | ISO/IEC 14143 기능점수 분석 → easy/medium/hard 모델 라우팅 | `packages/core/src/orchestrator/scoring-service.ts` |
 | 팀 대시보드 | Supabase auth + ledger 이벤트 브로드캐스트, 리플레이 | `packages/core/src/relay/*`, `supabase/migrations/001_team_dashboard.sql` |
 | 관측성 | JSON/text 구조화 로그, `/api/status` 스냅샷, `/api/events` SSE, `/api/health` | `packages/core/src/observability/logger.ts` |
+| 관측성 (v0.2) | OpenTelemetry OTLP HTTP 트레이스 + Prometheus `/api/metrics` (기본 off, `valley.yaml observability` 섹션으로 활성화) | `packages/core/src/observability/otel-exporter.ts`, `prom-metrics.ts` |
+| GitHub 어댑터 (v0.2) | `IssueTracker` / `WebhookReceiver` 포트의 GitHub 구현 + `POST /api/webhook/github` | `packages/core/src/tracker/adapters/github-adapter.ts`, `github-webhook-receiver.ts` |
+| 에이전트 예산 (v0.2) | 이슈당 / 일별 토큰·비용 한도. spawn 직전 `BudgetService.checkBeforeSpawn` 에서 차단 → cancelled 전이 | `packages/core/src/orchestrator/budget-service.ts` |
+| 라이브 인터벤션 (v0.2) | `POST /api/intervention` (pause / resume / append_prompt / abort), `InterventionBus` FIFO, 대시보드 `InterventionPanel` UI | `packages/core/src/orchestrator/intervention-bus.ts`, `apps/dashboard/src/app/api/intervention/route.ts` |
 | 멀티 레포 라우팅 | 레이블 기반 `workspace_root` / `agent_type` / `delivery_mode` 분기 | `packages/core/src/config/routing.ts` |
-| 보안 | HMAC 검증, 워크스페이스 격리, 프롬프트 주입 방어, secret gitignore | `docs/harness/SAFETY.md` 참조 |
+| 보안 | HMAC 검증, 워크스페이스 격리, 프롬프트 주입 방어, secret gitignore, 인터벤션 127.0.0.1 제한 (v0.2) | `docs/harness/SAFETY.md` 참조 |
 
-### 6.2 차기 릴리스 대상 (To-Be, v0.2 후보)
-- F1. **Tracker 포트 1차 어댑터 분리** — `IssueTracker / WebhookReceiver` 포트를 사용해 GitHub Issues 어댑터 프로토타입 제공 (design: `docs/plans/domain-ports-di-seam-design.md`)
-- F2. **Workspace 포트 분리 (PR2)** — `WorkspaceManager` 파사드 뒤에 `FileSystemWorkspaceGateway` 도입
-- F3. **Orchestrator 분할 (PR3)** — `WebhookRouter / IssueLifecycle / Orchestrator-core` 로 SRP 분리
-- F4. **ParsedWebhookEvent 도메인 승격** — Linear 의존성 제거
-- F5. **AgentRunnerService 포트화** — 세션 테스트성 확보
-- F6. **스코어 기반 라우팅 정식화** — 웹훅 진입 경로에서 비블로킹 분석, `score:N` 레이블 자동 부여
+### 6.2 v0.2 에서 완료된 항목
+- F1. ✅ **Tracker 포트 + GitHub 어댑터** — `IssueTracker / WebhookReceiver` 포트로 Linear + GitHub 어댑터 동일 경로 사용.
+- F2. ✅ **Workspace 포트 분리** — `WorkspaceManager` 파사드 뒤에 `FileSystemWorkspaceGateway` 도입, 내부 모듈 3개(`worktree-lifecycle / delivery-strategy / safety-net`) 로 분할.
+- F3. ✅ **Orchestrator 분할** — `WebhookRouter / IssueLifecycle / OrchestratorCore / InterventionBus` SRP 분리.
+- F4. ✅ **ParsedWebhookEvent 도메인 승격** — Linear 의존성 제거.
+- F5. ✅ **AgentRunnerService 포트화** — `AgentRunnerPort` + `SpawnAgentRunnerAdapter` 도입, 인터벤션용 `RunHandle` 노출.
+- F6. ✅ **관측성 / 예산 / 인터벤션 신기능** — OTel + Prometheus, Budget, Live intervention 추가 (기본 off).
+
+### 6.2b 차기 후보 (v0.3+)
+- 인터벤션 원격 접근 (서명 세션 토큰)
+- 에이전트 레코딩 세션 + 결정론적 재생
+- 팀 대시보드 대용량 이벤트 파티셔닝
+- Jira 어댑터
 
 ### 6.3 명시적 비범위
 - 에이전트 실행 결과 품질 평가 모델(자체 LLM judge)
@@ -234,19 +244,29 @@ Linear webhook POST
 
 ## 10. 릴리스 계획
 
-### v0.1 (현재, 2026-04 기준)
+### v0.1 (2026-04 초)
 - Linear 단일 tracker, Claude/Codex/Gemini 3 에이전트, 재시도 큐, DAG 스케줄러, 멀티 레포 라우팅, 스코어 기반 라우팅, 팀 대시보드 베타.
 
-### v0.2 (제안)
-- PR1: `IssueTracker / WebhookReceiver / WorkspaceGateway` 포트 + DI seam (`brainstorm-domain-ports-pr1` 메모리 참고)
-- PR2: WorkspaceManager 분할
-- PR3: Orchestrator 분할 (WebhookRouter / IssueLifecycle / core)
-- PR4: ParsedWebhookEvent 도메인 승격, GitHub Issues 어댑터 프로토타입
+### v0.2 (릴리스됨, 2026-04)
+PR 단위 기준:
+- **PR0**: Characterization 테스트 50건으로 기존 동작 잠금.
+- **PR1**: `IssueTracker / WebhookReceiver / WorkspaceGateway` 도메인 포트 + DI seam + Linear 어댑터 + contract 스위트.
+- **PR2**: WorkspaceManager 분할 (`worktree-lifecycle` / `delivery-strategy` / `safety-net`).
+- **PR3**: Orchestrator 분할 (`OrchestratorCore` / `IssueLifecycle` / `WebhookRouter` / facade).
+- **PR4**: `AgentRunnerPort` 도입, `ParsedWebhookEvent` 도메인 승격.
+- **Feature A**: GitHub 어댑터 + `POST /api/webhook/github` + contract 통과.
+- **Feature B**: `BudgetService` — 이슈당 / 일별 토큰·비용 한도.
+- **Feature C**: 라이브 인터벤션 — `InterventionBus` + `POST /api/intervention` + `InterventionPanel` UI.
+- **Feature D**: 관측성 — OpenTelemetry OTLP HTTP 트레이스 + Prometheus `/api/metrics` (둘 다 기본 off).
+- **M3**: 통합 테스트 3종 (`todo-to-done` / `retry-exhaust` / `intervention-flow`) + 문서 업데이트.
+
+전체 테스트 723개 / `validate.sh` green / 500줄 grandfather 목록 최소화.
 
 ### v0.3+ (구상)
-- AgentRunnerService 포트화 및 레코딩 세션(디터미니스틱 재현)
-- 이슈 분해 품질 평가 루프
-- 팀 대시보드 대용량 이벤트 아카이빙
+- 인터벤션 원격 접근 (서명 세션 토큰).
+- 레코딩 세션(디터미니스틱 재현) 및 평가 루프.
+- 팀 대시보드 대용량 이벤트 아카이빙 / 파티셔닝.
+- Jira 어댑터.
 
 ---
 

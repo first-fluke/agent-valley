@@ -151,13 +151,53 @@ When Linear API is unreachable: `{ "status": "degraded", "reason": "linear api u
 
 ---
 
-## Optional OTEL Integration
+## Optional OTEL Integration (v0.2+)
 
-When `OTEL_ENDPOINT` is set, export metrics and traces via OpenTelemetry.
+OpenTelemetry OTLP HTTP tracing is built in but defaults to **off**.
+Enable per deployment via `valley.yaml`:
 
+```yaml
+observability:
+  otel:
+    enabled: true
+    endpoint: http://localhost:4318     # OTLP HTTP collector
+    service_name: agent-valley
 ```
-OTEL_ENDPOINT=http://collector:4318   → export via OTLP HTTP
-OTEL_ENDPOINT not set                 → OTEL disabled (local logs only)
+
+**Trace scope:** Each webhook event as a root span; agent start / done /
+failed / cancelled + DAG cycle detection + retry queue size changes
+become spans and counters on that root. Exporter errors are swallowed
+inside the hooks and never propagate into orchestrator flow.
+
+Implementation: `packages/core/src/observability/otel-exporter.ts`.
+
+---
+
+## Optional Prometheus Integration (v0.2+)
+
+A Prometheus metrics endpoint is built in but defaults to **off**. Enable
+via `valley.yaml`:
+
+```yaml
+observability:
+  prometheus:
+    enabled: true
+    path: /api/metrics
 ```
 
-**Trace scope:** Each webhook event as a root span, each RunAttempt as a child span.
+| Metric | Type | Description |
+|---|---|---|
+| `agent_valley_active_agents` | gauge | Agents currently running |
+| `agent_valley_retry_queue_size` | gauge | Pending retry entries |
+| `agent_valley_agent_started_total` | counter | Spawn events, labelled by `agent_type` |
+| `agent_valley_agent_done_total` | counter | Successful completions |
+| `agent_valley_agent_failed_total` | counter | Failures with `retryable` label |
+| `agent_valley_agent_cancelled_total` | counter | Cancellations |
+| `agent_valley_agent_duration_ms` | histogram | Agent run duration |
+| `agent_valley_dag_cycles_total` | counter | DAG cycle detections |
+
+Served as text/plain from `GET /api/metrics` through the Presentation
+layer (`apps/dashboard/src/app/api/metrics/route.ts`). When Prometheus is
+disabled, the endpoint returns HTTP 503 with an actionable error body.
+
+Implementation: `packages/core/src/observability/prom-metrics.ts`.

@@ -7,6 +7,51 @@ Domain models: See `domain-models.md` (Workspace, Workspace Key derivation rules
 
 ---
 
+## Domain Port (v0.2+)
+
+The Application layer talks to workspaces through `WorkspaceGateway`
+(`packages/core/src/domain/ports/workspace.ts`):
+
+```typescript
+interface WorkspaceGateway {
+  create(issue: Issue, rootOverride?: string): Promise<Workspace>
+  get(issueId: string, rootOverride?: string): Promise<Workspace | null>
+  saveAttempt(workspace: Workspace, attempt: RunAttempt): Promise<void>
+  cleanup(workspace: Workspace): Promise<void>
+  detectUnfinishedWork(workspace: Workspace): Promise<UnfinishedWork>
+  autoCommit(workspace: Workspace): Promise<WorkspaceOpResult>
+  getDiffStat(workspace: Workspace): Promise<string | null>
+  mergeAndPush(workspace: Workspace): Promise<WorkspaceOpResult>
+  pushBranch(workspace: Workspace): Promise<PushResult>
+  createDraftPR(workspace: Workspace, opts: { title: string; body: string }): Promise<DraftPrResult>
+}
+```
+
+The only built-in adapter is `FileSystemWorkspaceGateway`
+(`packages/core/src/workspace/adapters/fs-workspace-gateway.ts`) which
+composes — not inherits — the existing `WorkspaceManager` facade.
+
+---
+
+## Internal Composition (v0.2+)
+
+`WorkspaceManager` is now a thin facade over three focused modules
+(`packages/core/src/workspace/`):
+
+| Module | Role |
+|---|---|
+| `worktree-lifecycle.ts` | Worktree creation, lookup, metadata persistence, cleanup, branch / key derivation, diff-against-main detection. |
+| `delivery-strategy.ts` | `merge` mode fast-forward rebase + push; `pr` mode branch push + safety-net draft PR (via `gh` CLI). |
+| `safety-net.ts` | Auto-commit of uncommitted agent work before delivery; regeneratable-lockfile conflict retry hints. |
+
+The split keeps every file under the 500-line constraint and lets each
+module be tested independently (`worktree-lifecycle.test.ts`,
+`delivery-strategy.test.ts`, `workspace-safety-net.test.ts`) while
+`FileSystemWorkspaceGateway` remains the single shape the orchestrator
+depends on.
+
+---
+
 ## Workspace Key Derivation
 
 Replace all characters outside the `[A-Za-z0-9._-]` range in `Issue.identifier` with `_`.

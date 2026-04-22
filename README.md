@@ -1,6 +1,6 @@
 # Agent Valley
 
-Linear webhook-driven agent orchestration platform. Register an issue on Linear, and AI agents (Claude, Codex, Gemini) automatically develop it in isolated git worktrees — in parallel.
+Linear- or GitHub-driven agent orchestration platform. Register an issue in your tracker, and AI agents (Claude, Codex, Gemini) automatically develop it in isolated git worktrees — in parallel.
 
 > Read this in: [한국어](./README.ko.md)
 
@@ -124,6 +124,10 @@ team:
 ### Project Config (`valley.yaml`)
 
 ```yaml
+# Tracker selector (v0.2+). Defaults to `linear` when omitted.
+tracker:
+  kind: linear        # linear | github
+
 linear:
   team_id: ACR
   team_uuid: uuid-xxx
@@ -133,6 +137,13 @@ linear:
     in_progress: state-uuid
     done: state-uuid
     cancelled: state-uuid
+
+# GitHub tracker (v0.2+) — used when tracker.kind = github.
+# github:
+#   token: ghp_xxx
+#   owner: my-org
+#   repo: my-repo
+#   webhook_secret: whsec_xxx
 
 workspace:
   root: /absolute/path/to/target-repo
@@ -162,6 +173,25 @@ scoring:
     easy:  { min: 1, max: 3, agent: gemini }
     medium: { min: 4, max: 7, agent: codex }
     hard:  { min: 8, max: 10, agent: claude }
+
+# Agent Budget Caps (optional, v0.2+). Omit to disable (default).
+# budget:
+#   per_issue:
+#     tokens: 2_000_000
+#     usd: 5.00
+#   per_day:
+#     tokens: 20_000_000
+#     usd: 50.00
+
+# Observability (optional, v0.2+). Both default to off.
+# observability:
+#   otel:
+#     enabled: false
+#     endpoint: http://localhost:4318
+#     service_name: agent-valley
+#   prometheus:
+#     enabled: false
+#     path: /api/metrics
 ```
 
 **Prompt template variables:** `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.description}}`, `{{workspace_path}}`, `{{attempt.id}}`, `{{retry_count}}`
@@ -208,14 +238,27 @@ agent-valley/
 ```
 Presentation   dashboard route handlers (no business logic)
      ↓
-Application    Orchestrator, AgentRunnerService (coordinate via interfaces)
+Application    Orchestrator (core / lifecycle / router / bus), AgentRunnerService
      ↓
-Domain         Issue, Workspace, RunAttempt, DAG (pure types, zero external deps)
+Domain         Issue, Workspace, RunAttempt, DAG, ParsedWebhookEvent (pure types)
+               + ports: IssueTracker, WebhookReceiver, WorkspaceGateway, AgentRunnerPort
      ↓
-Infrastructure Linear client, git operations, agent sessions (adapters)
+Infrastructure Linear + GitHub adapters, git operations, agent sessions, observability
 ```
 
 Dependency arrows point **downward only**. See `docs/architecture/LAYERS.md`.
+
+### Domain Port Layer
+
+Since v0.2 the Application layer talks to the outside world through four
+domain ports so adapters can be swapped without touching the orchestrator:
+
+| Port | Purpose | Current adapters |
+|---|---|---|
+| `IssueTracker` | Fetch / update issues, post comments, attach labels | `LinearTrackerAdapter`, `GitHubTrackerAdapter` |
+| `WebhookReceiver<TEvent>` | Verify signature + parse to `ParsedWebhookEvent` | `LinearWebhookReceiver`, `GitHubWebhookReceiver` |
+| `WorkspaceGateway` | Per-issue worktree lifecycle + delivery | `FileSystemWorkspaceGateway` |
+| `AgentRunnerPort` | Spawn agents + expose `RunHandle` for interventions | `SpawnAgentRunnerAdapter` |
 
 ### The 7 Symphony Components
 
@@ -256,13 +299,41 @@ PixiJS-rendered office scene showing real-time agent status:
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/webhook` | POST | Linear webhook receiver (HMAC-SHA256 verified) |
+| `/api/webhook/github` | POST | GitHub webhook receiver (HMAC-SHA256 verified) |
 | `/api/events` | GET | SSE stream for real-time dashboard updates |
 | `/api/status` | GET | JSON orchestrator status snapshot |
 | `/api/health` | GET | Health check (503 if orchestrator not initialized) |
+| `/api/intervention` | POST | Live agent intervention (pause / resume / append_prompt / abort). Localhost-only in v0.2 |
+| `/api/metrics` | GET | Prometheus-format metrics (enabled via `observability.prometheus.enabled`) |
 
 ---
 
 ## Key Features
+
+### GitHub Issues Support (v0.2+)
+
+Alongside Linear, GitHub Issues can drive the orchestrator. Set `tracker.kind: github` in `valley.yaml` and configure the GitHub section — the domain `IssueTracker` / `WebhookReceiver` ports swap transparently. Both trackers reuse the same orchestration, retry, and delivery pipeline.
+
+### Observability (v0.2+)
+
+OpenTelemetry OTLP HTTP traces and Prometheus metrics ship built in but **default to off**. Enable per deployment via the `observability` section in `valley.yaml`. When enabled:
+
+- OTel spans are emitted for agent start/done/failed + webhook + DAG events.
+- Prometheus metrics are served from `GET /api/metrics` (active agents, retry queue size, completion counts, failure counts, DAG cycle detections).
+
+### Agent Budget Caps (v0.2+)
+
+Per-issue and per-day token / cost caps prevent runaway agents. Budgets are evaluated before each spawn (`BudgetService.checkBeforeSpawn`) — when exceeded, the issue is cancelled with an actionable comment instead of spawning.
+
+### Live Intervention (v0.2+)
+
+Mid-run control from the dashboard via `POST /api/intervention`:
+
+- `pause` / `resume` — Codex native (JSON-RPC)
+- `append_prompt` — native on Codex / Gemini ACP; cancel + respawn on stateless Claude
+- `abort` — force-kill the session
+
+Commands flow through `InterventionBus` (FIFO per attempt, last-writer-wins). The HTTP surface is localhost-only in v0.2; remote access lands in v0.3 behind a signed session token.
 
 ### DAG Dependency Scheduling
 
@@ -281,7 +352,7 @@ Failed agent runs are retried with exponential backoff (`60s × 2^(attempt-1)`, 
 
 ### Startup Sync
 
-On boot, the orchestrator fetches all Todo + In Progress issues from Linear and reconciles the DAG cache. Existing in-progress issues resume automatically.
+On boot, the orchestrator fetches all Todo + In Progress issues from the configured tracker and reconciles the DAG cache. Existing in-progress issues resume automatically.
 
 ---
 
@@ -314,11 +385,12 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 
 ## Security
 
-- **HMAC-SHA256** webhook signature verification on all incoming Linear events
+- **HMAC-SHA256** webhook signature verification on all incoming Linear and GitHub events
 - **Prompt injection defense** — prompt template in `valley.yaml` is trusted, issue body is always sanitized at entry point
 - **Least privilege** — agents operate only within their assigned worktree
 - **Secret management** — secrets in `valley.yaml` and `settings.yaml` (gitignored), pre-commit secret detection
-- **Fetch timeout** — 30s timeout on all Linear API calls
+- **Fetch timeout** — 30s timeout on all tracker API calls
+- **Intervention surface** — `POST /api/intervention` is localhost-only (checks `Host` header) unless `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1`
 - **Audit logging** — all agent actions logged in structured JSON
 
 Full documentation: `docs/harness/SAFETY.md`

@@ -7,6 +7,22 @@ Domain models: see `domain-models.md` (Issue, Workspace, RunAttempt, RetryEntry,
 
 ---
 
+## Internal Composition (v0.2+)
+
+The Orchestrator is exposed as a single facade class, but internally it is split into four collaborators so responsibilities stay SRP-clean:
+
+| File | Role |
+|---|---|
+| `orchestrator.ts` | Public facade. Wires collaborators, exposes `start / stop / getHandlers / on / off` and a read-only `intervention` bus. |
+| `orchestrator-core.ts` | Owns `OrchestratorRuntimeState` + sub-services (`RetryQueue`, `DagScheduler`, `AgentRunnerService`, `BudgetService`, `ObservabilityHooks`). Sole state-mutation authority. |
+| `issue-lifecycle.ts` | State-transition side of event handling: Todo admission, In-Progress dispatch, left-In-Progress kill, retry / blocker re-evaluation. |
+| `webhook-router.ts` | Verifies signature, parses via `WebhookReceiver`, dispatches to lifecycle, drains the retry queue after each event. |
+| `intervention-bus.ts` | Application-layer mediator for live operator commands (pause / resume / append_prompt / abort). FIFO per attempt. |
+
+The split preserves the v0.1 public surface — external callers (dashboard bootstrap, relay bridge, CLI) continue to construct a single `new Orchestrator(...)`.
+
+---
+
 ## State Ownership
 
 The Orchestrator exclusively owns `OrchestratorRuntimeState`.

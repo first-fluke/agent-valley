@@ -1,11 +1,44 @@
-# Tracker Client (Linear GraphQL Adapter)
+# Tracker Client
 
-> Responsibility: Communicate with Linear API, parse webhook events, and convert data to domain models.
-> SRP: API communication and data transformation only. State changes are the agent's responsibility. Symphony never writes issue state.
+> Responsibility: Communicate with an external issue tracker (Linear or GitHub), parse webhook events, and convert data to domain models.
+> SRP: API communication and data transformation only. Symphony manages lifecycle state transitions (Todo→InProgress→Done/Cancelled); the tracker client performs the API calls.
 
 ---
 
-## Endpoint
+## Domain Ports (v0.2+)
+
+The Application layer talks to trackers through two domain ports
+(`packages/core/src/domain/ports/tracker.ts`):
+
+```typescript
+interface IssueTracker {
+  fetchIssuesByState(stateIds: string[]): Promise<Issue[]>
+  fetchIssueLabels(issueId: string): Promise<string[]>
+  updateIssueState(issueId: string, stateId: string): Promise<void>
+  addIssueComment(issueId: string, body: string): Promise<void>
+  addIssueLabel(issueId: string, labelName: string): Promise<void>
+}
+
+interface WebhookReceiver<TEvent = unknown> {
+  verifySignature(payload: string, signature: string): Promise<boolean>
+  parseEvent(payload: string): TEvent | null
+}
+```
+
+Both ports are implemented by two adapters:
+
+| Adapter | Endpoint / Transport | Source |
+|---|---|---|
+| `LinearTrackerAdapter` + `LinearWebhookReceiver` | `POST https://api.linear.app/graphql` (GraphQL) + HMAC-SHA256 webhook header `Linear-Signature` | `packages/core/src/tracker/adapters/linear-*.ts` |
+| `GitHubTrackerAdapter` + `GitHubWebhookReceiver` | `https://api.github.com/...` (REST v3 + `X-Hub-Signature-256` HMAC) | `packages/core/src/tracker/adapters/github-*.ts` |
+
+The selector is `tracker.kind` in `valley.yaml` (defaults to `linear`).
+Each adapter is exercised against `runIssueTrackerContract` /
+`runWebhookReceiverContract` in `packages/core/src/__tests__/contracts/`.
+
+---
+
+## Linear Endpoint
 
 ```
 POST https://api.linear.app/graphql

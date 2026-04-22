@@ -52,11 +52,17 @@ Symphony SPEC — 7 components:
 |---|---|---|
 | 1 | **Workflow Loader** | Prompt template rendering + input sanitization |
 | 2 | **Config Layer** | YAML config loader (settings.yaml + valley.yaml) + Zod validation |
-| 3 | **Issue Tracker Client** | Linear webhook parsing + signature verification + startup sync |
-| 4 | **Orchestrator** | Webhook event handler, state machine, retry queue, sole in-memory state authority |
-| 5 | **Workspace Manager** | Per-issue isolated directory + git worktree lifecycle |
-| 6 | **Agent Runner** | AgentSession abstraction (claude/gemini/codex via native protocols) |
-| 7 | **Observability** | Structured logs (JSON) + optional status surface |
+| 3 | **Issue Tracker Client** | Linear / GitHub webhook parsing + signature verification + startup sync |
+| 4 | **Orchestrator** | Webhook event handler, state machine, retry queue, sole in-memory state authority. v0.2+ split into `OrchestratorCore` / `IssueLifecycle` / `WebhookRouter` / `InterventionBus` |
+| 5 | **Workspace Manager** | Per-issue isolated directory + git worktree lifecycle. v0.2+ split into `worktree-lifecycle` / `delivery-strategy` / `safety-net` |
+| 6 | **Agent Runner** | `AgentRunnerPort` abstraction (claude/gemini/codex via native protocols) + live intervention `RunHandle` |
+| 7 | **Observability** | Structured logs (JSON) + optional OTel traces + optional Prometheus metrics |
+
+**Domain port layer (v0.2+):** Application code speaks to four domain
+ports — `IssueTracker`, `WebhookReceiver<TEvent>`, `WorkspaceGateway`,
+`AgentRunnerPort` — so adapters (Linear / GitHub / filesystem+git /
+spawn) are swappable without touching orchestration logic. Interfaces
+live in `packages/core/src/domain/ports/`.
 
 **Dependency direction:** see `docs/architecture/LAYERS.md`
 
@@ -72,6 +78,7 @@ Symphony SPEC — 7 components:
 - **Prompt injection defense:** `WORKFLOW.md` is trusted. Issue body is always suspect — validate at the entry point.
 - **Network egress control:** Agents must not make direct external network calls. All external calls go through approved adapters.
 - **Secret management:** Never include API keys or tokens in code, logs, or commits. `valley.yaml` and `settings.yaml` are registered in `.gitignore`.
+- **Intervention surface (v0.2+):** `POST /api/intervention` is localhost-only by default — the handler rejects requests whose `Host` header is not `localhost` / `127.0.0.1` / `[::1]`. Remote access is explicitly opt-in via `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` and is planned to land in v0.3 behind a signed session token.
 - **Audit logging:** Record all agent actions as structured logs.
 
 **Details:** `docs/harness/SAFETY.md`

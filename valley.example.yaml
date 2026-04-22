@@ -5,6 +5,12 @@
 #
 # Run `av setup` to generate both files interactively.
 
+# ── Tracker Selector (v0.2+) ──────────────────────────────────────────
+# Picks which IssueTracker + WebhookReceiver adapter to use.
+# Omit to default to "linear" (matches v0.1 behavior).
+# tracker:
+#   kind: linear                    # linear | github
+
 # ── Linear Issue Tracker ──────────────────────────────────────────────
 linear:
   # team_id: ACR                    # Linear team short code
@@ -15,6 +21,16 @@ linear:
     # in_progress: state-uuid       # "In Progress" workflow state ID
     # done: state-uuid              # "Done" workflow state ID
     # cancelled: state-uuid         # "Cancelled" workflow state ID
+
+# ── GitHub Issues Tracker (v0.2+, optional) ───────────────────────────
+# Used when tracker.kind = github. Labels are used instead of workflow
+# states — see packages/core/src/tracker/adapters/github-adapter.ts for
+# the label ↔ state mapping.
+# github:
+#   token: ghp_xxx                  # GitHub PAT or fine-grained token
+#   owner: my-org
+#   repo: my-repo
+#   webhook_secret: whsec_xxx       # HMAC-SHA256 signing secret (X-Hub-Signature-256)
 
 # ── Workspace ─────────────────────────────────────────────────────────
 workspace:
@@ -71,3 +87,28 @@ prompt: |
 #       min: 8
 #       max: 10
 #       agent: claude
+
+# ── Agent Budget Caps (v0.2+, optional) ───────────────────────────────
+# Per-issue and per-day token / USD limits. Budget is evaluated before
+# each spawn — exceeding a cap cancels the issue with an actionable
+# comment instead of spawning. Omit the whole block to disable.
+# budget:
+#   per_issue:
+#     tokens: 2000000               # Max tokens (input + output) per issue
+#     usd: 5.00                     # Max estimated cost (USD) per issue
+#   per_day:
+#     tokens: 20000000              # Team-wide daily token ceiling
+#     usd: 50.00                    # Team-wide daily USD ceiling
+
+# ── Observability (v0.2+, optional) ───────────────────────────────────
+# OpenTelemetry OTLP HTTP tracing + Prometheus metrics. Both default to
+# off — enable per deployment. Exporter errors are swallowed inside the
+# hooks and never affect orchestrator flow.
+# observability:
+#   otel:
+#     enabled: false
+#     endpoint: http://localhost:4318   # OTLP HTTP collector
+#     service_name: agent-valley
+#   prometheus:
+#     enabled: false
+#     path: /api/metrics                # Served by apps/dashboard

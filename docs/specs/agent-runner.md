@@ -1,9 +1,58 @@
 # Agent Runner
 
-> Responsibility: Manage agent process lifecycle via the AgentSession abstraction.
+> Responsibility: Manage agent process lifecycle via the `AgentRunnerPort` abstraction.
 > SRP: Owns session creation, execution, and cleanup. Retry decisions are the Orchestrator's responsibility.
 
 Domain models: see `domain-models.md` (RunAttempt, LiveSession).
+
+---
+
+## Domain Port (v0.2+)
+
+The Application layer spawns agents through `AgentRunnerPort`
+(`packages/core/src/domain/ports/agent-runner.ts`):
+
+```typescript
+interface AgentRunnerPort {
+  spawn(input: SpawnInput): Promise<RunHandle>
+  capabilities(agentType: string): InterventionCapability[]
+}
+
+interface RunHandle {
+  readonly attemptId: string
+  readonly issueKey: string
+  onEvent(handler: (event: AgentRunEvent) => void): Unsubscribe
+  send(cmd: InterventionCommand): Promise<void>
+  cancel(): Promise<void>
+  kill(): Promise<void>
+  isAlive(): boolean
+}
+
+type InterventionCommand =
+  | { kind: "pause" }
+  | { kind: "resume" }
+  | { kind: "append_prompt"; text: string }
+  | { kind: "abort"; reason: string }
+
+type InterventionCapability = "pause" | "resume" | "append_prompt" | "abort"
+```
+
+The only built-in adapter is `SpawnAgentRunnerAdapter`
+(`packages/core/src/sessions/adapters/spawn-agent-runner.ts`) which wraps
+the existing process-spawning `AgentRunnerService`. The orchestrator also
+consumes the adapter's static capability table so the dashboard can
+pre-disable unsupported intervention controls:
+
+```
+claude  → ["append_prompt", "abort"]               (stateless; pause/resume absent)
+codex   → ["pause", "resume", "append_prompt", "abort"]
+gemini  → ["append_prompt", "abort"] conservatively
+```
+
+`send()` rejects with `InterventionUnsupportedError` when the command is
+outside the advertised set. For `append_prompt` on a stateless agent
+(Claude), the upper-layer `InterventionBus` cancels the session and
+re-queues the issue with the appended instruction.
 
 ---
 
