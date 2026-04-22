@@ -5,6 +5,31 @@ follows [Semantic Versioning](https://semver.org/) and
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Commits follow
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased]
+
+### Coverage gate uplift (planned)
+
+The v0.2 coverage gate excludes files that have no unit-test seam in the
+current test infrastructure. As new seams land the excludes should be
+removed one at a time (never by lowering the threshold):
+
+- `packages/core/src/relay/ledger-bridge.ts`,
+  `packages/core/src/relay/node-id.ts`,
+  `packages/core/src/relay/supabase-ledger-client.ts` — needs a Supabase
+  test harness or an in-memory ledger fake.
+- `packages/core/src/orchestrator/scoring-service.ts` — needs an LLM
+  client seam (currently exercised only via `score-routing.test.ts`).
+- `apps/cli/src/{issue,breakdown,invite,login,supervisor}.ts` and the
+  interactive `apps/cli/src/setup/*-step.ts` files — needs a `@clack/prompts`
+  fake / subprocess harness. Non-interactive helpers under `apps/cli/src/setup/`
+  (mask, preview, resolve, save, yaml-build, github-api, linear-api) are
+  already inside the gate.
+- Dashboard UI (`apps/dashboard/**`) — needs a browser test runtime
+  (Playwright / vitest-browser). Tracked for v0.3.
+
+Target for v0.3: raise every gated module to `lines >= 85%`,
+`branches >= 75%` and start removing the excludes above.
+
 ## [0.2.0] - 2026-04-22
 
 ### Added
@@ -44,6 +69,17 @@ follows [Semantic Versioning](https://semver.org/) and
 - **Integration test suite** — `todo-to-done`, `retry-exhaust`, and
   `intervention-flow` end-to-end tests drive the real orchestrator over
   a real temp git repo with fakes only at the tracker + session seams.
+- **Coverage gate** — `validate.sh` Check 5/5 now runs
+  `bun run test:coverage` (vitest v8 provider). Global thresholds are
+  `lines >= 80%`, `branches >= 70%`, `functions >= 80%`,
+  `statements >= 80%` over `packages/core/src/**` + the
+  non-interactive slice of `apps/cli/src/**`. Current measurement:
+  statements 88.15%, branches 76.98%, functions 89.81%, lines 90.30%.
+  Interactive CLI entry points, Supabase relay plumbing, the LLM-call
+  scoring service, and the React dashboard are outside the gate —
+  tracked in the Unreleased section for v0.3 uplift. CI uploads
+  `coverage/lcov.info` + `coverage/index.html` as an artifact. Opt-out
+  for local iteration only: `SKIP_COVERAGE=1 ./scripts/harness/validate.sh`.
 
 ### Changed
 

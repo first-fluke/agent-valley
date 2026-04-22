@@ -14,6 +14,11 @@
 #   2. Dangerous shell commands (rm -rf /, force push to main)
 #   3. Architecture violations (domain/ importing from other layers; also legacy infrastructure/ rule)
 #   4. File length cap (CONSTRAINTS.md §5: no single file over 500 lines)
+#   5. Test coverage thresholds (v0.2 merge gate — see docs/plans/v0-2-bigbang-design.md §5.6/§7)
+#
+# Opt-outs:
+#   SKIP_COVERAGE=1 ./scripts/harness/validate.sh   # skip Check 5 for fast local iteration
+#                                                    # (CI must leave this unset)
 #
 # References:
 #   docs/harness/SAFETY.md     — secret management, safety rails
@@ -103,7 +108,7 @@ check_pattern() {
 # Detects common API key / token patterns that should never appear in code.
 # Reference: docs/harness/SAFETY.md section 1, CONSTRAINTS.md section 3
 # ─────────────────────────────────────────────────────────────────────────────
-info "Check 1/4: Hardcoded secrets"
+info "Check 1/5: Hardcoded secrets"
 
 # Exclude .env.example (it shows key names only, not values),
 # this script itself, and binary/lock files.
@@ -161,7 +166,7 @@ done <<< "${FILES}"
 # CHECK 2: Dangerous shell commands
 # Reference: docs/harness/SAFETY.md section 1, AGENTS.md section 3 Security
 # ─────────────────────────────────────────────────────────────────────────────
-info "Check 2/4: Dangerous shell commands"
+info "Check 2/5: Dangerous shell commands"
 
 VIOLATIONS_BEFORE_2="${VIOLATIONS}"
 
@@ -229,7 +234,7 @@ done <<< "${FILES}"
 # Reference: docs/architecture/CONSTRAINTS.md section 1
 #            docs/architecture/LAYERS.md
 # ─────────────────────────────────────────────────────────────────────────────
-info "Check 3/4: Architecture layer violations (domain must be pure)"
+info "Check 3/5: Architecture layer violations (domain must be pure)"
 
 VIOLATIONS_BEFORE_3="${VIOLATIONS}"
 
@@ -329,7 +334,7 @@ done <<< "${FILES}"
 # ─────────────────────────────────────────────────────────────────────────────
 # CHECK 4: File length cap (CONSTRAINTS.md §5 — no single file over 500 lines)
 # ─────────────────────────────────────────────────────────────────────────────
-info "Check 4/4: File length cap (CONSTRAINTS.md §5: max 500 lines per file)"
+info "Check 4/5: File length cap (CONSTRAINTS.md §5: max 500 lines per file)"
 
 VIOLATIONS_BEFORE_4="${VIOLATIONS}"
 MAX_LINES=500
@@ -381,6 +386,48 @@ while IFS= read -r file; do
 done <<< "${FILES}"
 
 [ "${VIOLATIONS}" -eq "${VIOLATIONS_BEFORE_4}" ] && ok "No oversized files found" || true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHECK 5: Test coverage thresholds (v0.2 merge gate).
+# Reference: docs/plans/v0-2-bigbang-design.md §5.6 (coverage gate), §7 (merge
+# gate checklist). Thresholds live in vitest.config.ts:coverage.thresholds.
+#
+# Skip with SKIP_COVERAGE=1 for fast local iteration. CI must leave this unset.
+# ─────────────────────────────────────────────────────────────────────────────
+info "Check 5/5: Test coverage thresholds"
+
+if [ "${SKIP_COVERAGE:-0}" = "1" ]; then
+  warn "SKIP_COVERAGE=1 set — skipping coverage gate. CI must not skip this check."
+else
+  VIOLATIONS_BEFORE_5="${VIOLATIONS}"
+
+  # Coverage needs a working WORKSPACE_ROOT for workspace-manager tests.
+  # Use a scratch directory if the caller has not set one.
+  COVERAGE_WORKSPACE_ROOT="${WORKSPACE_ROOT:-}"
+  if [ -z "${COVERAGE_WORKSPACE_ROOT}" ]; then
+    COVERAGE_WORKSPACE_ROOT="$(mktemp -d -t av-validate-workspaces-XXXXXX)"
+    export WORKSPACE_ROOT="${COVERAGE_WORKSPACE_ROOT}"
+  fi
+
+  if ! command -v bun >/dev/null 2>&1; then
+    violation "bun not found on PATH — cannot run 'bun run test:coverage'."
+    violation "  Fix: install bun (https://bun.sh) or set SKIP_COVERAGE=1 for local iteration only."
+    VIOLATIONS=$(( VIOLATIONS + 1 ))
+  else
+    # Let vitest stream its own output — it already prints a structured
+    # coverage table and the exact threshold that was missed.
+    if ! bun run test:coverage; then
+      violation "Coverage below threshold — see vitest summary above."
+      violation "  Fix: add tests for the lines/branches reported as uncovered,"
+      violation "       or justify a threshold change in vitest.config.ts:coverage.thresholds."
+      violation "  Thresholds live in: vitest.config.ts"
+      violation "  Design reference: docs/plans/v0-2-bigbang-design.md §5.6 / §7"
+      VIOLATIONS=$(( VIOLATIONS + 1 ))
+    fi
+  fi
+
+  [ "${VIOLATIONS}" -eq "${VIOLATIONS_BEFORE_5}" ] && ok "Coverage thresholds met" || true
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Result

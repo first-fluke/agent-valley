@@ -13,6 +13,7 @@
     "lint:fix": "biome check --fix .",
     "typecheck": "tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p apps/cli/tsconfig.json",
     "test": "vitest run --config vitest.config.ts",
+    "test:coverage": "vitest run --coverage --config vitest.config.ts",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -23,6 +24,7 @@
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@types/bun": "^1.3.11",
+    "@vitest/coverage-v8": "^4.1.5",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "typescript": "^6",
