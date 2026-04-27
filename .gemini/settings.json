@@ -45,5 +45,16 @@
         "matcher": "*"
       }
     ]
+  },
+  "general": {
+    "enableNotifications": true
+  },
+  "experimental": {
+    "enableAgents": true
+  },
+  "mcpServers": {
+    "serena": {
+      "url": "http://localhost:12341/mcp"
+    }
   }
 }
