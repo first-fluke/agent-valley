@@ -4,14 +4,35 @@
  * Confines the wrapped process to:
  *   - Broad filesystem READ (toolchains legitimately need to read most of
  *     the host — language runtimes, global package caches, system
- *     libraries). This matches the ask in the sandboxing task: writes are
- *     confined, reads are not.
+ *     libraries), MINUS an explicit denylist of paths that hold
+ *     credentials (see "Credential denylist" below). This matches the ask
+ *     in the sandboxing task: writes are confined, reads are not — with
+ *     the narrow exception of secrets a prompt-injected issue body could
+ *     otherwise exfiltrate.
  *   - Filesystem WRITE limited to the workspace directory + a curated set
  *     of per-agent-CLI cache/config directories under $HOME (so the CLI
  *     itself keeps working) + the OS tmp dir.
  *   - Outbound network restricted to HTTP/HTTPS ports, plus local DNS
  *     resolution and local unix-domain sockets (ssh-agent and similar —
  *     these never leave the host).
+ *
+ * Credential denylist (closes a HIGH-severity secret-exfiltration gap —
+ * see docs/harness/SAFETY.md § 2 residual gaps and the sandbox result
+ * doc): the broad `(allow file-read*)` below is followed by explicit
+ * `(deny file-read* ...)` rules for `~/.config/agent-valley` (holds
+ * LINEAR_API_KEY + other orchestrator secrets in settings.yaml), the
+ * project's `valley.yaml` (team webhook secret, Linear team id/uuid —
+ * resolved best-effort from the orchestrator's cwd, which is chdir'd to
+ * the project root at startup by apps/dashboard/src/lib/bootstrap.ts),
+ * and `~/.ssh` + `~/.git-credentials` (git auth material the sandboxed
+ * agent doesn't need — SSH auth for git push/pull goes through the
+ * already-allowed ssh-agent unix-domain socket instead of reading private
+ * key files directly). Seatbelt profiles are evaluated last-match-wins,
+ * so placing these `(deny ...)` rules AFTER `(allow file-read*)` in the
+ * generated profile text overrides it for exactly these paths. This does
+ * NOT close every credential-exposure path — cloud CLI credential caches
+ * (e.g. `~/.aws`, `~/.config/gcloud`) and other tools' dotfiles under
+ * `$HOME` remain readable; see the residual-gap note in SAFETY.md.
  *
  * GAP (documented, verified empirically — not a silent shortfall): the
  * original design intent was to scope `(remote tcp ...)` rules to the
@@ -38,6 +59,7 @@
 
 import { realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
+import { join } from "node:path"
 import { resolveBinaryPath } from "./sandbox-binary"
 import type { SandboxBuildRequest, SandboxCommand } from "./sandbox-types"
 
@@ -99,17 +121,32 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
     `${home}/.codex`,
     `${home}/.cursor`,
     `${home}/.grok`,
+    `${home}/.gemini`,
     `${home}/.cache`,
     `${home}/.npm`,
     `${home}/.bun`,
-    `${home}/.config`,
   ]
+  // NOTE: deliberately no blanket `${home}/.config` entry here — that
+  // used to make `~/.config/agent-valley/settings.yaml` (and every other
+  // tool's config under `~/.config`, e.g. `gh`, `gcloud`) writable by the
+  // sandboxed process. None of the agent CLIs this project spawns store
+  // their own config directly under `~/.config` (they use dotdirs like
+  // `~/.claude`, `~/.codex`, or `~/.gemini`, listed above).
 
   const writeRules = writablePaths.map((p) => `(allow file-write* (subpath ${seatbeltString(p)}))`).join("\n")
 
   const deviceWriteRules = ["/dev/null", "/dev/zero", "/dev/tty", "/dev/ptmx"]
     .map((p) => `(allow file-write-data (literal ${seatbeltString(p)}))`)
     .join("\n")
+
+  // See the module docstring "Credential denylist" section for why these
+  // exact paths are carved out of the broad read allowance below.
+  const denyReadSubpaths = [`${home}/.config/agent-valley`, `${home}/.ssh`]
+  const denyReadLiterals = [`${home}/.git-credentials`, join(process.cwd(), "valley.yaml")]
+  const denyReadRules = [
+    ...denyReadSubpaths.map((p) => `(deny file-read* (subpath ${seatbeltString(p)}))`),
+    ...denyReadLiterals.map((p) => `(deny file-read* (literal ${seatbeltString(p)}))`),
+  ].join("\n")
 
   return `(version 1)
 (deny default)
@@ -125,9 +162,11 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
 (allow system-socket)
 (allow iokit-open)
 
-; Filesystem — broad read, write confined to the workspace + curated
-; per-agent-CLI cache/config dirs + OS tmp dir.
+; Filesystem — broad read (minus the credential denylist below), write
+; confined to the workspace + curated per-agent-CLI cache/config dirs +
+; OS tmp dir.
 (allow file-read*)
+${denyReadRules}
 (deny file-write*)
 ${writeRules}
 ${deviceWriteRules}

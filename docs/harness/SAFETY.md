@@ -100,14 +100,28 @@ spawn through an OS-level sandbox so containment comes from the kernel:
    `bwrap` enforces filesystem confinement only — network egress is not
    restricted at all on that platform. Real domain-scoped enforcement
    would require a local forwarding proxy (not implemented).
-2. **Credential files are readable inside the sandbox.** Both platforms
-   grant broad filesystem READ (macOS: most of the host; Linux: a
-   read-only view of `$HOME`) so language toolchains keep working. This
-   means SSH keys, `~/.git-credentials`, and cloud credential caches
-   under `$HOME` are readable by the sandboxed process — combined with
-   the allowed HTTPS egress above, a compromised agent process could read
-   and exfiltrate them even though filesystem *writes* stay confined to
-   the workspace directory.
+2. **Most credential files are readable inside the sandbox — a curated
+   denylist is excluded.** Both platforms grant broad filesystem READ
+   (macOS: most of the host; Linux: a read-only view of `$HOME`) so
+   language toolchains keep working. `packages/core/src/sessions/
+   sandbox-darwin.ts` and `sandbox-linux.ts` now carve out an explicit
+   denylist from that broad read (macOS: `(deny file-read* ...)` rules
+   placed after the broad allow, exploiting Seatbelt's last-match-wins
+   evaluation; Linux: `--tmpfs`/`--ro-bind /dev/null` masks layered over
+   the read-only `$HOME` bind) covering `~/.config/agent-valley`
+   (LINEAR_API_KEY + other orchestrator secrets in settings.yaml), the
+   project's `valley.yaml` (team webhook secret, Linear team id/uuid —
+   masked on a best-effort basis, resolved from the orchestrator's cwd),
+   `~/.ssh`, and `~/.git-credentials`. SSH-based git auth is unaffected
+   since it goes through the already-allowed ssh-agent unix-domain
+   socket rather than reading private key files directly. This denylist
+   is NOT exhaustive: cloud CLI credential caches (e.g. `~/.aws`,
+   `~/.config/gcloud`) and other tools' dotfiles under `$HOME` remain
+   readable by the sandboxed process — combined with the allowed HTTPS
+   egress above, a compromised agent process could still read and
+   exfiltrate those even though filesystem *writes* stay confined to the
+   workspace directory + the curated per-agent-CLI write allowlist (which
+   no longer includes a blanket `~/.config`, for the same reason).
 
 ---
 
@@ -145,6 +159,39 @@ prompt = build_prompt(issue_id=issue.id, title=issue.title)
 2. Free-text fields must be escaped and isolated in a sandboxed area
 3. Values extracted from issue body must not be interpreted as system instructions
 4. Validate once at the entry point; internal components are trusted (see `AGENTS.md` Section Conventions — validate at the boundary)
+
+**Boundary sanitizer implementation (`packages/core/src/config/workflow-loader.ts`):**
+
+Untrusted title/description/retry-reason text passes through two layered,
+individually incomplete mitigations before it reaches a prompt:
+
+1. **Spotlighting (primary defense).** `wrapUntrustedContent` wraps the
+   sanitized text in explicit, labeled delimiters (`<<<UNTRUSTED_ISSUE_CONTENT
+   ...>>>` / `END_UNTRUSTED_ISSUE_CONTENT>>>`) with an inline preamble
+   instructing the model to treat the enclosed content as data, never as
+   instructions. Any literal occurrence of the delimiter tokens — or a
+   generic `<<<`/`>>>` bracket run of the same shape — inside the untrusted
+   text is neutralized first, so an issue body cannot forge its own closing
+   marker and "break out" of the block. This structural mitigation does not
+   depend on recognizing specific phrasing and is far more robust than
+   pattern matching.
+2. **Normalized blocklist matching (secondary signal).** `sanitizeIssueBody`
+   strips invisible/control characters (zero-width spaces/joiners, bidi
+   overrides, the BOM) and applies Unicode NFKC normalization before
+   redacting known injection phrasing, so trivial evasions like an
+   injected zero-width space splitting "ignore​previous​instructions"
+   no longer defeat the `\s+`-based patterns. It does **not** catch
+   cross-script homoglyphs (e.g. Cyrillic look-alike letters) or novel
+   paraphrasing — a blocklist can never be complete against an adaptive
+   adversary.
+
+Neither mechanism is a security boundary on its own, and this module does
+not claim to be one. **The actual containment boundary is the OS-level
+sandbox** (`packages/core/src/sessions/sandbox.ts`, §1 above): it limits
+what a fully compromised agent process can do to the host regardless of
+what text made it into the prompt. This sanitizer exists to reduce the
+odds that an agent *decides* to act on injected instructions, not to
+guarantee it can't.
 
 ---
 

@@ -6,6 +6,8 @@
  */
 
 import { existsSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { logger } from "../observability/logger"
 import {
@@ -99,6 +101,40 @@ describe("buildDarwinSandboxCommand", () => {
     const profile = result.args[1] as string
     expect(profile).toContain('\\"path')
   })
+
+  test("denies read access to ~/.config/agent-valley despite the broad file-read* allow", () => {
+    const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
+    const profile = result.args[1] as string
+    const agentValleyConfig = `${homedir()}/.config/agent-valley`
+    expect(profile).toContain(`(deny file-read* (subpath "${agentValleyConfig}"))`)
+    // The deny rule must appear AFTER the broad allow — Seatbelt is
+    // last-match-wins, so ordering is what makes the deny effective.
+    expect(profile.indexOf("(allow file-read*)")).toBeLessThan(
+      profile.indexOf(`(deny file-read* (subpath "${agentValleyConfig}"))`),
+    )
+  })
+
+  test("denies read access to the project's valley.yaml, ~/.ssh, and ~/.git-credentials", () => {
+    const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
+    const profile = result.args[1] as string
+    expect(profile).toContain(`(deny file-read* (subpath "${homedir()}/.ssh"))`)
+    expect(profile).toContain(`(deny file-read* (literal "${homedir()}/.git-credentials"))`)
+    expect(profile).toContain(`(deny file-read* (literal "${join(process.cwd(), "valley.yaml")}"))`)
+  })
+
+  test("does not grant write access to a blanket ~/.config directory", () => {
+    const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
+    const profile = result.args[1] as string
+    expect(profile).not.toContain(`(allow file-write* (subpath "${homedir()}/.config"))`)
+  })
+
+  test("still grants write access to per-agent-CLI dirs, including ~/.gemini", () => {
+    const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
+    const profile = result.args[1] as string
+    for (const dir of [".claude", ".codex", ".cursor", ".grok", ".gemini", ".cache", ".npm", ".bun"]) {
+      expect(profile).toContain(`(allow file-write* (subpath "${homedir()}/${dir}"))`)
+    }
+  })
 })
 
 describe("buildLinuxSandboxCommand", () => {
@@ -125,6 +161,63 @@ describe("buildLinuxSandboxCommand", () => {
         expect(existsSync(target)).toBe(true)
       }
     }
+  })
+
+  test("masks ~/.config/agent-valley and ~/.ssh with --tmpfs after the read-only $HOME bind", () => {
+    const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
+    const home = homedir()
+    const homeRoBindIndex = result.args.indexOf("--ro-bind")
+    const agentValleyConfig = `${home}/.config/agent-valley`
+    const sshDir = `${home}/.ssh`
+
+    const tmpfsIndex = result.args.indexOf("--tmpfs")
+    expect(tmpfsIndex).toBeGreaterThan(-1)
+    expect(tmpfsIndex).toBeGreaterThan(homeRoBindIndex)
+    expect(result.args).toContain(agentValleyConfig)
+    expect(result.args).toContain(sshDir)
+    expect(result.args[result.args.indexOf(agentValleyConfig) - 1]).toBe("--tmpfs")
+    expect(result.args[result.args.indexOf(sshDir) - 1]).toBe("--tmpfs")
+  })
+
+  test("masks ~/.git-credentials by ro-binding /dev/null over it", () => {
+    const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
+    const gitCredentials = `${homedir()}/.git-credentials`
+    const idx = result.args.indexOf(gitCredentials)
+    expect(idx).toBeGreaterThan(-1)
+    expect(result.args[idx - 1]).toBe("/dev/null")
+    expect(result.args[idx - 2]).toBe("--ro-bind")
+  })
+
+  test("does not bind-try a blanket ~/.config directory read-write", () => {
+    const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
+    const bareConfig = `${homedir()}/.config`
+    // The directory string must not appear immediately after --bind-try —
+    // masked/curated subpaths like .config/agent-valley are fine, the
+    // bare `.config` blanket entry is not.
+    const bindTryIndices = result.args.reduce<number[]>((acc, arg, i) => {
+      if (arg === "--bind-try") acc.push(i)
+      return acc
+    }, [])
+    const boundTargets = bindTryIndices.map((i) => result.args[i + 1])
+    expect(boundTargets).not.toContain(bareConfig)
+  })
+
+  test("still bind-try's per-agent-CLI dirs read-write, including ~/.gemini", () => {
+    const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
+    const home = homedir()
+    for (const dir of [".claude", ".codex", ".cursor", ".grok", ".gemini", ".cache", ".npm", ".bun"]) {
+      const target = `${home}/${dir}`
+      const idx = result.args.indexOf(target)
+      expect(idx).toBeGreaterThan(-1)
+      expect(result.args[idx - 1]).toBe("--bind-try")
+    }
+  })
+
+  test("workspace path stays read-write via --bind-try regardless of the credential mask", () => {
+    const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
+    const idx = result.args.indexOf(BASE_REQUEST.workspacePath)
+    expect(idx).toBeGreaterThan(-1)
+    expect(result.args[idx - 1]).toBe("--bind-try")
   })
 })
 
