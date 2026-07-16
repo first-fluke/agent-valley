@@ -86,13 +86,14 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
   /**
    * Parse the raw webhook body into a domain event.
    *
-   * `deliveryId` should be GitHub's `X-GitHub-Delivery` header when the
-   * caller has it available — it is not currently threaded through from
-   * `apps/dashboard`'s route handler / `WebhookRouter` (outside this
-   * package's ownership), so this parameter defaults to unset today. When
-   * absent, the dedup key falls back to a hash of the raw body, which
-   * still catches the verified threat (a captured, validly-signed payload
-   * replayed, or a platform redelivery that resends the same body).
+   * `deliveryId` is GitHub's `X-GitHub-Delivery` header, threaded through
+   * from `apps/dashboard/src/app/api/webhook/github/route.ts` via
+   * `WebhookRouter.handleWebhook` -> `Orchestrator.getHandlers().onWebhook`.
+   * When present, the dedup key is the stable delivery id. When absent
+   * (e.g. a non-GitHub caller, or a request missing the header), the
+   * dedup key falls back to a hash of the raw body, which still catches
+   * the verified threat (a captured, validly-signed payload replayed, or
+   * a platform redelivery that resends the same body).
    */
   parseEvent(payload: string, deliveryId?: string): ParsedWebhookEvent | null {
     const event = this.parseEventBody(payload)

@@ -29,7 +29,7 @@ export class WebhookRouter {
     private readonly lifecycle: IssueLifecycle,
   ) {}
 
-  async handleWebhook(payload: string, signature: string): Promise<WebhookResponse> {
+  async handleWebhook(payload: string, signature: string, deliveryId?: string): Promise<WebhookResponse> {
     const { core } = this
 
     // Verify signature
@@ -39,8 +39,10 @@ export class WebhookRouter {
       return { status: 403, body: '{"error":"Invalid signature"}' }
     }
 
-    // Parse event into the domain union
-    const event = core.webhook.parseEvent(payload) as ParsedWebhookEvent | null
+    // Parse event into the domain union. `deliveryId` (e.g. GitHub's
+    // X-GitHub-Delivery header) is threaded through so receivers that
+    // support it dedup on the stable delivery id instead of a body hash.
+    const event = core.webhook.parseEvent(payload, deliveryId) as ParsedWebhookEvent | null
     if (!event) {
       return { status: 200, body: '{"ok":true,"skipped":"not an issue event"}' }
     }

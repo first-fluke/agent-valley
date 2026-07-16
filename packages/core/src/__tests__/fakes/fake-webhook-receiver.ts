@@ -20,6 +20,8 @@ export class FakeWebhookReceiver<TEvent = unknown> implements WebhookReceiver<TE
 
   public readonly verifyCalls: Array<{ payload: string; signature: string }> = []
   public readonly parseCalls: string[] = []
+  /** Delivery ids passed to `parseEvent`, in call order (undefined when omitted). */
+  public readonly deliveryIdCalls: Array<string | undefined> = []
 
   /** Back-compat toggle: sets mode to always-valid or always-invalid. */
   set signatureValid(valid: boolean) {
@@ -38,8 +40,9 @@ export class FakeWebhookReceiver<TEvent = unknown> implements WebhookReceiver<TE
     }
   }
 
-  parseEvent(payload: string): TEvent | null {
+  parseEvent(payload: string, deliveryId?: string): TEvent | null {
     this.parseCalls.push(payload)
+    this.deliveryIdCalls.push(deliveryId)
     return this.nextEvent
   }
 }

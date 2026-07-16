@@ -10,7 +10,11 @@ import type { InterventionBus } from "@agent-valley/core/orchestrator/interventi
 
 export interface OrchestratorInstance {
   getStatus: () => Record<string, unknown>
-  handleWebhook: (payload: string, signature: string) => Promise<{ status: number; body: string }>
+  handleWebhook: (
+    payload: string,
+    signature: string,
+    deliveryId?: string,
+  ) => Promise<{ status: number; body: string }>
   stop: () => Promise<void>
   on: (event: string, handler: (...args: unknown[]) => void) => void
   off: (event: string, handler: (...args: unknown[]) => void) => void

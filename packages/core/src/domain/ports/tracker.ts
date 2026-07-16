@@ -62,6 +62,12 @@ export interface WebhookReceiver<TEvent = unknown> {
    * Parse the raw webhook body. Return `null` when the payload is a
    * well-formed event this receiver does not care about (e.g. non-issue
    * types, GitHub `ping`). Throwing is reserved for schema violations.
+   *
+   * `deliveryId` is an optional transport-level delivery identifier (e.g.
+   * GitHub's `X-GitHub-Delivery` header) threaded from the HTTP boundary
+   * for precise replay-protection dedup keys. Receivers that don't need
+   * it (e.g. Linear, which dedups on the signed body's webhookTimestamp)
+   * may ignore the parameter.
    */
-  parseEvent(payload: string): TEvent | null
+  parseEvent(payload: string, deliveryId?: string): TEvent | null
 }

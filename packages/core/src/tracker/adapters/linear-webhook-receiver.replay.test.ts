@@ -6,6 +6,8 @@
  * workstream's file-ownership scope).
  */
 import { describe, expect, test } from "vitest"
+import type { ParsedWebhookEvent } from "../../domain/parsed-webhook-event"
+import type { WebhookReceiver } from "../../domain/ports/tracker"
 import { WEBHOOK_REPLAY_FRESHNESS_WINDOW_MS, WebhookDedupCache } from "../dedup-cache"
 import { LinearWebhookReceiver } from "./linear-webhook-receiver"
 
@@ -107,5 +109,25 @@ describe("LinearWebhookReceiver — replay protection", () => {
 
     expect(receiverA.parseEvent(payload)).not.toBeNull()
     expect(receiverB.parseEvent(payload)).not.toBeNull()
+  })
+
+  test("interface-change safety: an extra deliveryId argument (GitHub-only param) is silently ignored", () => {
+    // WebhookReceiver.parseEvent gained an optional `deliveryId` second
+    // parameter so GithubWebhookReceiver can dedup on X-GitHub-Delivery.
+    // LinearWebhookReceiver never declares the parameter, so passing one
+    // through the shared call site must be a no-op — dedup still runs on
+    // webhookTimestamp + body hash exactly as before. Typed through the
+    // `WebhookReceiver` port (not the concrete class) since that's how
+    // WebhookRouter actually calls it (`core.webhook.parseEvent(...)`).
+    const receiver: WebhookReceiver<ParsedWebhookEvent> = new LinearWebhookReceiver({ secret: "whsec" })
+    const payload = makePayload({ webhookTimestamp: Date.now() })
+
+    const first = receiver.parseEvent(payload, "some-delivery-id")
+    expect(first).not.toBeNull()
+
+    // Same body, different "deliveryId" -> still dedup'd as a body replay
+    // (deliveryId is not part of Linear's dedup key).
+    const second = receiver.parseEvent(payload, "a-different-delivery-id")
+    expect(second).toBeNull()
   })
 })

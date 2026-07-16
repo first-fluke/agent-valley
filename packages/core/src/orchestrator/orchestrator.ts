@@ -114,11 +114,11 @@ export class Orchestrator extends OrchestratorEventEmitter {
    * This keeps the Application layer free of Presentation imports.
    */
   getHandlers(): {
-    onWebhook: (payload: string, signature: string) => Promise<{ status: number; body: string }>
+    onWebhook: (payload: string, signature: string, deliveryId?: string) => Promise<{ status: number; body: string }>
     getStatus: () => Record<string, unknown>
   } {
     return {
-      onWebhook: (payload, signature) => this.router.handleWebhook(payload, signature),
+      onWebhook: (payload, signature, deliveryId) => this.router.handleWebhook(payload, signature, deliveryId),
       getStatus: () => this.core.getStatus(),
     }
   }

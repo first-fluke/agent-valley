@@ -105,6 +105,20 @@ describe("WebhookRouter — signature gate", () => {
     expect(response.body).toContain("skipped")
     expect(harness.lifecycle.todoCalls).toHaveLength(0)
   })
+
+  test("threads an explicit deliveryId through to webhook.parseEvent", async () => {
+    harness.webhook.nextEvent = null
+    await harness.router.handleWebhook("{}", "ok", "delivery-abc-123")
+
+    expect(harness.webhook.deliveryIdCalls).toEqual(["delivery-abc-123"])
+  })
+
+  test("omits deliveryId (undefined) when the caller does not supply one, preserving body-hash fallback", async () => {
+    harness.webhook.nextEvent = null
+    await harness.router.handleWebhook("{}", "ok")
+
+    expect(harness.webhook.deliveryIdCalls).toEqual([undefined])
+  })
 })
 
 describe("WebhookRouter — relation events", () => {

@@ -18,13 +18,18 @@ export async function POST(request: Request) {
   }
 
   const signature = request.headers.get("x-hub-signature-256") ?? request.headers.get("X-Hub-Signature-256") ?? ""
+  // GitHub's stable per-delivery id — threaded through so dedup keys on
+  // this instead of falling back to a body hash (see
+  // GithubWebhookReceiver.parseEvent). Absent on non-GitHub callers or
+  // malformed requests; the receiver falls back to body-hash dedup then.
+  const deliveryId = request.headers.get("x-github-delivery") ?? request.headers.get("X-GitHub-Delivery") ?? undefined
 
   const orchestrator = getOrchestrator()
   if (!orchestrator) {
     return Response.json({ error: "Orchestrator not initialized" }, { status: 503 })
   }
 
-  const result = await orchestrator.handleWebhook(payload, signature)
+  const result = await orchestrator.handleWebhook(payload, signature, deliveryId)
   return new Response(result.body, {
     status: result.status,
     headers: { "Content-Type": "application/json" },
