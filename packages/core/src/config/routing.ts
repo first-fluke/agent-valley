@@ -8,7 +8,7 @@ import type { Config, ScoreRoutingConfig } from "./yaml-loader"
 
 export interface ResolvedRoute {
   workspaceRoot: string
-  agentType: "claude" | "codex" | "gemini"
+  agentType: "claude" | "codex" | "antigravity" | "cursor" | "grok"
   deliveryMode: "merge" | "pr"
   matchedLabel: string | null
 }
@@ -65,7 +65,10 @@ export function resolveRouteWithScore(issue: Issue, config: Config): ResolvedRou
   }
 }
 
-function matchScoreTier(score: number, routing: ScoreRoutingConfig): { agent: "claude" | "codex" | "gemini" } | null {
+function matchScoreTier(
+  score: number,
+  routing: ScoreRoutingConfig,
+): { agent: "claude" | "codex" | "antigravity" | "cursor" | "grok" } | null {
   for (const tier of [routing.easy, routing.medium, routing.hard]) {
     if (score >= tier.min && score <= tier.max) {
       return { agent: tier.agent }

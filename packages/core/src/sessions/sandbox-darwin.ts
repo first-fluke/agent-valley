@@ -36,6 +36,7 @@
  * to consume; it is not enforced by this module today.
  */
 
+import { realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { resolveBinaryPath } from "./sandbox-binary"
 import type { SandboxBuildRequest, SandboxCommand } from "./sandbox-types"
@@ -75,12 +76,29 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
   const home = homedir()
   const tmp = tmpdir()
 
+  // On macOS, os.tmpdir() returns the `/var/folders/...` symlink path, but
+  // Seatbelt resolves the real `/private/var/folders/...` path when a
+  // process creates a NEW file there — a write-rule scoped only to the
+  // `/var/folders/...` subpath silently denies those writes. Resolve the
+  // real path via realpathSync and allow-list both forms so writes to the
+  // sandboxed tmp workspace succeed regardless of which form the kernel
+  // checks against. Falls back to the unresolved tmp path alone if
+  // realpathSync fails (e.g. the dir doesn't exist yet).
+  let tmpReal = tmp
+  try {
+    tmpReal = realpathSync(tmp)
+  } catch {
+    /* keep tmp as-is */
+  }
+
   const writablePaths = [
     req.workspacePath,
     tmp,
+    ...(tmpReal !== tmp ? [tmpReal] : []),
     `${home}/.claude`,
     `${home}/.codex`,
-    `${home}/.gemini`,
+    `${home}/.cursor`,
+    `${home}/.grok`,
     `${home}/.cache`,
     `${home}/.npm`,
     `${home}/.bun`,

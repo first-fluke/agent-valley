@@ -13,7 +13,9 @@ export async function stepAgentType(ctx: SetupContext, step: number, total: numb
     options: [
       { value: "claude", label: "Claude", hint: "Anthropic Claude Code" },
       { value: "codex", label: "Codex", hint: "OpenAI Codex" },
-      { value: "gemini", label: "Gemini", hint: "Google Gemini" },
+      { value: "antigravity", label: "Antigravity", hint: "Google Antigravity (agy)" },
+      { value: "cursor", label: "Cursor", hint: "Cursor Agent" },
+      { value: "grok", label: "Grok", hint: "xAI Grok Build" },
     ],
   })
   if (p.isCancel(agentType)) return CANCEL

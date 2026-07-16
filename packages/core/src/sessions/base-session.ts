@@ -31,11 +31,19 @@ const SAFE_ENV_KEYS = [
   "BUN_ENV",
 ]
 
-/** Per-agent env keys that must be forwarded for the agent CLI to authenticate */
+/**
+ * Per-agent env keys that must be forwarded for the agent CLI to authenticate.
+ * Keyed by the literal `agentType` string each session passes to
+ * `buildAgentEnv()` — this matches the config-facing vendor id used by
+ * SessionFactory/config/ledger (e.g. AgySession passes "antigravity" here,
+ * even though its actual CLI binary is named `agy`).
+ */
 const AGENT_ENV_KEYS: Record<string, string[]> = {
   codex: ["OPENAI_API_KEY"],
   claude: ["ANTHROPIC_API_KEY"],
-  gemini: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+  antigravity: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+  cursor: ["CURSOR_API_KEY"],
+  grok: ["XAI_API_KEY", "GROK_API_KEY"],
 }
 
 /**

@@ -12,9 +12,11 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 4.4 (PR4).
  *
  * Intervention support table:
- *   claude  — ["append_prompt", "abort"]               (stateless; pause/resume absent)
- *   codex   — ["pause", "resume", "append_prompt", "abort"]
- *   gemini  — ["append_prompt", "abort"] conservatively (ACP-mode caps known only at runtime)
+ *   claude       — ["append_prompt", "abort"]               (stateless; pause/resume absent)
+ *   codex        — ["pause", "resume", "append_prompt", "abort"]  (persistent app-server)
+ *   antigravity  — ["append_prompt", "abort"]               (stateless spawn-per-execute)
+ *   cursor       — ["append_prompt", "abort"]               (stateless spawn-per-execute)
+ *   grok         — ["append_prompt", "abort"]               (stateless spawn-per-execute)
  *
  * The Claude append_prompt implementation (cancel + respawn with merged
  * prompt) is stubbed in this PR — send() throws for now so the failure
@@ -39,7 +41,9 @@ import type { AgentSession } from "../agent-session"
 export const CAPABILITY_TABLE: Record<string, InterventionCapability[]> = Object.freeze({
   claude: ["append_prompt", "abort"],
   codex: ["pause", "resume", "append_prompt", "abort"],
-  gemini: ["append_prompt", "abort"],
+  antigravity: ["append_prompt", "abort"],
+  cursor: ["append_prompt", "abort"],
+  grok: ["append_prompt", "abort"],
 }) as Record<string, InterventionCapability[]>
 
 /** Maps agent type name to an expected default capability set (read-only). */
@@ -70,7 +74,7 @@ export class SpawnAgentRunnerAdapter implements AgentRunnerPort {
     if (!input.agentType) {
       throw new Error(
         "SpawnAgentRunnerAdapter.spawn: input.agentType is required.\n" +
-          "  Fix: pass the resolved agent type (e.g. 'claude' | 'codex' | 'gemini').\n" +
+          "  Fix: pass the resolved agent type (e.g. 'claude' | 'codex' | 'antigravity' | 'cursor' | 'grok').\n" +
           "  Location: caller of AgentRunnerPort.spawn.",
       )
     }
@@ -224,7 +228,7 @@ class ServiceBackedRunHandle implements RunHandle {
         await session.sendUserMessage(cmd.text)
         return
       }
-      // Stateless sessions (claude, gemini-CLI) have no native path; the
+      // Stateless sessions (claude, antigravity, cursor, grok) have no native path; the
       // InterventionBus (Application layer) is responsible for cancel +
       // respawn there. The port layer surfaces the same error shape.
       throw new Error(

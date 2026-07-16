@@ -71,11 +71,18 @@ describe("SessionRegistry", () => {
     expect(callCount).toBe(2)
   })
 
-  test("registerBuiltins registers claude, codex, gemini", async () => {
+  test("registerBuiltins registers claude, codex, antigravity, cursor, grok", async () => {
     await registry.registerBuiltins()
     const types = registry.list()
     expect(types).toContain("claude")
     expect(types).toContain("codex")
-    expect(types).toContain("gemini")
+    expect(types).toContain("antigravity")
+    expect(types).toContain("cursor")
+    expect(types).toContain("grok")
+  })
+
+  test("registerBuiltins does not register gemini (retired vendor)", async () => {
+    await registry.registerBuiltins()
+    expect(registry.list()).not.toContain("gemini")
   })
 })

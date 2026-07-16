@@ -139,8 +139,14 @@ describe("ObservabilityHooks GenAI OTel pipeline", () => {
     const otel = createOtelExporter({ enabled: true, endpoint: "http://localhost:4318", serviceName: "x" })
     const hooks = createObservabilityHooks({ otel })
     try {
-      hooks.onAgentStart({ agentType: "gemini", issueKey: "PROJ-3", issueId: "i3", attemptId: "att-3" })
-      hooks.onAgentDone({ agentType: "gemini", issueKey: "PROJ-3", issueId: "i3", attemptId: "att-3", durationMs: 300 })
+      hooks.onAgentStart({ agentType: "antigravity", issueKey: "PROJ-3", issueId: "i3", attemptId: "att-3" })
+      hooks.onAgentDone({
+        agentType: "antigravity",
+        issueKey: "PROJ-3",
+        issueId: "i3",
+        attemptId: "att-3",
+        durationMs: 300,
+      })
       await otel.flush()
 
       const metrics = await capturedMetrics(fetchSpy)
@@ -149,7 +155,7 @@ describe("ObservabilityHooks GenAI OTel pipeline", () => {
       const spans = await capturedSpans(fetchSpy)
       const run = spans.find((s) => s.name === "invoke_agent") // no model -> no suffix
       const runAttrs = run?.attributes as Array<{ key: string; value: Record<string, unknown> }>
-      expect(runAttrs).toContainEqual({ key: "gen_ai.system", value: { stringValue: "gcp.gemini" } })
+      expect(runAttrs).toContainEqual({ key: "gen_ai.system", value: { stringValue: "gcp.antigravity" } })
     } finally {
       await otel.shutdown()
     }

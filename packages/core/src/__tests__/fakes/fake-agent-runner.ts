@@ -26,7 +26,9 @@ import { InterventionUnsupportedError } from "../../domain/ports/agent-runner"
 const DEFAULT_CAPS: Record<string, InterventionCapability[]> = {
   claude: ["append_prompt", "abort"],
   codex: ["pause", "resume", "append_prompt", "abort"],
-  gemini: ["append_prompt", "abort"],
+  antigravity: ["append_prompt", "abort"],
+  cursor: ["append_prompt", "abort"],
+  grok: ["append_prompt", "abort"],
 }
 
 export interface FakeAgentRunnerOptions {

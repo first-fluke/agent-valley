@@ -25,7 +25,7 @@ const routingRuleSchema = z.object({
     .string()
     .min(1)
     .refine((v) => v.startsWith("/"), "workspace_root in routing rule must be an absolute path"),
-  agent_type: z.enum(["claude", "codex", "gemini"]).optional(),
+  agent_type: z.enum(["claude", "codex", "antigravity", "cursor", "grok"]).optional(),
   delivery_mode: z.enum(["merge", "pr"]).optional(),
   verify_command: z.string().min(1, "verify_command must be a non-empty shell command").optional(),
 })
@@ -34,7 +34,7 @@ const scoreRoutingTierSchema = z
   .object({
     min: z.number().int().min(1).max(10),
     max: z.number().int().min(1).max(10),
-    agent: z.enum(["claude", "codex", "gemini"]),
+    agent: z.enum(["claude", "codex", "antigravity", "cursor", "grok"]),
   })
   .refine((v) => v.min <= v.max, "Each score tier must have min <= max")
 
@@ -59,7 +59,7 @@ export const globalConfigSchema = z
       .optional(),
     agent: z
       .object({
-        type: z.enum(["claude", "codex", "gemini"]).optional(),
+        type: z.enum(["claude", "codex", "antigravity", "cursor", "grok"]).optional(),
         timeout: z.number().min(30).optional(),
         max_retries: z.number().min(1).optional(),
         retry_delay: z.number().min(1).optional(),
@@ -138,7 +138,7 @@ export const projectConfigSchema = z
       .optional(),
     agent: z
       .object({
-        type: z.enum(["claude", "codex", "gemini"]).optional(),
+        type: z.enum(["claude", "codex", "antigravity", "cursor", "grok"]).optional(),
         timeout: z.number().min(30).optional(),
         max_retries: z.number().min(1).optional(),
         retry_delay: z.number().min(1).optional(),
@@ -232,7 +232,7 @@ const mergedConfigSchema = z
         (v) => v.startsWith("/"),
         "workspace.root must be an absolute path.\n  Fix: Set workspace.root: /absolute/path in valley.yaml",
       ),
-    agentType: z.enum(["claude", "codex", "gemini"]),
+    agentType: z.enum(["claude", "codex", "antigravity", "cursor", "grok"]),
     agentTimeout: z.number().min(30),
     agentMaxRetries: z.number().min(1),
     agentRetryDelay: z.number().min(1),
@@ -249,7 +249,7 @@ const mergedConfigSchema = z
           .string()
           .min(1)
           .refine((v) => v.startsWith("/"), "workspaceRoot must be absolute"),
-        agentType: z.enum(["claude", "codex", "gemini"]).optional(),
+        agentType: z.enum(["claude", "codex", "antigravity", "cursor", "grok"]).optional(),
         deliveryMode: z.enum(["merge", "pr"]).optional(),
         verifyCommand: z.string().optional(),
       }),

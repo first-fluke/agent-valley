@@ -163,6 +163,9 @@ echo ""
 
 copy_dir  ".agents"
 copy_dir  ".claude"
+copy_dir  ".codex"
+copy_dir  ".cursor"
+# TODO(oma-deferred): add .antigravity/.grok harness dirs once created
 copy_dir  "docs"
 
 mkdir -p "${TARGET_DIR}/scripts/harness"

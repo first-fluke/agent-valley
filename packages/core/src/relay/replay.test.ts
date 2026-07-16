@@ -154,7 +154,7 @@ describe("replayLedger", () => {
         seq: 2,
         nodeId: "eungwang:desktop",
         type: "node.join",
-        payload: { defaultAgentType: "gemini", maxParallel: 2, displayName: "Eungwang" },
+        payload: { defaultAgentType: "antigravity", maxParallel: 2, displayName: "Eungwang" },
       }),
       makeEvent({
         seq: 3,
@@ -166,7 +166,7 @@ describe("replayLedger", () => {
         seq: 4,
         nodeId: "eungwang:desktop",
         type: "agent.start",
-        payload: { agentType: "gemini", issueKey: "FIR-18", issueId: "id-18" },
+        payload: { agentType: "antigravity", issueKey: "FIR-18", issueId: "id-18" },
       }),
     ]
     const state = replayLedger(events)

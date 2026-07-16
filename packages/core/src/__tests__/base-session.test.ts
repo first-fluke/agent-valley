@@ -75,13 +75,13 @@ describe("buildAgentEnv", () => {
     }
   })
 
-  test("includes agent-specific keys for gemini", () => {
+  test("includes agent-specific keys for antigravity", () => {
     const origGoogle = process.env.GOOGLE_API_KEY
     const origGemini = process.env.GEMINI_API_KEY
     process.env.GOOGLE_API_KEY = "google-test"
     process.env.GEMINI_API_KEY = "gemini-test"
     try {
-      const env = buildAgentEnv("gemini")
+      const env = buildAgentEnv("antigravity")
       expect(env.GOOGLE_API_KEY).toBe("google-test")
       expect(env.GEMINI_API_KEY).toBe("gemini-test")
     } finally {
@@ -89,6 +89,35 @@ describe("buildAgentEnv", () => {
       else delete process.env.GOOGLE_API_KEY
       if (origGemini != null) process.env.GEMINI_API_KEY = origGemini
       else delete process.env.GEMINI_API_KEY
+    }
+  })
+
+  test("includes agent-specific keys for cursor", () => {
+    const original = process.env.CURSOR_API_KEY
+    process.env.CURSOR_API_KEY = "cursor-test"
+    try {
+      const env = buildAgentEnv("cursor")
+      expect(env.CURSOR_API_KEY).toBe("cursor-test")
+    } finally {
+      if (original != null) process.env.CURSOR_API_KEY = original
+      else delete process.env.CURSOR_API_KEY
+    }
+  })
+
+  test("includes agent-specific keys for grok", () => {
+    const origXai = process.env.XAI_API_KEY
+    const origGrok = process.env.GROK_API_KEY
+    process.env.XAI_API_KEY = "xai-test"
+    process.env.GROK_API_KEY = "grok-test"
+    try {
+      const env = buildAgentEnv("grok")
+      expect(env.XAI_API_KEY).toBe("xai-test")
+      expect(env.GROK_API_KEY).toBe("grok-test")
+    } finally {
+      if (origXai != null) process.env.XAI_API_KEY = origXai
+      else delete process.env.XAI_API_KEY
+      if (origGrok != null) process.env.GROK_API_KEY = origGrok
+      else delete process.env.GROK_API_KEY
     }
   })
 

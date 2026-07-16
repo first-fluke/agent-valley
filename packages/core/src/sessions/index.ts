@@ -7,12 +7,13 @@ export type {
   AgentSession,
   RunResult,
 } from "./agent-session"
-
+export { AgySession } from "./agy-session"
 export type { BaseSession } from "./base-session"
 export { buildAgentEnv } from "./base-session"
 export { ClaudeSession } from "./claude-session"
 export { CodexSession } from "./codex-session"
-export { GeminiSession } from "./gemini-session"
+export { CursorSession } from "./cursor-session"
+export { GrokSession } from "./grok-session"
 
 export {
   createSession,

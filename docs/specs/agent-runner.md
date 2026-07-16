@@ -44,9 +44,11 @@ consumes the adapter's static capability table so the dashboard can
 pre-disable unsupported intervention controls:
 
 ```
-claude  → ["append_prompt", "abort"]               (stateless; pause/resume absent)
-codex   → ["pause", "resume", "append_prompt", "abort"]
-gemini  → ["append_prompt", "abort"] conservatively
+claude       → ["append_prompt", "abort"]               (stateless; pause/resume absent)
+codex        → ["pause", "resume", "append_prompt", "abort"]
+antigravity  → ["append_prompt", "abort"] conservatively (stateless)
+cursor       → ["append_prompt", "abort"] conservatively (stateless)
+grok         → ["append_prompt", "abort"] conservatively (stateless)
 ```
 
 `send()` rejects with `InterventionUnsupportedError` when the command is
@@ -64,7 +66,9 @@ The Agent Runner does not communicate with agents directly. It uses the `AgentSe
 Orchestrator → AgentRunner → AgentSession interface
                                 ├── CodexSession  → codex app-server (JSON-RPC over stdio)
                                 ├── ClaudeSession → claude (NDJSON stream-json)
-                                └── GeminiSession → gemini (ACP or CLI fallback)
+                                ├── AgySession    → agy (Antigravity, one-shot print mode)
+                                ├── CursorSession → cursor-agent (streaming NDJSON)
+                                └── GrokSession   → grok (Grok Build, streaming NDJSON)
 ```
 
 ### Supported Agents
@@ -75,7 +79,9 @@ Select via `AGENT_TYPE` environment variable (or `agent.type` in `WORKFLOW.md`).
 |---|---|---|---|
 | `codex` | `CodexSession` | JSON-RPC 2.0 over stdio (`codex app-server`) | `CODEX_MODEL` |
 | `claude` | `ClaudeSession` | NDJSON streaming (`claude --print --input-format=stream-json`) | `CLAUDE_MODEL` |
-| `gemini` | `GeminiSession` | ACP experimental or CLI fallback (`gemini --yolo`) | `GEMINI_MODEL` |
+| `antigravity` | `AgySession` | One-shot print mode, plain text stdout (`agy -p --dangerously-skip-permissions`) | via `config.model` (no `AGENT_MODEL` env override) |
+| `cursor` | `CursorSession` | Streaming NDJSON (`cursor-agent -p --output-format stream-json`) | via `config.model` (no `AGENT_MODEL` env override) |
+| `grok` | `GrokSession` | Streaming NDJSON (`grok --single --output-format streaming-json`) | not supported — Grok Build has no per-invocation `--model` flag |
 
 ### SessionFactory
 
@@ -156,7 +162,9 @@ Agent processes receive a **minimal allowlisted environment**, not the full host
 Safe system vars: PATH, HOME, SHELL, LANG, TERM, TMPDIR, GIT_AUTHOR_*
 Agent-specific:   codex → OPENAI_API_KEY
                   claude → ANTHROPIC_API_KEY
-                  gemini → GOOGLE_API_KEY, GEMINI_API_KEY
+                  antigravity (and its "agy" CLI key) → GOOGLE_API_KEY, GEMINI_API_KEY
+                  cursor → CURSOR_API_KEY
+                  grok → XAI_API_KEY, GROK_API_KEY
 Explicit extras:  config.env (passed through AgentConfig)
 ```
 
@@ -182,7 +190,7 @@ When config.agent.timeout seconds elapse:
 Each session emits `heartbeat` events based on its native protocol activity:
 - **CodexSession**: any JSON-RPC server notification counts as heartbeat
 - **ClaudeSession**: any stream-json output activity counts as heartbeat
-- **GeminiSession**: any stdout activity or process PID check
+- **AgySession / CursorSession / GrokSession**: any stdout activity or process PID check
 
 ```
 Orphan detection: 2 × agent.timeout without heartbeat → force kill + retry

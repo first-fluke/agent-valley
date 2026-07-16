@@ -67,8 +67,8 @@ export interface ObservabilityHooks {
 /**
  * GenAI operation name (stable semconv v1.43.0 registry value) for spans
  * covering an agentic-coding-tool invocation. `agent-valley` spawns a
- * CLI agent (claude/codex/gemini) that autonomously drives an LLM
- * conversation, so `invoke_agent` is the closest registered operation —
+ * CLI agent (claude/codex/antigravity/cursor/grok) that autonomously drives
+ * an LLM conversation, so `invoke_agent` is the closest registered operation —
  * see https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/.
  */
 const GEN_AI_OPERATION_NAME = "invoke_agent"
@@ -85,7 +85,9 @@ const GEN_AI_OPERATION_NAME = "invoke_agent"
 const GEN_AI_SYSTEM_BY_AGENT_TYPE: Record<string, string> = {
   claude: "anthropic",
   codex: "openai",
-  gemini: "gcp.gemini",
+  antigravity: "gcp.antigravity",
+  cursor: "cursor",
+  grok: "xai",
 }
 
 function mapAgentTypeToGenAiSystem(agentType: string): string {
@@ -110,7 +112,7 @@ function buildGenAiSpanName(model?: string): string {
  * attributes kept alongside (not part of the GenAI convention, but
  * useful for querying a trace back to its issue / underlying CLI tool
  * — `gen_ai.system` alone only identifies the LLM provider, not which
- * of claude/codex/gemini invoked it).
+ * of claude/codex/antigravity/cursor/grok invoked it).
  */
 export function buildGenAiAttributes(input: {
   agentType: string

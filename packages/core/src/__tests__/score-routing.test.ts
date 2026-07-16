@@ -93,7 +93,7 @@ describe("resolveRouteWithScore", () => {
     const config = makeConfig({
       routingRules: [{ label: "backend", workspaceRoot: "/repos/backend" }],
       scoreRouting: {
-        easy: { min: 1, max: 3, agent: "gemini" },
+        easy: { min: 1, max: 3, agent: "antigravity" },
         medium: { min: 4, max: 7, agent: "codex" },
         hard: { min: 8, max: 10, agent: "claude" },
       },
@@ -108,14 +108,14 @@ describe("resolveRouteWithScore", () => {
     const issue = makeIssue({ score: 2 })
     const config = makeConfig({
       scoreRouting: {
-        easy: { min: 1, max: 3, agent: "gemini" },
+        easy: { min: 1, max: 3, agent: "antigravity" },
         medium: { min: 4, max: 7, agent: "codex" },
         hard: { min: 8, max: 10, agent: "claude" },
       },
     })
 
     const route = resolveRouteWithScore(issue, config)
-    expect(route.agentType).toBe("gemini")
+    expect(route.agentType).toBe("antigravity")
     expect(route.matchedLabel).toBe("score:2")
   })
 
@@ -123,7 +123,7 @@ describe("resolveRouteWithScore", () => {
     const issue = makeIssue({ score: 5 })
     const config = makeConfig({
       scoreRouting: {
-        easy: { min: 1, max: 3, agent: "gemini" },
+        easy: { min: 1, max: 3, agent: "antigravity" },
         medium: { min: 4, max: 7, agent: "codex" },
         hard: { min: 8, max: 10, agent: "claude" },
       },
@@ -137,7 +137,7 @@ describe("resolveRouteWithScore", () => {
     const issue = makeIssue({ score: 9 })
     const config = makeConfig({
       scoreRouting: {
-        easy: { min: 1, max: 3, agent: "gemini" },
+        easy: { min: 1, max: 3, agent: "antigravity" },
         medium: { min: 4, max: 7, agent: "codex" },
         hard: { min: 8, max: 10, agent: "claude" },
       },
@@ -152,7 +152,7 @@ describe("resolveRouteWithScore", () => {
     const config = makeConfig({
       agentType: "codex",
       scoreRouting: {
-        easy: { min: 1, max: 3, agent: "gemini" },
+        easy: { min: 1, max: 3, agent: "antigravity" },
         medium: { min: 4, max: 7, agent: "codex" },
         hard: { min: 8, max: 10, agent: "claude" },
       },

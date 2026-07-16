@@ -1,8 +1,9 @@
 /**
  * AgentSession — Core abstraction for agent communication.
  *
- * Orchestrator uses this interface exclusively. Each agent (Codex, Claude, Gemini)
- * provides a session implementation that speaks the agent's native protocol internally.
+ * Orchestrator uses this interface exclusively. Each agent (Codex, Claude, Antigravity,
+ * Cursor, Grok) provides a session implementation that speaks the agent's native protocol
+ * internally.
  */
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -25,7 +26,7 @@ export interface AgentConfig {
 
   /**
    * Agent-specific options (pass-through, not interpreted by Orchestrator).
-   * E.g. Codex sandbox permissions, Claude effort level, Gemini approval mode.
+   * E.g. Codex sandbox permissions, Claude effort level, Antigravity's `agy` mode.
    */
   options?: Record<string, unknown>
 }
@@ -43,8 +44,8 @@ export interface RunResult {
    * Token usage reported by the session adapter. Shape matches
    * `TokenUsage` in `../domain/budget` so it can be forwarded to
    * `BudgetService.recordUsage()` without re-mapping. Sessions that
-   * cannot discover usage (e.g. gemini CLI fallback) return `undefined`
-   * and BudgetService skips accumulation for that attempt.
+   * cannot discover usage (e.g. antigravity's `agy` CLI print mode) return
+   * `undefined` and BudgetService skips accumulation for that attempt.
    */
   tokenUsage?: {
     input: number
@@ -118,9 +119,10 @@ export interface AgentSession {
 
   /**
    * Send a mid-run user message to the agent without restarting.
-   * Supported by Codex (persistent JSON-RPC) and Gemini ACP.
-   * Claude (stateless) does not implement this — it must be handled
-   * via cancel + respawn at a higher layer.
+   * Supported by Codex (persistent JSON-RPC).
+   * Claude, Antigravity, Cursor, and Grok (all stateless, spawn-per-execute)
+   * do not implement this — it must be handled via cancel + respawn at a
+   * higher layer.
    */
   sendUserMessage?(text: string): Promise<void>
 }

@@ -113,7 +113,9 @@ export async function setupEdit(): Promise<void> {
       options: [
         { value: "claude", label: "Claude", hint: "Anthropic Claude Code" },
         { value: "codex", label: "Codex", hint: "OpenAI Codex" },
-        { value: "gemini", label: "Gemini", hint: "Google Gemini" },
+        { value: "antigravity", label: "Antigravity", hint: "Google Antigravity (agy)" },
+        { value: "cursor", label: "Cursor", hint: "Cursor Agent" },
+        { value: "grok", label: "Grok", hint: "xAI Grok Build" },
       ],
     })
     if (p.isCancel(agent)) {
@@ -121,7 +123,7 @@ export async function setupEdit(): Promise<void> {
       process.exit(0)
     }
     if (!gConfig.agent) gConfig.agent = {}
-    gConfig.agent.type = agent as "claude" | "codex" | "gemini"
+    gConfig.agent.type = agent as "claude" | "codex" | "antigravity" | "cursor" | "grok"
     globalChanged = true
   }
 

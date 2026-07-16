@@ -2,7 +2,7 @@
  * Hardware detection — detect system resources and recommend MAX_PARALLEL.
  *
  * Estimation per agent session:
- *   - RAM: ~4 GB (Claude Code is heaviest, Codex/Gemini lighter)
+ *   - RAM: ~4 GB (Claude Code is heaviest, Codex/Antigravity/Cursor/Grok lighter)
  *   - CPU: ~2 logical cores
  *
  * Recommendation = min(RAM-based, CPU-based), clamped to [1, cpuCount].

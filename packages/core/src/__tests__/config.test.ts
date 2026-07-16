@@ -272,7 +272,7 @@ scoring:
     easy:
       min: 1
       max: 3
-      agent: gemini
+      agent: antigravity
     medium:
       min: 4
       max: 7
@@ -286,7 +286,7 @@ scoring:
     const result = loadProjectConfig(tempDir)
 
     expect(result?.scoring?.model).toBe("haiku")
-    expect(result?.scoring?.routes?.easy.agent).toBe("gemini")
+    expect(result?.scoring?.routes?.easy.agent).toBe("antigravity")
     expect(result?.scoring?.routes?.hard.max).toBe(10)
   })
 
@@ -338,7 +338,7 @@ scoring:
     easy:
       min: 1
       max: 5
-      agent: gemini
+      agent: antigravity
     medium:
       min: 4
       max: 7
@@ -480,7 +480,7 @@ prompt: project prompt
 linear:
   api_key: global_key
 agent:
-  type: gemini
+  type: antigravity
   timeout: 1800
 logging:
   level: debug
@@ -511,7 +511,7 @@ prompt: test prompt
 
     // From global
     expect(config.linearApiKey).toBe("global_key")
-    expect(config.agentType).toBe("gemini")
+    expect(config.agentType).toBe("antigravity")
     expect(config.agentTimeout).toBe(1800)
     expect(config.logLevel).toBe("debug")
     expect(config.logFormat).toBe("text")
@@ -986,7 +986,7 @@ scoring:
     easy:
       min: 1
       max: 3
-      agent: gemini
+      agent: antigravity
     medium:
       min: 4
       max: 7
@@ -1000,7 +1000,7 @@ scoring:
     const config = loadConfig(projectDir, globalPath)
 
     expect(config.scoringModel).toBe("haiku")
-    expect(config.scoreRouting?.easy.agent).toBe("gemini")
+    expect(config.scoreRouting?.easy.agent).toBe("antigravity")
     expect(config.scoreRouting?.medium.agent).toBe("codex")
     expect(config.scoreRouting?.hard.agent).toBe("claude")
   })

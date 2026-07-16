@@ -34,8 +34,16 @@ describe("buildGenAiAttributes — GenAI semconv collection", () => {
       buildGenAiAttributes({ agentType: "codex", issueKey: "k", issueId: "i", result: "success" })["gen_ai.system"],
     ).toBe("openai")
     expect(
-      buildGenAiAttributes({ agentType: "gemini", issueKey: "k", issueId: "i", result: "success" })["gen_ai.system"],
-    ).toBe("gcp.gemini")
+      buildGenAiAttributes({ agentType: "antigravity", issueKey: "k", issueId: "i", result: "success" })[
+        "gen_ai.system"
+      ],
+    ).toBe("gcp.antigravity")
+    expect(
+      buildGenAiAttributes({ agentType: "cursor", issueKey: "k", issueId: "i", result: "success" })["gen_ai.system"],
+    ).toBe("cursor")
+    expect(
+      buildGenAiAttributes({ agentType: "grok", issueKey: "k", issueId: "i", result: "success" })["gen_ai.system"],
+    ).toBe("xai")
   })
 
   it("degrades gracefully for an unmapped agent type (no crash, raw value)", () => {
@@ -43,8 +51,13 @@ describe("buildGenAiAttributes — GenAI semconv collection", () => {
     expect(attrs["gen_ai.system"]).toBe("future-agent")
   })
 
-  it("omits gen_ai.usage.* when no token usage was discovered (e.g. gemini CLI fallback)", () => {
+  it("no longer maps the retired gemini agent type to a known gen_ai.system value", () => {
     const attrs = buildGenAiAttributes({ agentType: "gemini", issueKey: "k", issueId: "i", result: "success" })
+    expect(attrs["gen_ai.system"]).toBe("gemini")
+  })
+
+  it("omits gen_ai.usage.* when no token usage was discovered (e.g. antigravity's agy CLI print mode)", () => {
+    const attrs = buildGenAiAttributes({ agentType: "antigravity", issueKey: "k", issueId: "i", result: "success" })
     expect(attrs["gen_ai.usage.input_tokens"]).toBeUndefined()
     expect(attrs["gen_ai.usage.output_tokens"]).toBeUndefined()
     expect(attrs["gen_ai.request.model"]).toBeUndefined()

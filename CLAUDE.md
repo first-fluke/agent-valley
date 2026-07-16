@@ -13,7 +13,7 @@ When working on this project, use these specialized sub-agents:
 
 ## What This Project Is
 
-Symphony Dev Template — an agent orchestration platform that receives Linear webhook events and dispatches work to AI agents (Claude Code, Codex, Gemini) in isolated git worktrees. Implemented in **TypeScript + Bun**.
+Symphony Dev Template — an agent orchestration platform that receives Linear webhook events and dispatches work to AI agents (Claude Code, Codex, Antigravity, Cursor, Grok) in isolated git worktrees. Implemented in **TypeScript + Bun**.
 
 ## Commands
 
@@ -53,7 +53,7 @@ Domain         packages/core/src/domain/         Pure types: Issue, Workspace, R
      ↓
 Infrastructure packages/core/src/tracker/        Linear GraphQL client + webhook HMAC + state mutations + comments
                packages/core/src/workspace/      Git worktree lifecycle
-               packages/core/src/sessions/       AgentSession implementations (Claude, Codex, Gemini)
+               packages/core/src/sessions/       AgentSession implementations (Claude, Codex, Antigravity, Cursor, Grok)
                packages/core/src/config/         Zod-based YAML config validation (settings.yaml + valley.yaml)
                packages/core/src/observability/  Structured JSON/text logger
                packages/core/src/relay/          Supabase ledger bridge (team dashboard event sourcing)
@@ -69,7 +69,9 @@ Infrastructure packages/core/src/tracker/        Linear GraphQL client + webhook
 
 - `ClaudeSession` — spawns a new process per `execute()` (stateless)
 - `CodexSession` — persistent JSON-RPC connection via stdio
-- `GeminiSession` — dual-mode: ACP persistent server or one-shot fallback
+- `AgySession` — Antigravity's `agy` CLI, one-shot spawn-per-`execute()` (stateless)
+- `CursorSession` — `cursor-agent` CLI, streaming NDJSON, one-shot spawn-per-`execute()` (stateless)
+- `GrokSession` — Grok Build's `grok` CLI, streaming NDJSON, one-shot spawn-per-`execute()` (stateless)
 
 `SessionFactory` uses a registry pattern for runtime lookup by agent type string.
 
