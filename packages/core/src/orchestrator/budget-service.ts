@@ -23,6 +23,8 @@ import type { Issue } from "../domain/models"
 import type { ObservabilityHooks } from "../observability/hooks"
 import { createNoopObservabilityHooks } from "../observability/hooks"
 import { logger } from "../observability/logger"
+import type { BudgetUsagePort } from "./budget-persistence"
+import { BudgetUsagePersistence } from "./budget-persistence"
 
 // ── Public interface ──────────────────────────────────────────────────
 
@@ -31,10 +33,63 @@ export interface BudgetService {
   checkBeforeSpawn(issue: Issue): Promise<BudgetDecision>
   /** Record a completed run's token usage (per-session adapter callback). */
   recordUsage(attemptId: string, issueId: string, usage: TokenUsage): Promise<void>
+  /**
+   * Mid-run enforcement gate — evaluates a streaming attempt's
+   * running token count against the same per-issue / per-day caps used
+   * by `checkBeforeSpawn`, without needing a completed `recordUsage`
+   * call first. Callers (a streaming session/adapter) should invoke this
+   * periodically as token deltas arrive and abort the run's RunHandle
+   * when `allow === false`.
+   *
+   * Synchronous and side-effect free beyond logging: it only reads the
+   * in-memory counters already maintained by `recordUsage` /
+   * `checkBeforeSpawn`, so it is cheap to call on every streamed chunk.
+   * `warn` mode always returns `allow: true` (matches `checkBeforeSpawn`).
+   * Deliberately does not await `ready`: a run only reaches the streaming
+   * phase this gate is called from after `checkBeforeSpawn` already
+   * awaited hydration to admit the spawn, so by the time any
+   * `checkMidRun` call happens `ready` has long since resolved.
+   *
+   * Follow-up wiring (out of scope here — sessions/ is owned elsewhere):
+   * the streaming call site in `sessions/agent-runner.ts` (or the
+   * relevant `AgentSession` adapter) should call
+   * `budget.checkMidRun(issueId, tokensSoFar)` on each token-usage delta
+   * event and, on `allow === false`, cancel the run via the existing
+   * `RunHandle`/intervention abort path — the same path already used by
+   * `InterventionBus.abort()`.
+   *
+   * Optional on the interface for backward compatibility with existing
+   * hand-rolled `BudgetService` test fakes predating this method;
+   * `createNoopBudgetService()` and `InMemoryBudgetService` both always
+   * implement it. Callers that need mid-run enforcement should feature-
+   * detect with `budget.checkMidRun?.(...)`.
+   */
+  checkMidRun?(issueId: string, tokensSoFar: number): BudgetDecision
   /** Read-only accessor: total tokens + USD consumed today (UTC). */
   getDailyUsed(): { tokens: number; usd: number }
   /** Read-only accessor: total tokens + USD consumed for one issue. */
   getIssueUsed(issueId: string): { tokens: number; usd: number }
+  /**
+   * Resolves once any persisted counters have been hydrated from disk.
+   * Callers that construct a persisted service should `await` this
+   * before the first `checkBeforeSpawn` so a restart cannot momentarily
+   * under-report today's usage. `createNoopBudgetService()` and
+   * `InMemoryBudgetService` both always implement it (already-resolved
+   * when there is no persistence configured). Optional on the interface
+   * for backward compatibility with existing hand-rolled `BudgetService`
+   * test fakes predating this field — callers should guard with
+   * `if (budget.ready) await budget.ready`.
+   */
+  readonly ready?: Promise<void>
+  /**
+   * Await any in-flight persisted-counter write so shutdown never returns
+   * with a write still queued. Optional for backward compatibility with
+   * hand-rolled test fakes predating this method; `createNoopBudgetService()`
+   * and `InMemoryBudgetService` both always implement it (resolved
+   * immediately when no persistence is configured). Callers should feature-
+   * detect with `budget.flush?.()`.
+   */
+  flush?(): Promise<void>
 }
 
 // ── Internal accumulator shape ───────────────────────────────────────
@@ -51,6 +106,16 @@ export interface BudgetServiceOptions {
   observability?: ObservabilityHooks
   /** Injection point for tests that need a deterministic clock. */
   now?: () => Date
+  /**
+   * Production convenience: when set, a `BudgetUsagePersistence` is
+   * created at this path (matches the `.agent-valley/` convention — see
+   * `budget-persistence.ts`) and counters are hydrated from it on
+   * construction, then re-persisted on every `recordUsage()` call.
+   * Ignored when `persistence` is also supplied.
+   */
+  persistPath?: string
+  /** Test injection point — supply a fake `BudgetUsagePort` instead of a real file-backed one. Takes precedence over `persistPath`. */
+  persistence?: BudgetUsagePort
 }
 
 /**
@@ -71,11 +136,18 @@ export function createNoopBudgetService(): BudgetService {
     async recordUsage() {
       // no-op
     },
+    checkMidRun() {
+      return { allow: true }
+    },
     getDailyUsed() {
       return { tokens: 0, usd: 0 }
     },
     getIssueUsed() {
       return { tokens: 0, usd: 0 }
+    },
+    ready: Promise.resolve(),
+    async flush() {
+      // no-op
     },
   }
 }
@@ -86,6 +158,8 @@ export class InMemoryBudgetService implements BudgetService {
   private readonly caps: BudgetCaps
   private readonly obs: ObservabilityHooks
   private readonly now: () => Date
+  private readonly persistence: BudgetUsagePort | null
+  readonly ready: Promise<void>
 
   /** issueId -> running totals. */
   private readonly perIssue = new Map<string, UsageCounter>()
@@ -98,11 +172,34 @@ export class InMemoryBudgetService implements BudgetService {
     this.caps = opts.caps
     this.obs = opts.observability ?? createNoopObservabilityHooks()
     this.now = opts.now ?? (() => new Date())
+    this.persistence = opts.persistence ?? (opts.persistPath ? new BudgetUsagePersistence(opts.persistPath) : null)
+    this.ready = this.persistence ? this.hydrate(this.persistence) : Promise.resolve()
+  }
+
+  /** Reload today's per-day counter + all per-issue counters from disk. Failures are logged and never thrown — a restart must still boot with zeroed counters rather than crash. */
+  private async hydrate(persistence: BudgetUsagePort): Promise<void> {
+    try {
+      const snapshot = await persistence.load(this.currentDayKey())
+      this.perDay.set(snapshot.dayKey, { ...snapshot.perDay })
+      for (const [issueId, counter] of Object.entries(snapshot.perIssue)) {
+        this.perIssue.set(issueId, { ...counter })
+      }
+    } catch (err) {
+      logger.error("budget", "Failed to hydrate budget counters from disk — starting from zero", {
+        error: String(err),
+      })
+    }
   }
 
   // ── Gate ───────────────────────────────────────────────────────────
 
   async checkBeforeSpawn(issue: Issue): Promise<BudgetDecision> {
+    // Must wait for disk hydration to finish before reading perIssue/perDay —
+    // otherwise a spawn issued during the boot window sees zeroed counters
+    // (hydrate() hasn't populated them yet) and the daily/per-issue cap
+    // carried over from before a restart is defeated.
+    await this.ready
+
     // Override label opt-in: documented bypass with audit log (E18).
     if (this.caps.allowOverrideLabel && issue.labels.includes(BUDGET_OVERRIDE_LABEL)) {
       logger.info("budget", "Budget bypassed via override:budget label", {
@@ -119,21 +216,63 @@ export class InMemoryBudgetService implements BudgetService {
 
     // Evaluate in order: per-issue first (more specific), then per-day.
     const issueDecision = evalCap("issue_cap", issueUsed, this.caps.perIssue)
-    if (issueDecision) return this.handleDeny(issue, issueDecision)
+    if (issueDecision) return this.handleDeny(issue.id, issue.identifier, issueDecision)
 
     const dayDecision = evalCap("daily_cap", dayUsed, this.caps.perDay)
-    if (dayDecision) return this.handleDeny(issue, dayDecision)
+    if (dayDecision) return this.handleDeny(issue.id, issue.identifier, dayDecision)
 
     return { allow: true }
   }
 
-  private handleDeny(issue: Issue, decision: Exclude<BudgetDecision, { allow: true }>): BudgetDecision {
+  // ── Mid-run enforcement ──────────────────────────────────────────────
+
+  /** See `BudgetService.checkMidRun` docstring for the intended call site. */
+  checkMidRun(issueId: string, tokensSoFar: number): BudgetDecision {
+    const projected = Math.max(0, tokensSoFar)
+    const issueUsed = this.perIssue.get(issueId) ?? { tokens: 0, usd: 0 }
+    const dayKey = this.currentDayKey()
+    const dayUsed = this.perDay.get(dayKey) ?? { tokens: 0, usd: 0 }
+
+    // Token-only projection: mid-stream we don't reliably know the final
+    // model/pricing for USD cost, so mid-run enforcement is token-based
+    // only. USD caps are still enforced post-run via checkBeforeSpawn on
+    // the *next* spawn attempt once recordUsage has posted real cost.
+    const projectedIssueTokens = issueUsed.tokens + projected
+    if (this.caps.perIssue.tokens > 0 && projectedIssueTokens >= this.caps.perIssue.tokens) {
+      return this.handleDeny(issueId, issueId, {
+        allow: false,
+        reason: "issue_cap",
+        used: projectedIssueTokens,
+        cap: this.caps.perIssue.tokens,
+        unit: "tokens",
+      })
+    }
+
+    const projectedDayTokens = dayUsed.tokens + projected
+    if (this.caps.perDay.tokens > 0 && projectedDayTokens >= this.caps.perDay.tokens) {
+      return this.handleDeny(issueId, issueId, {
+        allow: false,
+        reason: "daily_cap",
+        used: projectedDayTokens,
+        cap: this.caps.perDay.tokens,
+        unit: "tokens",
+      })
+    }
+
+    return { allow: true }
+  }
+
+  private handleDeny(
+    issueId: string,
+    identifier: string,
+    decision: Exclude<BudgetDecision, { allow: true }>,
+  ): BudgetDecision {
     // warn mode: log + allow regardless, but still emit the block counter
     // under a separate result so operators can distinguish from allows.
     if (this.caps.onExceed === "warn") {
       logger.warn("budget", "Budget cap reached (warn mode — allowing run)", {
-        issueId: issue.id,
-        identifier: issue.identifier,
+        issueId,
+        identifier,
         reason: decision.reason,
         used: String(decision.used),
         cap: String(decision.cap),
@@ -144,8 +283,8 @@ export class InMemoryBudgetService implements BudgetService {
     }
 
     logger.warn("budget", "Budget cap reached — blocking spawn", {
-      issueId: issue.id,
-      identifier: issue.identifier,
+      issueId,
+      identifier,
       reason: decision.reason,
       used: String(decision.used),
       cap: String(decision.cap),
@@ -158,6 +297,12 @@ export class InMemoryBudgetService implements BudgetService {
   // ── Record ────────────────────────────────────────────────────────
 
   async recordUsage(attemptId: string, issueId: string, usage: TokenUsage): Promise<void> {
+    // Must wait for hydration too: hydrate() assigns straight into
+    // perIssue/perDay (see `hydrate()` above) rather than merging, so a
+    // recordUsage() that lands mid-hydration would have its write clobbered
+    // the moment hydrate()'s load() resolves.
+    await this.ready
+
     const tokens = Math.max(0, (usage.input ?? 0) + (usage.output ?? 0))
     const cost = computeCost(usage, this.caps.pricing)
 
@@ -184,6 +329,17 @@ export class InMemoryBudgetService implements BudgetService {
     })
 
     this.updateGauges(issueId, dayKey, issueAgg, dayAgg)
+    this.persistCounters(dayKey, dayAgg)
+  }
+
+  /** Fire-and-forget mirror of the current counters to disk. No-op when no persistence is configured. */
+  private persistCounters(dayKey: string, dayAgg: UsageCounter): void {
+    if (!this.persistence) return
+    this.persistence.save({
+      dayKey,
+      perDay: dayAgg,
+      perIssue: Object.fromEntries(this.perIssue),
+    })
   }
 
   // ── Accessors ─────────────────────────────────────────────────────
@@ -197,6 +353,11 @@ export class InMemoryBudgetService implements BudgetService {
   getIssueUsed(issueId: string): { tokens: number; usd: number } {
     const agg = this.perIssue.get(issueId) ?? { tokens: 0, usd: 0 }
     return { tokens: agg.tokens, usd: agg.usd }
+  }
+
+  /** Await any in-flight persisted-counter write. No-op when no persistence is configured. */
+  async flush(): Promise<void> {
+    await this.persistence?.flush()
   }
 
   // ── Internal helpers ─────────────────────────────────────────────

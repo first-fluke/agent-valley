@@ -13,6 +13,8 @@ import { configureLogger, logger } from "@agent-valley/core/observability/logger
 import { createOtelExporter } from "@agent-valley/core/observability/otel-exporter"
 import { createPromMetrics } from "@agent-valley/core/observability/prom-metrics"
 import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
+import type { LedgerBridge } from "@agent-valley/core/relay/ledger-bridge"
+import { wireLedgerRelay } from "@agent-valley/core/relay/ledger-wiring"
 import { GithubTrackerAdapter } from "@agent-valley/core/tracker/adapters/github-adapter"
 import { GithubWebhookReceiver } from "@agent-valley/core/tracker/adapters/github-webhook-receiver"
 import { LinearTrackerAdapter } from "@agent-valley/core/tracker/adapters/linear-adapter"
@@ -82,12 +84,30 @@ export async function bootstrap() {
 
   // Budget service — configured via valley.yaml budget: section. When the
   // section is absent the no-op service is used so spawn is never gated.
-  // Design § 4.5 / § 6.4 (E16–E19).
+  // Design § 4.5 / § 6.4 (E16–E19). Counters are persisted to
+  // `.agent-valley/budget-usage.json` (same convention as DagScheduler /
+  // RunStatePersistence) so a process restart cannot silently reset
+  // today's daily USD/token cap — `ready` is awaited below before the
+  // orchestrator can accept its first issue.
   const budget = config.budget
-    ? createInMemoryBudgetService({ caps: config.budget, observability })
+    ? createInMemoryBudgetService({
+        caps: config.budget,
+        observability,
+        persistPath: `${config.workspaceRoot}/.agent-valley/budget-usage.json`,
+      })
     : createNoopBudgetService()
+  if (budget.ready) await budget.ready
 
   const orchestrator = new Orchestrator(config, tracker, webhook, workspace, undefined, observability, budget)
+
+  // Team ledger relay — opt-in via valley.yaml team: (supabase_url +
+  // supabase_anon_key + id) AND a valid `av login` session. Clean no-op
+  // (null) for single-node setups or a team config with no session yet;
+  // never throws, never blocks boot. Must be wired before start() so the
+  // initial node.join event (emitted from OrchestratorCore.start()) is
+  // not missed.
+  const ledgerBridge: LedgerBridge | null = wireLedgerRelay(orchestrator, config)
+
   await orchestrator.start()
 
   const handlers = orchestrator.getHandlers()
@@ -104,6 +124,7 @@ export async function bootstrap() {
   const shutdown = async () => {
     logger.info("process", "Received shutdown signal, stopping orchestrator...")
     await orchestrator.stop()
+    if (ledgerBridge) await ledgerBridge.dispose()
     await otel.shutdown()
     process.exit(0)
   }
