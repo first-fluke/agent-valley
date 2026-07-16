@@ -39,6 +39,9 @@ workspace:
 # ── Agent ─────────────────────────────────────────────────────────────
 # agent:
 #   type: claude                    # claude | codex | gemini (overrides global default)
+#   max_parallel: 3                 # Max concurrent agent runs. Default: hardware-detected
+#                                    # recommendation. An explicit value above the recommendation
+#                                    # is honored (never silently clamped) but logged as a WARN.
 
 # ── Delivery ──────────────────────────────────────────────────────────
 delivery:
@@ -68,8 +71,22 @@ prompt: |
 #       workspace_root: /path/to/backend-repo
 #       agent_type: codex
 #       delivery_mode: pr
+#       verify_command: "pytest && mypy ."   # overrides verify.command below for this route
 #     - label: "scope:frontend"
 #       workspace_root: /path/to/frontend-repo
+
+# ── Verification Gate (optional) ───────────────────────────────────────
+# Runs the project's own test/lint/typecheck command inside the agent's
+# worktree before delivery (merge/PR) and before the issue transitions to
+# Done. "Done" without this block means only that the agent process exited
+# without error — no test/lint/typecheck is run. On failure, the agent gets
+# another attempt through the existing retry queue (agent.max_retries) with
+# the captured failure output as context; once retries are exhausted the
+# issue is cancelled with an actionable comment instead of being merged.
+# Omit this block to disable the gate (pre-gate behavior, unchanged).
+# verify:
+#   command: "bun run typecheck && bun test"  # any shell command; non-zero exit = fail
+#   timeout_sec: 600                          # kill the command after N seconds (default 600)
 
 # ── Score-Based Routing (optional) ───────────────────────────────────
 # scoring:
@@ -125,7 +142,13 @@ prompt: |
 # ── Observability (v0.2+, optional) ───────────────────────────────────
 # OpenTelemetry OTLP HTTP tracing + Prometheus metrics. Both default to
 # off — enable per deployment. Exporter errors are swallowed inside the
-# hooks and never affect orchestrator flow.
+# hooks and never affect orchestrator flow. When otel.enabled is true but
+# otel.endpoint / otel.service_name are omitted, they fall back to the
+# standard OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_SERVICE_NAME env vars (then
+# to "agent-valley"), so a collector configured purely via env vars works
+# without editing this file. Emitted spans/metrics follow GenAI semantic
+# conventions v1.43 (gen_ai.* span attributes + a gen_ai.client.token.usage
+# histogram) — see docs/harness/SAFETY.md.
 # observability:
 #   otel:
 #     enabled: false
@@ -134,3 +157,17 @@ prompt: |
 #   prometheus:
 #     enabled: false
 #     path: /api/metrics                # Served by apps/dashboard
+
+# ── Team Dashboard / Ledger Relay (optional) ──────────────────────────
+# Streams orchestrator events (node.join, issue lifecycle, etc.) to a
+# Supabase-backed team ledger for the shared dashboard. Same shape as
+# team: in ~/.config/agent-valley/settings.yaml; project values win.
+# Activates only when supabase_url + supabase_anon_key + id are ALL set
+# AND a valid Supabase session exists on disk (run `av login`). Any other
+# state (fields missing, or not logged in) is a silent no-op — single-node
+# setups are never blocked from booting.
+# team:
+#   supabase_url: https://xxx.supabase.co
+#   supabase_anon_key: your-anon-key
+#   id: my-team                       # Team identifier shared by all nodes
+#   display_name: my-node             # This node's display name on the dashboard

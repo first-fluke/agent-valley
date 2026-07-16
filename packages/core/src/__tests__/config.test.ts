@@ -5,6 +5,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { detectHardware } from "../config/hardware.ts"
 import { loadConfig, loadGlobalConfig, loadProjectConfig } from "../config/yaml-loader.ts"
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -201,6 +202,53 @@ routing:
     expect(result?.routing?.rules?.[1]?.agent_type).toBeUndefined()
   })
 
+  test("parses verify block and per-route verify_command", () => {
+    writeYaml(
+      tempDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: ACR
+  team_uuid: uuid
+  webhook_secret: whsec
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test prompt
+verify:
+  command: "bun run typecheck && bun test"
+  timeout_sec: 120
+routing:
+  rules:
+    - label: "scope:backend"
+      workspace_root: /tmp/backend
+      verify_command: "pytest && mypy ."
+`,
+    )
+    const result = loadProjectConfig(tempDir)
+
+    expect(result?.verify?.command).toBe("bun run typecheck && bun test")
+    expect(result?.verify?.timeout_sec).toBe(120)
+    expect(result?.routing?.rules?.[0]?.verify_command).toBe("pytest && mypy .")
+  })
+
+  test("rejects an empty verify.command", () => {
+    writeYaml(
+      tempDir,
+      "valley.yaml",
+      `
+${VALID_PROJECT}
+verify:
+  command: ""
+`,
+    )
+    expect(() => loadProjectConfig(tempDir)).toThrow("Project config validation failed")
+  })
+
   test("parses scoring routes", () => {
     writeYaml(
       tempDir,
@@ -349,6 +397,28 @@ describe("loadConfig", () => {
     expect(config.serverPort).toBe(9741)
     expect(config.deliveryMode).toBe("merge")
     expect(config.promptTemplate).toContain("{{issue.identifier}}")
+    // No verify: block in VALID_PROJECT — gate is a no-op by default, but
+    // timeoutSec still resolves to the documented default.
+    expect(config.verify.command).toBeUndefined()
+    expect(config.verify.timeoutSec).toBe(600)
+  })
+
+  test("resolves verify.command and timeout_sec from valley.yaml", () => {
+    const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `${VALID_PROJECT}
+verify:
+  command: "bun run typecheck && bun test"
+  timeout_sec: 120
+`,
+    )
+
+    const config = loadConfig(projectDir, globalPath)
+
+    expect(config.verify.command).toBe("bun run typecheck && bun test")
+    expect(config.verify.timeoutSec).toBe(120)
   })
 
   test("project overrides global values", () => {
@@ -933,5 +1003,130 @@ scoring:
     expect(config.scoreRouting?.easy.agent).toBe("gemini")
     expect(config.scoreRouting?.medium.agent).toBe("codex")
     expect(config.scoreRouting?.hard.agent).toBe("claude")
+  })
+
+  // ── maxParallel wiring ────────────────────────────────────────────
+
+  test("project agent.max_parallel wins over global and hardware default", () => {
+    const globalPath = writeYaml(
+      globalDir,
+      "settings.yaml",
+      `
+linear:
+  api_key: key
+agent:
+  max_parallel: 2
+`,
+    )
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: T
+  team_uuid: U
+  webhook_secret: W
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test
+agent:
+  max_parallel: 42
+`,
+    )
+    const config = loadConfig(projectDir, globalPath)
+    expect(config.maxParallel).toBe(42)
+  })
+
+  test("global agent.max_parallel is used when project omits it", () => {
+    const globalPath = writeYaml(
+      globalDir,
+      "settings.yaml",
+      `
+linear:
+  api_key: key
+agent:
+  max_parallel: 7
+`,
+    )
+    writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+    const config = loadConfig(projectDir, globalPath)
+    expect(config.maxParallel).toBe(7)
+  })
+
+  test("falls back to hardware-recommended concurrency when neither config sets max_parallel", () => {
+    const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
+    writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+    const config = loadConfig(projectDir, globalPath)
+    expect(config.maxParallel).toBe(detectHardware().recommended)
+  })
+
+  test("rejects agent.max_parallel of 0 in project config", () => {
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: T
+  team_uuid: U
+  webhook_secret: W
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test
+agent:
+  max_parallel: 0
+`,
+    )
+    expect(() => loadProjectConfig(projectDir)).toThrow("Project config validation failed")
+  })
+
+  test("rejects negative agent.max_parallel in global config", () => {
+    const globalPath = writeYaml(
+      globalDir,
+      "settings.yaml",
+      `
+agent:
+  max_parallel: -1
+`,
+    )
+    expect(() => loadGlobalConfig(globalPath)).toThrow("Global config validation failed")
+  })
+
+  test("warns via console.warn when explicit max_parallel exceeds the hardware recommendation", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
+    writeYaml(
+      projectDir,
+      "valley.yaml",
+      `
+linear:
+  team_id: T
+  team_uuid: U
+  webhook_secret: W
+  workflow_states:
+    todo: s1
+    in_progress: s2
+    done: s3
+    cancelled: s4
+workspace:
+  root: /tmp/ws
+prompt: test
+agent:
+  max_parallel: 999
+`,
+    )
+    const config = loadConfig(projectDir, globalPath)
+    expect(config.maxParallel).toBe(999)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("agent.max_parallel (999) exceeds"))
+    warnSpy.mockRestore()
   })
 })

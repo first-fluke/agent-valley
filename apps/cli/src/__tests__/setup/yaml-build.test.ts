@@ -17,6 +17,12 @@ describe("buildGlobalYaml (linear)", () => {
     expect(parsed.logging?.level).toBe("info")
     expect(parsed.server?.port).toBe(9741)
   })
+
+  it("persists maxParallel under agent.max_parallel", () => {
+    const out = buildGlobalYaml({ apiKey: "lin_api_test123", agentType: "claude", maxParallel: 5 })
+    const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
+    expect(parsed.agent?.max_parallel).toBe(5)
+  })
 })
 
 describe("buildGlobalYamlGithub", () => {
@@ -30,6 +36,12 @@ describe("buildGlobalYamlGithub", () => {
   it("never contains the substring 'api_key'", () => {
     const out = buildGlobalYamlGithub({ agentType: "codex", maxParallel: 1 })
     expect(out).not.toContain("api_key")
+  })
+
+  it("persists maxParallel under agent.max_parallel", () => {
+    const out = buildGlobalYamlGithub({ agentType: "codex", maxParallel: 8 })
+    const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
+    expect(parsed.agent?.max_parallel).toBe(8)
   })
 })
 

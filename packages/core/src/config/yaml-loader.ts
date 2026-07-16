@@ -12,8 +12,10 @@ import { parse as parseYaml } from "yaml"
 import { z } from "zod"
 import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
 import { detectHardware } from "./hardware"
+import { resolveMaxParallel } from "./merge-helpers"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
 import { buildTunnelConfig, tunnelMergedSchema, tunnelProjectSchema } from "./tunnel-schema"
+import { buildVerifyConfig, verifyMergedSchema, verifyProjectSchema } from "./verify-schema"
 
 // ── Schemas ─────────────────────────────────────────────────────────
 
@@ -25,6 +27,7 @@ const routingRuleSchema = z.object({
     .refine((v) => v.startsWith("/"), "workspace_root in routing rule must be an absolute path"),
   agent_type: z.enum(["claude", "codex", "gemini"]).optional(),
   delivery_mode: z.enum(["merge", "pr"]).optional(),
+  verify_command: z.string().min(1, "verify_command must be a non-empty shell command").optional(),
 })
 
 const scoreRoutingTierSchema = z
@@ -60,6 +63,7 @@ export const globalConfigSchema = z
         timeout: z.number().min(30).optional(),
         max_retries: z.number().min(1).optional(),
         retry_delay: z.number().min(1).optional(),
+        max_parallel: z.number().min(1, "agent.max_parallel must be >= 1").optional(),
       })
       .optional(),
     logging: z
@@ -138,6 +142,7 @@ export const projectConfigSchema = z
         timeout: z.number().min(30).optional(),
         max_retries: z.number().min(1).optional(),
         retry_delay: z.number().min(1).optional(),
+        max_parallel: z.number().min(1, "agent.max_parallel must be >= 1").optional(),
       })
       .optional(),
     delivery: z
@@ -179,6 +184,7 @@ export const projectConfigSchema = z
     observability: observabilityProjectSchema,
     budget: budgetProjectSchema,
     tunnel: tunnelProjectSchema,
+    verify: verifyProjectSchema,
   })
   .strict()
 
@@ -245,6 +251,7 @@ const mergedConfigSchema = z
           .refine((v) => v.startsWith("/"), "workspaceRoot must be absolute"),
         agentType: z.enum(["claude", "codex", "gemini"]).optional(),
         deliveryMode: z.enum(["merge", "pr"]).optional(),
+        verifyCommand: z.string().optional(),
       }),
     ),
     scoringModel: z.string().optional(),
@@ -256,6 +263,7 @@ const mergedConfigSchema = z
     observability: observabilityMergedSchema,
     budget: budgetMergedSchema,
     tunnel: tunnelMergedSchema,
+    verify: verifyMergedSchema,
   })
   .superRefine((cfg, ctx) => {
     if (cfg.trackerKind === "linear") {
@@ -356,6 +364,12 @@ export function loadProjectConfig(projectRoot?: string): ProjectConfig | null {
 
 // ── Merge ───────────────────────────────────────────────────────────
 
+/**
+ * Resolve agent.max_parallel with precedence project > global > hardware
+ * default. An explicit operator value that exceeds the hardware-recommended
+ * concurrency is honored (never silently clamped) but logged as a WARN so
+ * the operator can see the risk of resource exhaustion.
+ */
 function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null): Record<string, unknown> {
   const hw = detectHardware()
 
@@ -418,7 +432,7 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
     agentTimeout: project?.agent?.timeout ?? global?.agent?.timeout ?? defaults.agentTimeout,
     agentMaxRetries: project?.agent?.max_retries ?? global?.agent?.max_retries ?? defaults.agentMaxRetries,
     agentRetryDelay: project?.agent?.retry_delay ?? global?.agent?.retry_delay ?? defaults.agentRetryDelay,
-    maxParallel: defaults.maxParallel,
+    maxParallel: resolveMaxParallel(project?.agent?.max_parallel ?? global?.agent?.max_parallel, hw.recommended),
     serverPort: project?.server?.port ?? global?.server?.port ?? defaults.serverPort,
     logLevel: project?.logging?.level ?? global?.logging?.level ?? defaults.logLevel,
     logFormat: project?.logging?.format ?? global?.logging?.format ?? defaults.logFormat,
@@ -429,6 +443,7 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
       workspaceRoot: r.workspace_root,
       agentType: r.agent_type,
       deliveryMode: r.delivery_mode,
+      verifyCommand: r.verify_command,
     })),
     scoringModel: project?.scoring?.model ?? undefined,
     scoreRouting: project?.scoring?.routes ?? undefined,
@@ -439,6 +454,7 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
     observability: buildObservabilityConfig(project),
     budget: buildBudgetConfig(project),
     tunnel: buildTunnelConfig(project),
+    verify: buildVerifyConfig(project),
   }
 }
 

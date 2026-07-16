@@ -28,7 +28,7 @@ Path: {{workspace_path}}
 export function buildGlobalYaml(config: { apiKey: string; agentType: string; maxParallel: number }): string {
   const obj: GlobalConfig = {
     linear: { api_key: config.apiKey },
-    agent: { type: config.agentType as AgentType },
+    agent: { type: config.agentType as AgentType, max_parallel: config.maxParallel },
     logging: { level: "info", format: "json" },
     server: { port: 9741 },
   }
@@ -41,7 +41,7 @@ export function buildGlobalYaml(config: { apiKey: string; agentType: string; max
  */
 export function buildGlobalYamlGithub(config: { agentType: string; maxParallel: number }): string {
   const obj: GlobalConfig = {
-    agent: { type: config.agentType as AgentType },
+    agent: { type: config.agentType as AgentType, max_parallel: config.maxParallel },
     logging: { level: "info", format: "json" },
     server: { port: 9741 },
   }
