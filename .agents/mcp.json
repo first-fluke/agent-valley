@@ -1,17 +1,8 @@
 {
   "mcpServers": {
     "serena": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/oraios/serena",
-        "serena",
-        "start-mcp-server",
-        "--context",
-        "antigravity",
-        "--project",
-        "."
-      ],
+      "command": "serena",
+      "args": ["start-mcp-server", "--context", "claude-code", "--project-from-cwd", "--open-web-dashboard", "false"],
       "env": {
         "SERENA_LOG_LEVEL": "info"
       },
@@ -19,14 +10,12 @@
     }
   },
   "memoryConfig": {
-    "provider": "serena",
-    "basePath": ".serena/memories",
+    "provider": "file",
+    "basePath": ".agents/state/memories",
     "tools": {
-      "read": "read_memory",
-      "write": "write_memory",
-      "edit": "edit_memory",
-      "list": "list_memories",
-      "delete": "delete_memory"
+      "read": "Read",
+      "write": "Write",
+      "edit": "Edit"
     }
   },
   "toolGroups": {

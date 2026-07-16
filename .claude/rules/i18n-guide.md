@@ -20,6 +20,18 @@ Response language is determined by the following priority:
 language: ko  # ko, en, ja, zh, ...
 ```
 
+## Translation Voice
+
+When translating user-facing content, the `translation_voice` field in `.agents/oma-config.yaml` controls global rhythm and formality. It is applied on top of `oma-translator` content-type persona routing.
+
+| Value | Effect |
+|---|---|
+| `formal` | strict complete sentences, no fragments, formal register only |
+| `balanced` (default) | content-type defaults — fragments only in label/cell positions |
+| `interpreter` | punchy, audience-first, spoken cadence; fragments allowed when natural |
+
+Workflows that translate user-facing content should respect this setting via the `oma-translator` skill rather than hardcoding a tone.
+
 ## What to Localize
 
 | Category | Localize? | Example |
@@ -61,17 +73,9 @@ All workflows follow these rules. The following line in existing workflows refer
 - **Response language follows `language` setting in `.agents/oma-config.yaml` if configured.**
 ```
 
-## ARB-Based Localization (`packages/i18n/`)
-
-If `packages/i18n/` exists in the project, ARB files are the **single source of truth** for all user-facing strings.
-
-1. **Never hardcode UI strings** — all user-visible text must come from ARB files (`*.arb`)
-2. **Edit ARB first** — when adding or changing UI text, update the ARB file, then run the build in `packages/i18n/`
-3. **Build after changes** — run `dart run build_runner build` (or equivalent) inside `packages/i18n/` to regenerate localization code
-4. **Base locale** — the primary ARB file (e.g., `app_en.arb`) is the reference; other locales derive from it
-5. **Key naming** — use `camelCase` keys describing the purpose, not the content: `loginButton` not `clickHere`
-6. **Placeholders** — use ICU message syntax for interpolation: `"greeting": "Hello, {name}!"`
-7. **Do not translate keys** — ARB keys are identifiers, always in English
+> ARB-based localization (ARB as the single cross-platform source of truth for
+> UI strings) is a path-scoped rule — see `i18n-arb.md`, which loads only when
+> `*.arb` files are in context.
 
 ## Subagent Behavior
 

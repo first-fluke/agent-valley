@@ -12,18 +12,35 @@
         "timeout": 5
       },
       {
+        "hook": "state-boundary.ts",
+        "timeout": 5
+      },
+      {
         "hook": "skill-injector.ts",
+        "timeout": 3
+      },
+      {
+        "hook": "serena-primer.ts",
         "timeout": 3
       }
     ],
     "PreToolUse": {
       "hook": "test-filter.ts",
-      "matcher": "Bash",
+      "matcher": "run_shell_command",
       "timeout": 5
     },
     "Stop": {
       "hook": "persistent-mode.ts",
       "timeout": 5
+    }
+  },
+  "statusLine": {
+    "hook": "hud.ts"
+  },
+  "statusLineKey": "ui",
+  "extra": {
+    "hooksConfig": {
+      "enabled": true
     }
   }
 }

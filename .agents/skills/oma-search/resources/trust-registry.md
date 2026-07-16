@@ -7,10 +7,10 @@ Uses heuristic pattern matching + Tranco domain ranking for validation.
 
 | Level | Score Range | Label | Description |
 |-------|-----------|-------|-------------|
-| verified | 0.85-0.95 | ★★★★ | Official documentation, vendor sites, standards bodies |
-| community | 0.50-0.70 | ★★★ | User-generated, curated platforms |
-| external | 0.20-0.49 | ★★ | Third-party content sources |
-| unknown | — | — | Cannot determine trust level |
+| verified | 0.85-0.95 | **** | Official documentation, vendor sites, standards bodies |
+| community | 0.50-0.70 | *** | User-generated, curated platforms |
+| external | 0.20-0.49 | ** | Third-party content sources |
+| unknown | (none) | (none) | Cannot determine trust level |
 
 ## Scoring Rules
 
@@ -112,6 +112,6 @@ Cache is project-scoped and survives skill updates.
 | Source | Purpose | Cost | API |
 |--------|---------|------|-----|
 | Heuristic patterns | Domain category classification | Free | N/A (built-in rules) |
-| [Tranco List](https://tranco-list.eu/) | Domain popularity validation | Free | `siterank.redirect2.me/api/rank.json` |
+| [Tranco List](https://tranco-list.eu/) | Domain popularity validation | Free | `https://siterank.redirect2.me/api/rank.json` |
 | [redirect2me/siterank](https://github.com/redirect2me/siterank) | Self-hostable Tranco API | Free, OSS | Self-host option |
 | Serena memory | Score caching | Free | MCP memory tools |

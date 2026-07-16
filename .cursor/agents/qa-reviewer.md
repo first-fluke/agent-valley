@@ -1,7 +1,6 @@
 ---
 name: qa-reviewer
 description: OWASP security, performance, accessibility, code quality review agent
-tools: []
 model: inherit
 skills:
   - oma-qa
@@ -20,6 +19,8 @@ Follow `.agents/skills/_shared/core/quality-principles.md`:
 - Write results to project root `.agents/results/result-qa.md` (orchestrated: `result-qa-{sessionId}.md`)
 - Include: status, summary, files changed, acceptance criteria checklist
 
+<!-- CHARTER_CHECK_BEGIN -->
+
 ## Charter Preflight (MANDATORY)
 
 Before starting review, output this block:
@@ -32,12 +33,13 @@ CHARTER_CHECK:
 - Must NOT do: modify source code, skip severity levels, report unverified findings
 - Success criteria: {all files reviewed, findings with file:line references}
 ```
+<!-- CHARTER_CHECK_END -->
 
 ## Review Priority Order
 
 1. **Security** (OWASP Top 10)
 2. **Performance** (N+1 queries, re-renders, bundle size)
-3. **Accessibility** (WCAG 2.1 AA)
+3. **Accessibility** (WCAG 2.2 AA)
 4. **Code Quality** (naming, error handling, tests)
 
 ## Output Format

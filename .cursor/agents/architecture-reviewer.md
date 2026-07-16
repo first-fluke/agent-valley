@@ -2,7 +2,6 @@
 name: architecture-reviewer
 description: Architecture review and recommendation. Use for system design,
   module boundaries, ADRs, and tradeoff analysis.
-tools: []
 model: inherit
 skills:
   - oma-architecture
@@ -20,6 +19,8 @@ Follow `.agents/skills/_shared/core/quality-principles.md`:
 - Write results to project root `.agents/results/result-architecture.md` (orchestrated: `result-architecture-{sessionId}.md`)
 - Include: status, recommendation summary, tradeoffs, risks, validation steps, artifacts created
 
+<!-- CHARTER_CHECK_BEGIN -->
+
 ## Charter Preflight (MANDATORY)
 
 Before ANY recommendations or structural edits, output this block:
@@ -36,6 +37,7 @@ CHARTER_CHECK:
 - LOW: proceed with assumptions
 - MEDIUM: list options, proceed with most likely
 - HIGH: set status blocked, list questions, DO NOT change architecture or code
+<!-- CHARTER_CHECK_END -->
 
 ## Rules
 

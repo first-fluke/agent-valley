@@ -1,17 +1,19 @@
 ---
-description: Design workflow — create design systems, DESIGN.md, and design tokens with anti-pattern enforcement and accessibility checks
+name: design
+description: Design workflow that creates design systems, DESIGN.md, and design tokens with anti-pattern enforcement and accessibility checks
+disable-model-invocation: true
 ---
 
-# MANDATORY RULES — VIOLATION IS FORBIDDEN
+# MANDATORY RULES: VIOLATION IS FORBIDDEN
 
 - **Response language follows `language` setting in `.agents/oma-config.yaml` if configured.**
 - **NEVER skip phases.** Execute from Phase 1 in order.
-- **Do NOT write implementation code.** This workflow produces DESIGN.md, design tokens, and design guidance — not application code.
+- **Do NOT write implementation code.** This workflow produces DESIGN.md, design tokens, and design guidance, not application code.
 - **You MUST use MCP tools throughout the workflow.**
   - Use code analysis tools (`get_symbols_overview`, `find_symbol`, `search_for_pattern`) to analyze the existing codebase.
   - Use memory tools (write/edit) to record design results.
-  - Memory path: configurable via `memoryConfig.basePath` (default: `.serena/memories`)
-  - Tool names: configurable via `memoryConfig.tools` in `mcp.json`
+  - Memory path: configurable via `memoryConfig.basePath` (default: `.agents/state/memories`)
+  - Tool names: configurable via `memoryConfig.tools` in `.agents/mcp.json`
   - Do NOT use raw file reads or grep as substitutes.
 
 ---
@@ -26,10 +28,10 @@ Read `.design-context.md` in the project root.
 
 If it does not exist:
 1. Scan codebase for existing design signals:
-   - `package.json` — font packages, UI libraries, CSS framework
-   - Tailwind config — existing theme, colors, fonts
-   - Existing CSS/SCSS — design tokens, custom properties
-   - `DESIGN.md` — if already present, use as starting point
+   - `package.json`: font packages, UI libraries, CSS framework
+   - Tailwind config: existing theme, colors, fonts
+   - Existing CSS/SCSS: design tokens, custom properties
+   - `DESIGN.md`: if already present, use as starting point
 2. Ask the user (one question at a time, prefer multiple-choice):
    - What languages does the service support? (determines font strategy)
    - Who is the target audience? (B2B/B2C, age range, tech level)
@@ -40,8 +42,8 @@ If it does not exist:
 3. Save answers to `.design-context.md`
 
 Then parse the `## Reference Sites` section (if any) and resolve each
-domain against the live `getdesign@latest` manifest — see
-`resources/getdesign-fetcher.md`. Hold matched brands in memory for
+domain against the live `getdesign@latest` manifest. See
+`.agents/skills/oma-design/resources/getdesign-fetcher.md`. Hold matched brands in memory for
 Phase 2 Branch B. No vendor match = no branch activated.
 
 **Do NOT proceed until design context is established.**
@@ -52,16 +54,16 @@ Phase 2 Branch B. No vendor match = no branch activated.
 
 Run branches in priority order, use the first with data:
 
-- **Branch A — Stitch MCP**: load `resources/stitch-integration.md` if
+- **Branch A (Stitch MCP)**: load `.agents/skills/oma-design/resources/stitch-integration.md` if
   Stitch MCP is available; extract designTheme + screens.
-- **Branch B — getdesign Vendor Seed**: if Phase 1 matched any vendor,
-  follow `resources/getdesign-fetcher.md` — fetch via
+- **Branch B (getdesign Vendor Seed)**: if Phase 1 matched any vendor,
+  follow `.agents/skills/oma-design/resources/getdesign-fetcher.md`. Fetch via
   `bunx getdesign@latest add <brand> --out <tmp> --force` with
   `GETDESIGN_DISABLE_TELEMETRY=1`, verify SHA256 against manifest,
   load with prompt-injection framing, run anti-pattern pre-audit,
   delete temp.
-- **Branch C — Reference URL**: fetch and analyze HTML/CSS directly.
-- **Branch D — No reference**: skip to Phase 3.
+- **Branch C (Reference URL)**: fetch and analyze HTML/CSS directly.
+- **Branch D (No reference)**: skip to Phase 3.
 
 Every branch ends by feeding the 5-stage pipeline:
 Retrieval → Extraction → Translation → Synthesis → Alignment.
@@ -75,7 +77,7 @@ detail.
 
 Otherwise, if the user request is vague (< 3 sentences, no section
 details):
-- Load `resources/prompt-enhancement.md`
+- Load `.agents/skills/oma-design/resources/prompt-enhancement.md`
 - Transform into section-by-section specification
 - Present enhanced prompt to user for confirmation
 
@@ -94,11 +96,11 @@ direction includes:
 - Motion strategy (scroll-driven / hover-based / entrance-only / minimal)
 - Recommended component libraries (shadcn base + Aceternity / React Bits accents)
 
-Vendor seed present: override with the 3-variation formula —
-A Faithful, B Hybrid, C Loose inspiration — and surface any
+Vendor seed present: override with the 3-variation formula
+(A Faithful, B Hybrid, C Loose inspiration) and surface any
 anti-patterns flagged in the Phase 2 pre-audit. Multi-vendor merges
 require the dimension-level selection dialog from
-`resources/getdesign-fetcher.md`.
+`.agents/skills/oma-design/resources/getdesign-fetcher.md`.
 
 **You MUST get user confirmation on the chosen direction before proceeding.**
 
@@ -108,10 +110,10 @@ require the dimension-level selection dialog from
 
 // turbo
 Based on the chosen direction:
-1. Write `DESIGN.md` following `resources/design-md-spec.md` (9 sections,
+1. Write `DESIGN.md` following `.agents/skills/oma-design/resources/design-md-spec.md` (9 sections,
    including the mandatory Agent Prompt Guide in Section 9)
 2. If a vendor seed is in play: apply Seed Application Rules from
-   `resources/getdesign-fetcher.md` — adopt color/spacing/components/
+   `.agents/skills/oma-design/resources/getdesign-fetcher.md`. Adopt color/spacing/components/
    depth/responsive; rewrite typography for CJK projects; never copy
    the seed's Agent Prompt Guide verbatim.
 3. Output design tokens:
@@ -130,9 +132,9 @@ ALL output must be responsive by default. Never produce desktop-only layouts.
 
 ## Phase 6: AUDIT
 
-Load `resources/checklist.md` and run all checks in order:
+Load `.agents/skills/oma-design/resources/checklist.md` and run all checks in order:
 
-1. **Responsive** (MANDATORY — run first)
+1. **Responsive** (MANDATORY, run first)
 2. **WCAG 2.2 Accessibility**
 3. **Nielsen's 10 Heuristics**
 4. **AI Slop Check** (anti-patterns.md)
@@ -146,7 +148,7 @@ Fix violations or report to user with recommendations.
 
 1. Save `DESIGN.md` to the project root
 2. If Phase 2 Branch B fired, append the License Attribution block
-   from `resources/getdesign-fetcher.md` to the bottom of `DESIGN.md`
+   from `.agents/skills/oma-design/resources/getdesign-fetcher.md` to the bottom of `DESIGN.md`
    (mandatory for MIT compliance).
 3. Update `.design-context.md` if new decisions were made
 4. Write design token files if not already written

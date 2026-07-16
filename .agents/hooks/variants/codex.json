@@ -12,7 +12,15 @@
         "timeout": 5
       },
       {
+        "hook": "state-boundary.ts",
+        "timeout": 5
+      },
+      {
         "hook": "skill-injector.ts",
+        "timeout": 3
+      },
+      {
+        "hook": "serena-primer.ts",
         "timeout": 3
       }
     ],
@@ -24,13 +32,6 @@
     "Stop": {
       "hook": "persistent-mode.ts",
       "timeout": 5
-    }
-  },
-  "featureFlags": {
-    "file": ".codex/config.toml",
-    "section": "features",
-    "flags": {
-      "codex_hooks": true
     }
   }
 }

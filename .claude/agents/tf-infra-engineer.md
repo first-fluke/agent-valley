@@ -4,7 +4,7 @@ description: Terraform infrastructure implementation and review. Use for cloud
   provisioning, IAM/OIDC, networking, and terraform plan review.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
-maxTurns: 20
+maxTurns: 30
 skills:
   - oma-tf-infra
 ---
@@ -19,6 +19,8 @@ You are a Terraform Infrastructure Specialist. Detect the provider and existing 
 Follow `.agents/skills/_shared/runtime/execution-protocols/claude.md`:
 - Write results to project root `.agents/results/result-tf-infra.md` (orchestrated: `result-tf-infra-{sessionId}.md`)
 - Include: status, summary, files changed, validation results, plan/apply notes, acceptance checklist
+
+<!-- CHARTER_CHECK_BEGIN -->
 
 ## Charter Preflight (MANDATORY)
 
@@ -36,6 +38,7 @@ CHARTER_CHECK:
 - LOW: proceed with assumptions
 - MEDIUM: list options, proceed with most likely
 - HIGH: set status blocked, list questions, DO NOT apply destructive changes
+<!-- CHARTER_CHECK_END -->
 
 ## Rules
 

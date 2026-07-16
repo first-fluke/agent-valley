@@ -4,16 +4,10 @@
       {
         "hooks": [
           {
-            "name": "keyword-detector",
+            "name": "oma-hook-UserPromptSubmit",
             "type": "command",
-            "command": "bun \"$QWEN_PROJECT_DIR/.qwen/hooks/keyword-detector.ts\"",
-            "timeout": 5
-          },
-          {
-            "name": "skill-injector",
-            "type": "command",
-            "command": "bun \"$QWEN_PROJECT_DIR/.qwen/hooks/skill-injector.ts\"",
-            "timeout": 3
+            "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'UserPromptSubmit'",
+            "timeout": 21
           }
         ]
       }
@@ -22,26 +16,51 @@
       {
         "hooks": [
           {
-            "name": "test-filter",
+            "name": "oma-hook-PreToolUse",
             "type": "command",
-            "command": "bun \"$QWEN_PROJECT_DIR/.qwen/hooks/test-filter.ts\"",
-            "timeout": 5
+            "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'PreToolUse' --matcher 'run_shell_command'",
+            "timeout": 10
           }
         ],
-        "matcher": "Bash"
+        "matcher": "run_shell_command"
       }
     ],
     "Stop": [
       {
         "hooks": [
           {
-            "name": "persistent-mode",
+            "name": "oma-hook-Stop",
             "type": "command",
-            "command": "bun \"$QWEN_PROJECT_DIR/.qwen/hooks/persistent-mode.ts\"",
-            "timeout": 5
+            "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'Stop'",
+            "timeout": 10
           }
         ]
       }
     ]
+  },
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--isolated"]
+    },
+    "serena": {
+      "command": "serena",
+      "args": ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
+      "env": {
+        "SERENA_LOG_LEVEL": "info"
+      }
+    }
+  },
+  "privacy": {
+    "usageStatisticsEnabled": false
+  },
+  "ui": {
+    "statusLine": {
+      "type": "command",
+      "command": "'bun' \"$QWEN_PROJECT_DIR/.qwen/hooks/hud.ts\""
+    }
+  },
+  "hooksConfig": {
+    "enabled": true
   }
 }

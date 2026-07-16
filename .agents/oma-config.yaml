@@ -1,24 +1,16 @@
-# User Preferences (Optional)
-# Project-specific user configuration
-#
-# This file is optional. Works with defaults if not present.
-# CLI priority: --vendor arg > agent_cli_mapping > default_cli > cli-config.yaml's active_vendor > gemini
-
-# Response language setting (ko, en, ja, zh, ...)
+# Migrated by oma migration 008 — model_preset single-file config
 language: ko
-
-# Date/time format
 date_format: ISO
 timezone: Asia/Seoul
+model_preset: antigravity
 
-# Default CLI (for single tasks)
-default_cli: gemini
-
-# Per-agent CLI mapping (multi-CLI mode)
-agent_cli_mapping:
-  frontend: gemini
-  backend: gemini
-  mobile: gemini
-  qa: gemini
-  debug: gemini
-  pm: gemini
+# Added by oma update — new config keys (template defaults; edit freely)
+translation_voice: balanced
+auto_update_cli: true
+telemetry: false
+docs:
+  auto_verify: false
+  check_urls: true
+  exclude:
+    - benchmarks/**
+    - web/i18n/**

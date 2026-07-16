@@ -1,16 +1,18 @@
 ---
+name: ultrawork
 description: Ultrawork - high-quality 5-phase development workflow with 11 review steps out of 17
+disable-model-invocation: true
 ---
 
-# MANDATORY RULES — VIOLATION IS FORBIDDEN
+# MANDATORY RULES: VIOLATION IS FORBIDDEN
 
 - **Response language follows `language` setting in `.agents/oma-config.yaml` if configured.**
 - **NEVER skip steps.** Execute from Step 0 in order. Explicitly report completion of each step to the user before proceeding to the next.
 - **You MUST use MCP tools throughout the entire workflow.** This is NOT optional.
   - Use code analysis tools (`get_symbols_overview`, `find_symbol`, `find_referencing_symbols`, `search_for_pattern`) for code exploration.
   - Use memory tools (read/write/edit) for progress tracking.
-  - Memory path: configurable via `memoryConfig.basePath` (default: `.serena/memories`)
-  - Tool names: configurable via `memoryConfig.tools` in `mcp.json`
+  - Memory path: configurable via `memoryConfig.basePath` (default: `.agents/state/memories`)
+  - Tool names: configurable via `memoryConfig.tools` in `.agents/mcp.json`
   - Do NOT use raw file reads or grep as substitutes. MCP tools are the primary interface for code and memory operations.
 - **Read the oma-coordination skill BEFORE starting.** Read `.agents/skills/oma-coordination/SKILL.md` and follow its Core Rules.
 - **Follow the context-loading guide.** Read `.agents/skills/_shared/core/context-loading.md` and load only task-relevant resources.
@@ -24,15 +26,34 @@ The detected runtime vendor and each agent's target vendor determine how agents 
 
 ---
 
+## Cross-Context Review (CCR) Dispatch
+
+Every review step in this workflow (the 11 reviews in `multi-review-protocol.md`) runs as a **fresh, context-isolated reviewer subagent** — never inline in the main session, and never batched with implementation or with another review. This is mandatory; see the **Cross-Context Review (CCR) Mandate** in `multi-review-protocol.md` for the rationale and the two papers behind it.
+
+**One review = one fresh reviewer subagent.** The main session is the coordinator: it dispatches each review, waits for its verdict, and aggregates verdicts into the phase's `result-*.md` and `session-ultrawork.md`. For each review:
+
+1. **Resolve the reviewer's target vendor** per the Per-Agent Dispatch rules (`.agents/oma-config.yaml`). Use the native subagent path when `target_vendor === current_runtime_vendor`; otherwise use `oma agent:spawn` for that reviewer.
+2. **Build the reviewer prompt from the isolation contract only** (`multi-review-protocol.md` → CCR Mandate): the durable artifacts under review *referenced by path* (git diff, changed files, `.agents/results/plan-{sessionId}.json`, prior `result-*.md`, test/lint output) plus that single review's guide section. Do **NOT** paste this session's conversation history, the implementation agent's reasoning, or any prior review's verdict into the prompt.
+3. **Dispatch one reviewer per review.**
+   - Claude-native: `Agent(subagent_type="qa-reviewer", prompt="CCR <review name> ONLY. Inputs (read fresh, assume no prior context): <artifact paths>. Guide: <that review's section>. Write a structured verdict to memory.", run_in_background=true)` — multiple such calls in one message run in parallel, each in its own isolated context.
+   - CLI fallback: `oma agent:spawn qa-agent "CCR <review name> ONLY. Inputs (read fresh, assume no prior context): <artifact paths>. Guide: <that review's section>. Write a structured verdict to memory." session-id`
+4. **Collect** each reviewer's structured verdict from memory and fold it into the phase's `result-*.md` and `session-ultrawork.md`.
+
+Reviewers are read-only evaluators. Implementation and refactor **actions** (Phase 2 IMPL, and the structural refactor steps in Phase 4) remain with their action agents and are dispatched as before — only the review passes are isolated.
+
+---
+
 ## Phase 0: Initialization (DO NOT SKIP)
 
 1. Read `.agents/skills/oma-coordination/SKILL.md` and confirm Core Rules.
 2. Read `.agents/skills/_shared/core/context-loading.md` for resource loading strategy.
 3. Read `.agents/skills/_shared/runtime/memory-protocol.md` for memory protocol.
-4. Read `.agents/workflows/ultrawork/resources/multi-review-protocol.md` (11 review guides)
-5. Read `.agents/skills/_shared/core/quality-principles.md` (4 principles)
-6. Read `.agents/workflows/ultrawork/resources/phase-gates.md` (gate definitions)
-7. Record session start using memory write tool:
+4. Read `.agents/skills/_shared/runtime/event-spec.md` for L1 event protocol.
+5. Emit required L1 decisions by calling `oma state:emit` directly, as documented in `.agents/skills/_shared/runtime/event-spec.md`.
+6. Read `.agents/workflows/ultrawork/resources/multi-review-protocol.md` (11 review guides)
+7. Read `.agents/skills/_shared/core/quality-principles.md` (4 principles)
+8. Read `.agents/workflows/ultrawork/resources/phase-gates.md` (gate definitions)
+9. Record session start using memory write tool:
    - Create `session-ultrawork.md` in the memory base path
    - Include: session start time, user request summary, workflow version (ultrawork)
 
@@ -40,28 +61,30 @@ The detected runtime vendor and each agent's target vendor determine how agents 
 
 ## Phase 1: PLAN (Steps 1-4)
 
-### Step 1: Create Plan & Review
+### Step 1: Create Plan
 // turbo
-Activate PM Agent to execute Steps 1-4:
+Activate PM Agent to author the plan only (reviews are dispatched separately in Steps 2-4):
 
 1. Analyze requirements.
 2. Define API contracts.
 3. Create a prioritized task breakdown.
-4. Execute Plan Review - Completeness (Step 2).
-5. Execute Meta Review (Step 3).
-6. Execute Over-Engineering Review (Step 4).
-7. Save plan to `.agents/results/plan-{sessionId}.json`.
-8. Create `task-board.md` in memory path for dashboard compatibility.
-9. Use memory write tool to record plan completion.
+4. Save plan to `.agents/results/plan-{sessionId}.json`.
+5. Create `task-board.md` in memory path for dashboard compatibility.
+6. Use memory write tool to record plan completion.
+
+The PM Agent MUST NOT review its own plan inline — that is a same-context self-review, exactly the anchoring/sycophancy failure the CCR Mandate forbids. Steps 2-4 run in fresh isolated reviewers.
+
+### Steps 2-4: Plan Reviews (Cross-Context)
+Dispatch each of Steps 2, 3, 4 as a **separate fresh isolated reviewer subagent** per the **Cross-Context Review (CCR) Dispatch** section. Each reviewer receives ONLY the plan artifact (`.agents/results/plan-{sessionId}.json`) and the original requirements, plus its own review guide section — never the PM Agent's reasoning or this session's history. Collect the three verdicts into `session-ultrawork.md` before evaluating PLAN_GATE.
 
 ### Step 2: Plan Review (Completeness)
-- **Executed by PM Agent**: Ensure requirements are fully mapped.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Ensure requirements are fully mapped.
 
 ### Step 3: Review Verification (Meta Review)
-- **Executed by PM Agent**: Self-verify if the review was sufficient.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Verify the completeness review was sufficient. Chaining exception: this reviewer MAY receive the Step 2 verdict as input, since a meta-review's job is to audit the prior review.
 
 ### Step 4: Over-Engineering Review (Simplicity)
-- **Executed by PM Agent**: Check for unnecessary complexity (MVP focus).
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Check for unnecessary complexity (MVP focus).
 
 ### PLAN_GATE
 - [ ] Plan documented
@@ -70,7 +93,21 @@ Activate PM Agent to execute Steps 1-4:
 - [ ] Over-engineering review done
 - [ ] **User confirmation**
 
-**On gate pass**: Use memory edit tool to record phase completion in `session-ultrawork.md`
+**On gate pass**:
+1. Use memory edit tool to record phase completion in `session-ultrawork.md`.
+2. Emit the required L1 decision:
+   ```bash
+   oma state:emit "decision.made" '{"subject":"ultrawork.plan-approved","decision":"Proceed with the approved PLAN output.","rationale":"PLAN_GATE passed and the user confirmed scope."}'
+   ```
+3. Verify the required decision before Phase 2:
+   ```bash
+   oma state:verify --workflow ultrawork --checkpoint plan-approved
+   ```
+4. Emit and verify the implementation scope lock before spawning implementation agents:
+   ```bash
+   oma state:emit "decision.made" '{"subject":"ultrawork.impl-plan-locked","decision":"Use the approved task decomposition for IMPL.","rationale":"PLAN output is locked before implementation agents are spawned."}'
+   oma state:verify --workflow ultrawork --checkpoint impl-plan-locked
+   ```
 
 **Gate failure → Return to Step 1**
 
@@ -130,7 +167,7 @@ If automated measurement is available (tests, lint exist):
 3. Create Experiment Ledger via memory tools: `[WRITE]("experiment-ledger.md", initial ledger with baseline row)`
 4. Record composite score as the IMPL baseline
 
-If no measurement tools: skip — gates fall back to binary checklist.
+If no measurement tools: skip; gates fall back to binary checklist.
 
 ### IMPL_GATE
 - [ ] Build succeeds
@@ -146,43 +183,48 @@ If no measurement tools: skip — gates fall back to binary checklist.
 
 ## Phase 3: VERIFY (Steps 6-8)
 
-### Step 6-8: QA Verification
+### Step 6-8: QA Verification (Cross-Context Review)
 // turbo
-Spawn QA Agent to execute Steps 6-8.
+Dispatch each of Steps 6, 7, 8 as a **separate fresh isolated reviewer subagent** per the **Cross-Context Review (CCR) Dispatch** section. Do NOT run all three in one agent, and do NOT pass this session's history or the implementation agents' reasoning into any reviewer prompt. Each reviewer reads only the durable artifacts (git diff, changed files, `.agents/results/plan-{sessionId}.json`, `result-{agent}` files, test/lint output) plus its own review guide section from `multi-review-protocol.md`.
 
 #### If Claude Code
-Use the Agent tool to spawn subagent:
-- `Agent(subagent_type="qa-reviewer", prompt="Execute Phase 3 Verification. Step 6: Alignment Review. Step 7: Security/Bug Review (npm audit, OWASP). Step 8: Improvement/Regression Review. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
+Use three separate Agent tool calls (one message = parallel, isolated contexts):
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 6 Alignment Review ONLY. Inputs (read fresh, assume no prior context): <diff + changed files + plan-{sessionId}.json>. Guide: Alignment Review section. Write a structured verdict to memory.", run_in_background=true)`
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 7 Security/Bug Review ONLY (npm audit, OWASP). Inputs (read fresh, assume no prior context): <diff + changed files + audit output>. Guide: Safety Review section. Write a structured verdict to memory.", run_in_background=true)`
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 8 Improvement/Regression Review ONLY. Inputs (read fresh, assume no prior context): <diff + test output>. Guide: Regression Review section. Write a structured verdict to memory.", run_in_background=true)`
 
 #### If Codex CLI
-Spawn native Codex custom agents using `.codex/agents/{agent}.toml` when available for QA verification.
+Spawn one native Codex custom agent (`.codex/agents/{agent}.toml`) **per review** when available, each with only its artifacts + guide section.
 If native dispatch is not verified in the current runtime, fall back to `oma agent:spawn`.
 
 #### If Gemini CLI or Antigravity or CLI Fallback
 ```bash
-oma agent:spawn qa-agent "Execute Phase 3 Verification. Step 6: Alignment Review. Step 7: Security/Bug Review (npm audit, OWASP). Step 8: Improvement/Regression Review. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id
+oma agent:spawn qa-agent "CCR Step 6 Alignment Review ONLY. Inputs (read fresh): <diff + plan-{sessionId}.json>. Guide: Alignment Review section. Write a structured verdict to memory." session-id
+oma agent:spawn qa-agent "CCR Step 7 Security/Bug Review ONLY (npm audit, OWASP). Inputs (read fresh): <diff + audit output>. Guide: Safety Review section. Write a structured verdict to memory." session-id
+oma agent:spawn qa-agent "CCR Step 8 Regression Review ONLY. Inputs (read fresh): <diff + test output>. Guide: Regression Review section. Write a structured verdict to memory." session-id
 ```
 
 ---
 
-### Monitor QA Agent Progress
+### Monitor Reviewers & Aggregate
 
-**Wait for QA Agent to complete verification before proceeding.**
+**Wait for all three VERIFY reviewers to complete before proceeding.**
 
-1. Use memory read tool to poll `progress-qa-agent[-{sessionId}].md`
-2. Check for `result-qa-agent[-{sessionId}].md` to confirm completion
-3. Use memory edit tool to record QA results in `session-ultrawork.md`
+1. Use memory read tool to poll each reviewer's `progress-*` / verdict entry.
+2. Confirm each reviewer wrote its structured verdict to memory.
+   - **Claude-native path**: each `qa-reviewer` Agent call returns synchronously with its verdict.
+3. **Aggregate** the three verdicts into `result-qa-{sessionId}.md` under `.agents/results/` (this satisfies the VERIFY artifact contract) and record the combined VERIFY result in `session-ultrawork.md`.
 
-**Continue polling until QA Agent reports completion.**
+**Continue polling until all three reviewers report completion.**
 
 ### Step 6: Alignment Review
-- **Executed by QA Agent**: Compare implementation vs plan.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Compare implementation vs plan.
 
 ### Step 7: Security/Bug Review (Safety)
-- **Executed by QA Agent**: Check for vulnerabilities (Safety).
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Check for vulnerabilities (Safety).
 
 ### Step 8: Improvement Review (Regression Prevention)
-- **Executed by QA Agent**: Run regression tests.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Run regression tests.
 
 ### Step 8.1: Measure Post-VERIFY Quality Score (Conditional)
 
@@ -200,9 +242,17 @@ If baseline was measured at Step 5.2:
 
 **On gate pass**: Use memory edit tool to record phase completion in `session-ultrawork.md`
 
-**Gate failure (1st time)** → Return to Step 5, fix implementation issues, and repeat VERIFY phase.
+**Gate failure (1st time)** → Before re-spawning for the next VERIFY cycle, check the session cost cap:
 
-**Gate failure (2nd time on same issue)** → Activate **Exploration Loop**:
+> **Review Loop termination conditions** (OR, whichever fires first wins):
+> 1. Gate failure count has reached the configured maximum iterations (default: 5 total VERIFY + REFINE cycles). Do not start another cycle.
+> 2. Session cost cap exceeded: if `loadQuotaCap()` from `cli/io/session-cost.ts` returns non-null, call `checkCap(sessionId, cap)` (no cap configured → skip this condition). If `exceeded === true`, print `formatPromptMessage(result)` to the user and stop the loop immediately. Save all current step results before stopping, then report to the user that the loop was terminated early due to quota.
+>
+> If neither condition is met, return to Step 5 and continue.
+
+**Root-cause-first fix mandate:** when re-spawning implementation agents to address QA findings, the fix prompt MUST require root-cause remediation. Forbid tactical patches (try/catch swallowing the error, validation bypass, hardcoded values, feature flags hiding the bug, silencing the failing test) unless the agent explicitly justifies why a structural fix is out of scope (upstream library bug, deprecated path, hotfix window).
+
+**Gate failure (2nd time on same issue, and termination conditions not yet met)** → Activate **Exploration Loop**:
 1. Load `exploration-loop.md` (conditional, per `context-loading.md`)
 2. Generate 2-3 alternative hypotheses using Exploration Decision template (`reasoning-templates.md` #6)
 3. Experiment each approach sequentially (git stash per attempt)
@@ -217,54 +267,66 @@ If baseline was measured at Step 5.2:
 
 ### Step 9-13: Deep Refinement
 // turbo
-Spawn Debug Agent (or Senior Dev Agent) to execute Steps 9-13.
+REFINE mixes two kinds of work: **reviews** (Steps 10, 12), which are read-only evaluations, and **refactor actions** (Steps 9, 11, 13), which change code.
+
+**First, dispatch the two reviews as fresh isolated reviewer subagents** per the **Cross-Context Review (CCR) Dispatch** section — one reviewer for Step 10 (Reusability), one for Step 12 (Consistency). Each reads only the durable artifacts (git diff, changed files) plus its guide section; do not pass this session's history or the implementation agents' reasoning. Collect their verdicts from memory.
+
+**Then, spawn the Debug Agent** to perform the refactor actions (Steps 9, 11, 13) and apply the isolated reviewers' findings, and to write `result-debug-{sessionId}.md` (this satisfies the REFINE artifact contract).
 
 #### If Claude Code
-Use the Agent tool to spawn subagent:
-- `Agent(subagent_type="debug-investigator", prompt="Execute Phase 4 Refine. Step 9: Split large files. Step 10: Integration check. Step 11: Side Effect analysis (find_referencing_symbols). Step 12: Consistency review. Step 13: Cleanup dead code. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
+Reviews (two separate calls, isolated contexts):
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 10 Reusability Review ONLY. Inputs (read fresh, assume no prior context): <diff + changed files>. Guide: Reusability Review section. Write a structured verdict to memory.", run_in_background=true)`
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 12 Consistency Review ONLY. Inputs (read fresh, assume no prior context): <diff + changed files>. Guide: Consistency Review section. Write a structured verdict to memory.", run_in_background=true)`
+
+Refactor actions (after the review verdicts are collected):
+- `Agent(subagent_type="debug-investigator", prompt="Execute Phase 4 refactor actions. Step 9: Split large files. Step 11: Side Effect analysis (find_referencing_symbols). Step 13: Cleanup dead code. Apply the collected Reusability/Consistency verdicts. Write result-debug-{sessionId}.md. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
 
 #### If Codex CLI
-Spawn native Codex custom agents using `.codex/agents/{agent}.toml` when available for refinement tasks.
+Spawn one native Codex reviewer per review (`.codex/agents/{agent}.toml`) with only its artifacts + guide section, then a native refactor agent for Steps 9/11/13.
 If native dispatch is not verified in the current runtime, fall back to `oma agent:spawn`.
 
 #### If Gemini CLI or Antigravity or CLI Fallback
 ```bash
-oma agent:spawn debug-agent "Execute Phase 4 Refine. Step 9: Split large files. Step 10: Integration check. Step 11: Side Effect analysis (find_referencing_symbols). Step 12: Consistency review. Step 13: Cleanup dead code. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id
+oma agent:spawn qa-agent "CCR Step 10 Reusability Review ONLY. Inputs (read fresh): <diff>. Guide: Reusability Review section. Write a structured verdict to memory." session-id
+oma agent:spawn qa-agent "CCR Step 12 Consistency Review ONLY. Inputs (read fresh): <diff>. Guide: Consistency Review section. Write a structured verdict to memory." session-id
+oma agent:spawn debug-agent "Execute Phase 4 refactor actions. Step 9: Split large files. Step 11: Side Effect analysis. Step 13: Cleanup dead code. Apply the collected Reusability/Consistency verdicts. Write result-debug-{sessionId}.md. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id
 ```
 
 ---
 
-### Monitor Debug Agent Progress
+### Monitor Reviewers & Debug Agent Progress
 
-**Wait for Debug Agent to complete refinement before proceeding.**
+**Wait for the two reviewers and the Debug Agent to complete refinement before proceeding.**
 
-1. Use memory read tool to poll `progress-debug-agent[-{sessionId}].md`
-2. Check for `result-debug-agent[-{sessionId}].md` to confirm completion
-3. Use memory edit tool to record refinement results in `session-ultrawork.md`
+1. Confirm both isolated reviewers wrote their structured verdicts to memory.
+2. Use memory read tool to poll `progress-debug-agent[-{sessionId}].md`
+3. Check for `result-debug-agent[-{sessionId}].md` to confirm completion
+   - **Claude-native path**: the Agent tool returns synchronously and the `debug-investigator` subagent writes `result-debug[-{sessionId}].md` under `.agents/results/` — check that file instead of polling.
+4. Use memory edit tool to record refinement results (reviews + actions) in `session-ultrawork.md`
 
-**Continue polling until Debug Agent reports completion.**
+**Continue polling until the reviewers and Debug Agent report completion.**
 
 ### Step 9: Split Large Files/Functions
-- **Executed by Debug Agent**: Files > 500 lines, Functions > 50 lines.
+- **Executed by Debug Agent (action)**: Files > 500 lines, Functions > 50 lines.
 
 ### Step 10: Integration/Reuse Review (Reusability)
-- **Executed by Debug Agent**: Check for duplicate logic.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Check for duplicate logic.
 
 ### Step 11: Side Effect Review (Cascade Impact)
-- **Executed by Debug Agent**: Analyze impact scope.
+- **Executed by Debug Agent (action)**: Analyze impact scope.
 
 ### Step 12: Full Change Review (Consistency)
-- **Executed by Debug Agent**: Review naming and style.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Review naming and style.
 
 ### Step 13: Clean Up Unused Code
-- **Executed by Debug Agent**: Remove newly created dead code.
+- **Executed by Debug Agent (action)**: Remove newly created dead code.
 
 ### Step 13.1: Measure Post-REFINE Quality Score (Conditional)
 
 If baseline was measured at Step 5.2:
 1. Measure Quality Score after refinement
 2. Calculate delta from Post-VERIFY score
-3. **If delta < -5**: Apply Discard rule — revert refinement changes, record in Experiment Ledger
+3. **If delta < -5**: Apply Discard rule. Revert refinement changes, record in Experiment Ledger.
 4. Record kept experiments in Experiment Ledger
 
 ### REFINE_GATE
@@ -274,9 +336,21 @@ If baseline was measured at Step 5.2:
 - [ ] Code cleaned
 - [ ] (If measured) Quality Score >= Post-VERIFY score (no regression from refinement)
 
-**On gate pass**: Use memory edit tool to record phase completion in `session-ultrawork.md`
+**On gate pass**:
+1. Use memory edit tool to record phase completion in `session-ultrawork.md`.
+2. Emit and verify the REFINE outcome decision:
+   ```bash
+   oma state:emit "decision.made" '{"subject":"ultrawork.refine-outcome","decision":"Keep the REFINE changes or explicitly skip refinement.","rationale":"REFINE_GATE passed or the documented skip condition applies."}'
+   oma state:verify --workflow ultrawork --checkpoint refine-outcome
+   ```
 
-**Gate failure → Re-spawn Debug Agent with specific issues and repeat until GATE passes.**
+**Gate failure → Before re-spawning the Debug Agent, apply the same termination check:**
+
+> **Review Loop termination conditions** (OR, whichever fires first wins):
+> 1. Total REFINE failure count has reached the configured maximum iterations (default: 5 cycles across all phases). Do not start another cycle.
+> 2. Session cost cap exceeded: if `loadQuotaCap()` from `cli/io/session-cost.ts` returns non-null, call `checkCap(sessionId, cap)` (no cap configured → skip this condition). If `exceeded === true`, print `formatPromptMessage(result)` to the user and stop. Save current step results before stopping, then report early termination due to quota.
+>
+> If neither condition is met, re-spawn the Debug Agent with specific issues and repeat until GATE passes.
 
 **Skip conditions**: Simple tasks < 50 lines
 
@@ -284,46 +358,52 @@ If baseline was measured at Step 5.2:
 
 ## Phase 5: SHIP (Steps 14-17)
 
-### Step 14-17: Final QA & Deployment Readiness
+### Step 14-17: Final QA & Deployment Readiness (Cross-Context Review)
 // turbo
-Spawn QA Agent to execute Steps 14-17.
+Dispatch each of Steps 14, 15, 16, 17 as a **separate fresh isolated reviewer subagent** per the **Cross-Context Review (CCR) Dispatch** section. Do NOT run them in one agent, and do NOT pass this session's history or the implementation/refine agents' reasoning into any reviewer prompt. Each reviewer reads only the durable artifacts (git diff, changed files, lint/coverage output, prior `result-*.md`) plus its own review guide section.
 
 #### If Claude Code
-Use the Agent tool to spawn subagent:
-- `Agent(subagent_type="qa-reviewer", prompt="Execute Phase 5 Ship. Step 14: Quality Review (lint/coverage). Step 15: UX Flow Verification. Step 16: Related Issues Review. Step 17: Deployment Readiness. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules.", run_in_background=true)`
+Use separate Agent tool calls (one message = parallel, isolated contexts):
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 14 Code Quality Review ONLY (lint/coverage). Inputs (read fresh, assume no prior context): <diff + lint/coverage output>. Guide: Quality Review section. Write a structured verdict to memory.", run_in_background=true)`
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 15 UX Flow Verification ONLY. Inputs (read fresh, assume no prior context): <diff + user journey/routes>. Write a structured verdict to memory.", run_in_background=true)`
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 16 Related Issues / Cascade Impact Review ONLY. Inputs (read fresh, assume no prior context): <diff + find_referencing_symbols impact>. Guide: Cascade Impact Review section. Write a structured verdict to memory.", run_in_background=true)`
+- `Agent(subagent_type="qa-reviewer", prompt="CCR Step 17 Deployment Readiness Review ONLY. Inputs (read fresh, assume no prior context): <diff + secrets/migrations checklist>. Guide: Final Review section. Write a structured verdict to memory.", run_in_background=true)`
 
 #### If Codex CLI
-Spawn native Codex custom agents using `.codex/agents/{agent}.toml` when available for final QA and deployment readiness tasks.
+Spawn one native Codex reviewer per review (`.codex/agents/{agent}.toml`) when available, each with only its artifacts + guide section.
 If native dispatch is not verified in the current runtime, fall back to `oma agent:spawn`.
 
 #### If Gemini CLI or Antigravity or CLI Fallback
 ```bash
-oma agent:spawn qa-agent "Execute Phase 5 Ship. Step 14: Quality Review (lint/coverage). Step 15: UX Flow Verification. Step 16: Related Issues Review. Step 17: Deployment Readiness. IMPORTANT: Follow .agents/skills/_shared/core/context-loading.md rules." session-id
+oma agent:spawn qa-agent "CCR Step 14 Code Quality Review ONLY (lint/coverage). Inputs (read fresh): <diff + lint output>. Guide: Quality Review section. Write a structured verdict to memory." session-id
+oma agent:spawn qa-agent "CCR Step 15 UX Flow Verification ONLY. Inputs (read fresh): <diff + routes>. Write a structured verdict to memory." session-id
+oma agent:spawn qa-agent "CCR Step 16 Cascade Impact Review ONLY. Inputs (read fresh): <diff + impact>. Guide: Cascade Impact Review section. Write a structured verdict to memory." session-id
+oma agent:spawn qa-agent "CCR Step 17 Deployment Readiness Review ONLY. Inputs (read fresh): <diff + checklist>. Guide: Final Review section. Write a structured verdict to memory." session-id
 ```
 
 ---
 
-### Monitor Final QA Progress
+### Monitor Reviewers & Aggregate
 
-**Wait for QA Agent to complete final review before proceeding.**
+**Wait for all SHIP reviewers to complete final review before proceeding.**
 
-1. Use memory read tool to poll `progress-qa-agent[-{sessionId}].md`
-2. Check for `result-qa-agent[-{sessionId}].md` to confirm completion
-3. Use memory edit tool to record final QA results in `session-ultrawork.md`
+1. Confirm each reviewer wrote its structured verdict to memory.
+   - **Claude-native path**: each `qa-reviewer` Agent call returns synchronously with its verdict.
+2. **Aggregate** the verdicts into `result-qa-{sessionId}.md` under `.agents/results/` (this satisfies the SHIP artifact contract) and record the combined final result in `session-ultrawork.md`.
 
-**Continue polling until QA Agent reports completion.**
+**Continue polling until all SHIP reviewers report completion.**
 
 ### Step 14: Code Quality Review
-- **Executed by QA Agent**: Lint, Types, Coverage.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Lint, Types, Coverage.
 
 ### Step 15: UX Flow Verification
-- **Executed by QA Agent**: User journey check.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: User journey check.
 
 ### Step 16: Related Issues Review (Cascade Impact 2nd)
-- **Executed by QA Agent**: Final impact check.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Final impact check.
 
 ### Step 17: Deployment Readiness Review (Final)
-- **Executed by QA Agent**: Secrets, Migrations, checklist.
+- **Executed by a fresh isolated reviewer subagent (CCR)**: Secrets, Migrations, checklist.
 
 ### Step 17.1: Final Quality Score & Session Summary (Conditional)
 
@@ -357,17 +437,33 @@ If Quality Score was measured during this session:
 
 ---
 
+## Step 18: Optional Doc Verify Hook (post-SHIP; outside the 17-step model)
+
+If `oma-config.yaml` has `docs.auto_verify: true`:
+
+1. Run `oma docs verify --json` from the repo root.
+2. Capture the JSON output.
+3. If `broken.length === 0`: print `docs verified clean (N docs)` summary to stdout and continue with workflow completion.
+4. If `broken.length > 0`: print a 1-3 line summary identifying which docs have drift, and a hint `Run /oma-docs verify for the full report.` Continue with workflow completion (warn-only, never block).
+5. If `oma-docs` is not available (CLI command missing): skip silently.
+
+This hook is opt-in; the default `auto_verify: false` skips this step entirely.
+
+---
+
 ## Review Steps Summary
 
-| Phase  | Steps | Agent       | Execution | Perspective                       |
-| ------ | ----- | ----------- | --------- | --------------------------------- |
-| PLAN   | 1-4   | PM Agent    | Inline    | Completeness, Meta, Simplicity    |
-| IMPL   | 5     | Dev Agents  | Spawn     | Implementation                    |
-| VERIFY | 6-8   | QA Agent    | Spawn     | Alignment, Safety, Regression     |
-| REFINE | 9-13  | Debug Agent | Spawn     | Reusability, Cascade, Consistency |
-| SHIP   | 14-17 | QA Agent    | Spawn     | Quality, UX, Cascade 2nd, Deploy  |
+| Phase  | Steps | Agent                        | Execution            | Perspective                       |
+| ------ | ----- | ---------------------------- | -------------------- | --------------------------------- |
+| PLAN   | 1-4   | PM (author) + CCR reviewers  | CCR isolated review  | Completeness, Meta, Simplicity    |
+| IMPL   | 5     | Dev Agents                   | Spawn (action)       | Implementation                    |
+| VERIFY | 6-8   | CCR reviewers                | CCR isolated review  | Alignment, Safety, Regression     |
+| REFINE | 9-13  | Debug Agent + CCR reviewers  | Action + CCR review  | Reusability, Cascade, Consistency |
+| SHIP   | 14-17 | CCR reviewers                | CCR isolated review  | Quality, UX, Cascade 2nd, Deploy  |
 
-**Total 11 review steps + conditional Quality Score checkpoints → High quality guaranteed**
+**Total 11 review steps, each run in a fresh isolated reviewer (Cross-Context Review), + conditional Quality Score checkpoints → High quality guaranteed**
+
+Every review runs in its own fresh context (never inline, never batched) per the **Cross-Context Review (CCR) Dispatch** section and the CCR Mandate in `multi-review-protocol.md`.
 
 ---
 
@@ -383,4 +479,4 @@ This workflow conditionally incorporates patterns from autoresearch:
 | **Hypothesis exploration** | On repeated gate failures | `exploration-loop.md` (loaded on trigger) |
 | **Auto-learning** | At session end, if experiments exist | `lessons-learned.md` auto-generation |
 
-All protocols are loaded **conditionally** per `context-loading.md` — not at Phase 0.
+All protocols are loaded **conditionally** per `context-loading.md`, not at Phase 0.

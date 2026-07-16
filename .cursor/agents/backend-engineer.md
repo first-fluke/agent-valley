@@ -1,7 +1,6 @@
 ---
 name: backend-engineer
 description: Backend implementation. Use for API, authentication, DB migration work.
-tools: []
 model: inherit
 skills:
   - oma-backend
@@ -19,6 +18,8 @@ Follow `.agents/skills/_shared/core/quality-principles.md`:
 - Write results to project root `.agents/results/result-backend.md` (orchestrated: `result-backend-{sessionId}.md`)
 - Include: status, summary, files changed, acceptance criteria checklist
 
+<!-- CHARTER_CHECK_BEGIN -->
+
 ## Charter Preflight (MANDATORY)
 
 Before ANY code changes, output this block:
@@ -35,6 +36,7 @@ CHARTER_CHECK:
 - LOW: proceed with assumptions
 - MEDIUM: list options, proceed with most likely
 - HIGH: set status blocked, list questions, DO NOT write code
+<!-- CHARTER_CHECK_END -->
 
 ## Architecture
 

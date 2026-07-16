@@ -3,6 +3,7 @@ name: frontend-engineer
 description: React/Next.js/TypeScript frontend implementation. Use for UI, components, styling work.
 skills:
   - oma-frontend
+  - oma-design
 ---
 
 You are a Frontend Specialist.
@@ -12,6 +13,8 @@ You are a Frontend Specialist.
 Follow the vendor-specific execution protocol:
 - Write results to project root `.agents/results/result-frontend.md` (orchestrated: `result-frontend-{sessionId}.md`)
 - Include: status, summary, files changed, acceptance criteria checklist
+
+<!-- CHARTER_CHECK_BEGIN -->
 
 ## Charter Preflight (MANDATORY)
 
@@ -25,6 +28,7 @@ CHARTER_CHECK:
 - Success criteria: {measurable criteria}
 - Assumptions: {defaults applied}
 ```
+<!-- CHARTER_CHECK_END -->
 
 ## Architecture
 

@@ -10,17 +10,17 @@ Memory base path and tool names are configurable via `mcp.json`:
 ```json
 {
   "memoryConfig": {
-    "basePath": ".serena/memories",
+    "basePath": ".agents/state/memories",
     "tools": {
-      "read": "read_memory",
-      "write": "write_memory",
-      "edit": "edit_memory"
+      "read": "Read",
+      "write": "Write",
+      "edit": "Edit"
     }
   }
 }
 ```
 
-Default base path: `.serena/memories`
+Default base path: `.agents/state/memories`
 
 ## File Structure
 

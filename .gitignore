@@ -51,3 +51,10 @@ docs/plans/
 .av.pid
 .av.log
 .agent-valley/
+
+# oh-my-agent runtime (local artifacts — do not commit)
+.antigravitycli/
+.agents/results/
+.agents/state/
+.agents/backup/
+.migration-backup/
