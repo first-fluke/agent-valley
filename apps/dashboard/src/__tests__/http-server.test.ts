@@ -94,16 +94,37 @@ describe("API Route Handlers", () => {
     expect(res.status).toBe(403)
   })
 
-  test("GET /status accepts remote host when SYMPHONY_ALLOW_REMOTE_STATUS=1", async () => {
+  test("GET /status fails closed with 403 when SYMPHONY_ALLOW_REMOTE_STATUS=1 but no token is configured", async () => {
     const prev = process.env.SYMPHONY_ALLOW_REMOTE_STATUS
     process.env.SYMPHONY_ALLOW_REMOTE_STATUS = "1"
     try {
       const req = new Request("http://example.com/api/status", { headers: { host: "evil.ngrok-free.app" } })
       const res = statusGET(req)
-      expect(res.status).toBe(200)
+      expect(res.status).toBe(403)
+      const body = (await res.json()) as { message: string }
+      expect(body.message).toContain("SYMPHONY_DASHBOARD_TOKEN")
     } finally {
       if (prev === undefined) delete process.env.SYMPHONY_ALLOW_REMOTE_STATUS
       else process.env.SYMPHONY_ALLOW_REMOTE_STATUS = prev
+    }
+  })
+
+  test("GET /status accepts remote host when SYMPHONY_ALLOW_REMOTE_STATUS=1 and the bearer token matches", async () => {
+    const prevAllow = process.env.SYMPHONY_ALLOW_REMOTE_STATUS
+    const prevToken = process.env.SYMPHONY_DASHBOARD_TOKEN
+    process.env.SYMPHONY_ALLOW_REMOTE_STATUS = "1"
+    process.env.SYMPHONY_DASHBOARD_TOKEN = "secret-token-123"
+    try {
+      const req = new Request("http://example.com/api/status", {
+        headers: { host: "evil.ngrok-free.app", authorization: "Bearer secret-token-123" },
+      })
+      const res = statusGET(req)
+      expect(res.status).toBe(200)
+    } finally {
+      if (prevAllow === undefined) delete process.env.SYMPHONY_ALLOW_REMOTE_STATUS
+      else process.env.SYMPHONY_ALLOW_REMOTE_STATUS = prevAllow
+      if (prevToken === undefined) delete process.env.SYMPHONY_DASHBOARD_TOKEN
+      else process.env.SYMPHONY_DASHBOARD_TOKEN = prevToken
     }
   })
 
@@ -122,6 +143,18 @@ describe("API Route Handlers", () => {
       })
       const badRes = statusGET(bad)
       expect(badRes.status).toBe(401)
+    } finally {
+      if (prev === undefined) delete process.env.SYMPHONY_DASHBOARD_TOKEN
+      else process.env.SYMPHONY_DASHBOARD_TOKEN = prev
+    }
+  })
+
+  test("SECURITY REGRESSION: GET /status rejects a spoofed 'Host: localhost' header with no bearer token when a token is configured", async () => {
+    const prev = process.env.SYMPHONY_DASHBOARD_TOKEN
+    process.env.SYMPHONY_DASHBOARD_TOKEN = "secret-token-123"
+    try {
+      const res = statusGET(localStatusRequest())
+      expect(res.status).toBe(401)
     } finally {
       if (prev === undefined) delete process.env.SYMPHONY_DASHBOARD_TOKEN
       else process.env.SYMPHONY_DASHBOARD_TOKEN = prev

@@ -7,38 +7,23 @@
  *                       | { kind: "append_prompt", text: string }
  *                       | { kind: "abort", reason: string }
  *
- * Auth: v0.2 is localhost-only (127.0.0.1 / localhost host header).
- *       See docs/plans/v0-2-bigbang-design.md § 6.9. Remote access lands
- *       in v0.3 behind a signed session token.
+ * Auth: gated by authorizeInterventionRequest (@/lib/dashboard-auth). Local
+ *       requests pass a best-effort Host-header check by default; any
+ *       non-local request (or SYMPHONY_ALLOW_REMOTE_INTERVENTION=1) requires
+ *       a matching `Authorization: Bearer <SYMPHONY_INTERVENTION_TOKEN>`.
+ *       See @/lib/dashboard-auth.ts for the full policy and rationale —
+ *       the Host header alone is forgeable and is never the sole gate for
+ *       non-local traffic.
  *
  * Delegates all decisions to InterventionBus — the handler itself
  * contains no business logic (clean-architecture: Presentation → Application).
  */
 
 import type { InterventionCommand } from "@agent-valley/core/domain/ports/agent-runner"
+import { authorizeInterventionRequest } from "@/lib/dashboard-auth"
 import { getOrchestrator } from "@/lib/orchestrator-singleton"
 
 export const dynamic = "force-dynamic"
-
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
-
-function isLocalHost(host: string | null): boolean {
-  if (!host) return false
-  const hostname = host.replace(/:\d+$/, "")
-  return LOCAL_HOSTS.has(hostname)
-}
-
-function forbidden(): Response {
-  return Response.json(
-    {
-      error: "Forbidden",
-      message:
-        "/api/intervention is localhost-only. " +
-        "Remote access is planned for v0.3 (docs/plans/v0-2-bigbang-design.md § 6.9).",
-    },
-    { status: 403 },
-  )
-}
 
 function badRequest(message: string): Response {
   return Response.json({ error: "BadRequest", message }, { status: 400 })
@@ -69,9 +54,8 @@ function parseCommand(value: unknown): InterventionCommand | { error: string } {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  if (process.env.SYMPHONY_ALLOW_REMOTE_INTERVENTION !== "1") {
-    if (!isLocalHost(request.headers.get("host"))) return forbidden()
-  }
+  const unauthorized = authorizeInterventionRequest(request)
+  if (unauthorized) return unauthorized
 
   let body: unknown
   try {

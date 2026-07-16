@@ -1,8 +1,9 @@
 /**
- * /api/intervention route tests — verifies the 127.0.0.1 guard, body
- * validation, and InterventionBus delegation.
+ * /api/intervention route tests — verifies the auth gate (bearer token +
+ * best-effort localhost check), body validation, and InterventionBus
+ * delegation.
  *
- * Design: docs/plans/v0-2-bigbang-design.md § 5.7, § 6.9.
+ * Auth policy details: @/lib/dashboard-auth.ts, @/lib/dashboard-auth.test.ts.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
@@ -29,12 +30,18 @@ function localRequest(body: unknown, host = "localhost"): Request {
   })
 }
 
-function remoteRequest(body: unknown): Request {
+function remoteRequest(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request("http://example.com/api/intervention", {
     method: "POST",
-    headers: { host: "example.com", "content-type": "application/json" },
+    headers: { host: "example.com", "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   })
+}
+
+const ENV_KEYS = ["SYMPHONY_ALLOW_REMOTE_INTERVENTION", "SYMPHONY_INTERVENTION_TOKEN"] as const
+
+function clearEnv() {
+  for (const key of ENV_KEYS) delete process.env[key]
 }
 
 describe("POST /api/intervention", () => {
@@ -42,23 +49,73 @@ describe("POST /api/intervention", () => {
     mockOrchestrator = {
       intervention: { send: vi.fn(async () => ({ ok: true })) },
     }
-    delete process.env.SYMPHONY_ALLOW_REMOTE_INTERVENTION
+    clearEnv()
   })
 
   afterEach(() => {
     mockOrchestrator = null
-    delete process.env.SYMPHONY_ALLOW_REMOTE_INTERVENTION
+    clearEnv()
   })
 
-  test("returns 403 when the host is not localhost/127.0.0.1", async () => {
+  test("returns 403 when the host is not localhost/127.0.0.1 and no token is configured", async () => {
     const res = await interventionPOST(remoteRequest({ attemptId: "a", command: { kind: "pause" } }))
     expect(res.status).toBe(403)
     expect(mockOrchestrator?.intervention.send).not.toHaveBeenCalled()
   })
 
-  test("allows remote when SYMPHONY_ALLOW_REMOTE_INTERVENTION=1", async () => {
+  test("remote request with correct SYMPHONY_INTERVENTION_TOKEN is allowed without the remote flag", async () => {
+    process.env.SYMPHONY_INTERVENTION_TOKEN = "secret-token"
+    const res = await interventionPOST(
+      remoteRequest(
+        { attemptId: "a", command: { kind: "pause" } },
+        { authorization: "Bearer secret-token" },
+      ),
+    )
+    expect(res.status).toBe(200)
+    expect(mockOrchestrator?.intervention.send).toHaveBeenCalledWith("a", { kind: "pause" })
+  })
+
+  test("remote request with wrong token is rejected with 401", async () => {
+    process.env.SYMPHONY_INTERVENTION_TOKEN = "secret-token"
+    const res = await interventionPOST(
+      remoteRequest({ attemptId: "a", command: { kind: "pause" } }, { authorization: "Bearer wrong-token" }),
+    )
+    expect(res.status).toBe(401)
+    expect(mockOrchestrator?.intervention.send).not.toHaveBeenCalled()
+  })
+
+  test("remote request with missing token is rejected with 401 when a token is configured", async () => {
+    process.env.SYMPHONY_INTERVENTION_TOKEN = "secret-token"
+    const res = await interventionPOST(remoteRequest({ attemptId: "a", command: { kind: "pause" } }))
+    expect(res.status).toBe(401)
+    expect(mockOrchestrator?.intervention.send).not.toHaveBeenCalled()
+  })
+
+  test("SECURITY REGRESSION: a spoofed 'Host: localhost' header with no bearer token is rejected when a token is configured", async () => {
+    process.env.SYMPHONY_INTERVENTION_TOKEN = "secret-token"
+    const res = await interventionPOST(localRequest({ attemptId: "a", command: { kind: "pause" } }))
+    expect(res.status).toBe(401)
+    expect(mockOrchestrator?.intervention.send).not.toHaveBeenCalled()
+  })
+
+  test("fails closed with 403 when SYMPHONY_ALLOW_REMOTE_INTERVENTION=1 but no token is configured", async () => {
     process.env.SYMPHONY_ALLOW_REMOTE_INTERVENTION = "1"
     const res = await interventionPOST(remoteRequest({ attemptId: "a", command: { kind: "pause" } }))
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { message: string }
+    expect(body.message).toContain("SYMPHONY_INTERVENTION_TOKEN")
+    expect(mockOrchestrator?.intervention.send).not.toHaveBeenCalled()
+  })
+
+  test("allows remote when SYMPHONY_ALLOW_REMOTE_INTERVENTION=1 and the bearer token matches", async () => {
+    process.env.SYMPHONY_ALLOW_REMOTE_INTERVENTION = "1"
+    process.env.SYMPHONY_INTERVENTION_TOKEN = "secret-token"
+    const res = await interventionPOST(
+      remoteRequest(
+        { attemptId: "a", command: { kind: "pause" } },
+        { authorization: "Bearer secret-token" },
+      ),
+    )
     expect(res.status).toBe(200)
     expect(mockOrchestrator?.intervention.send).toHaveBeenCalledWith("a", { kind: "pause" })
   })
@@ -96,7 +153,7 @@ describe("POST /api/intervention", () => {
     expect(res.status).toBe(503)
   })
 
-  test("happy path: delegates to bus.send and returns 200", async () => {
+  test("happy path: local default allows the request and delegates to bus.send", async () => {
     const res = await interventionPOST(localRequest({ attemptId: "a1", command: { kind: "pause" } }))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
