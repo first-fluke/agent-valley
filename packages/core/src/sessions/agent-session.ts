@@ -72,6 +72,14 @@ export type AgentEvent =
   | { type: "heartbeat"; timestamp: string }
   | { type: "complete"; result: RunResult }
   | { type: "error"; error: AgentError }
+  /**
+   * Fired once the session's OS child process has actually been spawned
+   * (i.e. `this.process` was assigned on `BaseSession`). `pid` mirrors
+   * `ChildProcess.pid`, which is `undefined` if spawn() itself failed
+   * synchronously. Consumers (AgentRunnerService) use this to capture the
+   * real PID for crash-recovery persistence — see `PersistedAttempt.pid`.
+   */
+  | { type: "spawned"; pid: number | undefined }
 
 export type AgentEventType = AgentEvent["type"]
 
@@ -94,6 +102,9 @@ export interface AgentSession {
 
   /** Check if the agent process is still alive */
   isAlive(): boolean
+
+  /** OS process id of the spawned child, when known. `undefined` before start()/execute() has spawned a process. */
+  readonly pid?: number
 
   /** Subscribe to agent events */
   on<T extends AgentEventType>(event: T, handler: AgentEventHandler<T>): void

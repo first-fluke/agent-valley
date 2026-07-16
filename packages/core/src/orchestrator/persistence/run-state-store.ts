@@ -23,21 +23,21 @@ import { logger } from "../../observability/logger"
  * persisting. `pid` is the OS process id of the spawned agent, used by
  * boot recovery to probe liveness with `process.kill(pid, 0)`.
  *
- * LIMITATION: `AgentRunnerService` / `AgentSession` (packages/core/src/
- * orchestrator/agent-runner.ts, packages/core/src/sessions/*) do not
- * currently surface the child process PID past their own module
- * boundary — `RunOptions` / `RunCallbacks` / `AgentEvent` carry no pid
- * field. Threading a real PID up to OrchestratorCore requires editing
- * those files, which is out of scope for this change (see result doc
- * follow-ups). Until then, `pid` is always persisted as `null` and
- * `decideRecovery()` conservatively treats a `null` pid as "cannot
- * verify liveness" — see `./recovery.ts`.
+ * `pid` is populated from `AgentSession`'s `spawned` event (see
+ * `BaseSession.process` setter in `../../sessions/base-session.ts`),
+ * threaded through `AgentRunnerService` (`RunCallbacks.onSpawned`) into
+ * `OrchestratorCore.registerAttempt(issueId, attemptId, pid?)`. It can
+ * still be `null` in the narrow window between `registerAttempt()` being
+ * called (before spawn, to guard `canAcceptIssue`) and the child process
+ * actually spawning, or if the session type never surfaces a pid.
+ * `decideRecovery()` treats a `null` pid as "cannot verify liveness" and
+ * reaps conservatively — see `./recovery.ts`.
  */
 export interface PersistedAttempt {
   issueId: string
   attemptId: string
   workspacePath: string
-  /** OS process id of the spawned agent, when known. Always `null` today — see LIMITATION above. */
+  /** OS process id of the spawned agent, when known — see doc comment above for when it can still be `null`. */
   pid: number | null
   startedAt: string
 }

@@ -20,7 +20,7 @@
 
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, buildAgentEnv } from "./base-session"
+import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
 import { planSandboxedSpawn } from "./sandbox"
 
 // ── CLI surface (verified against `agy --help` v1.1.3) ─────────────────────
@@ -210,48 +210,46 @@ export class AgySession extends BaseSession {
   // fallback did when no usageMetadata was present — and BudgetService
   // skips accumulation for this attempt.
 
-  private readStream(): Promise<void> {
-    return new Promise((resolve) => {
-      const proc = this.process
-      if (!proc?.stdout) {
-        this.emitError("CRASH", "agy process has no stdout", false)
-        resolve()
-        return
+  private async readStream(): Promise<void> {
+    const proc = this.process
+    if (!proc?.stdout) {
+      this.emitError("CRASH", "agy process has no stdout", false)
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      buffer += decoder.decode(chunk, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        this.emitTextChunk(line)
       }
-
-      const decoder = new TextDecoder()
-      let buffer = ""
-
-      proc.stdout.on("data", (chunk: Buffer) => {
-        buffer += decoder.decode(chunk, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
-
-        for (const line of lines) {
-          if (!line.trim()) continue
-          this.emitTextChunk(line)
-        }
-      })
-
-      proc.stdout.on("error", () => {
-        // Stream error — proceed to close
-      })
-
-      proc.once("close", (code) => {
-        // Flush a trailing partial line that never got a terminating newline.
-        if (buffer.trim()) this.emitTextChunk(buffer)
-
-        const exitCode = code ?? -1
-        if (exitCode === 0) {
-          const result = this.buildRunResult(this.tailBuffer, this.filesChanged)
-          this.emit({ type: "complete", result })
-        } else {
-          this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `agy exited with code ${exitCode}`, true)
-        }
-
-        resolve()
-      })
     })
+
+    proc.stdout.on("error", () => {
+      // Stream error — proceed to close
+    })
+
+    // Gated on BOTH stdout 'end' and process 'close' — see
+    // waitForStreamCompletion() doc comment for why 'close' alone races
+    // the final buffered 'data' chunk on a fast-exiting process.
+    const { exitCode: code } = await waitForStreamCompletion(proc)
+
+    // Flush a trailing partial line that never got a terminating newline.
+    if (buffer.trim()) this.emitTextChunk(buffer)
+
+    const exitCode = code ?? -1
+    if (exitCode === 0) {
+      const result = this.buildRunResult(this.tailBuffer, this.filesChanged)
+      this.emit({ type: "complete", result })
+    } else {
+      this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `agy exited with code ${exitCode}`, true)
+    }
   }
 
   private emitTextChunk(text: string): void {

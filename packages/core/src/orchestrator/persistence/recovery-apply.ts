@@ -17,6 +17,8 @@ export interface RecoveryApplyDeps {
   state: OrchestratorRuntimeState
   activeAttempts: Map<string, string>
   attemptStartedAt: Map<string, string>
+  /** issueId -> real OS pid of the spawned agent, when known. See PersistedAttempt.pid. */
+  attemptPid: Map<string, number>
   retryQueue: RetryQueue
   observability: ObservabilityHooks
 }
@@ -43,6 +45,7 @@ export function applyRecoveryDecision(decision: RecoveryDecision, deps: Recovery
     }
     deps.activeAttempts.set(attempt.issueId, attempt.attemptId)
     deps.attemptStartedAt.set(attempt.issueId, attempt.startedAt)
+    if (attempt.pid != null) deps.attemptPid.set(attempt.issueId, attempt.pid)
     logger.warn("orchestrator", "Recovered attempt still alive after restart — reattached as active", {
       issueId: attempt.issueId,
       attemptId: attempt.attemptId,
@@ -58,6 +61,7 @@ export function applyRecoveryDecision(decision: RecoveryDecision, deps: Recovery
     )
     deps.activeAttempts.delete(attempt.issueId)
     deps.attemptStartedAt.delete(attempt.issueId)
+    deps.attemptPid.delete(attempt.issueId)
     deps.state.activeWorkspaces.delete(attempt.issueId)
   }
 
@@ -73,6 +77,34 @@ export function applyRecoveryDecision(decision: RecoveryDecision, deps: Recovery
     reaped: decision.reap.length,
     restoredRetries: decision.restoredRetries.length,
   }
+}
+
+/** Narrow view of InterventionBus.unregisterAttempt — avoids importing the concrete class here. */
+export interface AttemptUnregisterPort {
+  unregisterAttempt(attemptId: string): void
+}
+
+/**
+ * Clears all bookkeeping OrchestratorCore holds for a finished/failed
+ * attempt (activeWorkspaces status, activeAttempts, attemptStartedAt,
+ * attemptPid, interventionBus). Extracted alongside the other
+ * activeAttempts mutators in this module to keep orchestrator-core.ts
+ * under the 500-line cap. Caller (`OrchestratorCore.buildCompletionDeps`)
+ * still owns persisting the result via `persistActiveAttempts()`.
+ */
+export function cleanupAttemptState(
+  deps: RecoveryApplyDeps & { interventionBus: AttemptUnregisterPort | null },
+  issueId: string,
+  status: string,
+): void {
+  const ws = deps.state.activeWorkspaces.get(issueId)
+  if (ws) ws.status = status as Workspace["status"]
+  const attemptId = deps.activeAttempts.get(issueId)
+  deps.state.activeWorkspaces.delete(issueId)
+  deps.activeAttempts.delete(issueId)
+  deps.attemptStartedAt.delete(issueId)
+  deps.attemptPid.delete(issueId)
+  if (attemptId && deps.interventionBus) deps.interventionBus.unregisterAttempt(attemptId)
 }
 
 /** Synthetic Workspace entry for a reattached attempt — only issueId/path/status are known. */
@@ -92,6 +124,7 @@ export function buildPersistedAttempts(
   activeAttempts: Map<string, string>,
   activeWorkspaces: Map<string, Workspace>,
   attemptStartedAt: Map<string, string>,
+  attemptPid: Map<string, number>,
 ): PersistedAttempt[] {
   const attempts: PersistedAttempt[] = []
   for (const [issueId, attemptId] of activeAttempts) {
@@ -100,9 +133,7 @@ export function buildPersistedAttempts(
       issueId,
       attemptId,
       workspacePath: ws?.path ?? "",
-      // PID not currently surfaced by AgentRunnerService/AgentSession —
-      // see LIMITATION doc comment on PersistedAttempt in ./run-state-store.ts.
-      pid: null,
+      pid: attemptPid.get(issueId) ?? null,
       startedAt: attemptStartedAt.get(issueId) ?? new Date().toISOString(),
     })
   }
@@ -112,7 +143,7 @@ export function buildPersistedAttempts(
 /** Persist both active attempts and the retry queue snapshot in one call. Test-only convenience export. */
 export function persistAll(port: RunStatePort, deps: RecoveryApplyDeps): void {
   port.replaceActiveAttempts(
-    buildPersistedAttempts(deps.activeAttempts, deps.state.activeWorkspaces, deps.attemptStartedAt),
+    buildPersistedAttempts(deps.activeAttempts, deps.state.activeWorkspaces, deps.attemptStartedAt, deps.attemptPid),
   )
   port.replaceRetryQueue(deps.retryQueue.entries)
 }

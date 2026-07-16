@@ -18,6 +18,7 @@ import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { AgentEvent } from "../sessions/agent-session"
+import * as sandboxModule from "../sessions/sandbox"
 
 const MOCK_DIR = resolve(tmpdir(), "av-test-grok-mock")
 const MOCK_SCRIPT = resolve(MOCK_DIR, "grok")
@@ -407,9 +408,16 @@ exec sleep 5
 })
 
 describe("GrokSession — sandbox wrapping", () => {
+  // vi.spyOn on a namespace import, not vi.doMock()+vi.resetModules()+a
+  // fresh dynamic import per test: the doMock/resetModules combination
+  // was flaky here (~1-in-5 to 1-in-10 runs hung for 5s) because it
+  // tears down and rebuilds the whole module graph mid-file, racing
+  // against the "streaming output" describe block's real (unmocked)
+  // spawns that share the same module registry within this test file.
+  // spyOn only patches the one export in place and is restored per-test,
+  // so it never touches module identity or the other describe block.
   afterEach(() => {
-    vi.resetModules()
-    vi.doUnmock("../sessions/sandbox")
+    vi.restoreAllMocks()
     try {
       unlinkSync(MOCK_SCRIPT)
     } catch {
@@ -418,20 +426,17 @@ describe("GrokSession — sandbox wrapping", () => {
   })
 
   test("routes every spawn through planSandboxedSpawn with agentType 'grok' and the built argv", async () => {
-    vi.resetModules()
     // Resolve the mocked plan to an absolute no-op script rather than a
     // bare command name — avoids depending on the test runner's PATH
     // containing a specific binary.
     writeMockGrokRaw("#!/bin/bash\nexit 0\n")
-    const planSandboxedSpawn = vi.fn().mockResolvedValue({
+    const planSandboxedSpawn = vi.spyOn(sandboxModule, "planSandboxedSpawn").mockResolvedValue({
       command: MOCK_SCRIPT,
       args: [],
       sandboxed: true,
       platform: "darwin" as NodeJS.Platform,
       networkAllowlist: [],
     })
-
-    vi.doMock("../sessions/sandbox", () => ({ planSandboxedSpawn }))
 
     const { GrokSession } = await import("../sessions/grok-session")
     const session = new GrokSession()
@@ -458,14 +463,11 @@ describe("GrokSession — sandbox wrapping", () => {
   })
 
   test("propagates a fail-closed sandbox rejection as a CRASH error without spawning", async () => {
-    vi.resetModules()
     const planSandboxedSpawn = vi
-      .fn()
+      .spyOn(sandboxModule, "planSandboxedSpawn")
       .mockRejectedValue(
         new Error('sessions/sandbox: no OS sandbox available for agent "grok" on platform "linux" (missing: bwrap).'),
       )
-
-    vi.doMock("../sessions/sandbox", () => ({ planSandboxedSpawn }))
 
     const { GrokSession } = await import("../sessions/grok-session")
     const session = new GrokSession()

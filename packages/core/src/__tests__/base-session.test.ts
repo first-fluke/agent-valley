@@ -1,10 +1,14 @@
 /**
- * BaseSession tests — event emitter, process management, buildAgentEnv, waitForExit.
+ * BaseSession tests — event emitter, process management, buildAgentEnv,
+ * waitForExit, waitForStreamCompletion (readStream close-vs-data race
+ * fix), pid / 'spawned' event propagation.
  */
+import type { ChildProcess } from "node:child_process"
 import { spawn } from "node:child_process"
+import { EventEmitter } from "node:events"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import type { AgentConfig, AgentEvent } from "../sessions/agent-session"
-import { BaseSession, buildAgentEnv, waitForExit } from "../sessions/base-session"
+import { BaseSession, buildAgentEnv, waitForExit, waitForStreamCompletion } from "../sessions/base-session"
 
 // Concrete subclass for testing abstract BaseSession
 class TestSession extends BaseSession {
@@ -154,6 +158,90 @@ describe("waitForExit", () => {
   })
 })
 
+// ── waitForStreamCompletion — close-vs-data race fix ─────────────────
+
+/** Fake ChildProcess: an EventEmitter with a `.stdout` EventEmitter, driven manually to control event ordering. */
+function makeFakeChildProcess() {
+  const proc = new EventEmitter() as unknown as ChildProcess & EventEmitter
+  const stdout = new EventEmitter()
+  Object.assign(proc, { stdout })
+  return { proc, stdout }
+}
+
+describe("waitForStreamCompletion", () => {
+  test("does NOT resolve on 'close' alone — waits for stdout 'end' too, reproducing the fast-exit race", async () => {
+    const { proc, stdout } = makeFakeChildProcess()
+    const chunks: string[] = []
+    stdout.on("data", (c: string) => chunks.push(c))
+
+    const resultPromise = waitForStreamCompletion(proc)
+    let resolved = false
+    resultPromise.then(() => {
+      resolved = true
+    })
+
+    // Reproduce the race: 'close' fires before the final buffered 'data'
+    // chunk is delivered — the bug this fix targets.
+    proc.emit("close", 0)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(resolved).toBe(false)
+
+    // The final chunk arrives after 'close' — must still be captured
+    // before resolution, not lost.
+    stdout.emit("data", "final chunk")
+    stdout.emit("end")
+
+    const result = await resultPromise
+    expect(resolved).toBe(true)
+    expect(result.exitCode).toBe(0)
+    expect(chunks).toEqual(["final chunk"])
+  })
+
+  test("resolves once 'close' fires, when stdout already signaled 'end' first (normal order)", async () => {
+    const { proc, stdout } = makeFakeChildProcess()
+    const resultPromise = waitForStreamCompletion(proc)
+    let resolved = false
+    resultPromise.then(() => {
+      resolved = true
+    })
+
+    stdout.emit("end")
+    await new Promise((r) => setTimeout(r, 0))
+    expect(resolved).toBe(false)
+
+    proc.emit("close", 0)
+    const result = await resultPromise
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("treats stdout 'error' the same as 'end' for gating resolution", async () => {
+    const { proc, stdout } = makeFakeChildProcess()
+    const resultPromise = waitForStreamCompletion(proc)
+    proc.emit("close", 1)
+    stdout.emit("error", new Error("boom"))
+    const result = await resultPromise
+    expect(result.exitCode).toBe(1)
+  })
+
+  test("falls back to the grace-period timeout if stdout never signals 'end' after close", async () => {
+    const { proc } = makeFakeChildProcess()
+    const start = Date.now()
+    const resultPromise = waitForStreamCompletion(proc, 30)
+    proc.emit("close", null)
+    const result = await resultPromise
+    expect(Date.now() - start).toBeGreaterThanOrEqual(25)
+    expect(result.exitCode).toBeNull()
+  })
+
+  test("resolves on 'close' immediately when the process has no stdout", async () => {
+    const proc = new EventEmitter() as unknown as ChildProcess & EventEmitter
+    const resultPromise = waitForStreamCompletion(proc)
+    proc.emit("close", 7)
+    const result = await resultPromise
+    expect(result.exitCode).toBe(7)
+  })
+})
+
 // ── BaseSession event emitter ───────────────────────────────────────
 
 describe("BaseSession — event emitter", () => {
@@ -263,6 +351,57 @@ describe("BaseSession — process management", () => {
 
   test("dispose on already-dead session is safe", async () => {
     await expect(session.dispose()).resolves.toBeUndefined()
+  })
+})
+
+// ── BaseSession pid / 'spawned' event ─────────────────────────────────
+// Every subclass assigns `this.process = spawn(...)` — the accessor pair
+// on `process` (see base-session.ts) transparently emits 'spawned' with
+// the real OS pid, so no subclass changes are required for this.
+
+describe("BaseSession — pid / 'spawned' event", () => {
+  let session: TestSession
+
+  beforeEach(() => {
+    session = new TestSession()
+  })
+
+  afterEach(async () => {
+    await session.dispose()
+  })
+
+  test("pid is undefined before start()", () => {
+    expect(session.pid).toBeUndefined()
+  })
+
+  test("pid reflects the real OS pid of the spawned child after start()", async () => {
+    await session.start({ type: "test", timeout: 30, workspacePath: "/tmp" })
+    expect(session.pid).toBeGreaterThan(0)
+  })
+
+  test("emits a 'spawned' event with the real pid when the process is assigned", async () => {
+    const pids: Array<number | undefined> = []
+    session.on("spawned", (e) => pids.push(e.pid))
+
+    await session.start({ type: "test", timeout: 30, workspacePath: "/tmp" })
+
+    expect(pids).toHaveLength(1)
+    expect(pids[0]).toBe(session.pid)
+  })
+
+  test("pid becomes undefined again after dispose", async () => {
+    await session.start({ type: "test", timeout: 30, workspacePath: "/tmp" })
+    expect(session.pid).toBeGreaterThan(0)
+    await session.dispose()
+    expect(session.pid).toBeUndefined()
+  })
+
+  test("dispose (process = null) does not re-emit 'spawned'", async () => {
+    const pids: Array<number | undefined> = []
+    session.on("spawned", (e) => pids.push(e.pid))
+    await session.start({ type: "test", timeout: 30, workspacePath: "/tmp" })
+    await session.dispose()
+    expect(pids).toHaveLength(1)
   })
 })
 

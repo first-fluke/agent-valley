@@ -25,7 +25,7 @@ import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
 import type { InterventionBus } from "./intervention-bus"
 import { decideRecovery } from "./persistence/recovery"
-import { applyRecoveryDecision, buildPersistedAttempts } from "./persistence/recovery-apply"
+import { applyRecoveryDecision, buildPersistedAttempts, cleanupAttemptState } from "./persistence/recovery-apply"
 import type { RunStatePort } from "./persistence/run-state-store"
 import { RunStatePersistence } from "./persistence/run-state-store"
 import { RetryQueue } from "./retry-queue"
@@ -96,6 +96,8 @@ export class OrchestratorCore {
   readonly activeAttempts = new Map<string, string>()
   /** issueId -> attempt.startedAt, mirrored to disk for crash recovery (see persistence/). */
   private readonly attemptStartedAt = new Map<string, string>()
+  /** issueId -> real OS pid of the spawned agent, when known (see registerAttempt). */
+  private readonly attemptPid = new Map<string, number>()
   /** Durable mirror of activeAttempts + retryQueue so a crash/restart can recover instead of duplicating runs. */
   private readonly runStatePersistence: RunStatePort
   private recoveryCompleted = false
@@ -154,13 +156,7 @@ export class OrchestratorCore {
       tracker: this.tracker,
       dagScheduler: this.dagScheduler,
       cleanupState: (issueId, status) => {
-        const ws = this.state.activeWorkspaces.get(issueId)
-        if (ws) ws.status = status
-        const attemptId = this.activeAttempts.get(issueId)
-        this.state.activeWorkspaces.delete(issueId)
-        this.activeAttempts.delete(issueId)
-        this.attemptStartedAt.delete(issueId)
-        if (attemptId && this.interventionBus) this.interventionBus.unregisterAttempt(attemptId)
+        cleanupAttemptState(this.recoveryApplyDeps(), issueId, status)
         this.persistActiveAttempts()
       },
       saveAttempt: (ws, att) => this.workspace.saveAttempt(ws, att),
@@ -225,9 +221,12 @@ export class OrchestratorCore {
     this.persistActiveAttempts()
   }
 
-  registerAttempt(issueId: string, attemptId: string): void {
+  /** Registers the active attempt; called again with `pid` once the session's `spawned` event fires (pid-only update, keeps original `attemptStartedAt`). */
+  registerAttempt(issueId: string, attemptId: string, pid?: number): void {
+    const isNewAttempt = this.activeAttempts.get(issueId) !== attemptId
     this.activeAttempts.set(issueId, attemptId)
-    this.attemptStartedAt.set(issueId, new Date().toISOString())
+    if (isNewAttempt) this.attemptStartedAt.set(issueId, new Date().toISOString())
+    if (pid != null) this.attemptPid.set(issueId, pid)
     this.persistActiveAttempts()
   }
 
@@ -238,6 +237,7 @@ export class OrchestratorCore {
   clearAttempt(issueId: string): void {
     this.activeAttempts.delete(issueId)
     this.attemptStartedAt.delete(issueId)
+    this.attemptPid.delete(issueId)
     this.persistActiveAttempts()
   }
 
@@ -254,14 +254,18 @@ export class OrchestratorCore {
     this.persistRetryQueue()
   }
 
-  // ── Crash-recovery persistence (see persistence/) ──────────────────
-  // Mirrors activeAttempts/retryQueue to disk on every mutation. Mutation + decision logic lives in
-  // persistence/recovery*.ts to keep this file under the 500-line cap; this class remains sole state authority.
+  // ── Crash-recovery persistence — mutation/decision logic lives in persistence/recovery*.ts (500-line cap; sole state authority stays here) ──
+
+  /** Shared dep-bag for persistence/recovery-apply.ts mutators (cleanupAttemptState, applyRecoveryDecision). */
+  private recoveryApplyDeps() {
+    const { state, activeAttempts, attemptStartedAt, attemptPid, retryQueue, observability, interventionBus } = this
+    return { state, activeAttempts, attemptStartedAt, attemptPid, retryQueue, observability, interventionBus }
+  }
 
   /** Mirror `activeAttempts` (+ workspace path) to disk. Fire-and-forget; failures are logged, never thrown. */
   private persistActiveAttempts(): void {
     this.runStatePersistence.replaceActiveAttempts(
-      buildPersistedAttempts(this.activeAttempts, this.state.activeWorkspaces, this.attemptStartedAt),
+      buildPersistedAttempts(this.activeAttempts, this.state.activeWorkspaces, this.attemptStartedAt, this.attemptPid),
     )
   }
 
@@ -278,13 +282,7 @@ export class OrchestratorCore {
     const snapshot = await this.runStatePersistence.load()
     if (snapshot.activeAttempts.length === 0 && snapshot.retryQueue.length === 0) return
 
-    const summary = applyRecoveryDecision(decideRecovery(snapshot), {
-      state: this.state,
-      activeAttempts: this.activeAttempts,
-      attemptStartedAt: this.attemptStartedAt,
-      retryQueue: this.retryQueue,
-      observability: this.observability,
-    })
+    const summary = applyRecoveryDecision(decideRecovery(snapshot), this.recoveryApplyDeps())
 
     this.persistActiveAttempts()
     this.persistRetryQueue()

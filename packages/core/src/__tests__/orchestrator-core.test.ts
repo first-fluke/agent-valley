@@ -110,6 +110,61 @@ describe("OrchestratorCore — runtime state mutators", () => {
     expect(core.getAttempt("x")).toBeUndefined()
   })
 
+  test("registerAttempt persists the pid once passed, and clearAttempt removes it", () => {
+    const { config } = buildCore()
+    const runState = new FakeRunStatePersistence()
+    // Rebuild with an injected FakeRunStatePersistence to inspect persisted pid.
+    const withPersist = new OrchestratorCore({
+      config,
+      tracker: new FakeIssueTracker(),
+      webhook: new FakeWebhookReceiver<ParsedWebhookEvent>(),
+      workspace: new FakeWorkspaceGateway(),
+      emit: () => {},
+      runStatePersistence: runState,
+    })
+
+    withPersist.registerAttempt("x", "att-1")
+    expect(runState.replaceActiveAttemptsCalls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ issueId: "x", attemptId: "att-1", pid: null }),
+    )
+
+    withPersist.registerAttempt("x", "att-1", 4242)
+    expect(runState.replaceActiveAttemptsCalls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ issueId: "x", attemptId: "att-1", pid: 4242 }),
+    )
+
+    withPersist.clearAttempt("x")
+    expect(runState.replaceActiveAttemptsCalls.at(-1)).toEqual([])
+  })
+
+  test("registerAttempt's pid-only update (same attemptId) does not reset attemptStartedAt", async () => {
+    const { config } = buildCore()
+    const runState = new FakeRunStatePersistence()
+    const withPersist = new OrchestratorCore({
+      config,
+      tracker: new FakeIssueTracker(),
+      webhook: new FakeWebhookReceiver<ParsedWebhookEvent>(),
+      workspace: new FakeWorkspaceGateway(),
+      emit: () => {},
+      runStatePersistence: runState,
+    })
+
+    withPersist.registerAttempt("x", "att-1")
+    const firstStartedAt = runState.replaceActiveAttemptsCalls.at(-1)?.[0]?.startedAt
+
+    await new Promise((r) => setTimeout(r, 5))
+    withPersist.registerAttempt("x", "att-1", 111)
+    const secondStartedAt = runState.replaceActiveAttemptsCalls.at(-1)?.[0]?.startedAt
+
+    expect(secondStartedAt).toBe(firstStartedAt)
+
+    // A genuinely new attemptId for the same issue DOES reset startedAt.
+    await new Promise((r) => setTimeout(r, 5))
+    withPersist.registerAttempt("x", "att-2", 222)
+    const thirdStartedAt = runState.replaceActiveAttemptsCalls.at(-1)?.[0]?.startedAt
+    expect(thirdStartedAt).not.toBe(firstStartedAt)
+  })
+
   test("addWaitingIssue / deleteWaitingIssue is surfaced in status.waitingIssues", () => {
     const { core } = buildCore()
     core.addWaitingIssue("w1", { issueId: "w1", identifier: "PROJ-1", blockedBy: ["b1"], enqueuedAt: "t" })

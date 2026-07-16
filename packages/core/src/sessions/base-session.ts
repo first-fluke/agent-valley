@@ -78,10 +78,98 @@ export function waitForExit(proc: ChildProcess): Promise<void> {
   })
 }
 
+/**
+ * Waits for a spawned child process to fully finish, resolving only after
+ * BOTH the stdout readable stream has ended (`'end'`) AND the process
+ * itself has closed (`'close'`).
+ *
+ * Resolving on `'close'` alone (the previous pattern duplicated across
+ * claude/agy/cursor/grok-session.ts) races the final buffered `'data'`
+ * chunk on a fast-exiting child: `'close'` is only *usually* ordered
+ * after stdio streams finish, and short-lived processes have been
+ * observed (under load, on Bun's child_process implementation) to fire
+ * `'close'` before the last `'data'` chunk reaches listeners — silently
+ * truncating output or resolving before parsing completes.
+ *
+ * `graceMs` bounds the wait in case `'end'` never fires (e.g. a pipe
+ * destroyed by SIGKILL without a clean EOF) so this can never hang
+ * forever once the process has closed.
+ */
+export function waitForStreamCompletion(proc: ChildProcess, graceMs = 250): Promise<{ exitCode: number | null }> {
+  return new Promise((resolve) => {
+    if (!proc.stdout) {
+      proc.once("close", (code) => resolve({ exitCode: code }))
+      return
+    }
+
+    let settled = false
+    let closeCode: number | null = null
+    let closed = false
+    let stdoutDone = false
+    let graceTimer: ReturnType<typeof setTimeout> | null = null
+
+    const finish = () => {
+      if (settled) return
+      settled = true
+      if (graceTimer) clearTimeout(graceTimer)
+      resolve({ exitCode: closeCode })
+    }
+
+    const maybeFinish = () => {
+      if (closed && stdoutDone) finish()
+    }
+
+    proc.stdout.once("end", () => {
+      stdoutDone = true
+      maybeFinish()
+    })
+
+    proc.stdout.once("error", () => {
+      stdoutDone = true
+      maybeFinish()
+    })
+
+    proc.once("close", (code) => {
+      closed = true
+      closeCode = code
+      if (stdoutDone) {
+        finish()
+        return
+      }
+      // stdout hasn't signaled 'end' yet — give it a short grace window to
+      // flush any buffered 'data' before giving up and resolving anyway.
+      graceTimer = setTimeout(finish, graceMs)
+    })
+  })
+}
+
 export abstract class BaseSession implements AgentSession {
   protected config: AgentConfig | null = null
-  protected process: ChildProcess | null = null
   protected startedAt: number = 0
+  private _process: ChildProcess | null = null
+
+  /**
+   * Backed by `_process` so every subclass's `this.process = spawn(...)`
+   * assignment transparently emits a `spawned` event with the real OS
+   * pid — no subclass changes required. Consumers (AgentRunnerService)
+   * listen for `spawned` to capture the pid for crash-recovery
+   * persistence (`PersistedAttempt.pid`).
+   */
+  protected get process(): ChildProcess | null {
+    return this._process
+  }
+
+  protected set process(proc: ChildProcess | null) {
+    this._process = proc
+    if (proc) {
+      this.emit({ type: "spawned", pid: proc.pid })
+    }
+  }
+
+  /** OS process id of the spawned child, when known. */
+  get pid(): number | undefined {
+    return this._process?.pid
+  }
 
   abstract start(config: AgentConfig): Promise<void>
   abstract execute(prompt: string): Promise<void>

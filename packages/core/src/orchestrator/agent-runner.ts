@@ -20,6 +20,14 @@ export interface RunCallbacks {
   onComplete: (result: RunAttempt) => void
   onError: (error: { code: string; message: string; recoverable: boolean }) => void
   onHeartbeat: (timestamp: string) => void
+  /**
+   * Fired once the session's OS child process is actually spawned (see
+   * `AgentSession.pid` / the `spawned` event). Optional — callers that
+   * don't need the pid (most tests) can omit it. Used by orchestrator-core
+   * to persist a real pid instead of `null`, so crash recovery can
+   * probe liveness on restart (see `persistence/recovery.ts`).
+   */
+  onSpawned?: (pid: number | undefined) => void
 }
 
 const MAX_OUTPUT_SNIPPET = 24
@@ -93,6 +101,7 @@ export class AgentRunnerService {
     }
 
     // Wire up events
+    session.on("spawned", (e) => callbacks.onSpawned?.(e.pid))
     session.on("heartbeat", (e) => callbacks.onHeartbeat(e.timestamp))
     session.on("output", (e) => {
       const snippet = e.chunk.trim().replace(/\s+/g, " ").slice(-MAX_OUTPUT_SNIPPET)

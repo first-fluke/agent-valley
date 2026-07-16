@@ -11,7 +11,7 @@
 
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, buildAgentEnv } from "./base-session"
+import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
 import { planSandboxedSpawn } from "./sandbox"
 
 export class ClaudeSession extends BaseSession {
@@ -87,47 +87,42 @@ export class ClaudeSession extends BaseSession {
 
   // ── Stream parser ───────────────────────────────────────────────────────
 
-  private readStream(): Promise<void> {
-    return new Promise((resolve) => {
-      const proc = this.process
-      if (!proc?.stdout) {
-        resolve()
-        return
+  private async readStream(): Promise<void> {
+    const proc = this.process
+    if (!proc?.stdout) return
+
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      buffer += decoder.decode(chunk, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const event: unknown = JSON.parse(line)
+          this.handleEvent(event)
+        } catch {
+          // Non-JSON stderr noise
+        }
       }
-
-      const decoder = new TextDecoder()
-      let buffer = ""
-
-      proc.stdout.on("data", (chunk: Buffer) => {
-        buffer += decoder.decode(chunk, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
-
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const event: unknown = JSON.parse(line)
-            this.handleEvent(event)
-          } catch {
-            // Non-JSON stderr noise
-          }
-        }
-      })
-
-      proc.stdout.on("error", () => {
-        // Stream error — proceed to close
-      })
-
-      proc.once("close", (code) => {
-        const exitCode = code ?? -1
-
-        if (exitCode !== 0) {
-          this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `claude exited with code ${exitCode}`, exitCode !== 1)
-        }
-
-        resolve()
-      })
     })
+
+    proc.stdout.on("error", () => {
+      // Stream error — proceed to close
+    })
+
+    // Gated on BOTH stdout 'end' and process 'close' — see
+    // waitForStreamCompletion() doc comment for why 'close' alone races
+    // the final buffered 'data' chunk on a fast-exiting process.
+    const { exitCode: code } = await waitForStreamCompletion(proc)
+    const exitCode = code ?? -1
+
+    if (exitCode !== 0) {
+      this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `claude exited with code ${exitCode}`, exitCode !== 1)
+    }
   }
 
   private handleEvent(event: unknown): void {

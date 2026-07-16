@@ -201,6 +201,13 @@ export class IssueLifecycle {
     })
 
     const callbacks = createCompletionCallbacks(core.buildCompletionDeps(), issue, workspace, attempt, route)
+    // Real pid is only known once the session's underlying process is
+    // actually spawned (partway through execute() for stateless
+    // sessions) — see AgentRunnerService.spawn()'s "spawned" listener.
+    // registerAttempt() above already reserved the issueId->attemptId
+    // slot; this call updates it in place with the pid so crash recovery
+    // can persist a real, probeable pid instead of null.
+    callbacks.onSpawned = (pid) => core.registerAttempt(issue.id, attempt.id, pid)
 
     await core.agentRunner.spawn(
       attempt,

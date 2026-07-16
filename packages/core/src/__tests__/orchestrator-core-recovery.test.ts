@@ -49,6 +49,19 @@ describe("OrchestratorCore — persistence on mutation", () => {
     ])
   })
 
+  test("registerAttempt(..., pid) mirrors the real pid instead of null", () => {
+    const { core, runState } = buildCore()
+    const ws = makeWorkspace(makeIssue({ id: "i1" }))
+    core.addActiveWorkspace("i1", ws)
+    core.registerAttempt("i1", "att-1")
+    core.registerAttempt("i1", "att-1", 4321)
+
+    const last = runState.replaceActiveAttemptsCalls.at(-1)
+    expect(last).toEqual([
+      expect.objectContaining({ issueId: "i1", attemptId: "att-1", workspacePath: ws.path, pid: 4321 }),
+    ])
+  })
+
   test("cleanupState (via buildCompletionDeps) clears the persisted attempt", () => {
     const { core, runState } = buildCore()
     const ws = makeWorkspace(makeIssue({ id: "i1" }))
@@ -128,6 +141,26 @@ describe("OrchestratorCore — recoverFromPersistedState", () => {
 
     expect(core.canAcceptIssue("i1")).toEqual({ ok: false, reason: "already_active" })
     expect(core.getAttempt("i1")).toBe("att-1")
+  })
+
+  test("a pid captured via registerAttempt(..., pid) survives a restart round-trip and drives the liveness probe", async () => {
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true)
+    const runState = new FakeRunStatePersistence()
+    const { core: core1 } = buildCore(runState)
+    const ws = makeWorkspace(makeIssue({ id: "i1" }))
+    core1.addActiveWorkspace("i1", ws)
+    core1.registerAttempt("i1", "att-1")
+    // Real pid arrives once AgentRunnerService observes the session's
+    // 'spawned' event (see issue-lifecycle.ts's onSpawned wiring).
+    core1.registerAttempt("i1", "att-1", 555)
+
+    // Simulate a process restart: a fresh OrchestratorCore boots and reads
+    // the same on-disk snapshot `core1` just wrote.
+    const { core: core2 } = buildCore(runState)
+    await core2.recoverFromPersistedState()
+
+    expect(killSpy).toHaveBeenCalledWith(555, 0)
+    expect(core2.canAcceptIssue("i1")).toEqual({ ok: false, reason: "already_active" })
   })
 
   test("restores the retry queue", async () => {
