@@ -16,13 +16,19 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { Issue } from "../domain/models"
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
+import type { BudgetService } from "../orchestrator/budget-service"
 import { OrchestratorCore } from "../orchestrator/orchestrator-core"
+import type { RunStatePort } from "../orchestrator/persistence/run-state-store"
 import { makeConfig, makeIssue, makeWorkspace } from "./characterization/helpers"
+import { FakeRunStatePersistence } from "./fakes/fake-run-state-persistence"
 import { FakeIssueTracker } from "./fakes/fake-tracker"
 import { FakeWebhookReceiver } from "./fakes/fake-webhook-receiver"
 import { FakeWorkspaceGateway } from "./fakes/fake-workspace-gateway"
 
-function buildCore(configOverrides: Partial<ReturnType<typeof makeConfig>> = {}) {
+function buildCore(
+  configOverrides: Partial<ReturnType<typeof makeConfig>> = {},
+  depsOverrides: { runStatePersistence?: RunStatePort; budget?: BudgetService } = {},
+) {
   const tracker = new FakeIssueTracker()
   const webhook = new FakeWebhookReceiver<ParsedWebhookEvent>()
   const workspace = new FakeWorkspaceGateway()
@@ -34,6 +40,7 @@ function buildCore(configOverrides: Partial<ReturnType<typeof makeConfig>> = {})
     webhook,
     workspace,
     emit: (event, payload) => events.push({ event, payload }),
+    ...depsOverrides,
   })
   return { core, tracker, webhook, workspace, events, config }
 }
@@ -194,6 +201,61 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
 
     const leave = events.find((e) => e.event === "node.leave")
     expect(leave?.payload).toEqual({ reason: "graceful" })
+  })
+
+  test("stop() drains the run-state, DAG, and budget persistence write queues before resolving", async () => {
+    const runStatePersistence = new FakeRunStatePersistence()
+    const budgetFlush = vi.fn(async () => {})
+    const budget: BudgetService = {
+      async checkBeforeSpawn() {
+        return { allow: true }
+      },
+      async recordUsage() {},
+      getDailyUsed() {
+        return { tokens: 0, usd: 0 }
+      },
+      getIssueUsed() {
+        return { tokens: 0, usd: 0 }
+      },
+      flush: budgetFlush,
+    }
+    const { core } = buildCore({}, { runStatePersistence, budget })
+    core.attachLifecycle(dispatcher, async () => {
+      reevaluateCalls++
+    })
+    await core.start()
+
+    const runStateFlushSpy = vi.spyOn(runStatePersistence, "flush")
+    const dagFlushSpy = vi.spyOn(core.dagScheduler, "flush")
+
+    await core.stop()
+
+    expect(runStateFlushSpy).toHaveBeenCalledTimes(1)
+    expect(dagFlushSpy).toHaveBeenCalledTimes(1)
+    expect(budgetFlush).toHaveBeenCalledTimes(1)
+  })
+
+  test("stop() does not throw when the injected budget service has no flush method (backward compat)", async () => {
+    const budget = {
+      async checkBeforeSpawn() {
+        return { allow: true as const }
+      },
+      async recordUsage() {},
+      getDailyUsed() {
+        return { tokens: 0, usd: 0 }
+      },
+      getIssueUsed() {
+        return { tokens: 0, usd: 0 }
+      },
+      // Deliberately no `flush` — simulates a hand-rolled test fake predating this method.
+    } as BudgetService
+    const { core } = buildCore({}, { budget })
+    core.attachLifecycle(dispatcher, async () => {
+      reevaluateCalls++
+    })
+    await core.start()
+
+    await expect(core.stop()).resolves.toBeUndefined()
   })
 
   test("processRetryQueue re-queues entries if tracker fetch fails", async () => {

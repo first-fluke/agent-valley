@@ -1,11 +1,11 @@
 /**
  * Completion Handler — Post-agent-completion logic extracted from Orchestrator.
- * Safety-net (auto-commit), delivery (merge/pr), and exit assessment.
+ * Safety-net (auto-commit), verification gate, delivery (merge/pr), and exit assessment.
  */
 
 import type { ResolvedRoute } from "../config/routing"
 import type { Config } from "../config/yaml-loader"
-import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import type { Issue, RetryCategory, RunAttempt, Workspace } from "../domain/models"
 import type { IssueTracker } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
 import type { ObservabilityHooks } from "../observability/hooks"
@@ -15,6 +15,7 @@ import type { RunCallbacks } from "./agent-runner"
 import type { BudgetService } from "./budget-service"
 import type { DagScheduler } from "./dag-scheduler"
 import { buildParentSummary, buildWorkSummary } from "./helpers"
+import { buildVerificationFailurePrompt, resolveVerifyCommand, runVerificationGate } from "./verification-gate"
 
 export interface CompletionDeps {
   config: Config
@@ -24,7 +25,8 @@ export interface CompletionDeps {
   /** Update orchestrator state on completion/failure. Orchestrator remains sole state authority. */
   cleanupState: (issueId: string, status: "done" | "failed") => void
   saveAttempt: (workspace: Workspace, attempt: RunAttempt) => void
-  addRetry: (issueId: string, attemptCount: number, error: string) => boolean
+  /** `category` (see `RetryCategory`) drives RetryQueue's per-category max-attempts policy. Defaults to "infra" when omitted. */
+  addRetry: (issueId: string, attemptCount: number, error: string, category?: RetryCategory) => boolean
   emitEvent: (event: string, payload: Record<string, unknown>) => void
   fillVacantSlots: () => Promise<void>
   triggerUnblocked: (issueIds: string[]) => Promise<void>
@@ -60,12 +62,19 @@ export function createCompletionCallbacks(
     options: {
       retryComment: string
       manualComment: string
+      /** Failure classification for the retry-queue policy. Defaults to "infra" (all current call sites are environmental: lockfile conflicts, verify_command failures). */
+      category?: RetryCategory
     },
   ): Promise<boolean> => {
     const nextRetryCount = (attempt.retryCount ?? 0) + 1
 
     if (failure.retryable) {
-      const retryAdded = deps.addRetry(issue.id, nextRetryCount, failure.retryPrompt ?? failure.error)
+      const retryAdded = deps.addRetry(
+        issue.id,
+        nextRetryCount,
+        failure.retryPrompt ?? failure.error,
+        options.category ?? "infra",
+      )
       deps.cleanupState(issue.id, "failed")
 
       try {
@@ -160,6 +169,7 @@ export function createCompletionCallbacks(
           retryComment:
             "Symphony: Auto-commit blocked by regeneratable lockfile conflict — retrying with repair instructions.",
           manualComment: "Symphony: Auto-commit blocked — manual resolution required",
+          category: "infra", // regeneratable lockfile conflict — environmental, not agent capability
         })
         return
       }
@@ -185,6 +195,50 @@ export function createCompletionCallbacks(
         })
       }
 
+      // ── Verification gate ── Runs verify_command in the worktree before delivery/Done.
+      // No-op when unconfigured. On failure, retried via the queue (category "verification");
+      // exhaustion falls through to the shared cancel-with-comment path below.
+      if (hasCodeChanges) {
+        const verifyCommand = resolveVerifyCommand(config, route)
+        if (verifyCommand) {
+          const gateResult = await runVerificationGate(workspace, verifyCommand, {
+            timeoutSec: config.verify?.timeoutSec,
+          })
+          if (!gateResult.ok) {
+            logger.warn("completion", `Verification gate failed for ${issue.identifier}`, {
+              issueId: issue.id,
+              command: verifyCommand,
+              timedOut: gateResult.timedOut ?? false,
+            })
+            await handleWorkspaceFailure(
+              {
+                error: gateResult.timedOut
+                  ? `Verification command timed out (${config.verify?.timeoutSec ?? "default"}s): ${verifyCommand}`
+                  : `Verification command failed: ${verifyCommand}`,
+                retryable: true,
+                retryPrompt: buildVerificationFailurePrompt(gateResult),
+              },
+              {
+                retryComment: "Symphony: Verification gate failed — retrying with the failure output below.",
+                manualComment: "Symphony: Verification gate failed — manual resolution required",
+                category: "verification",
+              },
+            )
+            return
+          }
+          logger.info("completion", `Verification gate passed for ${issue.identifier}`, {
+            issueId: issue.id,
+            command: verifyCommand,
+          })
+        } else {
+          logger.debug(
+            "completion",
+            `No verify_command configured — verification gate skipped for ${issue.identifier}`,
+            { issueId: issue.id },
+          )
+        }
+      }
+
       // ── Delivery ──
       if (route.deliveryMode === "merge") {
         const mergeResult = await wsGateway.mergeAndPush(workspace)
@@ -203,6 +257,7 @@ export function createCompletionCallbacks(
               retryComment:
                 "Symphony: Merge hit a regeneratable lockfile conflict — retrying with repair instructions.",
               manualComment: "Symphony: Merge failed — manual resolution required",
+              category: "infra", // regeneratable lockfile conflict — environmental, not agent capability
             },
           )
           return
@@ -243,8 +298,13 @@ export function createCompletionCallbacks(
       let targetState = config.workflowStates.done
 
       if (!hasCodeChanges && !hasOutput) {
-        // Anti-premature-exit: retry once before giving up
-        const prematureRetryAdded = deps.addRetry(issue.id, (completedAttempt.retryCount ?? 0) + 1, "premature-exit")
+        // Anti-premature-exit: retry once before giving up. "capability" — re-running an incapable attempt rarely helps.
+        const prematureRetryAdded = deps.addRetry(
+          issue.id,
+          (completedAttempt.retryCount ?? 0) + 1,
+          "premature-exit",
+          "capability",
+        )
         if (prematureRetryAdded) {
           logger.warn("completion", `Agent exited without changes for ${issue.identifier}, scheduling retry`)
           deps.cleanupState(issue.id, "failed")
@@ -302,6 +362,7 @@ export function createCompletionCallbacks(
         issueId: issue.id,
         attemptId: attempt.id,
         durationMs,
+        tokenUsage: completedAttempt.tokenUsage,
       })
 
       // Budget post-run accounting (§ 4.5, § 6.4 E19). When the session
@@ -368,7 +429,8 @@ export function createCompletionCallbacks(
       })
 
       if (err.recoverable) {
-        const added = deps.addRetry(issue.id, (attempt.retryCount ?? 0) + 1, err.message)
+        // AgentError codes (TIMEOUT, CRASH, AUTH_FAILED, CANCELLED, UNKNOWN) are all environmental — "infra".
+        const added = deps.addRetry(issue.id, (attempt.retryCount ?? 0) + 1, err.message, "infra")
         if (!added) {
           // Max retries exceeded — cancel issue with error comment
           try {

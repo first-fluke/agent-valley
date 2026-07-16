@@ -24,32 +24,25 @@ import type { CompletionDeps } from "./completion-handler"
 import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
 import type { InterventionBus } from "./intervention-bus"
+import { decideRecovery } from "./persistence/recovery"
+import { applyRecoveryDecision, buildPersistedAttempts } from "./persistence/recovery-apply"
+import type { RunStatePort } from "./persistence/run-state-store"
+import { RunStatePersistence } from "./persistence/run-state-store"
 import { RetryQueue } from "./retry-queue"
 
 /** Reason returned by slot-availability check; callers map to retry / skip. */
 export type SlotDecision = { ok: true } | { ok: false; reason: "already_active" | "concurrency" }
 
-/**
- * Narrow callbacks the core emits upward to the facade; the facade
- * forwards into OrchestratorEventEmitter.emitEvent. Defined as a type
- * to keep core free of any upward import.
- */
+/** Narrow callback the core emits upward to the facade, which forwards into OrchestratorEventEmitter.emitEvent. */
 export type CoreEventEmit = (event: string, payload: Record<string, unknown>) => void
 
-/**
- * Hook the core calls when state settles and idle slots should be
- * re-filled. Supplied by the facade at wiring time so the core does
- * not need to know about IssueLifecycle.
- */
+/** Hook the core calls when state settles and idle slots should be re-filled. Supplied by the facade at wiring time. */
 export type FillSlotsHook = () => Promise<void>
 
 /** Supplied by the facade to re-evaluate waiting issues after blocker removal. */
 export type ReevaluateWaitingHook = () => Promise<void>
 
-/**
- * Re-entry point used when a retry queue entry or startup-sync issue
- * needs to drive the full Todo / In Progress dispatch path.
- */
+/** Re-entry point used when a retry queue entry or startup-sync issue needs the full Todo / In Progress dispatch path. */
 export interface LifecycleDispatcher {
   handleIssueTodo: (issue: Issue, retryContext?: { attemptCount: number; lastError: string }) => Promise<void>
   handleIssueInProgress: (issue: Issue, retryContext?: { attemptCount: number; lastError: string }) => Promise<void>
@@ -60,24 +53,16 @@ export interface OrchestratorCoreDeps {
   tracker: IssueTracker
   webhook: WebhookReceiver<ParsedWebhookEvent>
   workspace: WorkspaceGateway
-  /**
-   * AgentRunnerPort adapter. Optional — when omitted, the core creates
-   * its own SpawnAgentRunnerAdapter (preserving v0.1 behavior).
-   */
+  /** AgentRunnerPort adapter. Optional — when omitted, the core creates its own SpawnAgentRunnerAdapter (v0.1 behavior). */
   agentRunner?: SpawnAgentRunnerAdapter
   /** Emit events onto the facade's public event stream. */
   emit: CoreEventEmit
-  /**
-   * Optional observability hooks (OTel + Prometheus). Omit for no-op
-   * behavior (default). Exporter errors are swallowed inside the hooks
-   * and never propagate into orchestrator flow.
-   */
+  /** Optional observability hooks (OTel + Prometheus). Omit for no-op behavior; exporter errors never propagate. */
   observability?: ObservabilityHooks
-  /**
-   * Optional per-issue + per-day budget service. Omit to fall back to a
-   * no-op implementation that always allows spawn. Design § 4.5.
-   */
+  /** Optional per-issue + per-day budget service. Omit to fall back to a no-op that always allows spawn. Design § 4.5. */
   budget?: BudgetService
+  /** Run-state persistence port. Omit to fall back to a real `RunStatePersistence` (`.agent-valley/run-state.json`). */
+  runStatePersistence?: RunStatePort
 }
 
 export class OrchestratorCore {
@@ -107,10 +92,13 @@ export class OrchestratorCore {
 
   /** Guards against TOCTOU race: tracks issues currently being processed. */
   readonly processingIssues = new Set<string>()
-
   /** Maps issueId -> attemptId for active agent sessions. */
   readonly activeAttempts = new Map<string, string>()
-
+  /** issueId -> attempt.startedAt, mirrored to disk for crash recovery (see persistence/). */
+  private readonly attemptStartedAt = new Map<string, string>()
+  /** Durable mirror of activeAttempts + retryQueue so a crash/restart can recover instead of duplicating runs. */
+  private readonly runStatePersistence: RunStatePort
+  private recoveryCompleted = false
   private readonly emit: CoreEventEmit
   private retryTimer: ReturnType<typeof setInterval> | null = null
   private promptTemplate = ""
@@ -130,13 +118,13 @@ export class OrchestratorCore {
     this.workspace = deps.workspace
     this.emit = deps.emit
 
-    // Port seam: orchestrator-core depends on AgentRunnerPort via the
-    // SpawnAgentRunnerAdapter. When no adapter is injected, build a
-    // fresh one wrapping a new AgentRunnerService (v0.1 behavior).
+    // Port seam: depends on AgentRunnerPort via SpawnAgentRunnerAdapter; builds one wrapping a fresh AgentRunnerService if omitted.
     this.agentRunnerPort = deps.agentRunner ?? new SpawnAgentRunnerAdapter()
     this.agentRunner = this.agentRunnerPort.service
     this.retryQueue = new RetryQueue(this.config.agentMaxRetries, this.config.agentRetryDelay)
     this.dagScheduler = new DagScheduler(`${this.config.workspaceRoot}/.agent-valley/dag-cache.json`)
+    this.runStatePersistence =
+      deps.runStatePersistence ?? new RunStatePersistence(`${this.config.workspaceRoot}/.agent-valley/run-state.json`)
     this.observability = deps.observability ?? createNoopObservabilityHooks()
     this.budget = deps.budget ?? createNoopBudgetService()
     this.dagScheduler.setCycleObserver(() => this.observability.onDagCycle())
@@ -171,18 +159,16 @@ export class OrchestratorCore {
         const attemptId = this.activeAttempts.get(issueId)
         this.state.activeWorkspaces.delete(issueId)
         this.activeAttempts.delete(issueId)
-        if (attemptId && this.interventionBus) {
-          this.interventionBus.unregisterAttempt(attemptId)
-        }
+        this.attemptStartedAt.delete(issueId)
+        if (attemptId && this.interventionBus) this.interventionBus.unregisterAttempt(attemptId)
+        this.persistActiveAttempts()
       },
       saveAttempt: (ws, att) => this.workspace.saveAttempt(ws, att),
-      addRetry: (issueId, count, error) => this.retryQueue.add(issueId, count, error),
+      addRetry: (issueId, count, error, category) => this.retryQueue.add(issueId, count, error, category),
       emitEvent: (event, payload) => this.emit(event, payload),
       fillVacantSlots: () => this.fillVacantSlots(),
       triggerUnblocked: async (issueIds) => {
-        for (const id of issueIds) {
-          this.state.waitingIssues.delete(id)
-        }
+        for (const id of issueIds) this.state.waitingIssues.delete(id)
         if (this.reevaluateWaiting) await this.reevaluateWaiting()
       },
       observability: this.observability,
@@ -215,6 +201,7 @@ export class OrchestratorCore {
     if (guard.reason === "concurrency") {
       this.retryQueue.add(issueId, 0, "Concurrency limit reached")
       this.observability.onRetryQueueChanged(this.retryQueue.size)
+      this.persistRetryQueue()
     }
     return false
   }
@@ -222,7 +209,6 @@ export class OrchestratorCore {
   markProcessing(issueId: string): void {
     this.processingIssues.add(issueId)
   }
-
   releaseProcessing(issueId: string): void {
     this.processingIssues.delete(issueId)
   }
@@ -230,17 +216,19 @@ export class OrchestratorCore {
   addActiveWorkspace(issueId: string, workspace: Workspace): void {
     this.state.activeWorkspaces.set(issueId, workspace)
   }
-
   getActiveWorkspace(issueId: string): Workspace | undefined {
     return this.state.activeWorkspaces.get(issueId)
   }
 
   removeActiveWorkspace(issueId: string): void {
     this.state.activeWorkspaces.delete(issueId)
+    this.persistActiveAttempts()
   }
 
   registerAttempt(issueId: string, attemptId: string): void {
     this.activeAttempts.set(issueId, attemptId)
+    this.attemptStartedAt.set(issueId, new Date().toISOString())
+    this.persistActiveAttempts()
   }
 
   getAttempt(issueId: string): string | undefined {
@@ -249,17 +237,62 @@ export class OrchestratorCore {
 
   clearAttempt(issueId: string): void {
     this.activeAttempts.delete(issueId)
+    this.attemptStartedAt.delete(issueId)
+    this.persistActiveAttempts()
   }
 
   enqueueRetry(issueId: string, attemptCount: number, lastError: string): boolean {
     const added = this.retryQueue.add(issueId, attemptCount, lastError)
     this.observability.onRetryQueueChanged(this.retryQueue.size)
+    this.persistRetryQueue()
     return added
   }
 
   removeRetry(issueId: string): void {
     this.retryQueue.remove(issueId)
     this.observability.onRetryQueueChanged(this.retryQueue.size)
+    this.persistRetryQueue()
+  }
+
+  // ── Crash-recovery persistence (see persistence/) ──────────────────
+  // Mirrors activeAttempts/retryQueue to disk on every mutation. Mutation + decision logic lives in
+  // persistence/recovery*.ts to keep this file under the 500-line cap; this class remains sole state authority.
+
+  /** Mirror `activeAttempts` (+ workspace path) to disk. Fire-and-forget; failures are logged, never thrown. */
+  private persistActiveAttempts(): void {
+    this.runStatePersistence.replaceActiveAttempts(
+      buildPersistedAttempts(this.activeAttempts, this.state.activeWorkspaces, this.attemptStartedAt),
+    )
+  }
+
+  /** Mirror the retry queue to disk. Called after every add/remove/drain. */
+  private persistRetryQueue(): void {
+    this.runStatePersistence.replaceRetryQueue(this.retryQueue.entries)
+  }
+
+  /** Boot recovery — idempotent (guarded by `recoveryCompleted`). Called automatically from `start()`, before startup sync. */
+  async recoverFromPersistedState(): Promise<void> {
+    if (this.recoveryCompleted) return
+    this.recoveryCompleted = true
+
+    const snapshot = await this.runStatePersistence.load()
+    if (snapshot.activeAttempts.length === 0 && snapshot.retryQueue.length === 0) return
+
+    const summary = applyRecoveryDecision(decideRecovery(snapshot), {
+      state: this.state,
+      activeAttempts: this.activeAttempts,
+      attemptStartedAt: this.attemptStartedAt,
+      retryQueue: this.retryQueue,
+      observability: this.observability,
+    })
+
+    this.persistActiveAttempts()
+    this.persistRetryQueue()
+    logger.info("orchestrator", "Boot recovery complete", {
+      reattached: String(summary.reattached),
+      reaped: String(summary.reaped),
+      restoredRetries: String(summary.restoredRetries),
+    })
   }
 
   addWaitingIssue(
@@ -296,10 +329,13 @@ export class OrchestratorCore {
   // ── Lifecycle (start / stop / startup sync / retry timer) ─────────
 
   async start(): Promise<void> {
+    // Recover before startup sync fetches Todo/InProgress issues, so a still-alive attempt isn't re-dispatched.
+    await this.recoverFromPersistedState()
+
     this.state.isRunning = true
     this.promptTemplate = this.config.promptTemplate
 
-    // Startup sync — run in background so server starts immediately
+    // Startup sync runs in background so server starts immediately
     const runStartupSync = async () => {
       await new Promise((r) => setTimeout(r, 2_000))
       await this.ensureStartupSync()
@@ -334,6 +370,8 @@ export class OrchestratorCore {
     if (this.retryTimer) clearInterval(this.retryTimer)
 
     await this.agentRunner.killAll()
+    // Drain persistence write queues so stop() never returns with an in-flight write.
+    await Promise.all([this.runStatePersistence.flush(), this.dagScheduler.flush(), this.budget.flush?.() ?? null])
 
     logger.info("orchestrator", "Shutdown complete")
   }
@@ -422,6 +460,7 @@ export class OrchestratorCore {
   async processRetryQueue(): Promise<void> {
     const ready = this.retryQueue.drain()
     if (ready.length === 0) return
+    this.persistRetryQueue()
     if (!this.dispatcher) return
 
     let issues: Issue[] = []
@@ -432,8 +471,9 @@ export class OrchestratorCore {
       ])
     } catch (err) {
       logger.warn("orchestrator", "Retry fetch failed, re-queuing entries", { error: String(err) })
-      for (const entry of ready) this.retryQueue.add(entry.issueId, entry.attemptCount, entry.lastError)
+      for (const entry of ready) this.retryQueue.add(entry.issueId, entry.attemptCount, entry.lastError, entry.category)
       this.observability.onRetryQueueChanged(this.retryQueue.size)
+      this.persistRetryQueue()
       return
     }
     for (const entry of ready) {

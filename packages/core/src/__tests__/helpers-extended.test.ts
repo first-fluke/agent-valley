@@ -132,6 +132,7 @@ describe("buildOrchestratorStatus", () => {
         prometheus: { enabled: false, path: "/api/metrics" },
       },
       tunnel: { provider: "ngrok", cloudflare: { mode: "quick" } },
+      verify: { command: undefined, timeoutSec: 600 },
     } as Config
   }
 

@@ -96,7 +96,8 @@ describe("RetryQueue", () => {
     // backoffSec=60
     // attempt 1: delay = 60 * 2^0 = 60s
     // attempt 2: delay = 60 * 2^1 = 120s
-    const q = new RetryQueue(5, 60)
+    // rng()=1 pins jitter to its upper bound (= the uncapped raw delay), isolating the doubling math from jitter.
+    const q = new RetryQueue(5, 60, () => 1)
 
     const now = Date.now()
 
@@ -117,7 +118,7 @@ describe("RetryQueue", () => {
   })
 
   test("attemptCount=0 uses full backoff (no fractional exponent)", () => {
-    const q = new RetryQueue(5, 60)
+    const q = new RetryQueue(5, 60, () => 1) // rng()=1 pins jitter to its upper bound
     const now = Date.now()
     q.add("issue-0", 0, "queued")
     const delay = new Date(q.entries[0]?.nextRetryAt ?? 0).getTime() - now
@@ -133,5 +134,91 @@ describe("RetryQueue", () => {
     expect(queue.size).toBe(1)
     expect(queue.entries[0]?.attemptCount).toBe(2)
     expect(queue.entries[0]?.lastError).toBe("second error")
+  })
+
+  test("add() without a category defaults to 'infra'", () => {
+    queue.add("issue-1", 1, "err")
+    expect(queue.entries[0]?.category).toBe("infra")
+  })
+
+  describe("jitter", () => {
+    test("jittered delay stays within [delay/2, delay] for a fixed RNG output", () => {
+      // backoffSec=60, attemptCount=1 -> raw delay = 60s. half=30s.
+      // rng()=0 -> actual = 30s (lower bound). rng()=0.999... -> actual ~= 60s (upper bound).
+      const lowQueue = new RetryQueue(5, 60, () => 0)
+      const now = Date.now()
+      lowQueue.add("issue-low", 1, "err")
+      const lowDelay = new Date(lowQueue.entries[0]?.nextRetryAt ?? 0).getTime() - now
+      expect(lowDelay).toBeGreaterThanOrEqual(29_000)
+      expect(lowDelay).toBeLessThan(31_000)
+
+      const highQueue = new RetryQueue(5, 60, () => 0.999999)
+      highQueue.add("issue-high", 1, "err")
+      const highDelay = new Date(highQueue.entries[0]?.nextRetryAt ?? 0).getTime() - now
+      expect(highDelay).toBeGreaterThan(59_000)
+      expect(highDelay).toBeLessThanOrEqual(60_500)
+    })
+
+    test("jittered delay for random RNG samples always falls within [delay/2, delay] bounds", () => {
+      // backoffSec=10, attemptCount=3 -> raw delay = 10 * 2^2 = 40s. Bounds: [20s, 40s].
+      for (const sample of [0, 0.25, 0.5, 0.75, 0.999]) {
+        const q = new RetryQueue(10, 10, () => sample)
+        const now = Date.now()
+        q.add("issue-1", 3, "err")
+        const delay = new Date(q.entries[0]?.nextRetryAt ?? 0).getTime() - now
+        expect(delay).toBeGreaterThanOrEqual(19_500)
+        expect(delay).toBeLessThanOrEqual(40_500)
+      }
+    })
+
+    test("backoff is capped at the max ceiling before jitter is applied", () => {
+      // backoffSec=1000, attemptCount=10 -> raw delay would be enormous; capped to maxBackoffSec=100.
+      // rng()=0.999999 -> actual should approach the 100s ceiling, never the uncapped raw value.
+      const q = new RetryQueue(20, 1000, () => 0.999999, 100)
+      const now = Date.now()
+      q.add("issue-1", 10, "err")
+      const delay = new Date(q.entries[0]?.nextRetryAt ?? 0).getTime() - now
+      expect(delay).toBeLessThanOrEqual(100_500)
+      expect(delay).toBeGreaterThan(90_000)
+    })
+  })
+
+  describe("category-based max-attempts policy", () => {
+    test("infra category uses the full configured maxAttempts", () => {
+      const q = new RetryQueue(5, 0)
+      expect(q.add("issue-1", 4, "err", "infra")).toBe(true)
+      expect(q.add("issue-2", 5, "err", "infra")).toBe(false)
+    })
+
+    test("verification category uses the full configured maxAttempts", () => {
+      const q = new RetryQueue(5, 0)
+      expect(q.add("issue-1", 4, "err", "verification")).toBe(true)
+      expect(q.add("issue-2", 5, "err", "verification")).toBe(false)
+    })
+
+    test("capability category caps retries earlier than infra (default cap of 2)", () => {
+      const q = new RetryQueue(5, 0)
+      expect(q.add("issue-1", 1, "err", "capability")).toBe(true)
+      // infra would still allow attemptCount=2,3,4 (maxAttempts=5); capability stops at 2.
+      expect(q.add("issue-1", 2, "err", "capability")).toBe(false)
+    })
+
+    test("capability cap never exceeds the configured maxAttempts when maxAttempts is smaller", () => {
+      const q = new RetryQueue(1, 0)
+      expect(q.add("issue-1", 0, "err", "capability")).toBe(true)
+      expect(q.add("issue-1", 1, "err", "capability")).toBe(false)
+    })
+  })
+
+  describe("category persistence through dedup", () => {
+    test("dedup update overwrites the category with the latest classification", () => {
+      const q = new RetryQueue(5, 0)
+      q.add("issue-1", 1, "first error", "infra")
+      expect(q.entries[0]?.category).toBe("infra")
+      q.add("issue-1", 1, "second error", "verification")
+      expect(q.size).toBe(1)
+      expect(q.entries[0]?.category).toBe("verification")
+      expect(q.entries[0]?.lastError).toBe("second error")
+    })
   })
 })

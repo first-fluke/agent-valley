@@ -267,4 +267,9 @@ export class DagScheduler {
         logger.error("dag-scheduler", "Async persist failed", { error: String(err) })
       })
   }
+
+  /** Await any in-flight persist so callers (e.g. shutdown) never return with a write still queued. */
+  async flush(): Promise<void> {
+    await this.writeQueue
+  }
 }

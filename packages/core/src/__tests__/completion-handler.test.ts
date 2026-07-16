@@ -1,11 +1,26 @@
 /**
  * Completion Handler tests — safety-net, delivery, and exit assessment.
  */
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { ResolvedRoute } from "../config/routing"
 import type { Config } from "../config/yaml-loader"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
-import { type CompletionDeps, createCompletionCallbacks } from "../orchestrator/completion-handler"
+import type { CompletionDeps } from "../orchestrator/completion-handler"
+
+// The verification gate's real implementation spawns a subprocess. Mock it
+// here so completion-handler tests stay deterministic and fast — the gate's
+// own behavior (exec, timeout, output truncation) is covered by
+// verification-gate.test.ts. `resolveVerifyCommand` / `buildVerificationFailurePrompt`
+// stay real so the wiring (config -> command -> retry prompt) is exercised.
+vi.mock("../orchestrator/verification-gate", async () => {
+  const actual = await vi.importActual<typeof import("../orchestrator/verification-gate")>(
+    "../orchestrator/verification-gate",
+  )
+  return { ...actual, runVerificationGate: vi.fn() }
+})
+
+const { createCompletionCallbacks } = await import("../orchestrator/completion-handler")
+const { runVerificationGate } = await import("../orchestrator/verification-gate")
 
 // ── Test fixtures ──────────────────────────────────────────────────
 
@@ -87,6 +102,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     deliveryMode: "merge",
     routingRules: [],
     promptTemplate: "test prompt",
+    verify: { command: undefined, timeoutSec: 600 },
     ...overrides,
   } as Config
 }
@@ -153,7 +169,7 @@ function makeFakeTracker() {
 describe("createCompletionCallbacks", () => {
   let events: Array<{ event: string; payload: Record<string, unknown> }>
   let stateCleanups: Array<{ issueId: string; status: string }>
-  let retryAdds: Array<{ issueId: string; count: number; error: string }>
+  let retryAdds: Array<{ issueId: string; count: number; error: string; category?: string }>
   let filledSlots: number
 
   function makeDeps(
@@ -173,8 +189,8 @@ describe("createCompletionCallbacks", () => {
       } as unknown as CompletionDeps["dagScheduler"],
       cleanupState: (issueId, status) => stateCleanups.push({ issueId, status }),
       saveAttempt: () => {},
-      addRetry: (issueId, count, error) => {
-        retryAdds.push({ issueId, count, error })
+      addRetry: (issueId, count, error, category) => {
+        retryAdds.push({ issueId, count, error, category })
         return count < 3
       },
       emitEvent: (event, payload) => events.push({ event, payload }),
@@ -191,6 +207,7 @@ describe("createCompletionCallbacks", () => {
     stateCleanups = []
     retryAdds = []
     filledSlots = 0
+    vi.mocked(runVerificationGate).mockReset()
   })
 
   describe("onComplete — safety net", () => {
@@ -489,6 +506,188 @@ describe("createCompletionCallbacks", () => {
     })
   })
 
+  describe("onComplete — verification gate", () => {
+    test("no verify_command configured — gate is skipped, merge + Done proceed as before", async () => {
+      let merged = false
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      mockWm.mergeAndPush = async () => {
+        merged = true
+        return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
+      }
+      const deps = makeDeps(mockWm) // config.verify.command is undefined by default
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(runVerificationGate).not.toHaveBeenCalled()
+      expect(merged).toBe(true)
+      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+    })
+
+    test("gate passes — merge proceeds and issue transitions to Done", async () => {
+      let merged = false
+      vi.mocked(runVerificationGate).mockResolvedValue({ ran: true, ok: true, command: "bun test", output: "PASS" })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      mockWm.mergeAndPush = async () => {
+        merged = true
+        return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
+      }
+      const deps = makeDeps(mockWm, { verify: { command: "bun test", timeoutSec: 600 } })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(runVerificationGate).toHaveBeenCalledTimes(1)
+      expect(merged).toBe(true)
+      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+    })
+
+    test("gate fails — no merge, not Done, retry scheduled with failure output as context", async () => {
+      let merged = false
+      vi.mocked(runVerificationGate).mockResolvedValue({
+        ran: true,
+        ok: false,
+        command: "bun test",
+        output: "FAIL: expected 1 to equal 2",
+        timedOut: false,
+      })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      mockWm.mergeAndPush = async () => {
+        merged = true
+        return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
+      }
+      const deps = makeDeps(mockWm, { verify: { command: "bun test", timeoutSec: 600 } })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(merged).toBe(false)
+      expect(events.length).toBe(0) // no agent.done emitted — Done transition never reached
+      expect(stateCleanups.at(-1)?.status).toBe("failed")
+      expect(retryAdds).toHaveLength(1)
+      expect(retryAdds[0]?.error).toContain("FAIL: expected 1 to equal 2")
+      expect(retryAdds[0]?.error).toContain("Retry instruction:")
+      expect(filledSlots).toBe(1)
+    })
+
+    test("gate fails on a timeout — retry prompt uses the timeout header", async () => {
+      vi.mocked(runVerificationGate).mockResolvedValue({
+        ran: true,
+        ok: false,
+        command: "bun test",
+        output: "",
+        timedOut: true,
+      })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      const deps = makeDeps(mockWm, { verify: { command: "bun test", timeoutSec: 600 } })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(retryAdds[0]?.error).toContain("Verification command timed out: bun test")
+    })
+
+    test("gate fails and retries are exhausted — issue is cancelled, not merged, not Done", async () => {
+      let merged = false
+      vi.mocked(runVerificationGate).mockResolvedValue({
+        ran: true,
+        ok: false,
+        command: "bun test",
+        output: "FAIL",
+        timedOut: false,
+      })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      mockWm.mergeAndPush = async () => {
+        merged = true
+        return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
+      }
+      let cancelledState: string | null = null
+      const deps = makeDeps(
+        mockWm,
+        { verify: { command: "bun test", timeoutSec: 600 } },
+        {
+          addRetry: () => false, // simulate max retries already exceeded
+          tracker: {
+            fetchIssuesByState: async () => [],
+            fetchIssueLabels: async () => [],
+            addIssueComment: async () => {},
+            addIssueLabel: async () => {},
+            updateIssueState: async (_issueId: string, state: string) => {
+              cancelledState = state
+            },
+          } as unknown as CompletionDeps["tracker"],
+        },
+      )
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(merged).toBe(false)
+      expect(cancelledState).toBe(deps.config.workflowStates.cancelled)
+      expect(events.length).toBe(0)
+    })
+
+    test("gate only runs when there are code changes", async () => {
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: false })
+      const deps = makeDeps(mockWm, { verify: { command: "bun test", timeoutSec: 600 } })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "No changes needed",
+      })
+
+      expect(runVerificationGate).not.toHaveBeenCalled()
+    })
+
+    test("per-route verify_command is preferred over the project-wide command", async () => {
+      vi.mocked(runVerificationGate).mockResolvedValue({ ran: true, ok: true, command: "pytest", output: "" })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      const deps = makeDeps(mockWm, {
+        verify: { command: "bun test", timeoutSec: 600 },
+        routingRules: [{ label: "scope:backend", workspaceRoot: "/repo", verifyCommand: "pytest" }],
+      })
+      const route = makeRoute({ matchedLabel: "scope:backend" })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), route)
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(runVerificationGate).toHaveBeenCalledWith(expect.anything(), "pytest", expect.anything())
+    })
+  })
+
   describe("onComplete — DAG cascade", () => {
     function makeCompletedAttempt() {
       return {
@@ -654,6 +853,100 @@ describe("createCompletionCallbacks", () => {
       await callbacks.onError({ code: "FATAL", message: "unrecoverable", recoverable: false })
 
       expect(retryAdds.length).toBe(0)
+    })
+  })
+
+  describe("retry failure classification", () => {
+    test("auto-commit blocked by lockfile conflict classifies as 'infra'", async () => {
+      const mockWm = makeFakeWorkspaceGateway({
+        hasUncommittedChanges: true,
+        hasCodeChanges: true,
+        autoCommitOk: false,
+        autoCommitError: "Conflict markers detected in regeneratable lockfiles: package-lock.json",
+        autoCommitRetryable: true,
+        autoCommitRetryPrompt: "Run npm install to regenerate package-lock.json",
+      })
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(retryAdds.at(-1)?.category).toBe("infra")
+    })
+
+    test("verification gate failure classifies as 'verification'", async () => {
+      vi.mocked(runVerificationGate).mockResolvedValue({
+        ran: true,
+        ok: false,
+        command: "bun test",
+        output: "FAIL",
+        timedOut: false,
+      })
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
+      const deps = makeDeps(mockWm, { verify: { command: "bun test", timeoutSec: 600 } })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(retryAdds.at(-1)?.category).toBe("verification")
+    })
+
+    test("merge lockfile conflict classifies as 'infra'", async () => {
+      const mockWm = makeFakeWorkspaceGateway({
+        hasCodeChanges: true,
+        diffStat: "1 file",
+        mergeOk: false,
+        mergeError: "Rebase conflicted in regeneratable lockfiles: package-lock.json",
+        mergeRetryable: true,
+        mergeRetryPrompt: "Run npm install to regenerate package-lock.json",
+      })
+      const deps = makeDeps(mockWm)
+      const route = makeRoute({ deliveryMode: "merge" })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), route)
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Done",
+      })
+
+      expect(retryAdds.at(-1)?.category).toBe("infra")
+    })
+
+    test("premature-exit (no code changes, no output) classifies as 'capability'", async () => {
+      const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: false })
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete({
+        ...makeAttempt(),
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: null,
+      })
+
+      expect(retryAdds.at(-1)?.category).toBe("capability")
+    })
+
+    test("recoverable agent onError classifies as 'infra'", async () => {
+      const mockWm = makeFakeWorkspaceGateway()
+      const deps = makeDeps(mockWm)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onError({ code: "TIMEOUT", message: "agent timed out", recoverable: true })
+
+      expect(retryAdds.at(-1)?.category).toBe("infra")
     })
   })
 

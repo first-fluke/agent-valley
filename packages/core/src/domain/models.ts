@@ -97,11 +97,28 @@ export interface RunAttempt {
   }
 }
 
+/**
+ * Failure classification for retry policy (MAST: infra / capability /
+ * verification failures need different remediation — conflating them
+ * wastes retries on unrecoverable classes).
+ *
+ * - "infra": transient/environmental (timeout, crash, spawn failure,
+ *   git/network errors, regeneratable lockfile conflicts). Full retry budget.
+ * - "verification": the project's own verify_command (test/lint/typecheck)
+ *   failed. Retried with the failure output as context. Full retry budget.
+ * - "capability": the agent produced no usable output (premature exit /
+ *   repeated no-op). Re-running the same incapable attempt rarely helps,
+ *   so this category gets a shorter retry budget before escalating to
+ *   cancelled.
+ */
+export type RetryCategory = "infra" | "capability" | "verification"
+
 export interface RetryEntry {
   issueId: string
   attemptCount: number
   nextRetryAt: string
   lastError: string
+  category: RetryCategory
 }
 
 export interface WaitingEntry {

@@ -301,6 +301,25 @@ describe("persistence", () => {
     await s.loadCache()
     expect(s.getReadyIssues()).toEqual([])
   })
+
+  test("flush() resolves once the in-flight write queue drains", async () => {
+    scheduler.buildFromIssues([makeIssue({ id: "F", identifier: "T-1" })])
+
+    // Enqueue an async persist (fire-and-forget) via a mutation, then flush.
+    scheduler.updateNodeStatus("F", "running")
+    await scheduler.flush()
+
+    // A caller that immediately reads the cache file after flush() must see
+    // the write that was in-flight when flush() was called — proves the
+    // queue was actually drained, not just resolved trivially.
+    const loaded = new DagScheduler(TEST_CACHE)
+    await loaded.loadCache()
+    expect(loaded.getNode("F")?.status).toBe("running")
+  })
+
+  test("flush() resolves immediately when no write is queued", async () => {
+    await expect(scheduler.flush()).resolves.toBeUndefined()
+  })
 })
 
 // ── Reconcile ───────────────────────────────────────────────────────
