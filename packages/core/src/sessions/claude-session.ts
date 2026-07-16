@@ -12,6 +12,7 @@
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, buildAgentEnv } from "./base-session"
+import { planSandboxedSpawn } from "./sandbox"
 
 export class ClaudeSession extends BaseSession {
   private filesChanged: string[] = []
@@ -49,8 +50,25 @@ export class ClaudeSession extends BaseSession {
       args.push("--effort", effort)
     }
 
+    // Containment for --dangerously-skip-permissions comes from the OS
+    // sandbox wrapping this spawn, not from trusting the flag itself.
+    // planSandboxedSpawn() fails closed (throws) when no sandbox is
+    // available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
+    let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
+    try {
+      plan = await planSandboxedSpawn({
+        agentType: "claude",
+        command: "claude",
+        args,
+        workspacePath: this.config.workspacePath,
+      })
+    } catch (err) {
+      this.emitError("CRASH", `${err}`, false)
+      return
+    }
+
     // Pass prompt via stdin to avoid arg length/injection issues
-    this.process = spawn("claude", args, {
+    this.process = spawn(plan.command, plan.args, {
       cwd: this.config.workspacePath,
       env: buildAgentEnv("claude", this.config.env) as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],

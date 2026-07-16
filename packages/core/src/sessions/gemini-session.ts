@@ -10,6 +10,7 @@
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, buildAgentEnv } from "./base-session"
+import { planSandboxedSpawn } from "./sandbox"
 
 export class GeminiSession extends BaseSession {
   private output = ""
@@ -24,11 +25,20 @@ export class GeminiSession extends BaseSession {
     this.started = true
 
     if (this.useAcp) {
-      // ACP mode: persistent process
+      // ACP mode: persistent process. Containment for --approval-mode
+      // yolo/auto comes from the OS sandbox wrapping this process — see
+      // ./sandbox.ts. Fails closed when no sandbox is available unless
+      // SYMPHONY_ALLOW_UNSANDBOXED=1 is set; let that propagate.
       this.startedAt = Date.now()
       const args = this.buildAcpArgs(config)
+      const plan = await planSandboxedSpawn({
+        agentType: "gemini",
+        command: "gemini",
+        args,
+        workspacePath: config.workspacePath,
+      })
 
-      this.process = spawn("gemini", args, {
+      this.process = spawn(plan.command, plan.args, {
         cwd: config.workspacePath,
         env: buildAgentEnv("gemini", config.env) as NodeJS.ProcessEnv,
         stdio: ["pipe", "pipe", "pipe"],
@@ -110,8 +120,24 @@ export class GeminiSession extends BaseSession {
     const config = this.config
     const args = this.buildFallbackArgs(config)
 
+    // Containment for --yolo comes from the OS sandbox wrapping this
+    // spawn, not from trusting the flag. Fails closed when no sandbox is
+    // available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
+    let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
+    try {
+      plan = await planSandboxedSpawn({
+        agentType: "gemini",
+        command: "gemini",
+        args,
+        workspacePath: config.workspacePath,
+      })
+    } catch (err) {
+      this.emitError("CRASH", `${err}`, false)
+      return
+    }
+
     // Pass prompt via stdin to avoid CLI arg injection and temp file issues
-    this.process = spawn("gemini", args, {
+    this.process = spawn(plan.command, plan.args, {
       cwd: config.workspacePath,
       env: buildAgentEnv("gemini", config.env) as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "ignore"], // gemini outputs heavy MCP noise to stderr — ignore to prevent pipe blocking

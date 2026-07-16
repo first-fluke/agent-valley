@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, buildAgentEnv } from "./base-session"
+import { planSandboxedSpawn } from "./sandbox"
 
 interface JsonRpcRequest {
   jsonrpc: "2.0"
@@ -47,7 +48,19 @@ export class CodexSession extends BaseSession {
       args.push("-c", `model="${config.model}"`)
     }
 
-    this.process = spawn("codex", args, {
+    // Containment for the per-turn `approvalPolicy: "never"` (set in
+    // execute()) comes from the OS sandbox wrapping this process, not
+    // from trusting the flag. planSandboxedSpawn() fails closed when no
+    // sandbox is available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set —
+    // let that rejection propagate so callers see a clear start() failure.
+    const plan = await planSandboxedSpawn({
+      agentType: "codex",
+      command: "codex",
+      args,
+      workspacePath: config.workspacePath,
+    })
+
+    this.process = spawn(plan.command, plan.args, {
       cwd: config.workspacePath,
       env: buildAgentEnv("codex", config.env) as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
