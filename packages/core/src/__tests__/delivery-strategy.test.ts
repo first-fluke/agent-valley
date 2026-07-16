@@ -57,6 +57,39 @@ beforeEach(() => {
   responses.length = 0
 })
 
+describe("mergeAndPush — verification gate guard", () => {
+  test("refuses to run any git command when opts.verified is false", async () => {
+    const result = await mergeAndPush(makeWorkspace(), "/tmp/root", { verified: false })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("verified:false")
+    expect(calls).toHaveLength(0)
+  })
+
+  test("proceeds normally when opts.verified is omitted (backward compatible)", async () => {
+    enqueue(
+      { exitCode: 1, stdout: "", stderr: "" }, // no remote
+      { exitCode: 0, stdout: "", stderr: "" }, // diff --quiet → no diff
+    )
+
+    const result = await mergeAndPush(makeWorkspace(), "/tmp/root")
+
+    expect(result.ok).toBe(true)
+    expect(calls.length).toBeGreaterThan(0)
+  })
+
+  test("proceeds normally when opts.verified is explicitly true", async () => {
+    enqueue(
+      { exitCode: 1, stdout: "", stderr: "" }, // no remote
+      { exitCode: 0, stdout: "", stderr: "" }, // diff --quiet → no diff
+    )
+
+    const result = await mergeAndPush(makeWorkspace(), "/tmp/root", { verified: true })
+
+    expect(result.ok).toBe(true)
+  })
+})
+
 describe("mergeAndPush", () => {
   test("short-circuits with ok:true when branch has no diff vs main", async () => {
     enqueue(
@@ -126,6 +159,95 @@ describe("mergeAndPush", () => {
     expect(result.ok).toBe(false)
     expect(result.error).toContain("Unmerged files present")
     expect(result.error).toContain("Fix:")
+  })
+})
+
+describe("mergeAndPush — rebase conflict classification (no destructive auto-resolution)", () => {
+  function enqueuePreRebaseHappyPath(): void {
+    enqueue(
+      { exitCode: 1, stdout: "", stderr: "" }, // no remote
+      { exitCode: 1, stdout: "", stderr: "" }, // diff --quiet → branch has diff
+      { exitCode: 0, stdout: "", stderr: "" }, // preRebase: diff --name-only --diff-filter=U (clean)
+      { exitCode: 0, stdout: "", stderr: "" }, // preRebase: diff --name-only main...branch (no changed files → skip marker scan)
+      { exitCode: 0, stdout: "", stderr: "" }, // preRebase: diff --check main...branch
+      { exitCode: 1, stdout: "", stderr: "conflict" }, // rebase main branch → fails
+      { exitCode: 1, stdout: "", stderr: "" }, // diff --check → still has conflict markers
+    )
+  }
+
+  test("ordinary (non-lockfile, non-high-risk) conflict never runs checkout --theirs and returns retryable", async () => {
+    enqueuePreRebaseHappyPath()
+    enqueue(
+      { exitCode: 0, stdout: "src/models.ts\n", stderr: "" }, // autoResolveRebaseConflicts: diff --name-only --diff-filter=U
+      { exitCode: 0, stdout: "", stderr: "" }, // rebase --abort
+    )
+
+    const result = await mergeAndPush(makeWorkspace(), "/tmp/root")
+
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.error).toContain("src/models.ts")
+    expect(result.retryPrompt).toContain("preserving BOTH main's changes and your own")
+
+    const theirsCall = calls.find((c) => c.cmd === "git" && c.args.includes("--theirs"))
+    expect(theirsCall).toBeUndefined()
+    const abortCall = calls.find((c) => c.cmd === "git" && c.args[0] === "rebase" && c.args.includes("--abort"))
+    expect(abortCall).toBeDefined()
+  })
+
+  test("conflict confined to regeneratable lockfiles returns the lockfile retry prompt", async () => {
+    enqueuePreRebaseHappyPath()
+    enqueue(
+      { exitCode: 0, stdout: "package-lock.json\n", stderr: "" }, // diff --name-only --diff-filter=U
+      { exitCode: 0, stdout: "", stderr: "" }, // rebase --abort
+    )
+
+    const result = await mergeAndPush(makeWorkspace(), "/tmp/root")
+
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.error).toContain("regeneratable lockfiles")
+    expect(result.retryPrompt).toContain("dependency install or sync")
+
+    const theirsCall = calls.find((c) => c.cmd === "git" && c.args.includes("--theirs"))
+    expect(theirsCall).toBeUndefined()
+  })
+
+  test("conflict touching a high-risk file (e.g. migrations) hard-fails without retryable", async () => {
+    enqueuePreRebaseHappyPath()
+    enqueue(
+      { exitCode: 0, stdout: "db/migrations/001_init.sql\n", stderr: "" }, // diff --name-only --diff-filter=U
+      { exitCode: 0, stdout: "", stderr: "" }, // rebase --abort
+    )
+
+    const result = await mergeAndPush(makeWorkspace(), "/tmp/root")
+
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBeFalsy()
+    expect(result.error).toContain("high-risk file")
+    expect(result.error).toContain("db/migrations/001_init.sql")
+
+    const theirsCall = calls.find((c) => c.cmd === "git" && c.args.includes("--theirs"))
+    expect(theirsCall).toBeUndefined()
+  })
+
+  test("mixed lockfile + ordinary conflict is treated as ordinary (retryable, no destructive resolution)", async () => {
+    enqueuePreRebaseHappyPath()
+    enqueue(
+      { exitCode: 0, stdout: "package-lock.json\nsrc/models.ts\n", stderr: "" }, // diff --name-only --diff-filter=U
+      { exitCode: 0, stdout: "", stderr: "" }, // rebase --abort
+    )
+
+    const result = await mergeAndPush(makeWorkspace(), "/tmp/root")
+
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.retryPrompt).toContain("package-lock.json")
+    expect(result.retryPrompt).toContain("src/models.ts")
+    expect(result.retryPrompt).toContain("Regenerate the lockfile(s)")
+
+    const theirsCall = calls.find((c) => c.cmd === "git" && c.args.includes("--theirs"))
+    expect(theirsCall).toBeUndefined()
   })
 })
 

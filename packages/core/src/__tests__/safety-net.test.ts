@@ -13,6 +13,7 @@
 import { describe, expect, test } from "vitest"
 import {
   buildLockfileRetryPrompt,
+  buildRebaseConflictRetryPrompt,
   CONFLICT_MARKER_PATTERN,
   type ConflictClassificationLabels,
   classifyConflictFiles,
@@ -52,6 +53,16 @@ describe("isHighRiskConflictFile", () => {
     ["src/unrelated.ts", false],
     ["README.md", false],
     ["package-lock.json", false],
+    // Broadened: database migrations and schema files
+    ["db/migrations/001_init.sql", true],
+    ["migrations/20240101_add_users.py", true],
+    ["scripts/migrate.ts", true],
+    ["prisma/schema.prisma", true],
+    ["src/models.schema.ts", true],
+    ["seed.sql", true],
+    // Near-misses that must NOT be flagged (avoid false-positive hard-fails)
+    ["migrated.ts", false],
+    ["src/immigration-policy.md", false],
   ])("classifies %s → %p", (file, expected) => {
     expect(isHighRiskConflictFile(file)).toBe(expected)
   })
@@ -83,6 +94,28 @@ describe("buildLockfileRetryPrompt", () => {
     const prompt = buildLockfileRetryPrompt(["yarn.lock"])
     expect(prompt).toContain("yarn.lock")
     expect(prompt).toMatch(/Retry instruction/)
+  })
+})
+
+describe("buildRebaseConflictRetryPrompt", () => {
+  test("lists conflicted files and instructs preserving both sides", () => {
+    const prompt = buildRebaseConflictRetryPrompt(["src/models.ts", "src/utils.ts"])
+    expect(prompt).toContain("src/models.ts")
+    expect(prompt).toContain("src/utils.ts")
+    expect(prompt).toContain("Main advanced while you worked")
+    expect(prompt).toContain("preserving BOTH main's changes and your own")
+    expect(prompt).toContain("do not discard either side")
+  })
+
+  test("adds a lockfile-specific bullet when the conflict set includes a lockfile", () => {
+    const prompt = buildRebaseConflictRetryPrompt(["src/models.ts", "package-lock.json"])
+    expect(prompt).toContain("Regenerate the lockfile(s)")
+    expect(prompt).toContain("package-lock.json")
+  })
+
+  test("omits the lockfile bullet when no lockfile is in the conflict set", () => {
+    const prompt = buildRebaseConflictRetryPrompt(["src/models.ts"])
+    expect(prompt).not.toContain("Regenerate the lockfile(s)")
   })
 })
 

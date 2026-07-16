@@ -37,6 +37,14 @@ export const HIGH_RISK_CONFLICT_PATTERNS: readonly RegExp[] = [
   /(^|\/)go\.mod$/,
   /(^|\/)(middleware|auth|auth-client|auth-server|env|config)\.[^/]+$/,
   /(^|\/)auth\//,
+  // Database migrations and schema — a mechanically "resolved" conflict here
+  // can silently drop a migration step or corrupt the schema. These always
+  // need review with the full migration history in hand.
+  /(^|\/)migrations\//,
+  /\bmigrate\b/i,
+  /\.sql$/,
+  /(^|\/)schema\.prisma$/,
+  /\.schema\.ts$/,
 ]
 
 export function isRegeneratableLockfile(file: string): boolean {
@@ -55,6 +63,31 @@ export function buildLockfileRetryPrompt(files: string[]): string {
     "- Run the repo's dependency install or sync command to regenerate the conflicted lockfile(s).",
     "- Review the regenerated lockfile diff and keep only intentional dependency updates.",
   ].join("\n")
+}
+
+/**
+ * Retry prompt for an ordinary (non-lockfile, non-high-risk) rebase conflict.
+ *
+ * We never resolve these by overwriting the file with one side's blob
+ * (`git checkout --theirs` replaces the whole file, not just the conflicting
+ * hunks — see `docs/harness/SAFETY.md`). Instead the rebase is aborted and
+ * the agent re-applies its change on top of the current main.
+ */
+export function buildRebaseConflictRetryPrompt(files: string[]): string {
+  const lockfiles = files.filter((file) => isRegeneratableLockfile(file))
+  const lines = [
+    `Main advanced while you worked. Your rebase onto the latest main conflicts in: ${files.join(", ")}`,
+    "Retry instruction:",
+    "- Re-apply your change on top of the current main, preserving BOTH main's changes and your own — do not discard either side.",
+    "- Read both versions of each conflicted file before resolving; do not accept one side wholesale.",
+  ]
+  if (lockfiles.length > 0) {
+    lines.push(
+      `- Regenerate the lockfile(s) via the repo's dependency install/sync command rather than hand-editing: ${lockfiles.join(", ")}`,
+    )
+  }
+  lines.push("- Re-run verification (tests/build) after resolving before delivering again.")
+  return lines.join("\n")
 }
 
 /** Parse `-z`-delimited `git status --porcelain` or `git diff --name-only -z` output. */

@@ -12,6 +12,7 @@ import type { Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 import {
   buildLockfileRetryPrompt,
+  buildRebaseConflictRetryPrompt,
   classifyConflictFiles,
   findConflictMarkerFiles,
   isHighRiskConflictFile,
@@ -81,12 +82,29 @@ async function validateBranchBeforeMerge(root: string, branch: string): Promise<
 }
 
 /**
- * Auto-resolve rebase conflicts.
+ * Classify a rebase conflict. This function never mutates the working tree —
+ * it only inspects the conflicted file list and decides a retry strategy.
+ * The caller (`mergeAndPush`) always aborts the rebase after a non-ok result.
  *
- * During rebase, "ours" = the branch being rebased onto (main),
- * "theirs" = the feature branch commits being replayed.
- * We accept "theirs" (feature branch) to preserve the agent's work — except
- * for lockfiles (retryable) and high-risk files (hard failure).
+ * We used to resolve ordinary conflicts by running `git checkout --theirs`
+ * per file. In a rebase, "theirs" is the feature-branch commit being
+ * replayed, but `--theirs` replaces the file with that commit's ENTIRE
+ * blob — it is not a hunk-by-hunk merge. Any change main had already
+ * contributed to that file (including hunks that would have merged
+ * cleanly) was silently discarded. That caused real, silent work loss
+ * when two agents touched the same file: whichever rebased second would
+ * wipe out the first agent's already-merged change. We never do that now.
+ *
+ * Contract:
+ * - Any conflicted file matching `HIGH_RISK_CONFLICT_PATTERNS` (dependency
+ *   manifests, auth, migrations, schema, ...) → hard failure, not
+ *   retryable. These are never safe to resolve mechanically or reattempt
+ *   without human review.
+ * - Conflict confined entirely to regeneratable lockfiles → retryable; the
+ *   agent regenerates the lockfile against the new main.
+ * - Any other conflict (ordinary source files, or a mix of lockfiles and
+ *   ordinary files) → retryable; the agent re-applies its change on top of
+ *   current main, preserving both sides. No file is overwritten here.
  */
 async function autoResolveRebaseConflicts(root: string, branch: string): Promise<DeliveryResult> {
   const { stdout: conflictList } = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: root })
@@ -96,6 +114,21 @@ async function autoResolveRebaseConflicts(root: string, branch: string): Promise
     .filter((f) => f.length > 0)
 
   if (conflictedFiles.length === 0) return { ok: false, error: `Rebase conflict on ${branch}` }
+
+  const highRiskFiles = conflictedFiles.filter((file) => isHighRiskConflictFile(file))
+  if (highRiskFiles.length > 0) {
+    logger.warn("workspace-manager", "Refusing to auto-resolve high-risk rebase conflicts", {
+      branch,
+      files: highRiskFiles.join(", "),
+    })
+    return {
+      ok: false,
+      error:
+        `Rebase conflict on ${branch} touches high-risk file(s): ${highRiskFiles.join(", ")}\n` +
+        "  Fix: Resolve these conflicts manually — high-risk files (dependency manifests, auth, " +
+        "migrations, schema) are never auto-resolved or auto-retried.",
+    }
+  }
 
   const lockfiles = conflictedFiles.filter((file) => isRegeneratableLockfile(file))
   if (lockfiles.length === conflictedFiles.length) {
@@ -111,52 +144,47 @@ async function autoResolveRebaseConflicts(root: string, branch: string): Promise
     }
   }
 
-  const highRiskFiles = conflictedFiles.filter((file) => isHighRiskConflictFile(file))
-  if (highRiskFiles.length > 0 || lockfiles.length > 0) {
-    const combined = [...new Set([...highRiskFiles, ...lockfiles])]
-    logger.warn("workspace-manager", "Refusing to auto-resolve high-risk rebase conflicts", {
-      branch,
-      files: combined.join(", "),
-    })
-    return {
-      ok: false,
-      error: `Rebase conflict on ${branch}: ${combined.join(", ")}`,
-    }
-  }
-
-  logger.info("workspace-manager", `Auto-resolving ${conflictedFiles.length} rebase conflict(s)`, {
+  logger.warn("workspace-manager", "Deferring rebase conflict to agent retry (no destructive auto-resolution)", {
     branch,
     files: conflictedFiles.join(", "),
   })
-
-  // In rebase context: --theirs = the commit being rebased (feature branch)
-  for (const file of conflictedFiles) {
-    const { exitCode } = await runCommand("git", ["checkout", "--theirs", "--", file], { cwd: root })
-    if (exitCode !== 0) {
-      logger.warn("workspace-manager", `Failed to resolve ${file}`, { branch })
-      return { ok: false, error: `Rebase conflict on ${branch}: failed to resolve ${file}` }
-    }
-    await runCommand("git", ["add", file], { cwd: root })
+  return {
+    ok: false,
+    retryable: true,
+    error: `Rebase conflicted on ${branch} in: ${conflictedFiles.join(", ")}`,
+    retryPrompt: buildRebaseConflictRetryPrompt(conflictedFiles),
   }
-
-  const { exitCode: continueExit } = await runCommand("git", ["rebase", "--continue"], {
-    cwd: root,
-    env: { ...process.env, GIT_EDITOR: "true" },
-  })
-
-  if (continueExit !== 0) {
-    const { exitCode: moreConflicts } = await runCommand("git", ["diff", "--check"], { cwd: root })
-    if (moreConflicts !== 0) {
-      return autoResolveRebaseConflicts(root, branch)
-    }
-  }
-
-  logger.info("workspace-manager", `Auto-resolved rebase conflicts for ${branch}`)
-  return { ok: true }
 }
 
-/** Rebase the feature branch onto main, fast-forward merge, and push. Retries up to 3 times on push rejection. */
-export async function mergeAndPush(workspace: Workspace, rootFallback: string): Promise<DeliveryResult> {
+/**
+ * Rebase the feature branch onto main, fast-forward merge, and push. Retries up to 3 times on push rejection.
+ *
+ * `opts.verified` is NOT the enforcement point for the verification gate.
+ * The only current caller (`completion-handler.ts`) never passes `opts` at
+ * all — it enforces the gate itself by simply not calling `mergeAndPush`
+ * when the verification gate (`verify_command`) failed. The
+ * `opts.verified === false` check below is unreachable in production today;
+ * it exists solely as cheap defense-in-depth for a future direct caller
+ * that explicitly passes `verified: false`. Do not rely on it as the
+ * verification gate — that logic lives entirely in `completion-handler.ts`.
+ */
+export async function mergeAndPush(
+  workspace: Workspace,
+  rootFallback: string,
+  opts: { verified?: boolean } = {},
+): Promise<DeliveryResult> {
+  if (opts.verified === false) {
+    logger.error("workspace-manager", "mergeAndPush refused — verification gate did not pass", {
+      branch: workspace.branch,
+    })
+    return {
+      ok: false,
+      error:
+        "mergeAndPush called with verified:false.\n" +
+        "  Fix: Do not call mergeAndPush until the verification gate (verify_command) reports ok:true.",
+    }
+  }
+
   const root = repoRootOf(workspace, rootFallback)
   const branch = workspace.branch
   const maxAttempts = 3

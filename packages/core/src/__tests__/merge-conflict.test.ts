@@ -89,7 +89,7 @@ describe("mergeAndPush — rebase-based delivery", () => {
     expect(readFile(resolve(repoDir, "other.txt"))).toContain("other content")
   })
 
-  test("auto-resolves rebase conflict (feature branch wins)", { timeout: 10000 }, async () => {
+  test("defers ordinary rebase conflicts to agent retry — never overwrites the file with one side's blob", async () => {
     // Feature branch modifies line 2
     git(repoDir, ["checkout", "-b", "feature/TEST-2"])
     writeFileSync(resolve(repoDir, "file.txt"), "line 1\nfeature change\nline 3\n")
@@ -114,11 +114,69 @@ describe("mergeAndPush — rebase-based delivery", () => {
     }
     const result = await manager.mergeAndPush(workspace)
 
-    expect(result.ok).toBe(true)
+    // No longer silently resolved by overwriting with "theirs" — deferred
+    // back to the agent as a retryable failure.
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.error).toContain("file.txt")
+    expect(result.retryPrompt).toContain("preserving BOTH main's changes and your own")
+    expect(result.retryPrompt).toContain("file.txt")
 
-    // Feature branch version wins (theirs in rebase context)
+    // main is untouched — still has main's own change, rebase was aborted.
     git(repoDir, ["checkout", "main"])
-    expect(readFile(resolve(repoDir, "file.txt"))).toContain("feature change")
+    expect(readFile(resolve(repoDir, "file.txt"))).toContain("main change")
+    expect(readFile(resolve(repoDir, "file.txt"))).not.toContain("feature change")
+
+    const remoteMain = git(bareDir, ["show", "main:file.txt"])
+    expect(remoteMain).toContain("main change")
+  })
+
+  test("two-agent silent-loss scenario: rebase conflict never discards main's already-merged work", async () => {
+    // Capture main BEFORE issue A lands, so issue B can branch from it.
+    const preIssueAMain = git(repoDir, ["rev-parse", "main"])
+
+    // Issue A adds foo() to models.ts and merges first.
+    git(repoDir, ["checkout", "-b", "feature/ISSUE-A"])
+    writeFileSync(resolve(repoDir, "models.ts"), "export function foo() {\n  return 1\n}\n")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: add foo"])
+    git(repoDir, ["checkout", "main"])
+    git(repoDir, ["merge", "--no-ff", "feature/ISSUE-A", "-m", "merge: issue A"])
+    git(repoDir, ["push", "origin", "main"])
+    expect(readFile(resolve(repoDir, "models.ts"))).toContain("foo")
+
+    // Issue B branched from the OLDER main (before foo() landed) and adds
+    // bar() to the same file — this is the conflicting/overlapping region.
+    git(repoDir, ["checkout", "-b", "feature/ISSUE-B", preIssueAMain])
+    writeFileSync(resolve(repoDir, "models.ts"), "export function bar() {\n  return 2\n}\n")
+    git(repoDir, ["add", "."])
+    git(repoDir, ["commit", "-m", "feat: add bar"])
+
+    const workspace = {
+      id: "t",
+      key: "ISSUE-B",
+      path: resolve(repoDir, "ISSUE-B"),
+      issueId: "t",
+      branch: "feature/ISSUE-B",
+      status: "running" as const,
+      createdAt: new Date().toISOString(),
+    }
+    const result = await manager.mergeAndPush(workspace)
+
+    // Must NOT silently succeed by wiping foo() off main — it must come
+    // back as a retryable failure so the agent re-applies bar() without
+    // destroying foo().
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.retryPrompt).toContain("models.ts")
+
+    // The critical assertion: main (local AND remote) still has foo() —
+    // it was never overwritten with B's blob.
+    git(repoDir, ["checkout", "main"])
+    expect(readFile(resolve(repoDir, "models.ts"))).toContain("foo")
+
+    const remoteMain = git(bareDir, ["show", "main:models.ts"])
+    expect(remoteMain).toContain("foo")
   })
 
   test("clean merge with no changes returns ok", async () => {
