@@ -6,26 +6,14 @@ import { z } from "zod"
 import type { Issue } from "../domain/models"
 import { parseScoreFromLabels } from "../domain/models"
 import { logger } from "../observability/logger"
+import { verifyHmacSha256Hex } from "./hmac-verify"
 import type { ParsedWebhookEvent, RelationWebhookEvent, WebhookEvent } from "./types"
 
 /**
- * Verify HMAC-SHA256 webhook signature.
+ * Verify HMAC-SHA256 webhook signature (constant-time; see hmac-verify.ts).
  */
 export async function verifyWebhookSignature(payload: string, signature: string, secret: string): Promise<boolean> {
-  const encoder = new TextEncoder()
-  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
-    "sign",
-  ])
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload))
-  const expected = Buffer.from(sig).toString("hex")
-
-  // Constant-time comparison
-  if (expected.length !== signature.length) return false
-  let diff = 0
-  for (let i = 0; i < expected.length; i++) {
-    diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i)
-  }
-  return diff === 0
+  return verifyHmacSha256Hex(payload, signature, secret)
 }
 
 // ── Webhook Payload Schemas ─────────────────────────────────────────
@@ -67,6 +55,11 @@ const webhookPayloadSchema = z.object({
       stateId: z.string(),
     })
     .optional(),
+  // Present on real Linear deliveries (ms epoch); optional so payloads that
+  // predate this field (fixtures, older captures) still parse. Used for
+  // replay/freshness protection — see `checkWebhookFreshnessAndDedup` in
+  // `dedup-cache.ts`, wired in `adapters/linear-webhook-receiver.ts`.
+  webhookTimestamp: z.number().optional(),
 })
 
 const relationPayloadSchema = z.object({
@@ -78,6 +71,7 @@ const relationPayloadSchema = z.object({
     issueId: z.string(),
     relatedIssueId: z.string(),
   }),
+  webhookTimestamp: z.number().optional(),
 })
 
 /**
@@ -101,6 +95,7 @@ export function parseWebhookEvent(payload: string): ParsedWebhookEvent | null {
         issueId: data.data.issueId,
         relatedIssueId: data.data.relatedIssueId,
         relationType: data.data.type,
+        webhookTimestamp: data.webhookTimestamp,
       } satisfies RelationWebhookEvent
     }
 
@@ -149,6 +144,7 @@ export function parseWebhookEvent(payload: string): ParsedWebhookEvent | null {
       issue,
       stateId,
       prevStateId,
+      webhookTimestamp: data.webhookTimestamp,
     } satisfies WebhookEvent
   } catch (err) {
     logger.error("tracker-client", "Failed to parse webhook payload", { error: String(err) })

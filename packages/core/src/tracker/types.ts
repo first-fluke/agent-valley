@@ -16,6 +16,13 @@ export interface LinearIssueWebhookEvent {
   issue: Issue
   stateId: string
   prevStateId: string | null
+  /**
+   * Ms-epoch delivery timestamp Linear stamps on real webhook payloads.
+   * Undefined only for payloads that predate this field (fixtures/older
+   * captures) — replay/freshness protection is skipped in that case. See
+   * `dedup-cache.ts::checkWebhookFreshnessAndDedup`.
+   */
+  webhookTimestamp?: number
 }
 
 export interface LinearRelationWebhookEvent {
@@ -24,6 +31,8 @@ export interface LinearRelationWebhookEvent {
   issueId: string
   relatedIssueId: string
   relationType: string
+  /** See `LinearIssueWebhookEvent.webhookTimestamp`. */
+  webhookTimestamp?: number
 }
 
 export type LinearParsedWebhookEvent = LinearIssueWebhookEvent | LinearRelationWebhookEvent

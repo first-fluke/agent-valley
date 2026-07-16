@@ -13,6 +13,8 @@
 
 import type { ParsedWebhookEvent } from "../../domain/parsed-webhook-event"
 import type { IssueStateType, WebhookReceiver } from "../../domain/ports/tracker"
+import { logger } from "../../observability/logger"
+import { checkWebhookFreshnessAndDedup, WebhookDedupCache } from "../dedup-cache"
 import type { LinearParsedWebhookEvent } from "../types"
 import { parseWebhookEvent, verifyWebhookSignature } from "../webhook-handler"
 
@@ -39,11 +41,18 @@ export interface LinearWebhookReceiverConfig {
    * logical state.
    */
   workflowStates?: LinearWebhookWorkflowStates
+  /**
+   * Optional injectable replay-protection cache — primarily for tests
+   * that need a deterministic clock/TTL. Defaults to a private, bounded,
+   * TTL-evicting `WebhookDedupCache` (see `../dedup-cache.ts`).
+   */
+  dedupCache?: WebhookDedupCache
 }
 
 export class LinearWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent> {
   private readonly secret: string
   private readonly workflowStates?: LinearWebhookWorkflowStates
+  private readonly dedupCache: WebhookDedupCache
 
   constructor(config: LinearWebhookReceiverConfig) {
     if (!config.secret) {
@@ -55,6 +64,7 @@ export class LinearWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
     }
     this.secret = config.secret
     this.workflowStates = config.workflowStates
+    this.dedupCache = config.dedupCache ?? new WebhookDedupCache()
   }
 
   verifySignature(payload: string, signature: string): Promise<boolean> {
@@ -64,6 +74,24 @@ export class LinearWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
   parseEvent(payload: string): ParsedWebhookEvent | null {
     const linearEvent = parseWebhookEvent(payload)
     if (!linearEvent) return null
+
+    // Replay protection: only enforced when the payload carries the
+    // `webhookTimestamp` field (present on every real Linear delivery). A
+    // captured-and-replayed payload cannot strip this field without
+    // invalidating the HMAC signature, so gating on its presence does not
+    // weaken the check — it only keeps legacy/fixture payloads that predate
+    // the field parsing as before.
+    if (linearEvent.webhookTimestamp !== undefined) {
+      const replay = checkWebhookFreshnessAndDedup(payload, linearEvent.webhookTimestamp, this.dedupCache)
+      if (!replay.ok) {
+        logger.warn("tracker-linear", `Webhook rejected: ${replay.reason}`, {
+          issueId: linearEvent.issueId,
+          webhookTimestamp: linearEvent.webhookTimestamp,
+        })
+        return null
+      }
+    }
+
     return this.toDomainEvent(linearEvent)
   }
 

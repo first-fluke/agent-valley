@@ -17,6 +17,9 @@ import type { Issue } from "../../domain/models"
 import { parseScoreFromLabels } from "../../domain/models"
 import type { ParsedWebhookEvent } from "../../domain/parsed-webhook-event"
 import type { IssueStateType, WebhookReceiver } from "../../domain/ports/tracker"
+import { logger } from "../../observability/logger"
+import { hashPayloadSha256Hex, WebhookDedupCache } from "../dedup-cache"
+import { verifyHmacSha256Hex } from "../hmac-verify"
 import type { GithubStateLabels } from "./github-adapter"
 
 export interface GithubWebhookReceiverConfig {
@@ -24,6 +27,12 @@ export interface GithubWebhookReceiverConfig {
   secret: string
   /** State label table — used to translate labels to logical states. */
   labels: GithubStateLabels
+  /**
+   * Optional injectable replay-protection cache — primarily for tests.
+   * Defaults to a private, bounded, TTL-evicting `WebhookDedupCache` (see
+   * `../dedup-cache.ts`).
+   */
+  dedupCache?: WebhookDedupCache
 }
 
 interface GithubIssuePayload {
@@ -48,6 +57,7 @@ interface GithubWebhookPayload {
 export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent> {
   private readonly secret: string
   private readonly labels: GithubStateLabels
+  private readonly dedupCache: WebhookDedupCache
 
   constructor(config: GithubWebhookReceiverConfig) {
     if (!config.secret) {
@@ -64,33 +74,43 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
     }
     this.secret = config.secret
     this.labels = config.labels
+    this.dedupCache = config.dedupCache ?? new WebhookDedupCache()
   }
 
   async verifySignature(payload: string, signature: string): Promise<boolean> {
     // Accept `sha256=<hex>` (GitHub canonical) or the bare hex for tooling parity.
     const provided = signature.startsWith("sha256=") ? signature.slice("sha256=".length) : signature
-    if (!provided) return false
-
-    const encoder = new TextEncoder()
-    const key = await crypto.subtle.importKey(
-      "raw",
-      encoder.encode(this.secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    )
-    const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload))
-    const expected = Buffer.from(sig).toString("hex")
-
-    if (expected.length !== provided.length) return false
-    let diff = 0
-    for (let i = 0; i < expected.length; i++) {
-      diff |= expected.charCodeAt(i) ^ provided.charCodeAt(i)
-    }
-    return diff === 0
+    return verifyHmacSha256Hex(payload, provided, this.secret)
   }
 
-  parseEvent(payload: string): ParsedWebhookEvent | null {
+  /**
+   * Parse the raw webhook body into a domain event.
+   *
+   * `deliveryId` should be GitHub's `X-GitHub-Delivery` header when the
+   * caller has it available — it is not currently threaded through from
+   * `apps/dashboard`'s route handler / `WebhookRouter` (outside this
+   * package's ownership), so this parameter defaults to unset today. When
+   * absent, the dedup key falls back to a hash of the raw body, which
+   * still catches the verified threat (a captured, validly-signed payload
+   * replayed, or a platform redelivery that resends the same body).
+   */
+  parseEvent(payload: string, deliveryId?: string): ParsedWebhookEvent | null {
+    const event = this.parseEventBody(payload)
+    if (!event) return null
+
+    const dedupKey = deliveryId ? `delivery:${deliveryId}` : `body:${hashPayloadSha256Hex(payload)}`
+    if (!this.dedupCache.checkAndRecord(dedupKey)) {
+      logger.warn("tracker-github", "Webhook rejected: duplicate delivery", {
+        issueId: event.issueId,
+        dedupKey: deliveryId ?? "body-hash",
+      })
+      return null
+    }
+
+    return event
+  }
+
+  private parseEventBody(payload: string): ParsedWebhookEvent | null {
     let raw: GithubWebhookPayload
     try {
       raw = JSON.parse(payload) as GithubWebhookPayload
