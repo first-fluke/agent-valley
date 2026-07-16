@@ -165,7 +165,9 @@ copy_dir  ".agents"
 copy_dir  ".claude"
 copy_dir  ".codex"
 copy_dir  ".cursor"
-# TODO(oma-deferred): add .antigravity/.grok harness dirs once created
+copy_dir  ".grok"
+# antigravity uses a global CLI harness (~/.gemini/antigravity-cli/), not a
+# project dir, so it is intentionally not copied here.
 copy_dir  "docs"
 
 mkdir -p "${TARGET_DIR}/scripts/harness"

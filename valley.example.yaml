@@ -60,9 +60,13 @@ prompt: |
   Path: {{workspace_path}}
 
   ## Instructions
-  1. Read AGENTS.md first
-  2. Implement the requested changes
-  3. Run tests before finishing
+  1. Read AGENTS.md first — this repo ships an oma harness (workflows + skills).
+  2. This runs non-interactively (agent CLIs use --print / headless mode), so
+     keyword-triggered hooks may not auto-activate. Explicitly follow the
+     relevant oma workflow for non-trivial work (e.g. `work` for step-by-step,
+     `ultrawork` for gated multi-phase) and invoke the matching domain skills.
+  3. Implement the requested changes.
+  4. Run tests before finishing.
 
 # ── Multi-Repo Routing (optional) ────────────────────────────────────
 # routing:
