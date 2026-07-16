@@ -106,6 +106,7 @@ agent:
   type: claude          # Default agent: claude / codex / gemini
   timeout: 3600
   max_retries: 3
+  max_parallel: 3       # Max concurrent agent runs (default: hardware-detected recommendation)
 
 logging:
   level: info           # debug / info / warn / error
@@ -166,6 +167,14 @@ routing:
       workspace_root: /path/to/frontend
       agent_type: codex
       delivery_mode: pr
+      verify_command: "pytest && mypy ."   # overrides verify.command below for this route
+
+# Verification Gate (optional, v0.2+). Runs before delivery and before the
+# issue transitions to Done; on failure the agent retries with the captured
+# output as context (existing retry queue). Omit to disable (pre-gate behavior).
+# verify:
+#   command: "bun run typecheck && bun test"
+#   timeout_sec: 600
 
 # Score-Based Routing (optional)
 scoring:
@@ -399,7 +408,8 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 - **Least privilege** — agents operate only within their assigned worktree
 - **Secret management** — secrets in `valley.yaml` and `settings.yaml` (gitignored), pre-commit secret detection
 - **Fetch timeout** — 30s timeout on all tracker API calls
-- **Intervention surface** — `POST /api/intervention` is localhost-only (checks `Host` header) unless `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1`
+- **Intervention surface** — `POST /api/intervention` is localhost-only (best-effort `Host` header check) unless `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` is set together with `SYMPHONY_INTERVENTION_TOKEN` (a bearer token is required for every non-local request; the flag alone without a token rejects everything)
+- **Sandbox execution** — every spawned agent CLI runs inside an OS-level sandbox (`sandbox-exec` on macOS, `bwrap` on Linux); spawns fail closed if no sandbox is available unless `SYMPHONY_ALLOW_UNSANDBOXED=1` is explicitly set
 - **Audit logging** — all agent actions logged in structured JSON
 
 Full documentation: `docs/harness/SAFETY.md`

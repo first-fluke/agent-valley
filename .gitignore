@@ -58,3 +58,6 @@ docs/plans/
 .agents/state/
 .agents/backup/
 .migration-backup/
+
+# oma docs generated artifacts
+docs/generated/

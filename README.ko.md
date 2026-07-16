@@ -106,6 +106,7 @@ agent:
   type: claude          # 기본 에이전트: claude / codex / gemini
   timeout: 3600
   max_retries: 3
+  max_parallel: 3       # 동시 실행 가능한 에이전트 수 (기본값: 하드웨어 감지 기반 권장치)
 
 logging:
   level: info           # debug / info / warn / error
@@ -166,6 +167,14 @@ routing:
       workspace_root: /path/to/frontend
       agent_type: codex
       delivery_mode: pr
+      verify_command: "pytest && mypy ."   # 이 라우트에 한해 아래 verify.command 를 덮어씁니다
+
+# 검증 게이트 (선택 사항, v0.2+). 배포/PR 생성과 Done 전환 전에 실행되며,
+# 실패 시 캡처된 출력을 컨텍스트로 기존 재시도 큐를 통해 다시 시도합니다.
+# 생략 시 게이트 이전 동작(비활성)을 유지합니다.
+# verify:
+#   command: "bun run typecheck && bun test"
+#   timeout_sec: 600
 
 # 점수 기반 라우팅 (선택 사항)
 scoring:
@@ -398,7 +407,8 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 - **최소 권한** — 에이전트는 할당된 worktree 내에서만 작동
 - **시크릿 관리** — 시크릿은 `valley.yaml`과 `settings.yaml`에만 저장 (gitignore 처리), pre-commit 시크릿 탐지
 - **Fetch 타임아웃** — 모든 트래커 API 호출에 30초 타임아웃
-- **인터벤션 표면** — `POST /api/intervention` 은 `Host` 헤더 기준 로컬호스트 전용이며, `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` 을 명시적으로 지정하지 않는 한 외부 접근을 차단합니다
+- **인터벤션 표면** — `POST /api/intervention` 은 `Host` 헤더 기준(베스트 에포트) 로컬호스트 전용이며, `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` 과 `SYMPHONY_INTERVENTION_TOKEN` 을 함께 설정해야 외부 접근이 허용됩니다 (토큰 없이 플래그만 켜면 모든 요청이 거부됩니다)
+- **샌드박스 실행** — 스폰되는 모든 에이전트 CLI는 OS 수준 샌드박스(macOS는 `sandbox-exec`, Linux는 `bwrap`) 안에서 실행되며, 샌드박스를 사용할 수 없으면 `SYMPHONY_ALLOW_UNSANDBOXED=1` 을 명시적으로 설정하지 않는 한 스폰이 거부됩니다(fail-closed)
 - **감사 로깅** — 모든 에이전트 작업을 구조화된 JSON으로 기록
 
 전체 문서: `docs/harness/SAFETY.md`

@@ -102,32 +102,71 @@ POST /webhook received:
 ```
 AgentRunner.spawn() resolves:
   → exitCode == 0:
+    - Post-completion (safety-net auto-commit, then work-summary comment)
+    - Verification gate (see below) — if configured for this route and it
+      fails, fall through to the retryable-failure path instead of Done
+    - Delivery (merge/PR)
     - Workspace.status = "done", remove from activeWorkspaces
-    - TrackerClient.addIssueComment(issueId, workSummary)  ← best-effort
     - TrackerClient.updateIssueState(issueId, done)
 
-  → exitCode != 0 (recoverable):
+  → exitCode != 0, or verification gate failed (recoverable):
     - Add RetryEntry to retry queue
     - If max retries exceeded:
       - TrackerClient.addIssueComment(issueId, errorReport)
       - TrackerClient.updateIssueState(issueId, cancelled)
 ```
 
+### Verification Gate (v0.2+)
+
+`packages/core/src/orchestrator/verification-gate.ts`, wired into
+`completion-handler.ts` between the work-summary comment and delivery.
+When a `verify_command` is resolved for the issue's route (per-route
+`routing.rules[].verify_command` overrides the project-wide
+`verify.command` — see `packages/core/src/config/verify-schema.ts`), it
+runs inside the agent's worktree before delivery and before the Done
+transition. This is the external check that replaces agent
+self-assessment: an agent that writes broken code and exits 0 must not be
+marked Done or merged on its own say-so. No `verify_command` configured
+for the route is a no-op — Done means only that the agent process exited
+0, same as before this feature. On failure (non-zero exit or timeout,
+default 600s / `verify.timeout_sec`), the run is fed back through the
+existing retry queue with the captured output (bounded to 10KB) as
+retry-prompt context; once retries are exhausted the issue is cancelled
+with an actionable comment instead of being merged.
+
 ---
 
 ## Restart Recovery
 
-On restart, in-memory state is reset. A one-time Linear API call restores state.
+`packages/core/src/orchestrator/persistence/` durably snapshots in-flight
+run state to `${workspaceRoot}/.agent-valley/run-state.json`
+(`run-state-store.ts`, mirroring `DagScheduler`'s JSON-cache pattern),
+mutated only by `OrchestratorCore` — the same "sole state authority"
+invariant that applies to the in-memory state. On boot, before startup
+sync runs, `OrchestratorCore.recoverFromPersistedState()` loads the
+snapshot and applies a PID-liveness decision (`decideRecovery()` in
+`packages/core/src/orchestrator/persistence/recovery.ts`) to each persisted active attempt:
 
 ```
-1. Initialize: activeWorkspaces = {}, retryQueue = []
-2. Startup sync: fetch Todo + In Progress issues from Linear (one-time)
-3. Todo → transition to InProgress, then start agent
-   InProgress → start agent directly
-4. If prior RunAttempt exists with no LiveSession:
-   → process terminated while Orchestrator was down → add to retry queue
-5. Start HTTP server, ready for webhook events
+1. Load run-state.json (missing/corrupt file → empty snapshot, not an error)
+2. For each persisted active attempt:
+   a. pid known AND process.kill(pid, 0) succeeds → reattach (block a duplicate spawn)
+   b. pid unknown, or the liveness probe fails/errors → reap (clean up so the
+      normal dispatch path can safely restart it exactly once)
+3. Restore the persisted retry queue as-is
+4. Re-persist the post-recovery state, log reattached/reaped/restoredRetries counts
+5. Continue into startup sync (fetch Todo + In Progress issues from Linear)
 ```
+
+**Current limitation:** `AgentRunnerService`/`AgentSession` do not yet
+surface the spawned child process's OS pid past their own module
+boundary, so `pid` is always persisted as `null` today. `decideRecovery()`
+conservatively treats a `null` pid as "cannot verify liveness" and reaps
+it — every restart currently re-dispatches in-flight issues rather than
+reattaching to a still-alive process, but it does so exactly once via the
+persisted retry/active-attempt bookkeeping instead of silently losing
+track of them. Threading a real pid through `RunOptions`/`RunCallbacks`
+is a tracked follow-up, not yet implemented.
 
 **Orphan process handling:** If LiveSession.lastHeartbeat exceeds `2 * agent.timeout`, treat as orphan. Terminate OS process, add to retry queue.
 
@@ -183,8 +222,8 @@ Verify Symphony SPEC Section 18.1 compliance during implementation.
 | 18.1.3 | Startup sync | One-time Linear API call on start to recover missed events |
 | 18.1.4 | Concurrency limit enforced | Block new runs when `maxParallel` is reached |
 | 18.1.5 | Duplicate run prevention | No concurrent RunAttempts for the same issueId |
-| 18.1.6 | Retry queue is not persisted | Reset on restart (in-memory only) |
-| 18.1.7 | Restart recovery | Startup sync restores state from Linear + existing workspaces |
+| 18.1.6 | Retry queue is durably persisted | Snapshotted to `${workspaceRoot}/.agent-valley/run-state.json` on every add/remove/drain; restored on boot before startup sync (see Restart Recovery) |
+| 18.1.7 | Restart recovery | Persisted run-state snapshot + PID-liveness check reconciles active attempts, then startup sync restores state from Linear + existing workspaces |
 | 18.1.8 | Timeout enforced | Force-kill runner when `agent.timeout` is exceeded |
 | 18.1.9 | Max retries enforced | Stop retrying after `retryPolicy.maxAttempts` |
 | 18.1.10 | Scheduling state writes | Orchestrator manages Todo→InProgress, InProgress→Done/Cancelled transitions |

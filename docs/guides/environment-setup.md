@@ -145,15 +145,21 @@ FAIL: WORKSPACE_ROOT is not set.
 `/api/status` and `/api/events` expose orchestrator runtime state (active
 workspaces, issue identifiers, retry queue). `bun av dev` tunnels the dashboard
 through ngrok for Linear webhook delivery, so by default these endpoints are
-**blocked for any request whose `Host` header is not `localhost`**.
+**blocked for any request whose `Host` header is not `localhost`** (best-effort
+check — see `docs/harness/SAFETY.md` § 4 for why this alone is not a security
+boundary).
 
 If you only open the dashboard at `http://localhost:PORT`, you need nothing —
 it works out of the box. Remote access requires one of:
 
 | Env var | Effect |
 |---|---|
-| `SYMPHONY_DASHBOARD_TOKEN=<token>` | Remote requests must include `Authorization: Bearer <token>` |
-| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | Disables the host gate entirely (not recommended for ngrok) |
+| `SYMPHONY_DASHBOARD_TOKEN=<token>` | Non-local requests must include `Authorization: Bearer <token>` |
+| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | Opts into remote access — **requires `SYMPHONY_DASHBOARD_TOKEN` to also be set**. If the flag is on without a token, every request (including local ones) is rejected; unauthenticated remote access is never allowed. |
+
+`/api/intervention` (pause/resume/append_prompt/abort a live agent run) is
+gated the same way via `SYMPHONY_INTERVENTION_TOKEN` and
+`SYMPHONY_ALLOW_REMOTE_INTERVENTION=1`.
 
 `/api/webhook` is always public — it verifies Linear's HMAC signature
 independently, so the host gate does not apply.
