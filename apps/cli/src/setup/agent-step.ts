@@ -17,6 +17,7 @@ export async function stepAgentType(ctx: SetupContext, step: number, total: numb
       { value: "cursor", label: "Cursor", hint: "Cursor Agent" },
       { value: "grok", label: "Grok", hint: "xAI Grok Build" },
       { value: "kimi", label: "Kimi", hint: "Moonshot AI Kimi Code" },
+      { value: "opencode", label: "opencode", hint: "Multi-provider (75+ backends)" },
     ],
   })
   if (p.isCancel(agentType)) return CANCEL

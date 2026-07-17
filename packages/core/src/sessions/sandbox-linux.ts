@@ -110,15 +110,22 @@ export function buildLinuxSandboxCommand(req: SandboxBuildRequest, bwrapPath = "
     `${home}/.grok`,
     `${home}/.kimi-code`,
     `${home}/.gemini`,
+    // opencode is the one agent CLI that stores its own state under
+    // `~/.local/share` and `~/.config` instead of a top-level dotdir —
+    // both are scoped to `.../opencode` specifically, not a blanket grant
+    // (see the `${home}/.config` note below).
+    `${home}/.local/share/opencode`,
+    `${home}/.config/opencode`,
     `${home}/.cache`,
     `${home}/.npm`,
     `${home}/.bun`,
   ]
   // NOTE: deliberately no blanket `${home}/.config` entry here — see the
-  // module docstring "Credential denylist" section. None of the agent
-  // CLIs this project spawns store their own config directly under
-  // `~/.config` (they use dotdirs like `~/.claude`, `~/.codex`, or
-  // `~/.gemini`, listed above).
+  // module docstring "Credential denylist" section. Agent CLIs this
+  // project spawns store their own config directly under `~/.config` only
+  // in opencode's case (scoped to `~/.config/opencode` above); the rest
+  // use dotdirs like `~/.claude`, `~/.codex`, or `~/.gemini`, listed
+  // above.
   for (const p of writablePaths) {
     args.push("--bind-try", p, p)
   }

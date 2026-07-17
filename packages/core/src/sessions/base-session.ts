@@ -48,6 +48,10 @@ const AGENT_ENV_KEYS: Record<string, string[]> = {
   // `/login` device-code flow), not env vars — these are forwarded for
   // parity/CI when present, and are harmless no-ops when absent.
   kimi: ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
+  // opencode is multi-provider (75+); auth.json is primary, these are
+  // convenience passthroughs — opencode's primary auth is
+  // ~/.local/share/opencode/auth.json via `opencode auth`, not env vars.
+  opencode: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"],
 }
 
 /**

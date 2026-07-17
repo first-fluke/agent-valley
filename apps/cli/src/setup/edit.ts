@@ -117,6 +117,7 @@ export async function setupEdit(): Promise<void> {
         { value: "cursor", label: "Cursor", hint: "Cursor Agent" },
         { value: "grok", label: "Grok", hint: "xAI Grok Build" },
         { value: "kimi", label: "Kimi", hint: "Moonshot AI Kimi Code" },
+        { value: "opencode", label: "opencode", hint: "Multi-provider (75+ backends)" },
       ],
     })
     if (p.isCancel(agent)) {
@@ -124,7 +125,7 @@ export async function setupEdit(): Promise<void> {
       process.exit(0)
     }
     if (!gConfig.agent) gConfig.agent = {}
-    gConfig.agent.type = agent as "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi"
+    gConfig.agent.type = agent as "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
     globalChanged = true
   }
 

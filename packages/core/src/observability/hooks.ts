@@ -89,6 +89,10 @@ const GEN_AI_SYSTEM_BY_AGENT_TYPE: Record<string, string> = {
   cursor: "cursor",
   grok: "xai",
   kimi: "moonshotai",
+  // opencode routes to 75+ providers per-invocation, so there is no single
+  // upstream LLM provider to name here — "opencode" is the honest
+  // gen_ai.system value rather than picking one provider arbitrarily.
+  opencode: "opencode",
 }
 
 function mapAgentTypeToGenAiSystem(agentType: string): string {

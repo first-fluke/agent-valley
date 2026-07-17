@@ -50,6 +50,7 @@ antigravity  → ["append_prompt", "abort"] conservatively (stateless)
 cursor       → ["append_prompt", "abort"] conservatively (stateless)
 grok         → ["append_prompt", "abort"] conservatively (stateless)
 kimi         → ["append_prompt", "abort"] conservatively (stateless)
+opencode     → ["append_prompt", "abort"] conservatively (stateless)
 ```
 
 `send()` rejects with `InterventionUnsupportedError` when the command is
@@ -70,7 +71,8 @@ Orchestrator → AgentRunner → AgentSession interface
                                 ├── AgySession    → agy (Antigravity, one-shot print mode)
                                 ├── CursorSession → cursor-agent (streaming NDJSON)
                                 ├── GrokSession   → grok (Grok Build, streaming NDJSON)
-                                └── KimiSession   → kimi (Kimi Code, streaming NDJSON)
+                                ├── KimiSession   → kimi (Kimi Code, streaming NDJSON)
+                                └── OpencodeSession → opencode (multi-provider, streaming NDJSON)
 ```
 
 ### Supported Agents
@@ -85,6 +87,7 @@ Select via `AGENT_TYPE` environment variable (or `agent.type` in `WORKFLOW.md`).
 | `cursor` | `CursorSession` | Streaming NDJSON (`cursor-agent -p --output-format stream-json`) | via `config.model` (no `AGENT_MODEL` env override) |
 | `grok` | `GrokSession` | Streaming NDJSON (`grok --single --output-format streaming-json`) | not supported — Grok Build has no per-invocation `--model` flag |
 | `kimi` | `KimiSession` | Streaming NDJSON (`kimi -p --output-format stream-json`) | via `config.model` (no `AGENT_MODEL` env override) |
+| `opencode` | `OpencodeSession` | Streaming NDJSON, multi-provider (75+ backends) | via `config.model` (no `AGENT_MODEL` env override) |
 
 ### SessionFactory
 
@@ -172,6 +175,10 @@ Agent-specific:   codex → OPENAI_API_KEY
                     authenticates via ~/.kimi-code/config.toml + `/login`
                     device-code; these env vars are forwarded for
                     parity/CI when present)
+                  opencode → ANTHROPIC_API_KEY, OPENAI_API_KEY,
+                    OPENROUTER_API_KEY (multi-provider, 75+ backends;
+                    ~/.local/share/opencode/auth.json via `opencode auth`
+                    is primary, these are convenience passthroughs)
 Explicit extras:  config.env (passed through AgentConfig)
 ```
 
@@ -197,7 +204,7 @@ When config.agent.timeout seconds elapse:
 Each session emits `heartbeat` events based on its native protocol activity:
 - **CodexSession**: any JSON-RPC server notification counts as heartbeat
 - **ClaudeSession**: any stream-json output activity counts as heartbeat
-- **AgySession / CursorSession / GrokSession / KimiSession**: any stdout activity or process PID check
+- **AgySession / CursorSession / GrokSession / KimiSession / OpencodeSession**: any stdout activity or process PID check
 
 ```
 Orphan detection: 2 × agent.timeout without heartbeat → force kill + retry

@@ -123,6 +123,12 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
     `${home}/.grok`,
     `${home}/.kimi-code`,
     `${home}/.gemini`,
+    // opencode is the one agent CLI that stores its own state under
+    // `~/.local/share` and `~/.config` instead of a top-level dotdir —
+    // both are scoped to `.../opencode` specifically, not a blanket grant
+    // (see the `${home}/.config` note below).
+    `${home}/.local/share/opencode`,
+    `${home}/.config/opencode`,
     `${home}/.cache`,
     `${home}/.npm`,
     `${home}/.bun`,
@@ -130,9 +136,10 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
   // NOTE: deliberately no blanket `${home}/.config` entry here — that
   // used to make `~/.config/agent-valley/settings.yaml` (and every other
   // tool's config under `~/.config`, e.g. `gh`, `gcloud`) writable by the
-  // sandboxed process. None of the agent CLIs this project spawns store
-  // their own config directly under `~/.config` (they use dotdirs like
-  // `~/.claude`, `~/.codex`, or `~/.gemini`, listed above).
+  // sandboxed process. Agent CLIs this project spawns store their own
+  // config directly under `~/.config` only in opencode's case (scoped to
+  // `~/.config/opencode` above); the rest use dotdirs like `~/.claude`,
+  // `~/.codex`, or `~/.gemini`, listed above.
 
   const writeRules = writablePaths.map((p) => `(allow file-write* (subpath ${seatbeltString(p)}))`).join("\n")
 

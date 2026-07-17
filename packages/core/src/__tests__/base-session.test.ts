@@ -142,6 +142,28 @@ describe("buildAgentEnv", () => {
     }
   })
 
+  test("includes agent-specific keys for opencode", () => {
+    const origAnthropic = process.env.ANTHROPIC_API_KEY
+    const origOpenai = process.env.OPENAI_API_KEY
+    const origOpenrouter = process.env.OPENROUTER_API_KEY
+    process.env.ANTHROPIC_API_KEY = "anthropic-test"
+    process.env.OPENAI_API_KEY = "openai-test"
+    process.env.OPENROUTER_API_KEY = "openrouter-test"
+    try {
+      const env = buildAgentEnv("opencode")
+      expect(env.ANTHROPIC_API_KEY).toBe("anthropic-test")
+      expect(env.OPENAI_API_KEY).toBe("openai-test")
+      expect(env.OPENROUTER_API_KEY).toBe("openrouter-test")
+    } finally {
+      if (origAnthropic != null) process.env.ANTHROPIC_API_KEY = origAnthropic
+      else delete process.env.ANTHROPIC_API_KEY
+      if (origOpenai != null) process.env.OPENAI_API_KEY = origOpenai
+      else delete process.env.OPENAI_API_KEY
+      if (origOpenrouter != null) process.env.OPENROUTER_API_KEY = origOpenrouter
+      else delete process.env.OPENROUTER_API_KEY
+    }
+  })
+
   test("merges extra env vars", () => {
     const env = buildAgentEnv("claude", { MY_VAR: "hello" })
     expect(env.MY_VAR).toBe("hello")

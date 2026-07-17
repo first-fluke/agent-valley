@@ -172,6 +172,10 @@ copy_dir  ".grok"
 # holds mcp.json from `oma link kimi`, not a full skills dir. kimi natively
 # auto-discovers the copied `.agents/skills/` as a project skill dir at
 # spawn time — no copy_dir and no --skills-dir flag needed.
+# opencode is NOT copied either: its `.opencode/` harness ships a bun plugin
+# with a ~61MB node_modules + lockfiles (gitignored, regenerable). Copying it
+# would bloat every target repo. Run `oma link opencode` in the target to
+# generate `.opencode/` (plugins + agents) with its deps instead.
 copy_dir  "docs"
 
 mkdir -p "${TARGET_DIR}/scripts/harness"
