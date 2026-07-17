@@ -362,6 +362,22 @@ describe("renderPrompt workflow routing", () => {
     expect(result).not.toContain("`orchestrate`")
   })
 
+  test("a persistent workflow is never injected even for a genuine, non-question request", () => {
+    // Persistent workflows (orchestrate/ultrawork/work/ralph) model a live
+    // interactive session and are excluded from routing unconditionally —
+    // not just when the issue reads as a question.
+    const issue = makeIssue({
+      title: "Please orchestrate the deployment across every service in parallel",
+      description: "",
+    })
+    const attempt = makeAttempt()
+    const table = makeTriggerTable()
+
+    const result = renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", table)
+
+    expect(result).not.toContain("`orchestrate`")
+  })
+
   test("no trigger table (e.g. missing triggers.json) leaves the prompt unchanged", () => {
     const issue = makeIssue({ title: "Debug the backend service auth flow bug" })
     const attempt = makeAttempt()

@@ -24,8 +24,30 @@ function makeTable(overrides: Partial<TriggerTable> = {}): TriggerTable {
         persistent: false,
         keywords: {
           "*": ["debug"],
-          en: ["fix bug", "fix the bug"],
+          en: ["fix bug", "fix the bug", "doesn't work"],
           ko: ["버그 고쳐줘", "고쳐줘"],
+        },
+      },
+      plan: {
+        persistent: false,
+        keywords: {
+          "*": [],
+          en: ["plan", "break down"],
+        },
+      },
+      review: {
+        persistent: false,
+        keywords: {
+          "*": ["code review"],
+          en: ["audit"],
+        },
+      },
+      design: {
+        persistent: false,
+        keywords: {
+          "*": [],
+          en: ["theme"],
+          ko: ["디자인"],
         },
       },
       orchestrate: {
@@ -96,18 +118,8 @@ describe("routeIssue", () => {
     expect(result.workflows).toContain("debug")
   })
 
-  test("word-boundary guard prevents 'work' from matching inside 'framework'", () => {
-    const table = makeTable()
-    const result = routeIssue("Upgrade the framework used by the network layer", table)
-    expect(result.workflows).not.toContain("work")
-  })
-
   test("CJK keywords match without word-boundary guards", () => {
-    const table = makeTable({
-      workflows: {
-        design: { persistent: false, keywords: { ko: ["디자인"] } },
-      },
-    })
+    const table = makeTable()
     const result = routeIssue("이 페이지 디자인 좀 해줘", table)
     expect(result.workflows).toContain("design")
   })
@@ -126,6 +138,36 @@ describe("routeIssue", () => {
   })
 })
 
+// ── Persistent workflows are excluded unconditionally ─────────────────
+
+describe("routeIssue persistent workflow exclusion", () => {
+  test("'doesn't work' routes to debug but never to the persistent 'work' workflow", () => {
+    const table = makeTable()
+    const result = routeIssue("This feature doesn't work in production, please fix", table)
+    expect(result.workflows).toContain("debug")
+    expect(result.workflows).not.toContain("work")
+  })
+
+  test("bare 'work' keyword never routes, even standalone", () => {
+    const table = makeTable()
+    const result = routeIssue("Please work on this as soon as possible", table)
+    expect(result.workflows).not.toContain("work")
+  })
+
+  test("a genuine, non-question orchestrate-shaped request still never routes to persistent orchestrate", () => {
+    const table = makeTable()
+    const result = routeIssue("Please orchestrate the release across all three services in parallel", table)
+    expect(result.workflows).not.toContain("orchestrate")
+  })
+
+  test("persistent workflows are excluded regardless of question phrasing", () => {
+    const table = makeTable()
+    const result = routeIssue("What is the orchestrate workflow and how does it work?", table)
+    expect(result.workflows).not.toContain("orchestrate")
+    expect(result.workflows).not.toContain("work")
+  })
+})
+
 // ── excludedWorkflows ─────────────────────────────────────────────────
 
 describe("routeIssue excludedWorkflows", () => {
@@ -136,33 +178,103 @@ describe("routeIssue excludedWorkflows", () => {
   })
 })
 
+// ── Weak short-ASCII-keyword guard (workflows only) ────────────────────
+
+describe("routeIssue weak keyword guard", () => {
+  test("bare 'plan' buried mid-sentence does not trigger the plan workflow alone", () => {
+    const table = makeTable()
+    const result = routeIssue("We plan to ship this next week once QA signs off", table)
+    expect(result.workflows).not.toContain("plan")
+  })
+
+  test("bare 'theme' buried mid-sentence does not trigger the design workflow alone", () => {
+    const table = makeTable()
+    const result = routeIssue("The theme of this issue is user retention, not visuals", table)
+    expect(result.workflows).not.toContain("design")
+  })
+
+  test("bare 'audit' buried mid-sentence does not trigger the review workflow alone", () => {
+    const table = makeTable()
+    const result = routeIssue("Let's audit the results next quarter after launch", table)
+    expect(result.workflows).not.toContain("review")
+  })
+
+  test("sentence-initial (imperative) 'plan' still triggers the plan workflow", () => {
+    const table = makeTable()
+    const result = routeIssue("Plan the Q3 roadmap for the team", table)
+    expect(result.workflows).toContain("plan")
+  })
+
+  test("slash-command form '/plan' still triggers the plan workflow", () => {
+    const table = makeTable()
+    const result = routeIssue("/plan the migration to the new billing system", table)
+    expect(result.workflows).toContain("plan")
+  })
+
+  test("a weak match corroborated by a second distinct keyword still triggers", () => {
+    const table = makeTable()
+    // "plan" alone (mid-sentence) would be dropped, but "break down" is a
+    // second, independent keyword match for the same workflow.
+    const result = routeIssue("We should plan this properly and break down the requirements", table)
+    expect(result.workflows).toContain("plan")
+  })
+
+  test("two distinct weak keywords together still corroborate each other", () => {
+    const table = makeTable({
+      workflows: {
+        misc: {
+          persistent: false,
+          keywords: { en: ["abcd", "wxyz"] },
+        },
+      },
+    })
+    const result = routeIssue("Random text mentions abcd once and wxyz once, nothing else", table)
+    expect(result.workflows).toContain("misc")
+  })
+
+  test("a single weak keyword occurrence with no imperative position and no corroboration is dropped", () => {
+    const table = makeTable({
+      workflows: {
+        misc: {
+          persistent: false,
+          keywords: { en: ["abcd"] },
+        },
+      },
+    })
+    const result = routeIssue("Random text mentions abcd once, buried in the middle, nothing else", table)
+    expect(result.workflows).not.toContain("misc")
+  })
+
+  test("multi-word phrases are never weak, regardless of total length", () => {
+    const table = makeTable()
+    const result = routeIssue("Please run a code review before merging", table)
+    expect(result.workflows).toContain("review")
+  })
+
+  test("skills are unaffected by the weak-keyword guard (stay high-recall)", () => {
+    const table = makeTable({
+      skills: {
+        "oma-search": { keywords: { en: ["find"] } },
+      },
+    })
+    const result = routeIssue("Can you find the library docs for this, buried mid sentence", table)
+    expect(result.skills).toContain("oma-search")
+  })
+})
+
 // ── informationalPatterns suppression ────────────────────────────────
 
 describe("routeIssue informationalPatterns", () => {
-  test("a purely informational question does not trigger a persistent workflow", () => {
+  test("an informational question about a non-persistent workflow suppresses that match", () => {
     const table = makeTable()
-    const result = routeIssue("What is the orchestrate workflow and how does it work?", table)
-    expect(result.workflows).not.toContain("orchestrate")
+    const result = routeIssue("What is a code review and how does it work here?", table)
+    expect(result.workflows).not.toContain("review")
   })
 
-  test("Korean informational question does not trigger a persistent workflow", () => {
+  test("a genuine (non-question) request still triggers a non-persistent workflow", () => {
     const table = makeTable()
-    const result = routeIssue("work 워크플로우가 뭐야?", table)
-    expect(result.workflows).not.toContain("work")
-  })
-
-  test("a genuine (non-question) request still triggers a persistent workflow", () => {
-    const table = makeTable()
-    const result = routeIssue("Please orchestrate the release across all three services in parallel", table)
-    expect(result.workflows).toContain("orchestrate")
-  })
-
-  test("a non-persistent workflow is not suppressed just because it is a question", () => {
-    const table = makeTable()
-    // "debug" is not persistent, so the isAnalyticalIssue gate never applies
-    // to it — but the windowed informational-context suppression still can.
-    const result = routeIssue("My app crashed, can you debug it for me right now?", table)
-    expect(result.workflows).toContain("debug")
+    const result = routeIssue("Please run a code review on this PR before merging", table)
+    expect(result.workflows).toContain("review")
   })
 })
 
@@ -211,6 +323,10 @@ describe("integration: real triggers.json", () => {
     expect(table).not.toBeNull()
     expect(table?.workflows.debug).toBeDefined()
     expect(table?.skills["oma-backend"]).toBeDefined()
+    // informationalPatterns is a dict keyed by language (Record<string,
+    // string[]>), NOT a flat array — confirmed against the real file.
+    expect(Array.isArray(table?.informationalPatterns)).toBe(false)
+    expect(Array.isArray(table?.informationalPatterns["*"])).toBe(true)
   })
 
   test("real triggers.json routes a debug+backend sample issue", () => {
@@ -220,5 +336,38 @@ describe("integration: real triggers.json", () => {
     const result = routeIssue("Debug the backend service auth flow — users can't log in", table)
     expect(result.workflows).toContain("debug")
     expect(result.skills).toContain("oma-backend")
+  })
+
+  test("real triggers.json never routes any persistent workflow", () => {
+    const table = loadTriggerTable(projectRoot)
+    expect(table).not.toBeNull()
+    if (!table) throw new Error("expected table to load")
+    const persistentNames = Object.entries(table.workflows)
+      .filter(([, def]) => def.persistent)
+      .map(([name]) => name)
+    expect(persistentNames.length).toBeGreaterThan(0) // sanity: fixture assumption still holds
+
+    const samples = [
+      "This feature doesn't work in production, please fix it",
+      "We should plan this and work through the requirements together",
+      "Please orchestrate the deployment across every service in parallel",
+      "Let's run this step by step, one by one, guide me through it",
+    ]
+    for (const sample of samples) {
+      const result = routeIssue(sample, table)
+      for (const persistentName of persistentNames) {
+        expect(result.workflows).not.toContain(persistentName)
+      }
+    }
+  })
+
+  test("real triggers.json: common short-word false positives from prose are suppressed", () => {
+    const table = loadTriggerTable(projectRoot)
+    expect(table).not.toBeNull()
+    if (!table) throw new Error("expected table to load")
+
+    expect(routeIssue("We plan to ship this next week once QA signs off", table).workflows).not.toContain("plan")
+    expect(routeIssue("Some ideas here for the onboarding redesign later", table).workflows).not.toContain("brainstorm")
+    expect(routeIssue("The theme of this bug report is intermittent failures", table).workflows).not.toContain("design")
   })
 })
