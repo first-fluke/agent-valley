@@ -168,6 +168,10 @@ copy_dir  ".cursor"
 copy_dir  ".grok"
 # antigravity uses a global CLI harness (~/.gemini/antigravity-cli/), not a
 # project dir, so it is intentionally not copied here.
+# kimi does NOT get a copy_dir either: its harness dir (.kimi-code/) only
+# holds mcp.json from `oma link kimi`, not a full skills dir. kimi natively
+# auto-discovers the copied `.agents/skills/` as a project skill dir at
+# spawn time — no copy_dir and no --skills-dir flag needed.
 copy_dir  "docs"
 
 mkdir -p "${TARGET_DIR}/scripts/harness"

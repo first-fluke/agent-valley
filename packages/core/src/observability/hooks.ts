@@ -88,6 +88,7 @@ const GEN_AI_SYSTEM_BY_AGENT_TYPE: Record<string, string> = {
   antigravity: "gcp.antigravity",
   cursor: "cursor",
   grok: "xai",
+  kimi: "moonshotai",
 }
 
 function mapAgentTypeToGenAiSystem(agentType: string): string {

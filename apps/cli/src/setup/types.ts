@@ -24,7 +24,7 @@ export type StepResult = typeof BACK | typeof CANCEL | undefined
 
 export type TrackerKind = "linear" | "github"
 
-export type AgentType = "claude" | "codex" | "antigravity" | "cursor" | "grok"
+export type AgentType = "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi"
 
 export interface LinearSetupValues {
   apiKey: string

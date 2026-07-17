@@ -44,6 +44,9 @@ describe("buildGenAiAttributes — GenAI semconv collection", () => {
     expect(
       buildGenAiAttributes({ agentType: "grok", issueKey: "k", issueId: "i", result: "success" })["gen_ai.system"],
     ).toBe("xai")
+    expect(
+      buildGenAiAttributes({ agentType: "kimi", issueKey: "k", issueId: "i", result: "success" })["gen_ai.system"],
+    ).toBe("moonshotai")
   })
 
   it("degrades gracefully for an unmapped agent type (no crash, raw value)", () => {

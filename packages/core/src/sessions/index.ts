@@ -14,6 +14,7 @@ export { ClaudeSession } from "./claude-session"
 export { CodexSession } from "./codex-session"
 export { CursorSession } from "./cursor-session"
 export { GrokSession } from "./grok-session"
+export { KimiSession } from "./kimi-session"
 
 export {
   createSession,

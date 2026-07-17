@@ -16,6 +16,7 @@ export async function stepAgentType(ctx: SetupContext, step: number, total: numb
       { value: "antigravity", label: "Antigravity", hint: "Google Antigravity (agy)" },
       { value: "cursor", label: "Cursor", hint: "Cursor Agent" },
       { value: "grok", label: "Grok", hint: "xAI Grok Build" },
+      { value: "kimi", label: "Kimi", hint: "Moonshot AI Kimi Code" },
     ],
   })
   if (p.isCancel(agentType)) return CANCEL

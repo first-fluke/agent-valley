@@ -7,7 +7,7 @@
 
 // ── Agent Types ──────────────────────────────────────────────────────────────
 
-export type AgentType = "claude" | "codex" | "antigravity" | "cursor" | "grok"
+export type AgentType = "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi"
 
 // ── Ledger Event (Discriminated Union) ───────────────────────────────────────
 

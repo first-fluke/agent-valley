@@ -125,6 +125,23 @@ describe("buildAgentEnv", () => {
     }
   })
 
+  test("includes agent-specific keys for kimi", () => {
+    const origKimi = process.env.KIMI_API_KEY
+    const origMoonshot = process.env.MOONSHOT_API_KEY
+    process.env.KIMI_API_KEY = "kimi-test"
+    process.env.MOONSHOT_API_KEY = "moonshot-test"
+    try {
+      const env = buildAgentEnv("kimi")
+      expect(env.KIMI_API_KEY).toBe("kimi-test")
+      expect(env.MOONSHOT_API_KEY).toBe("moonshot-test")
+    } finally {
+      if (origKimi != null) process.env.KIMI_API_KEY = origKimi
+      else delete process.env.KIMI_API_KEY
+      if (origMoonshot != null) process.env.MOONSHOT_API_KEY = origMoonshot
+      else delete process.env.MOONSHOT_API_KEY
+    }
+  })
+
   test("merges extra env vars", () => {
     const env = buildAgentEnv("claude", { MY_VAR: "hello" })
     expect(env.MY_VAR).toBe("hello")

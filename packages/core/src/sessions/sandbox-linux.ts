@@ -108,6 +108,7 @@ export function buildLinuxSandboxCommand(req: SandboxBuildRequest, bwrapPath = "
     `${home}/.codex`,
     `${home}/.cursor`,
     `${home}/.grok`,
+    `${home}/.kimi-code`,
     `${home}/.gemini`,
     `${home}/.cache`,
     `${home}/.npm`,

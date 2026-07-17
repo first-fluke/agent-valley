@@ -3,6 +3,7 @@
  */
 import { beforeEach, describe, expect, test } from "vitest"
 import type { AgentSession } from "../sessions/agent-session.ts"
+import { KimiSession } from "../sessions/kimi-session.ts"
 import { SessionRegistry } from "../sessions/session-factory.ts"
 
 /** Minimal mock session for testing the registry. */
@@ -71,7 +72,7 @@ describe("SessionRegistry", () => {
     expect(callCount).toBe(2)
   })
 
-  test("registerBuiltins registers claude, codex, antigravity, cursor, grok", async () => {
+  test("registerBuiltins registers claude, codex, antigravity, cursor, grok, kimi", async () => {
     await registry.registerBuiltins()
     const types = registry.list()
     expect(types).toContain("claude")
@@ -79,10 +80,17 @@ describe("SessionRegistry", () => {
     expect(types).toContain("antigravity")
     expect(types).toContain("cursor")
     expect(types).toContain("grok")
+    expect(types).toContain("kimi")
   })
 
   test("registerBuiltins does not register gemini (retired vendor)", async () => {
     await registry.registerBuiltins()
     expect(registry.list()).not.toContain("gemini")
+  })
+
+  test('"kimi" resolves to a KimiSession instance', async () => {
+    await registry.registerBuiltins()
+    const session = registry.create("kimi")
+    expect(session).toBeInstanceOf(KimiSession)
   })
 })

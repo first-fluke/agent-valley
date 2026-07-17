@@ -49,6 +49,7 @@ codex        → ["pause", "resume", "append_prompt", "abort"]
 antigravity  → ["append_prompt", "abort"] conservatively (stateless)
 cursor       → ["append_prompt", "abort"] conservatively (stateless)
 grok         → ["append_prompt", "abort"] conservatively (stateless)
+kimi         → ["append_prompt", "abort"] conservatively (stateless)
 ```
 
 `send()` rejects with `InterventionUnsupportedError` when the command is
@@ -68,7 +69,8 @@ Orchestrator → AgentRunner → AgentSession interface
                                 ├── ClaudeSession → claude (NDJSON stream-json)
                                 ├── AgySession    → agy (Antigravity, one-shot print mode)
                                 ├── CursorSession → cursor-agent (streaming NDJSON)
-                                └── GrokSession   → grok (Grok Build, streaming NDJSON)
+                                ├── GrokSession   → grok (Grok Build, streaming NDJSON)
+                                └── KimiSession   → kimi (Kimi Code, streaming NDJSON)
 ```
 
 ### Supported Agents
@@ -82,6 +84,7 @@ Select via `AGENT_TYPE` environment variable (or `agent.type` in `WORKFLOW.md`).
 | `antigravity` | `AgySession` | One-shot print mode, plain text stdout (`agy -p --dangerously-skip-permissions`) | via `config.model` (no `AGENT_MODEL` env override) |
 | `cursor` | `CursorSession` | Streaming NDJSON (`cursor-agent -p --output-format stream-json`) | via `config.model` (no `AGENT_MODEL` env override) |
 | `grok` | `GrokSession` | Streaming NDJSON (`grok --single --output-format streaming-json`) | not supported — Grok Build has no per-invocation `--model` flag |
+| `kimi` | `KimiSession` | Streaming NDJSON (`kimi -p --output-format stream-json`) | via `config.model` (no `AGENT_MODEL` env override) |
 
 ### SessionFactory
 
@@ -165,6 +168,10 @@ Agent-specific:   codex → OPENAI_API_KEY
                   antigravity (and its "agy" CLI key) → GOOGLE_API_KEY, GEMINI_API_KEY
                   cursor → CURSOR_API_KEY
                   grok → XAI_API_KEY, GROK_API_KEY
+                  kimi → KIMI_API_KEY, MOONSHOT_API_KEY (kimi primarily
+                    authenticates via ~/.kimi-code/config.toml + `/login`
+                    device-code; these env vars are forwarded for
+                    parity/CI when present)
 Explicit extras:  config.env (passed through AgentConfig)
 ```
 
@@ -190,7 +197,7 @@ When config.agent.timeout seconds elapse:
 Each session emits `heartbeat` events based on its native protocol activity:
 - **CodexSession**: any JSON-RPC server notification counts as heartbeat
 - **ClaudeSession**: any stream-json output activity counts as heartbeat
-- **AgySession / CursorSession / GrokSession**: any stdout activity or process PID check
+- **AgySession / CursorSession / GrokSession / KimiSession**: any stdout activity or process PID check
 
 ```
 Orphan detection: 2 × agent.timeout without heartbeat → force kill + retry

@@ -44,6 +44,10 @@ const AGENT_ENV_KEYS: Record<string, string[]> = {
   antigravity: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
   cursor: ["CURSOR_API_KEY"],
   grok: ["XAI_API_KEY", "GROK_API_KEY"],
+  // kimi primarily authenticates via ~/.kimi-code/config.toml (set by the
+  // `/login` device-code flow), not env vars — these are forwarded for
+  // parity/CI when present, and are harmless no-ops when absent.
+  kimi: ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
 }
 
 /**
