@@ -4,12 +4,14 @@
  */
 import { describe, expect, test } from "vitest"
 import {
+  buildRoutingGuidance,
   renderPrompt,
   sanitizeIssueBody,
   UNTRUSTED_BLOCK_CLOSE,
   UNTRUSTED_BLOCK_OPEN,
   wrapUntrustedContent,
 } from "../config/workflow-loader.ts"
+import type { TriggerTable } from "../config/workflow-router.ts"
 import type { Issue, RunAttempt } from "../domain/models.ts"
 
 // ── renderPrompt ────────────────────────────────────────────────────
@@ -279,5 +281,160 @@ describe("renderPrompt spotlighting", () => {
     // One legitimate close for description's block, one for title's, one for retry_reason's.
     expect(closeOccurrences).toBe(3)
     expect(result).toContain("[redacted]")
+  })
+})
+
+// ── renderPrompt + workflow routing injection ──────────────────────
+
+function makeTriggerTable(overrides: Partial<TriggerTable> = {}): TriggerTable {
+  return {
+    workflows: {
+      debug: {
+        persistent: false,
+        keywords: {
+          "*": ["debug"],
+          en: ["fix bug"],
+          ko: ["버그 고쳐줘"],
+        },
+      },
+      orchestrate: {
+        persistent: true,
+        keywords: { "*": ["orchestrate"] },
+      },
+      docs: {
+        persistent: false,
+        keywords: { "*": ["docs excluded marker"] },
+      },
+    },
+    skills: {
+      "oma-backend": {
+        keywords: { "*": ["backend service", "auth flow"] },
+      },
+    },
+    informationalPatterns: {
+      "*": ["what is", "explain"],
+    },
+    excludedWorkflows: ["docs"],
+    ...overrides,
+  }
+}
+
+describe("renderPrompt workflow routing", () => {
+  const template = "Work on {{issue.identifier}}: {{issue.title}}\nDesc: {{issue.description}}"
+
+  test("an issue matching debug + oma-backend gets a trusted routing block injected", () => {
+    const issue = makeIssue({
+      title: "Debug the backend service auth flow bug",
+      description: "Users cannot log in when MFA is enabled",
+    })
+    const attempt = makeAttempt()
+    const table = makeTriggerTable()
+
+    const result = renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", table)
+
+    expect(result).toContain("## Suggested oma workflow")
+    expect(result).toContain("`debug`")
+    expect(result).toContain(".agents/workflows/debug.md")
+    expect(result).toContain("`oma-backend`")
+  })
+
+  test("a Korean issue routes via ko keywords", () => {
+    const issue = makeIssue({ title: "결제 버그 고쳐줘", description: "" })
+    const attempt = makeAttempt()
+    const table = makeTriggerTable()
+
+    const result = renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", table)
+
+    expect(result).toContain("## Suggested oma workflow")
+    expect(result).toContain("`debug`")
+  })
+
+  test("a purely informational issue does not trigger a persistent workflow", () => {
+    const issue = makeIssue({
+      title: "What is the orchestrate workflow and how does it work?",
+      description: "Just curious, not asking you to run anything.",
+    })
+    const attempt = makeAttempt()
+    const table = makeTriggerTable()
+
+    const result = renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", table)
+
+    expect(result).not.toContain("`orchestrate`")
+  })
+
+  test("no trigger table (e.g. missing triggers.json) leaves the prompt unchanged", () => {
+    const issue = makeIssue({ title: "Debug the backend service auth flow bug" })
+    const attempt = makeAttempt()
+
+    const result = renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", null)
+
+    expect(result).not.toContain("## Suggested oma workflow")
+    expect(result).toBe(renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", null))
+  })
+
+  test("no matching workflow/skill leaves the prompt unchanged", () => {
+    const issue = makeIssue({ title: "Update the changelog", description: "Bump the version number" })
+    const attempt = makeAttempt()
+    const table = makeTriggerTable()
+
+    const result = renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", table)
+
+    expect(result).not.toContain("## Suggested oma workflow")
+  })
+
+  test("excludedWorkflows are never injected even when their keyword matches", () => {
+    const issue = makeIssue({ title: "docs excluded marker in the title", description: "" })
+    const attempt = makeAttempt()
+    const table = makeTriggerTable()
+
+    const result = renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", table)
+
+    expect(result).not.toContain("`docs`")
+  })
+
+  test("the routing block is placed OUTSIDE the untrusted-issue-content spotlight block", () => {
+    const issue = makeIssue({
+      title: "Debug the backend service auth flow bug",
+      description: "Users cannot log in when MFA is enabled",
+    })
+    const attempt = makeAttempt()
+    const table = makeTriggerTable()
+
+    const result = renderPrompt(template, issue, "/tmp/ws", attempt, 0, "", table)
+
+    const lastClose = result.lastIndexOf(UNTRUSTED_BLOCK_CLOSE)
+    const guidanceStart = result.indexOf("## Suggested oma workflow")
+    expect(lastClose).toBeGreaterThan(-1)
+    expect(guidanceStart).toBeGreaterThan(-1)
+    // The guidance block must start after the LAST spotlight close marker —
+    // i.e. it is not nested inside any wrapUntrustedContent() span.
+    expect(guidanceStart).toBeGreaterThan(lastClose)
+    // And it must not itself be wrapped by the untrusted markers.
+    const guidanceBlock = result.slice(guidanceStart)
+    expect(guidanceBlock).not.toContain(UNTRUSTED_BLOCK_OPEN)
+  })
+})
+
+// ── buildRoutingGuidance ─────────────────────────────────────────────
+
+describe("buildRoutingGuidance", () => {
+  test("returns empty string when nothing matched", () => {
+    expect(buildRoutingGuidance({ workflows: [], skills: [] })).toBe("")
+  })
+
+  test("renders multiple workflows and skills with plural wording", () => {
+    const text = buildRoutingGuidance({ workflows: ["debug", "review"], skills: ["oma-backend", "oma-qa"] })
+    expect(text).toContain("workflows")
+    expect(text).toContain("`debug`")
+    expect(text).toContain("`review`")
+    expect(text).toContain("skills")
+    expect(text).toContain("`oma-backend`")
+    expect(text).toContain("`oma-qa`")
+  })
+
+  test("singular wording for exactly one workflow and one skill", () => {
+    const text = buildRoutingGuidance({ workflows: ["debug"], skills: ["oma-backend"] })
+    expect(text).toContain("workflow.")
+    expect(text).toContain("skill for domain-specific")
   })
 })

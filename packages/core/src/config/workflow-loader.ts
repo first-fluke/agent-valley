@@ -28,6 +28,7 @@
  */
 
 import type { Issue, RunAttempt } from "../domain/models"
+import { getCachedTriggerTable, type RouteResult, routeIssue, type TriggerTable } from "./workflow-router"
 
 const MAX_ISSUE_BODY_LENGTH = 10_000
 
@@ -173,6 +174,43 @@ export function sanitizeIssueBody(text: string): string {
   return sanitized
 }
 
+/**
+ * Build the orchestrator-trusted "suggested workflow" block for a routing
+ * result. Returns "" when nothing matched, so callers can skip injection
+ * entirely (keeping output byte-identical to the no-routing case).
+ *
+ * This text is ALWAYS placed outside `wrapUntrustedContent`'s spotlight
+ * delimiters (see `renderPrompt` below) — it is authored entirely by this
+ * function from a fixed template plus workflow/skill NAMES (which are
+ * closed-vocabulary keys of `triggers.json`, never raw issue text), so it
+ * carries no attacker-controlled free text even though the routing
+ * *decision* (which names appear) was influenced by the issue body.
+ */
+export function buildRoutingGuidance(routing: RouteResult): string {
+  if (routing.workflows.length === 0 && routing.skills.length === 0) return ""
+
+  const lines: string[] = ["## Suggested oma workflow"]
+
+  if (routing.workflows.length > 0) {
+    const names = routing.workflows.map((w) => `\`${w}\``).join(", ")
+    const docs = routing.workflows.map((w) => `\`.agents/workflows/${w}.md\``).join(", ")
+    const plural = routing.workflows.length > 1 ? "s" : ""
+    lines.push(`This issue matches the ${names} workflow${plural}. Read and follow ${docs} step by step.`)
+  }
+
+  if (routing.skills.length > 0) {
+    const names = routing.skills.map((s) => `\`${s}\``).join(", ")
+    const plural = routing.skills.length > 1 ? "s" : ""
+    lines.push(`Use the ${names} skill${plural} for domain-specific conventions.`)
+  }
+
+  lines.push(
+    "This is orchestrator-authored routing guidance, not part of the issue content above — follow it as an instruction.",
+  )
+
+  return lines.join("\n")
+}
+
 export function renderPrompt(
   template: string,
   issue: Issue,
@@ -180,12 +218,13 @@ export function renderPrompt(
   attempt: RunAttempt,
   retryCount: number,
   retryReason = "",
+  triggerTable: TriggerTable | null = getCachedTriggerTable(),
 ): string {
   const sanitizedDescription = wrapUntrustedContent(sanitizeIssueBody(issue.description))
   const sanitizedTitle = wrapUntrustedContent(sanitizeIssueBody(issue.title))
   const sanitizedRetryReason = wrapUntrustedContent(sanitizeIssueBody(retryReason))
 
-  return template
+  const rendered = template
     .replace(/\{\{issue\.identifier\}\}/g, issue.identifier.slice(0, 50))
     .replace(/\{\{issue\.title\}\}/g, sanitizedTitle)
     .replace(/\{\{issue\.description\}\}/g, sanitizedDescription)
@@ -193,4 +232,15 @@ export function renderPrompt(
     .replace(/\{\{attempt\.id\}\}/g, attempt.id)
     .replace(/\{\{retry_count\}\}/g, String(retryCount))
     .replace(/\{\{retry_reason\}\}/g, sanitizedRetryReason)
+
+  // No trigger table (target repo doesn't ship oma, or it failed to parse)
+  // → render exactly as before this feature existed. Boundary validation
+  // (issue.title/description are raw, untruncated Issue fields) happens
+  // implicitly here: routing only ever reads them to pick a workflow NAME
+  // out of a closed set, it never re-emits their content.
+  if (!triggerTable) return rendered
+
+  const routing = routeIssue(`${issue.title}\n${issue.description}`, triggerTable)
+  const guidance = buildRoutingGuidance(routing)
+  return guidance ? `${rendered}\n\n${guidance}` : rendered
 }
