@@ -71,7 +71,12 @@ function postGraphQLWithNodeHttps(
   })
 }
 
-async function linearGraphQL<T>(apiKey: string, query: string, variables: Record<string, unknown>): Promise<T> {
+/**
+ * Exported so sibling adapters (e.g. `linear-webhook-client.ts`) can reuse
+ * the same auth/error-handling transport without duplicating it. Kept in
+ * this file since every other Linear adapter is layered on top of it.
+ */
+export async function linearGraphQL<T>(apiKey: string, query: string, variables: Record<string, unknown>): Promise<T> {
   const useNodeHttpsTransport = typeof Bun === "undefined" && !process.env.VITEST
 
   const response = !useNodeHttpsTransport
@@ -402,6 +407,15 @@ export async function fetchIssueByIdentifier(
   )
   return data?.team?.issues?.nodes?.[0] ?? null
 }
+
+// ── Webhook Management ──────────────────────────────────────────────
+//
+// Implementation lives in `linear-webhook-client.ts` (kept separate to
+// respect the 500-line file limit in docs/architecture/CONSTRAINTS.md).
+// Re-exported here so callers can keep importing everything Linear-related
+// from a single `tracker/linear-client` entry point.
+
+export { upsertWebhook, WEBHOOK_LABEL } from "./linear-webhook-client"
 
 // ── Helpers ─────────────────────────────────────────────────────────
 

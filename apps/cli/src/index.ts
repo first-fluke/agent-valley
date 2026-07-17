@@ -16,6 +16,8 @@ import { resolve } from "node:path"
 import { loadConfig } from "@agent-valley/core/config/yaml-loader"
 import { program } from "commander"
 import pc from "picocolors"
+import { registerDoctorCommand } from "./doctor"
+import { registerLinearWebhook } from "./linear-webhook-register"
 import { spawnTunnel, type TunnelHandle, type TunnelLogger } from "./tunnel"
 
 /** Project root = cwd where user runs `bunx av` */
@@ -171,8 +173,15 @@ program
     console.log(pc.dim(`  Logs: tail -f ${LOG_FILE}`))
     console.log(pc.dim(`  Stop: av down`))
 
-    // Wait a moment for ngrok URL detection, then exit
-    await new Promise((r) => setTimeout(r, 5_000))
+    // Wait (bounded) for the tunnel URL to register the Linear webhook,
+    // same 5s budget the original fixed sleep used for URL detection.
+    const tunnelUrl = await Promise.race<string | null>([
+      tunnel.ready,
+      new Promise((r) => setTimeout(() => r(null), 5_000)),
+    ])
+    if (tunnelUrl) {
+      await registerLinearWebhook(ROOT, tunnelUrl)
+    }
   })
 
 // ── down ─────────────────────────────────────────────────────────────────────
@@ -247,6 +256,9 @@ program
 
     // tunnel (ngrok / cloudflared / none — from valley.yaml)
     const tunnel = startTunnel(port)
+    tunnel.ready.then((url) => {
+      if (url) void registerLinearWebhook(ROOT, url)
+    })
 
     // Watch config files
     const chokidar = await import("chokidar")
@@ -456,5 +468,7 @@ program
 program.action(() => {
   program.help()
 })
+
+registerDoctorCommand(program)
 
 program.parse()

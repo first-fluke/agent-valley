@@ -5,6 +5,7 @@
  * unit-tested without mocking the TUI layer.
  */
 
+import { randomBytes } from "node:crypto"
 import type { WorkflowState } from "./types"
 
 export async function linearQuery(apiKey: string, query: string): Promise<Record<string, unknown>> {
@@ -29,4 +30,15 @@ export async function linearQuery(apiKey: string, query: string): Promise<Record
  */
 export function findWorkflowState(states: WorkflowState[], names: string[], type: string): WorkflowState | undefined {
   return states.find((st) => names.includes(st.name)) ?? states.find((st) => st.type === type)
+}
+
+/**
+ * Generate a high-entropy webhook signing secret (256 bits of hex, 64
+ * hex chars). Used so the setup wizard never has to ask the operator to
+ * manually create a webhook + copy a secret out of Linear's dashboard —
+ * `av up` / `av dev` registers the webhook automatically using this
+ * value (see `packages/core/src/tracker/linear-webhook-client.ts`).
+ */
+export function randomWebhookSecret(): string {
+  return randomBytes(32).toString("hex")
 }

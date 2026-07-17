@@ -9,7 +9,7 @@
 
 import * as p from "@clack/prompts"
 import pc from "picocolors"
-import { findWorkflowState, linearQuery } from "./linear-api"
+import { findWorkflowState, linearQuery, randomWebhookSecret } from "./linear-api"
 import { BACK, CANCEL, type LinearTeam, type SetupContext, type StepResult, type WorkflowState } from "./types"
 import { stepLabel } from "./ui"
 
@@ -141,40 +141,35 @@ export async function stepWorkflowStates(ctx: SetupContext, step: number, total:
   return
 }
 
+/**
+ * Webhook registration is fully automatic — `av up` / `av dev` upserts
+ * the webhook in Linear itself (see
+ * `packages/core/src/tracker/linear-webhook-client.ts::upsertWebhook`)
+ * using the live tunnel URL once it starts. This step only needs to
+ * make sure a signing secret exists; it auto-generates one so the
+ * operator never has to create the webhook by hand or paste a secret.
+ */
 export async function stepWebhook(ctx: SetupContext, step: number, total: number): Promise<StepResult> {
   const linear = ensureLinear(ctx)
   if (!linear.orgUrlKey || !linear.selectedTeam) return BACK
 
-  const webhookUrl = `https://linear.app/${linear.orgUrlKey}/settings/api`
+  if (!linear.webhookSecret) {
+    linear.webhookSecret = randomWebhookSecret()
+  }
 
   p.note(
     [
-      `Go to ${pc.cyan(webhookUrl)}:`,
+      `A signing secret was generated for team ${pc.bold(linear.selectedTeam.name)} (shown masked in the preview below).`,
       "",
-      `1. Click ${pc.bold("Create webhook")}`,
-      `2. Label: ${pc.dim("Symphony")}`,
-      `3. URL: your ngrok tunnel URL + ${pc.bold("/webhook")}`,
-      `4. Events: check ${pc.bold("Issues")}`,
-      `5. Team: select ${pc.bold(linear.selectedTeam.name)}`,
-      `6. Copy the Signing secret after creation`,
+      `Agent Valley will register the webhook in Linear automatically the`,
+      `next time you run ${pc.bold("av up")} or ${pc.bold("av dev")}, pointing it at your live tunnel URL + /api/webhook.`,
+      "",
+      `No manual webhook setup is needed. If registration ever fails (e.g. missing API`,
+      `key permission), av will log an actionable warning and you can create the`,
+      `webhook by hand at ${pc.cyan(`https://linear.app/${linear.orgUrlKey}/settings/api`)} as a fallback.`,
     ].join("\n"),
-    stepLabel(step, total, "Webhook Setup Guide"),
+    stepLabel(step, total, "Webhook Setup"),
   )
 
-  const ready = await p.confirm({ message: "Have you completed the webhook setup in Linear?" })
-  if (p.isCancel(ready)) return CANCEL
-  if (!ready) return BACK
-
-  const webhookSecret = await p.text({
-    message: "Webhook Signing Secret",
-    placeholder: "lin_wh_xxx",
-    initialValue: linear.webhookSecret,
-    validate: (v) => {
-      if (!v) return "Required"
-    },
-  })
-  if (p.isCancel(webhookSecret)) return CANCEL
-
-  linear.webhookSecret = webhookSecret
   return
 }
