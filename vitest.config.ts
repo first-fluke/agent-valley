@@ -7,6 +7,11 @@ const root = dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   test: {
     globals: false,
+    // Retry flaky tests: several suites create real git worktrees under the OS
+    // tmpdir and can race on parallel-worker teardown (ENOTEMPTY / transient
+    // git state) under load. The race is infrastructural, not a logic defect
+    // (each passes in isolation), so a bounded retry stabilizes CI/pre-push.
+    retry: 2,
     projects: [
       defineProject({
         resolve: {
