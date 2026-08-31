@@ -1,36 +1,36 @@
 #!/usr/bin/env bun
-import type { OmaEvent } from "./state-emit.ts"
-import type { Vendor } from "./types.ts"
+import type { OmaEvent } from "./state-emit.ts";
+import type { Vendor } from "./types.ts";
 
 export interface MemoryFact {
-  text: string
-  source?: string
-  score?: number
+  text: string;
+  source?: string;
+  score?: number;
 }
 
 export interface StateSnapshotRenderInput {
-  vendor: Vendor
-  sid: string
-  reason: string
-  recentEvents: OmaEvent[]
-  facts?: MemoryFact[]
+  vendor: Vendor;
+  sid: string;
+  reason: string;
+  recentEvents: OmaEvent[];
+  facts?: MemoryFact[];
 }
 
 function renderRecentEvents(events: OmaEvent[]): string[] {
-  if (events.length === 0) return ["- none"]
-  return events.map((event) => `- ${event.ts} ${event.kind}`)
+  if (events.length === 0) return ["- none"];
+  return events.map((event) => `- ${event.ts} ${event.kind}`);
 }
 
 function renderMemoryFacts(facts: MemoryFact[]): string[] {
-  if (facts.length === 0) return ["- none"]
+  if (facts.length === 0) return ["- none"];
   return facts.map((fact) => {
-    const source = fact.source ? ` (${fact.source})` : ""
-    return `- ${fact.text}${source}`
-  })
+    const source = fact.source ? ` (${fact.source})` : "";
+    return `- ${fact.text}${source}`;
+  });
 }
 
 function renderClaudeSnapshot(input: StateSnapshotRenderInput): string {
-  const facts = input.facts ?? []
+  const facts = input.facts ?? [];
   return [
     "[OMA STATE SNAPSHOT]",
     `sid: ${input.sid}`,
@@ -39,13 +39,13 @@ function renderClaudeSnapshot(input: StateSnapshotRenderInput): string {
     ...renderRecentEvents(input.recentEvents),
     "memory facts:",
     ...renderMemoryFacts(facts),
-  ].join("\n")
+  ].join("\n");
 }
 
 export function renderStateSnapshot(input: StateSnapshotRenderInput): string {
   switch (input.vendor) {
     case "claude":
-      return renderClaudeSnapshot(input)
+      return renderClaudeSnapshot(input);
     case "antigravity":
     case "codex":
     case "commandcode":
@@ -55,6 +55,6 @@ export function renderStateSnapshot(input: StateSnapshotRenderInput): string {
     case "kiro":
     case "pi":
     case "qwen":
-      return renderClaudeSnapshot(input)
+      return renderClaudeSnapshot(input);
   }
 }

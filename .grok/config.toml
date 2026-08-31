@@ -4,5 +4,5 @@ args = [ "-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--isolate
 
 [mcp_servers.serena]
 command = "serena"
-args = [ "start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false" ]
+args = [ "start-mcp-server", "--context", "oma", "--project-from-cwd", "--open-web-dashboard", "false", "--add-mode", "no-memories" ]
 

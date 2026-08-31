@@ -6,8 +6,8 @@ command = "npx"
 args = [ "-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--isolated" ]
 
 [mcp_servers.serena]
-command = "serena"
-args = [ "start-mcp-server", "--context", "codex", "--project-from-cwd", "--open-web-dashboard", "false" ]
+command = "oma"
+args = [ "bridge", "--context", "oma" ]
 startup_timeout_sec = 90
 
 [mcp_servers.serena.env]

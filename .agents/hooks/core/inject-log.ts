@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-import { mkdirSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
-import { sessionDir } from "./state-marker.ts"
-import type { MemoryFact } from "./vendor-renderer.ts"
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { sessionDir } from "./state-marker.ts";
+import type { MemoryFact } from "./vendor-renderer.ts";
 
 /**
  * Per-boundary inject audit log (D52) with privacy guards (D57).
@@ -29,63 +29,67 @@ const DEFAULT_SECRET_PATTERNS: RegExp[] = [
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWT
   /\bBearer\s+[A-Za-z0-9._-]{12,}/gi, // bearer tokens
   /(api[_-]?key|secret|token|password|passwd|access[_-]?key)(["']?\s*[:=]\s*["']?)[A-Za-z0-9._\-/+]{8,}/gi,
-]
+];
 
-const REDACTION = "[REDACTED]"
+const REDACTION = "[REDACTED]";
 
 function extraPatternsFromEnv(): RegExp[] {
-  const raw = process.env.OMA_REDACT_PATTERNS
-  if (!raw) return []
-  const patterns: RegExp[] = []
+  const raw = process.env.OMA_REDACT_PATTERNS;
+  if (!raw) return [];
+  const patterns: RegExp[] = [];
   for (const source of raw.split(",")) {
-    const trimmed = source.trim()
-    if (!trimmed) continue
+    const trimmed = source.trim();
+    if (!trimmed) continue;
     try {
-      patterns.push(new RegExp(trimmed, "g"))
+      patterns.push(new RegExp(trimmed, "g"));
     } catch {
       // Ignore invalid user-supplied patterns rather than crashing the hook.
     }
   }
-  return patterns
+  return patterns;
 }
 
 export function redactSecrets(text: string, extra: RegExp[] = []): string {
-  let out = text
-  for (const pattern of [...DEFAULT_SECRET_PATTERNS, ...extraPatternsFromEnv(), ...extra]) {
+  let out = text;
+  for (const pattern of [
+    ...DEFAULT_SECRET_PATTERNS,
+    ...extraPatternsFromEnv(),
+    ...extra,
+  ]) {
     // String.replace passes (match, ...groups, offset, fullString). Keyed
     // patterns capture (key, separator) as strings so the log still shows WHICH
     // secret was redacted; ungrouped patterns get a number offset in arg 1, so
     // type-check before treating args as capture groups.
     out = out.replace(pattern, (...args: unknown[]) => {
-      const key = args[1]
-      const sep = args[2]
+      const key = args[1];
+      const sep = args[2];
       if (typeof key === "string" && typeof sep === "string") {
-        return `${key}${sep}${REDACTION}`
+        return `${key}${sep}${REDACTION}`;
       }
-      return REDACTION
-    })
+      return REDACTION;
+    });
   }
-  return out
+  return out;
 }
 
 export interface InjectLogEntry {
-  boundaryAt: string
-  fromVendor: string | null
-  fromVendorSid: string | null
-  toVendor: string
-  toVendorSid: string
-  recallQuery: string | null
-  facts: MemoryFact[]
-  rendered: string
+  boundaryAt: string;
+  fromVendor: string | null;
+  fromVendorSid: string | null;
+  toVendor: string;
+  toVendorSid: string;
+  recallQuery: string | null;
+  facts: MemoryFact[];
+  rendered: string;
 }
 
 export function injectLogDir(projectDir: string, sid: string): string {
-  return join(sessionDir(projectDir, sid), "inject-log")
+  return join(sessionDir(projectDir, sid), "inject-log");
 }
 
 /** Filesystem-safe filename from an ISO timestamp (`:`/`.` are unsafe on win32). */
 export function injectLogFilename(boundaryAt: string): string {
-  return `${boundaryAt.replace(/[:.]/g, "-")}.md`
+  return `${boundaryAt.replace(/[:.]/g, "-")}.md`;
 }
 
 function renderInjectLog(entry: InjectLogEntry): string {
@@ -94,11 +98,12 @@ function renderInjectLog(entry: InjectLogEntry): string {
       ? "- (none)"
       : entry.facts
           .map((fact) => {
-            const source = fact.source ? ` (${fact.source})` : ""
-            const score = typeof fact.score === "number" ? ` [${fact.score}]` : ""
-            return `- ${redactSecrets(fact.text)}${source}${score}`
+            const source = fact.source ? ` (${fact.source})` : "";
+            const score =
+              typeof fact.score === "number" ? ` [${fact.score}]` : "";
+            return `- ${redactSecrets(fact.text)}${source}${score}`;
           })
-          .join("\n")
+          .join("\n");
 
   return [
     `# OMA Inject Log ${entry.boundaryAt}`,
@@ -116,24 +121,28 @@ function renderInjectLog(entry: InjectLogEntry): string {
     redactSecrets(entry.rendered),
     "```",
     "",
-  ].join("\n")
+  ].join("\n");
 }
 
 /**
  * Write a boundary inject log. Best-effort: a failure here is debug-only and
  * must never break the hook, so errors are swallowed and `null` is returned.
  */
-export function writeInjectLog(projectDir: string, sid: string, entry: InjectLogEntry): string | null {
+export function writeInjectLog(
+  projectDir: string,
+  sid: string,
+  entry: InjectLogEntry,
+): string | null {
   try {
-    const dir = injectLogDir(projectDir, sid)
-    mkdirSync(dir, { recursive: true, mode: 0o700 })
-    const path = join(dir, injectLogFilename(entry.boundaryAt))
+    const dir = injectLogDir(projectDir, sid);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const path = join(dir, injectLogFilename(entry.boundaryAt));
     writeFileSync(path, renderInjectLog(entry), {
       encoding: "utf-8",
       mode: 0o600,
-    })
-    return path
+    });
+    return path;
   } catch {
-    return null
+    return null;
   }
 }
