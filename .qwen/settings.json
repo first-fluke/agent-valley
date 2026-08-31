@@ -19,7 +19,7 @@
             "name": "oma-hook-PreToolUse",
             "type": "command",
             "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'PreToolUse' --matcher 'run_shell_command'",
-            "timeout": 10
+            "timeout": 13
           }
         ],
         "matcher": "run_shell_command"
@@ -32,20 +32,42 @@
             "name": "oma-hook-Stop",
             "type": "command",
             "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'Stop'",
-            "timeout": 10
+            "timeout": 15
           }
         ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "name": "oma-hook-PostToolUse",
+            "type": "command",
+            "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'PostToolUse' --matcher 'write_file|replace'",
+            "timeout": 10
+          }
+        ],
+        "matcher": "write_file|replace"
       }
     ]
   },
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--isolated"]
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--no-usage-statistics",
+        "--isolated"
+      ]
     },
     "serena": {
-      "command": "serena",
-      "args": ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
+      "command": "oma",
+      "args": [
+        "bridge",
+        "--context",
+        "oma"
+      ],
       "env": {
         "SERENA_LOG_LEVEL": "info"
       }
@@ -62,5 +84,16 @@
   },
   "hooksConfig": {
     "enabled": true
+  },
+  "model": {
+    "generationConfig": {
+      "timeout": 300000
+    }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(ls *)",
+      "Bash(oma *)"
+    ]
   }
 }

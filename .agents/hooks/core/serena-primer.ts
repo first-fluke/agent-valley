@@ -21,15 +21,15 @@
  * PreInvocation / beforeSubmitPrompt / userPromptSubmit), after skill-injector.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { agyConversationId, isAgyInput, readAgyPrompt } from "./agy-input.ts"
-import { makePromptOutput } from "./hook-output.ts"
-import { normalizePromptInput } from "./prompt-input.ts"
-import type { HandlerCtx, HandlerResult, HookInput, Vendor } from "./types.ts"
-import { getProjectDir, inferVendorFromScriptPath } from "./vendor-detect.ts"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { agyConversationId, isAgyInput, readAgyPrompt } from "./agy-input.ts";
+import { makePromptOutput } from "./hook-output.ts";
+import { normalizePromptInput } from "./prompt-input.ts";
+import type { HandlerCtx, HandlerResult, HookInput, Vendor } from "./types.ts";
+import { getProjectDir, inferVendorFromScriptPath } from "./vendor-detect.ts";
 
-const SESSION_TTL_MS = 60 * 60 * 1000
+const SESSION_TTL_MS = 60 * 60 * 1000;
 
 // ── Serena Detection ──────────────────────────────────────────
 
@@ -39,38 +39,38 @@ const SESSION_TTL_MS = 60 * 60 * 1000
  * vendor-agnostic signal that Serena is in use here.
  */
 export function isSerenaProject(projectDir: string): boolean {
-  return existsSync(join(projectDir, ".serena", "project.yml"))
+  return existsSync(join(projectDir, ".serena", "project.yml"));
 }
 
 // ── Session-once State ────────────────────────────────────────
 
 interface PrimerState {
-  sessions: Record<string, number>
+  sessions: Record<string, number>;
 }
 
 function getStatePath(projectDir: string): string {
-  return join(projectDir, ".agents", "state", "serena-primer.json")
+  return join(projectDir, ".agents", "state", "serena-primer.json");
 }
 
 function readState(projectDir: string): PrimerState {
-  const p = getStatePath(projectDir)
-  if (!existsSync(p)) return { sessions: {} }
+  const p = getStatePath(projectDir);
+  if (!existsSync(p)) return { sessions: {} };
   try {
-    const parsed = JSON.parse(readFileSync(p, "utf-8"))
+    const parsed = JSON.parse(readFileSync(p, "utf-8"));
     if (parsed && typeof parsed === "object" && parsed.sessions) {
-      return parsed as PrimerState
+      return parsed as PrimerState;
     }
   } catch {
     // corrupted — reset
   }
-  return { sessions: {} }
+  return { sessions: {} };
 }
 
 function writeState(projectDir: string, state: PrimerState): void {
-  const p = getStatePath(projectDir)
+  const p = getStatePath(projectDir);
   try {
-    mkdirSync(dirname(p), { recursive: true })
-    writeFileSync(p, JSON.stringify(state, null, 2))
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, JSON.stringify(state, null, 2));
   } catch {
     // failing open is acceptable — worst case the primer injects again
   }
@@ -81,21 +81,25 @@ function writeState(projectDir: string, state: PrimerState): void {
  * session (within TTL); returns false on subsequent prompts. Expired sessions
  * are pruned. Pure given `now` for testability.
  */
-export function claimSession(projectDir: string, sessionId: string, now: number = Date.now()): boolean {
-  const state = readState(projectDir)
+export function claimSession(
+  projectDir: string,
+  sessionId: string,
+  now: number = Date.now(),
+): boolean {
+  const state = readState(projectDir);
 
   for (const [id, ts] of Object.entries(state.sessions)) {
-    if (now - ts > SESSION_TTL_MS) delete state.sessions[id]
+    if (now - ts > SESSION_TTL_MS) delete state.sessions[id];
   }
 
-  const last = state.sessions[sessionId]
+  const last = state.sessions[sessionId];
   if (last !== undefined && now - last <= SESSION_TTL_MS) {
-    return false
+    return false;
   }
 
-  state.sessions[sessionId] = now
-  writeState(projectDir, state)
-  return true
+  state.sessions[sessionId] = now;
+  writeState(projectDir, state);
+  return true;
 }
 
 // ── Primer Content ────────────────────────────────────────────
@@ -113,8 +117,9 @@ export function primerContext(): string {
     "- Code discovery / reading: `get_symbols_overview`, `find_symbol`, `find_referencing_symbols`, `search_for_pattern`.",
     "- Code edits: `replace_symbol_body`, `insert_after_symbol`, `insert_before_symbol`, `replace_content`.",
     "- Native grep/glob: only for initial filename/path discovery. Do not fall back to grep + Read for code navigation just because Serena's tools aren't loaded yet — load them.",
+    '- Result size: omit `max_answer_chars` on Serena tools (uses the configured default, typically 150000). Never pass small caps like `3000` on broad searches. If a call returns "The answer is too long (N characters)", retry with `max_answer_chars` > N or narrow path/glob — do not keep the low cap.',
     "- Exception — MCP timeout: if a Serena MCP call times out or hangs (seen mainly in OpenCode Desktop's long-lived sidecar), stop retrying MCP for this session: use native search/read for code, and access `.serena/memories/` files directly (or `serena memories read|write` when Serena CLI ≥ 1.5 is installed) for memory work. A full app relaunch restores Serena MCP.",
-  ].join("\n")
+  ].join("\n");
 }
 
 // ── Pure handler (canonical ABI) ─────────────────────────────
@@ -124,75 +129,92 @@ export function primerContext(): string {
  * Serena-activated project's session, else returns null.
  * `ctx.cwd` must be the resolved git-root project directory.
  */
-export async function run(input: HookInput, ctx: HandlerCtx): Promise<HandlerResult | null> {
-  if (input.kind !== "prompt") return null
+export async function run(
+  input: HookInput,
+  ctx: HandlerCtx,
+): Promise<HandlerResult | null> {
+  if (input.kind !== "prompt") return null;
 
-  const { cwd: projectDir, sid: sessionId = "unknown" } = ctx
+  const { cwd: projectDir, sid: sessionId = "unknown" } = ctx;
 
-  if (!isSerenaProject(projectDir)) return null
+  if (!isSerenaProject(projectDir)) return null;
   // Compaction keeps the session id, so the session-once claim would skip
   // exactly the turn that just lost the primer from context — force re-inject.
-  const forced = input.source === "compact"
-  if (!claimSession(projectDir, sessionId) && !forced) return null
+  const forced = input.source === "compact";
+  if (!claimSession(projectDir, sessionId) && !forced) return null;
 
-  return { type: "context", additionalContext: primerContext() }
+  return { type: "context", additionalContext: primerContext() };
 }
 
 // ── Standalone entry (pi subprocess / direct bun invocation) ──
 
 function detectVendor(input: Record<string, unknown>): Vendor {
-  const byScriptPath = inferVendorFromScriptPath(import.meta.filename)
-  if (byScriptPath) return byScriptPath
-  if (isAgyInput(input)) return "antigravity"
-  const event = input.hook_event_name as string | undefined
-  const hookEventName = input.hookEventName as string | undefined
-  if (process.env.GROK_WORKSPACE_ROOT) return "grok"
-  if (process.env.KIRO_PROJECT_DIR || event === "userPromptSubmit" || hookEventName === "userPromptSubmit") {
-    return "kiro"
+  const byScriptPath = inferVendorFromScriptPath(import.meta.filename);
+  if (byScriptPath) return byScriptPath;
+  if (isAgyInput(input)) return "antigravity";
+  const event = input.hook_event_name as string | undefined;
+  const hookEventName = input.hookEventName as string | undefined;
+  if (process.env.GROK_WORKSPACE_ROOT) return "grok";
+  if (
+    process.env.KIRO_PROJECT_DIR ||
+    event === "userPromptSubmit" ||
+    hookEventName === "userPromptSubmit"
+  ) {
+    return "kiro";
   }
-  if (event === "PreInvocation") return "antigravity"
-  if (event === "beforeSubmitPrompt") return "cursor"
-  if (event === "UserPromptSubmit" && "session_id" in input && !("sessionId" in input)) return "codex"
-  if (process.env.QWEN_PROJECT_DIR) return "qwen"
-  return "claude"
+  if (event === "PreInvocation") return "antigravity";
+  if (event === "beforeSubmitPrompt") return "cursor";
+  if (
+    event === "UserPromptSubmit" &&
+    "session_id" in input &&
+    !("sessionId" in input)
+  )
+    return "codex";
+  if (process.env.QWEN_PROJECT_DIR) return "qwen";
+  return "claude";
 }
 
 function getSessionId(input: Record<string, unknown>): string {
-  return (input.sessionId as string) || (input.session_id as string) || agyConversationId(input) || "unknown"
+  return (
+    (input.sessionId as string) ||
+    (input.session_id as string) ||
+    agyConversationId(input) ||
+    "unknown"
+  );
 }
 
 async function main() {
-  const raw = readFileSync(0, "utf-8")
-  let input: Record<string, unknown>
+  const raw = readFileSync(0, "utf-8");
+  let input: Record<string, unknown>;
   try {
-    input = JSON.parse(raw)
+    input = JSON.parse(raw);
   } catch {
-    process.exit(0)
+    process.exit(0);
   }
 
-  const vendor = detectVendor(input)
-  const projectDir = getProjectDir(vendor, input)
-  const sessionId = getSessionId(input)
-  let prompt = normalizePromptInput(input.prompt)
+  const vendor = detectVendor(input);
+  const projectDir = getProjectDir(vendor, input);
+  const sessionId = getSessionId(input);
+  let prompt = normalizePromptInput(input.prompt);
 
   // agy's PreInvocation stdin carries no `prompt`; recover it and only act on
   // the first invocation of a turn.
   if (vendor === "antigravity" && !prompt) {
-    const invocationNum = input.invocationNum
-    if (typeof invocationNum === "number" && invocationNum > 1) process.exit(0)
-    prompt = readAgyPrompt(input.transcriptPath)
+    const invocationNum = input.invocationNum;
+    if (typeof invocationNum === "number" && invocationNum > 1) process.exit(0);
+    prompt = readAgyPrompt(input.transcriptPath);
   }
 
-  const hookInput: HookInput = { kind: "prompt", prompt, cwd: projectDir }
-  const ctx: HandlerCtx = { vendor, cwd: projectDir, sid: sessionId }
+  const hookInput: HookInput = { kind: "prompt", prompt, cwd: projectDir };
+  const ctx: HandlerCtx = { vendor, cwd: projectDir, sid: sessionId };
 
-  const result = await run(hookInput, ctx)
+  const result = await run(hookInput, ctx);
   if (result && result.type === "context") {
-    process.stdout.write(makePromptOutput(vendor, result.additionalContext))
+    process.stdout.write(makePromptOutput(vendor, result.additionalContext));
   }
-  process.exit(0)
+  process.exit(0);
 }
 
 if (import.meta.main) {
-  main().catch(() => process.exit(0))
+  main().catch(() => process.exit(0));
 }

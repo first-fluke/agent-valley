@@ -11,89 +11,109 @@
  * `<hookDir>/../last-hud-input.json` for schema reverse-engineering.
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
-import type { ModeState } from "./types.ts"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { ModeState } from "./types.ts";
 
 // ── ANSI Colors ───────────────────────────────────────────────
 
-const dim = (s: string) => `\x1b[2m${s}\x1b[22m`
-const bold = (s: string) => `\x1b[1m${s}\x1b[22m`
-const green = (s: string) => `\x1b[32m${s}\x1b[39m`
-const yellow = (s: string) => `\x1b[33m${s}\x1b[39m`
-const red = (s: string) => `\x1b[31m${s}\x1b[39m`
-const cyan = (s: string) => `\x1b[36m${s}\x1b[39m`
+const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
+const green = (s: string) => `\x1b[32m${s}\x1b[39m`;
+const yellow = (s: string) => `\x1b[33m${s}\x1b[39m`;
+const red = (s: string) => `\x1b[31m${s}\x1b[39m`;
+const cyan = (s: string) => `\x1b[36m${s}\x1b[39m`;
 
 function colorByThreshold(value: number, text: string): string {
-  if (value >= 85) return red(text)
-  if (value >= 70) return yellow(text)
-  return green(text)
+  if (value >= 85) return red(text);
+  if (value >= 70) return yellow(text);
+  return green(text);
 }
 
 // ── Stdin ─────────────────────────────────────────────────────
 
 interface RateLimit {
-  used_percentage?: number
-  resets_at?: string
+  used_percentage?: number;
+  resets_at?: string;
 }
 
 interface StatuslineStdin {
-  cwd?: string
-  model?: { id?: string; display_name?: string }
+  cwd?: string;
+  model?: { id?: string; display_name?: string };
   context_window?: {
-    context_window_size?: number
-    used_percentage?: number
+    context_window_size?: number;
+    used_percentage?: number;
     // agy 1.0.0 StatusLine adds these — Claude does not.
-    total_input_tokens?: number
-    total_output_tokens?: number
-  }
+    total_input_tokens?: number;
+    total_output_tokens?: number;
+  };
   cost?: {
-    total_cost_usd?: number
-    total_lines_added?: number
-    total_lines_removed?: number
-    total_duration_ms?: number
-  }
+    total_cost_usd?: number;
+    total_lines_added?: number;
+    total_lines_removed?: number;
+    total_duration_ms?: number;
+  };
   rate_limits?: {
-    five_hour?: RateLimit
-    seven_day?: RateLimit
-  }
+    five_hour?: RateLimit;
+    seven_day?: RateLimit;
+  };
   // Qwen Code statusLine fields (git branch + line metrics live under
   // different keys than Claude/agy). Schema: qwen-code statusLine docs.
-  git?: { branch?: string }
+  git?: { branch?: string };
   metrics?: {
-    files?: { total_lines_added?: number; total_lines_removed?: number }
-  }
+    files?: { total_lines_added?: number; total_lines_removed?: number };
+  };
   // agy StatusLine fields (snake_case; Antigravity hides $cost / rate-limits).
   // Schema: antigravity.google StatusLine "Available JSON fields".
-  agent_state?: string
-  sandbox?: { enabled?: boolean; allow_network?: boolean }
-  product?: string
-  conversation_id?: string
-  workspace?: { current_dir?: string; project_dir?: string }
-  vcs?: { type?: string; branch?: string; client?: string; dirty?: boolean }
-  agent?: { name?: string }
-  subagents?: Array<{ name?: string; role?: string; status?: string }>
-  background_tasks?: Array<{ name?: string; status?: string; index?: number }>
-  pending_input_count?: number
-  tool_confirmation_pending?: boolean
-  terminal_width?: number
+  agent_state?: string;
+  sandbox?: { enabled?: boolean; allow_network?: boolean };
+  product?: string;
+  conversation_id?: string;
+  workspace?: { current_dir?: string; project_dir?: string };
+  vcs?: { type?: string; branch?: string; client?: string; dirty?: boolean };
+  agent?: { name?: string };
+  subagents?: Array<{ name?: string; role?: string; status?: string }>;
+  background_tasks?: Array<{ name?: string; status?: string; index?: number }>;
+  pending_input_count?: number;
+  tool_confirmation_pending?: boolean;
+  terminal_width?: number;
 }
 
-function readStdin(): StatuslineStdin {
-  const raw = (() => {
-    try {
-      return readFileSync(0, "utf-8")
-    } catch {
-      return ""
+async function readStdin(
+  timeoutMs = STDIN_TIMEOUT_MS,
+): Promise<StatuslineStdin> {
+  // Some vendors (notably agy) spawn the statusline without closing the stdin
+  // pipe; a synchronous readFileSync(0) then blocks until the vendor's
+  // statusline timeout SIGKILLs the process. Read asynchronously and give up
+  // after timeoutMs, letting main() fall back to a payload-less line.
+  const read = (async () => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(chunk as Buffer);
     }
-  })()
-  maybeDumpDebugPayload(raw)
+    const raw = Buffer.concat(chunks).toString("utf-8");
+    maybeDumpDebugPayload(raw);
+    try {
+      return JSON.parse(raw) as StatuslineStdin;
+    } catch {
+      return {};
+    }
+  })();
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("stdin timeout")), timeoutMs);
+  });
+
   try {
-    return JSON.parse(raw)
-  } catch {
-    return {}
+    return await Promise.race([read, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
 }
+
+/** Max time to wait for the vendor to deliver (and close) the stdin payload. */
+const STDIN_TIMEOUT_MS = 800;
 
 /**
  * When `OMA_HUD_DEBUG=1`, capture the raw stdin payload to a sibling file so
@@ -101,10 +121,14 @@ function readStdin(): StatuslineStdin {
  * which has no public docs at v1.0.0). Best-effort — failures are swallowed.
  */
 function maybeDumpDebugPayload(raw: string): void {
-  if (process.env.OMA_HUD_DEBUG !== "1" || !raw) return
+  if (process.env.OMA_HUD_DEBUG !== "1" || !raw) return;
   try {
-    const target = join(import.meta.dirname ?? process.cwd(), "..", "last-hud-input.json")
-    writeFileSync(target, `${raw.trim()}\n`, "utf-8")
+    const target = join(
+      import.meta.dirname ?? process.cwd(),
+      "..",
+      "last-hud-input.json",
+    );
+    writeFileSync(target, `${raw.trim()}\n`, "utf-8");
   } catch {
     // intentionally silent
   }
@@ -113,157 +137,192 @@ function maybeDumpDebugPayload(raw: string): void {
 // ── Active Workflow Detection ─────────────────────────────────
 
 function getActiveWorkflow(projectDir: string): ModeState | null {
-  const stateDir = join(projectDir, ".agents", "state")
-  if (!existsSync(stateDir)) return null
+  const stateDir = join(projectDir, ".agents", "state");
+  if (!existsSync(stateDir)) return null;
 
   try {
     for (const file of readdirSync(stateDir)) {
-      if (!file.endsWith(".json") || !file.includes("-state-")) continue
-      const content = readFileSync(join(stateDir, file), "utf-8")
-      const state: ModeState = JSON.parse(content)
+      if (!file.endsWith(".json") || !file.includes("-state-")) continue;
+      const content = readFileSync(join(stateDir, file), "utf-8");
+      const state: ModeState = JSON.parse(content);
 
       // Skip stale (>2h)
-      const elapsed = Date.now() - new Date(state.activatedAt).getTime()
-      if (elapsed > 2 * 60 * 60 * 1000) continue
+      const elapsed = Date.now() - new Date(state.activatedAt).getTime();
+      if (elapsed > 2 * 60 * 60 * 1000) continue;
 
-      return state
+      return state;
     }
   } catch {
     // ignore
   }
-  return null
+  return null;
 }
 
 // ── Model Name Shortener ──────────────────────────────────────
 
-export function shortModel(model?: { id?: string; display_name?: string }): string {
-  const name = model?.display_name || model?.id || ""
-  if (!name) return ""
+export function shortModel(model?: {
+  id?: string;
+  display_name?: string;
+}): string {
+  const name = model?.display_name || model?.id || "";
+  if (!name) return "";
   // Claude: "Claude Opus 4.6 (1M context)" → "Opus 4.6"
-  const claude = name.match(/(Opus|Sonnet|Haiku)[\s.]*([\d.]*)/i)
-  if (claude) return `${claude[1]}${claude[2] ? ` ${claude[2]}` : ""}`
-  // Gemini / agy: "Gemini 3.5 Flash (High)" → "Gemini 3.5 Flash"
-  const gemini = name.match(/(Gemini)\s+([\d.]+)\s+(Pro|Flash|Ultra|Nano|Thinking)/i)
-  if (gemini) return `${gemini[1]} ${gemini[2]} ${gemini[3]}`
-  return name.split("/").pop()?.slice(0, 20) || ""
+  const claude = name.match(/(Opus|Sonnet|Haiku)[\s.]*([\d.]*)/i);
+  if (claude) return `${claude[1]}${claude[2] ? ` ${claude[2]}` : ""}`;
+  // Gemini / agy: "Gemini 3.6 Flash (High)" → "Gemini 3.6 Flash"
+  const gemini = name.match(
+    /(Gemini)\s+([\d.]+)\s+(Pro|Flash|Ultra|Nano|Thinking)/i,
+  );
+  if (gemini) return `${gemini[1]} ${gemini[2]} ${gemini[3]}`;
+  // Gemini / agy slug: "antigravity/gemini-3.6-flash" → "Gemini 3.6 Flash"
+  const geminiSlug = name.match(
+    /gemini-([\d.]+)-(pro|flash|ultra|nano|thinking)/i,
+  );
+  if (geminiSlug) {
+    const capType =
+      geminiSlug[2].charAt(0).toUpperCase() + geminiSlug[2].slice(1);
+    return `Gemini ${geminiSlug[1]} ${capType}`;
+  }
+  return name.split("/").pop()?.slice(0, 20) || "";
 }
 
 // ── Rate Limit Helpers ───────────────────────────────────────
 
 function formatCountdown(resetsAt: string): string {
-  const remaining = new Date(resetsAt).getTime() - Date.now()
-  if (remaining <= 0) return ""
-  const h = Math.floor(remaining / 3_600_000)
-  const m = Math.floor((remaining % 3_600_000) / 60_000)
-  return h > 0 ? `${h}h${m}m` : `${m}m`
+  const remaining = new Date(resetsAt).getTime() - Date.now();
+  if (remaining <= 0) return "";
+  const h = Math.floor(remaining / 3_600_000);
+  const m = Math.floor((remaining % 3_600_000) / 60_000);
+  return h > 0 ? `${h}h${m}m` : `${m}m`;
 }
 
 function formatRateLimit(label: string, rl?: RateLimit): string | null {
-  if (!rl || rl.used_percentage == null) return null
-  const pct = Math.round(rl.used_percentage)
-  const countdown = rl.resets_at ? formatCountdown(rl.resets_at) : ""
-  const text = countdown ? `${label}:${pct}%(${countdown})` : `${label}:${pct}%`
-  return colorByThreshold(pct, text)
+  if (!rl || rl.used_percentage == null) return null;
+  const pct = Math.round(rl.used_percentage);
+  const countdown = rl.resets_at ? formatCountdown(rl.resets_at) : "";
+  const text = countdown
+    ? `${label}:${pct}%(${countdown})`
+    : `${label}:${pct}%`;
+  return colorByThreshold(pct, text);
 }
 
 function formatTokens(n: number): string {
-  if (n < 1000) return `${n}`
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
+  if (n < 1000) return `${n}`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
 // ── Claude / agy statusline ───────────────────────────────────
 
 export function buildClaudeStatusline(input: StatuslineStdin): string {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || input.cwd || input.workspace?.current_dir || process.cwd()
-  const parts: string[] = []
+  const projectDir =
+    process.env.CLAUDE_PROJECT_DIR ||
+    input.cwd ||
+    input.workspace?.current_dir ||
+    process.cwd();
+  const parts: string[] = [];
 
   // 1. OMA label
-  parts.push(bold(cyan("[OMA]")))
+  parts.push(bold(cyan("[OMA]")));
 
   // 2. Model
-  const model = shortModel(input.model)
-  if (model) parts.push(dim(model))
+  const model = shortModel(input.model);
+  if (model) parts.push(dim(model));
 
   // 3. Context %
-  const ctxPct = input.context_window?.used_percentage
+  const ctxPct = input.context_window?.used_percentage;
   if (ctxPct != null) {
-    parts.push(colorByThreshold(ctxPct, `ctx:${Math.round(ctxPct)}%`))
+    parts.push(colorByThreshold(ctxPct, `ctx:${Math.round(ctxPct)}%`));
   }
 
   // 4. Session cost (Claude)
-  const cost = input.cost?.total_cost_usd
+  const cost = input.cost?.total_cost_usd;
   if (cost != null && cost > 0) {
-    parts.push(dim(`$${cost.toFixed(2)}`))
+    parts.push(dim(`$${cost.toFixed(2)}`));
   }
 
   // 5. Rate limits (Claude)
-  const rl5 = formatRateLimit("5h", input.rate_limits?.five_hour)
-  const rl7 = formatRateLimit("7d", input.rate_limits?.seven_day)
+  const rl5 = formatRateLimit("5h", input.rate_limits?.five_hour);
+  const rl7 = formatRateLimit("7d", input.rate_limits?.seven_day);
   if (rl5 || rl7) {
-    parts.push([rl5, rl7].filter(Boolean).join(dim(" ")))
+    parts.push([rl5, rl7].filter(Boolean).join(dim(" ")));
   }
 
   // 6. Lines changed (vendor-provided only; agy doesn't track this and we
   //    intentionally don't synthesize from git — keep what the vendor knows).
-  const added = input.cost?.total_lines_added ?? input.metrics?.files?.total_lines_added
-  const removed = input.cost?.total_lines_removed ?? input.metrics?.files?.total_lines_removed
+  const added =
+    input.cost?.total_lines_added ?? input.metrics?.files?.total_lines_added;
+  const removed =
+    input.cost?.total_lines_removed ??
+    input.metrics?.files?.total_lines_removed;
   if (added || removed) {
-    const diffParts: string[] = []
-    if (added) diffParts.push(green(`+${added}`))
-    if (removed) diffParts.push(red(`-${removed}`))
-    parts.push(diffParts.join(dim("/")))
+    const diffParts: string[] = [];
+    if (added) diffParts.push(green(`+${added}`));
+    if (removed) diffParts.push(red(`-${removed}`));
+    parts.push(diffParts.join(dim("/")));
   }
 
   // 7. agy StatusLine signals (presence-guarded; Claude payloads omit these).
   //    git branch (+dirty marker), live agent state, active subagents,
   //    background tasks, queued inputs, and a pending tool-confirmation flag.
-  const branch = input.vcs?.branch ?? input.git?.branch
+  const branch = input.vcs?.branch ?? input.git?.branch;
   if (branch) {
-    parts.push(dim(`⎇ ${branch}${input.vcs?.dirty ? "*" : ""}`))
+    parts.push(dim(`⎇ ${branch}${input.vcs?.dirty ? "*" : ""}`));
   }
   if (input.agent_state && input.agent_state !== "idle") {
-    parts.push(yellow(input.agent_state))
+    parts.push(yellow(input.agent_state));
   }
-  const subagentCount = input.subagents?.length ?? 0
+  const subagentCount = input.subagents?.length ?? 0;
   if (subagentCount > 0) {
-    parts.push(cyan(`subagents:${subagentCount}`))
+    parts.push(cyan(`subagents:${subagentCount}`));
   }
-  const backgroundCount = input.background_tasks?.length ?? 0
+  const backgroundCount = input.background_tasks?.length ?? 0;
   if (backgroundCount > 0) {
-    parts.push(yellow(`bg:${backgroundCount}`))
+    parts.push(yellow(`bg:${backgroundCount}`));
   }
-  if (typeof input.pending_input_count === "number" && input.pending_input_count > 0) {
-    parts.push(dim(`queue:${input.pending_input_count}`))
+  if (
+    typeof input.pending_input_count === "number" &&
+    input.pending_input_count > 0
+  ) {
+    parts.push(dim(`queue:${input.pending_input_count}`));
   }
   if (input.tool_confirmation_pending) {
-    parts.push(yellow("confirm?"))
+    parts.push(yellow("confirm?"));
   }
   if (input.sandbox?.enabled) {
-    parts.push(dim("sandbox"))
+    parts.push(dim("sandbox"));
   }
 
   // 8. Active workflow
-  const workflow = getActiveWorkflow(projectDir)
+  const workflow = getActiveWorkflow(projectDir);
   if (workflow) {
-    parts.push(yellow(`${workflow.workflow}:${workflow.reinforcementCount}`))
+    parts.push(yellow(`${workflow.workflow}:${workflow.reinforcementCount}`));
   }
 
   // 9. Tokens (agy exposes these; Claude usually does not). Keep this last
   // because the token string is visually noisy and mostly informational.
-  const inTok = input.context_window?.total_input_tokens ?? 0
-  const outTok = input.context_window?.total_output_tokens ?? 0
+  const inTok = input.context_window?.total_input_tokens ?? 0;
+  const outTok = input.context_window?.total_output_tokens ?? 0;
   if (inTok > 0 || outTok > 0) {
-    parts.push(dim(`tok:${formatTokens(inTok)}↑${formatTokens(outTok)}↓`))
+    parts.push(dim(`tok:${formatTokens(inTok)}↑${formatTokens(outTok)}↓`));
   }
 
-  return parts.join(dim(" │ "))
+  return parts.join(dim(" │ "));
 }
 
 // ── Main ──────────────────────────────────────────────────────
 
-function main() {
-  process.stdout.write(buildClaudeStatusline(readStdin()))
+async function main() {
+  let out: string;
+  try {
+    out = buildClaudeStatusline(await readStdin());
+  } catch {
+    // stdin timed out — a payload-less line beats a killed statusline
+    out = buildClaudeStatusline({});
+  }
+  // Exit explicitly: after a timeout the pending stdin read would otherwise
+  // keep the event loop (and the process) alive.
+  process.stdout.write(out, () => process.exit(0));
 }
 
-main()
+void main();

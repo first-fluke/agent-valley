@@ -7,10 +7,10 @@
 // once and every handler imports them. `detectVendor` stays per-handler because
 // the event-name → vendor mapping is hook-kind-specific (prompt/tool/stop).
 
-import { join } from "node:path"
-import { agyProjectDir } from "./agy-input.ts"
-import { resolveGitRoot } from "./fs-utils.ts"
-import type { Vendor } from "./types.ts"
+import { join } from "node:path";
+import { agyProjectDir } from "./agy-input.ts";
+import { resolveGitRoot } from "./fs-utils.ts";
+import type { Vendor } from "./types.ts";
 
 /**
  * Infer the vendor from the installed script path (`import.meta.filename` of the
@@ -19,28 +19,32 @@ import type { Vendor } from "./types.ts"
  * bare `.gemini/hooks/` case (which no longer exists post Gemini-CLI removal).
  */
 export function inferVendorFromScriptPath(scriptPath: string): Vendor | null {
-  if (scriptPath.includes(`${join(".gemini", "antigravity-cli", "hooks")}`)) return "antigravity"
-  if (scriptPath.includes(`${join(".cursor", "hooks")}`)) return "cursor"
-  if (scriptPath.includes(`${join(".qwen", "hooks")}`)) return "qwen"
-  if (scriptPath.includes(`${join(".claude", "hooks")}`)) return "claude"
-  if (scriptPath.includes(`${join(".codex", "hooks")}`)) return "codex"
-  if (scriptPath.includes(`${join(".grok", "hooks")}`)) return "grok"
-  if (scriptPath.includes(`${join(".kiro", "hooks")}`)) return "kiro"
-  if (scriptPath.includes(`${join(".kimi-code", "hooks")}`)) return "kimi"
+  if (scriptPath.includes(`${join(".gemini", "antigravity-cli", "hooks")}`))
+    return "antigravity";
+  if (scriptPath.includes(`${join(".cursor", "hooks")}`)) return "cursor";
+  if (scriptPath.includes(`${join(".qwen", "hooks")}`)) return "qwen";
+  if (scriptPath.includes(`${join(".claude", "hooks")}`)) return "claude";
+  if (scriptPath.includes(`${join(".codex", "hooks")}`)) return "codex";
+  if (scriptPath.includes(`${join(".grok", "hooks")}`)) return "grok";
+  if (scriptPath.includes(`${join(".kiro", "hooks")}`)) return "kiro";
+  if (scriptPath.includes(`${join(".kimi-code", "hooks")}`)) return "kimi";
   // pi auto-loads the bridge from `.pi/extensions/oma/`; core scripts are copied
   // alongside it and spawned as subprocesses from there.
-  if (scriptPath.includes(`${join(".pi", "extensions")}`)) return "pi"
-  return null
+  if (scriptPath.includes(`${join(".pi", "extensions")}`)) return "pi";
+  return null;
 }
 
 /** Resolve the git-root project directory for a vendor + raw hook input. */
-export function getProjectDir(vendor: Vendor, input: Record<string, unknown>): string {
-  let dir: string
+export function getProjectDir(
+  vendor: Vendor,
+  input: Record<string, unknown>,
+): string {
+  let dir: string;
   switch (vendor) {
     case "codex":
     case "cursor":
-      dir = (input.cwd as string) || process.cwd()
-      break
+      dir = (input.cwd as string) || process.cwd();
+      break;
     case "antigravity":
       dir =
         agyProjectDir(input) ||
@@ -48,22 +52,26 @@ export function getProjectDir(vendor: Vendor, input: Record<string, unknown>): s
         process.env.ANTIGRAVITY_PROJECT_DIR ||
         process.env.AGY_PROJECT_DIR ||
         process.env.GEMINI_PROJECT_DIR ||
-        process.cwd()
-      break
+        process.cwd();
+      break;
     case "qwen":
-      dir = process.env.QWEN_PROJECT_DIR || process.cwd()
-      break
+      dir = process.env.QWEN_PROJECT_DIR || process.cwd();
+      break;
     case "grok":
-      dir = process.env.GROK_WORKSPACE_ROOT || (input.cwd as string) || process.cwd()
-      break
+      dir =
+        process.env.GROK_WORKSPACE_ROOT ||
+        (input.cwd as string) ||
+        process.cwd();
+      break;
     case "kiro":
-      dir = process.env.KIRO_PROJECT_DIR || (input.cwd as string) || process.cwd()
-      break
+      dir =
+        process.env.KIRO_PROJECT_DIR || (input.cwd as string) || process.cwd();
+      break;
     default:
-      dir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
-      break
+      dir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+      break;
   }
-  return resolveGitRoot(dir)
+  return resolveGitRoot(dir);
 }
 
 /**
@@ -75,30 +83,30 @@ export function getProjectDir(vendor: Vendor, input: Record<string, unknown>): s
 export function getHookDir(vendor: Vendor): string {
   switch (vendor) {
     case "claude":
-      return ".claude/hooks"
+      return ".claude/hooks";
     case "codex":
-      return ".codex/hooks"
+      return ".codex/hooks";
     case "commandcode":
-      return ".commandcode/hooks"
+      return ".commandcode/hooks";
     case "cursor":
-      return ".cursor/hooks"
+      return ".cursor/hooks";
     case "antigravity":
       // agy has no project hook dir — its `.agents/hooks.json` runs handlers
       // straight from the SSOT core dir, where filter-test-output.sh lives.
-      return ".agents/hooks/core"
+      return ".agents/hooks/core";
     case "qwen":
-      return ".qwen/hooks"
+      return ".qwen/hooks";
     case "grok":
-      return ".grok/hooks"
+      return ".grok/hooks";
     case "kiro":
-      return ".kiro/hooks"
+      return ".kiro/hooks";
     case "kimi":
       // Kimi Code CLI is global-only (homeOnly variant): runtime hooks live in
       // ~/.kimi-code/hooks, so there is no project hook dir. Mirror antigravity
       // and point at the SSOT core dir; otherwise the rewrite no-ops gracefully.
-      return ".agents/hooks/core"
+      return ".agents/hooks/core";
     case "pi":
       // pi keeps the core scripts inside the bridge's directory extension.
-      return join(".pi", "extensions", "oma")
+      return join(".pi", "extensions", "oma");
   }
 }

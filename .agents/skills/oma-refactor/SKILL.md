@@ -49,6 +49,8 @@ outputs:
     required: false
 ```
 
+Standalone runs write plan / before-after reports under `.agents/results/refactor/`; orchestrated runs (via the `refactor-engineer` agent) write `.agents/results/result-refactor[-{sessionId}].md` per the agent execution protocol.
+
 ### Dependencies
 - `resources/definition.md` (invariant definition: 5 properties, boundaries, destination principle, naming roles, inline evidence)
 - `resources/measurement.md` (4-layer measurement + git forensics commands)
@@ -115,7 +117,7 @@ outputs:
 | Report delta | `NOTIFY` | Metric + readability before/after |
 
 ### Tools and instruments
-- Serena MCP: `find_symbol`, `find_referencing_symbols`, `search_for_pattern` for impact analysis
+- Serena MCP: `find_symbol`, `find_referencing_symbols`, `search_for_pattern` for impact analysis; `rename_symbol` for engine-executed renames
 - Deterministic transformers: IDE refactoring actions, codemods (jscodeshift / OpenRewrite / ast-grep / comby)
 - Metrics: lizard / radon (complexity) — both are PyPI packages, run via `uvx lizard` / `uvx radon` so no pre-install is required; per-language linters with `max-lines` gates
 - Test stack per registry: vitest + StrykerJS / pytest + mutmut / flutter_test (see `resources/governance.md`)

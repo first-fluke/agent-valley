@@ -65,3 +65,5 @@ docs/generated/
 # opencode harness — ships a bun plugin with a ~62MB node_modules; it is
 # regenerable build output. Generate it in a target repo via `oma link opencode`.
 .opencode/
+
+.qwen/tmp/

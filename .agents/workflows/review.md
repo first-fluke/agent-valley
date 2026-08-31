@@ -37,7 +37,6 @@ If a PR or branch is provided, diff against the base branch to scope the review.
 
 ## Step 2: Run Automated Security Checks
 
-// turbo
 Run available security tools: `npm audit` (Node.js), `bandit` (Python), or equivalent.
 Check for known vulnerabilities in dependencies. Flag any CRITICAL or HIGH findings.
 
@@ -120,8 +119,10 @@ Request parallel subagent execution with the review scope and standards.
 
 ### If Gemini CLI or Antigravity or CLI Fallback
 ```bash
-oma agent:spawn qa-agent "Review files for security, performance, accessibility, and code quality. Follow .agents/skills/oma-qa/SKILL.md standards. Report as CRITICAL/HIGH/MEDIUM/LOW with file:line and remediation." session-id
+oma agent:spawn qa-agent "Review files for security, performance, accessibility, and code quality. Follow .agents/skills/oma-qa/SKILL.md standards. Report as CRITICAL/HIGH/MEDIUM/LOW with file:line and remediation." session-id -w {workspace}
 ```
+
+**Wait for the QA agent to complete and collect its findings before compiling the Step 7 report.** On the Claude-native path the background agent notifies on completion (or spawn synchronously); on the CLI path poll `result-qa*[-{sessionId}].md` in the memory base path.
 
 ---
 

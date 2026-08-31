@@ -27,14 +27,14 @@
     "preToolUse": [
       {
         "command": "'.cursor/hooks/oma-hook.sh' --vendor 'cursor' --event 'preToolUse' --matcher 'Shell'",
-        "timeout": 10,
+        "timeout": 13,
         "matcher": "Shell"
       }
     ],
     "stop": [
       {
         "command": "'.cursor/hooks/oma-hook.sh' --vendor 'cursor' --event 'stop'",
-        "timeout": 10,
+        "timeout": 15,
         "loop_limit": null
       }
     ],
@@ -42,6 +42,12 @@
       {
         "command": "'.cursor/hooks/oma-hook.sh' --vendor 'cursor' --event 'sessionStart'",
         "timeout": 13
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "'.cursor/hooks/oma-hook.sh' --vendor 'cursor' --event 'afterFileEdit'",
+        "timeout": 10
       }
     ]
   },

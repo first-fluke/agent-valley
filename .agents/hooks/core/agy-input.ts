@@ -9,7 +9,7 @@
  *
  * Ref: antigravity.google/docs/hooks — "Input/Output Contract".
  */
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs";
 
 /**
  * agy is identified by its stdin shape (no hook_event_name to key off): a
@@ -17,19 +17,24 @@ import { existsSync, readFileSync } from "node:fs"
  * vendor sends this pair.
  */
 export function isAgyInput(input: Record<string, unknown>): boolean {
-  return Array.isArray(input.workspacePaths) && typeof input.conversationId === "string"
+  return (
+    Array.isArray(input.workspacePaths) &&
+    typeof input.conversationId === "string"
+  );
 }
 
 /** agy's project dir is the first mounted workspace path. */
 export function agyProjectDir(input: Record<string, unknown>): string | null {
-  const ws = input.workspacePaths
-  if (Array.isArray(ws) && typeof ws[0] === "string") return ws[0]
-  return null
+  const ws = input.workspacePaths;
+  if (Array.isArray(ws) && typeof ws[0] === "string") return ws[0];
+  return null;
 }
 
 /** agy's stable session identifier is the conversation UUID. */
-export function agyConversationId(input: Record<string, unknown>): string | null {
-  return typeof input.conversationId === "string" ? input.conversationId : null
+export function agyConversationId(
+  input: Record<string, unknown>,
+): string | null {
+  return typeof input.conversationId === "string" ? input.conversationId : null;
 }
 
 /**
@@ -42,25 +47,25 @@ export function agyConversationId(input: Record<string, unknown>): string | null
  */
 export function readAgyPrompt(transcriptPath: unknown): string {
   if (typeof transcriptPath !== "string" || !existsSync(transcriptPath)) {
-    return ""
+    return "";
   }
-  let content = ""
+  let content = "";
   try {
     for (const line of readFileSync(transcriptPath, "utf-8").split("\n")) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
+      const trimmed = line.trim();
+      if (!trimmed) continue;
       try {
-        const step = JSON.parse(trimmed) as Record<string, unknown>
+        const step = JSON.parse(trimmed) as Record<string, unknown>;
         if (step.type === "USER_INPUT" && typeof step.content === "string") {
-          content = step.content // keep the last USER_INPUT
+          content = step.content; // keep the last USER_INPUT
         }
       } catch {
         // skip malformed transcript line
       }
     }
   } catch {
-    return ""
+    return "";
   }
-  const match = content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/)
-  return (match?.[1] ?? content).trim()
+  const match = content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/);
+  return (match?.[1] ?? content).trim();
 }

@@ -2,15 +2,23 @@
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--isolated"]
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--no-usage-statistics",
+        "--isolated"
+      ]
     },
     "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
+      "serverUrl": "https://mcp.context7.com/mcp"
     },
     "serena": {
-      "command": "serena",
-      "args": ["start-mcp-server", "--context", "antigravity", "--project-from-cwd", "--open-web-dashboard", "false"],
+      "command": "oma",
+      "args": [
+        "bridge",
+        "--context",
+        "oma"
+      ],
       "env": {
         "SERENA_LOG_LEVEL": "info"
       }
