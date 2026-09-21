@@ -8,6 +8,7 @@ Run through every item before submitting your work.
 - [ ] Do NOT flag `src/proxy.ts` as dead code or recommend renaming to `middleware.ts`; `proxy.ts` is the canonical Next.js 16+ convention
 <!-- oma-docs:ignore-end -->
 - [ ] Config flags use the `Proxy` form (e.g. `skipProxyUrlNormalize`), not the legacy `Middleware` form
+- [ ] Every `<Link>` passes `prefetch={false}`; any prefetching link is a deliberate high-intent target with an inline reason
 
 ## TypeScript
 - [ ] Strict mode, no `any` types
@@ -56,6 +57,7 @@ React 19 + recent `eslint-plugin-react-hooks` flag these as hard errors. They ar
 
 ## Performance
 - [ ] No unnecessary re-renders (check with React DevTools Profiler)
+- [ ] Memoization matches the project's React Compiler setting: compiler ON (`reactCompiler` in `next.config.*`) → no hand-written `useMemo`/`useCallback`/`React.memo` in new code; compiler OFF → memoize manually (see `tech-stack.md` §React Compiler)
 - [ ] Code splitting for route-level components
 - [ ] Images optimized and lazy-loaded
 

@@ -22,14 +22,14 @@ Each `variants/{platform}/` directory contains:
   conflict).
 - **`snippets.md`** — copy-paste-ready, numbered code patterns.
 - **`api-template.{swift,dart,ts}`** — the canonical data/repository template,
-  including the mandatory repository-layer response cache.
+  including the repository-layer response cache when required.
 
 `stack.schema.json` is the shared schema for all variants.
 
 ## resources/ is shared meta only
 
 The sibling `resources/` directory holds **only** cross-platform, protocol, and
-meta documents shared by every variant: `execution-protocol.md`, `examples.md`,
+meta documents shared by every variant: `execution-protocol.md`,
 `checklist.md`, `error-playbook.md`, `tech-stack.md` (the variant index +
 cross-platform guidance), and the screen templates. Platform-specific stack
 narrative and snippets belong in the variant, not in `resources/`.
