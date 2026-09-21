@@ -1,13 +1,15 @@
 # Mobile Agent - Tech Stack Reference (Swift iOS Native)
 
+Starter reference for the selected platform. Preserve existing project choices. The caching implementation below applies only when caching is required; do not add it for an unrelated screen or widget change.
+
 ## Framework: SwiftUI + Observation
 
-- **Language**: Swift 5.9+ (Swift 6 compatible)
+- **Language**: Swift 6.0+ floor, strict-concurrency clean (current stable is Swift 6.3, July 2026)
 - **UI Framework**: SwiftUI
 - **State Management**: Observation framework (`@Observable`, iOS 17+)
 - **Concurrency**: Swift async/await + structured concurrency (`Task`, `TaskGroup`, `AsyncStream`)
 - **Minimum Deployment**: iOS 17.0
-- **Tooling**: Xcode 15+, Swift Package Manager (SwiftPM)
+- **Tooling**: Xcode 16+ floor (current stable is Xcode 26, July 2026), Swift Package Manager (SwiftPM)
 
 `@Observable` replaces `ObservableObject`/`@Published` for SwiftUI view models. The macro synthesizes observation tracking at compile time with zero boilerplate and no Combine dependency.
 
@@ -54,7 +56,7 @@ changes surface as Swift compile errors after regeneration, not at runtime.
 |-----------|---------|
 | Hybrid (memory + disk) cache | `hyperoslo/Cache` |
 
-Read-through caching of API responses is **mandatory at the Repository (Service) layer**, backed by `hyperoslo/Cache`. The generated `Components.Schemas.*` types are `Codable`, so they are cached directly through `Cache`'s `Storage<Key, Value>` with `TransformerFactory.forCodable`. This memoizes **decoded models**, not raw bytes — the cache sits between the `@Observable` view model and the generated `Client`, never inside a `ClientMiddleware`.
+When response caching is required, implement it at the Repository (Service) layer, backed by `hyperoslo/Cache`. The generated `Components.Schemas.*` types are `Codable`, so they are cached directly through `Cache`'s `Storage<Key, Value>` with `TransformerFactory.forCodable`. This memoizes **decoded models**, not raw bytes — the cache sits between the `@Observable` view model and the generated `Client`, never inside a `ClientMiddleware`.
 
 **Placement rule — Repository layer, not transport.** Do **not** intercept `HTTPBody` in a `ClientMiddleware` to cache responses: `HTTPBody` is a single-consumption async stream, so capturing it for replay corrupts the request/response lifecycle. Cache the typed result *after* the generated `Client` call returns instead.
 
@@ -81,7 +83,7 @@ See `snippets.md` §10 for the canonical `ResponseCache` actor and cached `TodoS
 ## Local Storage
 
 - **hyperoslo/Cache** — hybrid memory+disk cache for **API response memoization** at the Repository layer (see above). Transient, server-owned data only.
-- **SwiftData** (iOS 17+) — Swift-native ORM built on Core Data; preferred for **durable, user-owned** structured persistence (system of record).
+- **SwiftData** (iOS 17+) — Swift-native ORM built on Core Data; preferred for **durable, user-owned** structured persistence (system of record). See `snippets.md` §11 for a compact `@Model` + `ModelContainer` + repository-fetch example.
 - **UserDefaults / `@AppStorage`** — lightweight key-value preferences.
 - **Keychain** (`Security` framework) — tokens and credentials.
 
@@ -98,7 +100,7 @@ Run tests with `swift test` (SwiftPM projects) or via Xcode's test runner. Targe
 ## Project Layout: App / Core / Features / Shared
 
 This is **not a Swift-specific standard** — it is the idiomatic Swift expression of
-the same *feature-first* principle the Frontend Agent applies (`../../rules/frontend.md`
+the same *feature-first* principle the Frontend Agent applies (`../../../../rules/frontend.md`
 §Architecture). Apple's own SwiftUI samples and the 2025+ community consensus both say
 **group by feature, not by type** (no flat `Views/` `Models/` `ViewModels/`). The shared
 rules across platforms are: feature slices own their UI + state, **no cross-feature

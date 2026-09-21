@@ -43,9 +43,35 @@
           "全部お願い",
           "まとめてやって"
         ],
-        "zh": ["编排", "并行执行", "自动执行", "全部执行", "全部做", "自动处理", "一起做", "全做了", "帮我全做"],
-        "es": ["orquestar", "paralelo", "ejecutar todo", "hazlo todo", "ejecuta todo", "automatiza", "haz todo"],
-        "fr": ["orchestrer", "parallèle", "tout exécuter", "fais tout", "exécute tout", "automatise", "gère tout"],
+        "zh": [
+          "编排",
+          "并行执行",
+          "自动执行",
+          "全部执行",
+          "全部做",
+          "自动处理",
+          "一起做",
+          "全做了",
+          "帮我全做"
+        ],
+        "es": [
+          "orquestar",
+          "paralelo",
+          "ejecutar todo",
+          "hazlo todo",
+          "ejecuta todo",
+          "automatiza",
+          "haz todo"
+        ],
+        "fr": [
+          "orchestrer",
+          "parallèle",
+          "tout exécuter",
+          "fais tout",
+          "exécute tout",
+          "automatise",
+          "gère tout"
+        ],
         "de": [
           "orchestrieren",
           "parallel",
@@ -55,7 +81,15 @@
           "automatisieren",
           "alles auf einmal"
         ],
-        "pt": ["orquestrar", "paralelo", "executar tudo", "faça tudo", "execute tudo", "automatize", "resolva tudo"],
+        "pt": [
+          "orquestrar",
+          "paralelo",
+          "executar tudo",
+          "faça tudo",
+          "execute tudo",
+          "automatize",
+          "resolva tudo"
+        ],
         "ru": [
           "оркестровать",
           "параллельно",
@@ -137,7 +171,16 @@
           "トレードオフ",
           "品質特性"
         ],
-        "zh": ["架构", "系统设计", "软件设计", "架构评审", "模块边界", "服务边界", "权衡分析", "质量属性"],
+        "zh": [
+          "架构",
+          "系统设计",
+          "软件设计",
+          "架构评审",
+          "模块边界",
+          "服务边界",
+          "权衡分析",
+          "质量属性"
+        ],
         "es": [
           "arquitectura",
           "diseño de sistemas",
@@ -214,7 +257,15 @@
       "persistent": false,
       "keywords": {
         "*": ["task breakdown"],
-        "en": ["plan", "make a plan", "create a plan", "break down", "analyze requirements", "plan this", "decompose"],
+        "en": [
+          "plan",
+          "make a plan",
+          "create a plan",
+          "break down",
+          "analyze requirements",
+          "plan this",
+          "decompose"
+        ],
         "ko": [
           "계획",
           "요구사항 분석",
@@ -244,7 +295,16 @@
           "設計して",
           "プランを作って"
         ],
-        "zh": ["计划", "需求分析", "任务分解", "制定计划", "做个计划", "分析一下", "拆分任务", "规划一下"],
+        "zh": [
+          "计划",
+          "需求分析",
+          "任务分解",
+          "制定计划",
+          "做个计划",
+          "分析一下",
+          "拆分任务",
+          "规划一下"
+        ],
         "es": [
           "plan",
           "planificar",
@@ -295,7 +355,15 @@
           "разбей на задачи",
           "спланируй"
         ],
-        "nl": ["plan", "plannen", "vereistenanalyse", "maak een plan", "analyseer", "splits op", "plan dit"],
+        "nl": [
+          "plan",
+          "plannen",
+          "vereistenanalyse",
+          "maak een plan",
+          "analyseer",
+          "splits op",
+          "plan dit"
+        ],
         "pl": [
           "plan",
           "planować",
@@ -312,7 +380,15 @@
       "persistent": false,
       "keywords": {
         "*": ["code review", "security audit", "security review"],
-        "en": ["review", "review this", "review my code", "check my code", "audit", "inspect", "code check"],
+        "en": [
+          "review",
+          "review this",
+          "review my code",
+          "check my code",
+          "audit",
+          "inspect",
+          "code check"
+        ],
         "ko": [
           "리뷰",
           "코드 검토",
@@ -339,7 +415,17 @@
           "点検して",
           "コード確認"
         ],
-        "zh": ["审查", "代码审查", "安全审计", "审查一下", "检查一下", "看看代码", "检查代码", "代码检查", "安全检查"],
+        "zh": [
+          "审查",
+          "代码审查",
+          "安全审计",
+          "审查一下",
+          "检查一下",
+          "看看代码",
+          "检查代码",
+          "代码检查",
+          "安全检查"
+        ],
         "es": [
           "revisión",
           "revisar código",
@@ -426,9 +512,26 @@
           "deepsec triage",
           "deepsec matchers"
         ],
-        "ko": ["딥섹 워크플로우", "딥섹 실행", "딥섹 스캔", "딥섹으로 검사", "딥섹 PR 리뷰", "딥섹 CI 게이트"],
-        "ja": ["ディープセック実行", "deepsecワークフロー", "deepsecでスキャン", "deepsec PRレビュー"],
-        "zh": ["运行 deepsec", "deepsec 工作流", "用 deepsec 扫描", "deepsec PR 审查"]
+        "ko": [
+          "딥섹 워크플로우",
+          "딥섹 실행",
+          "딥섹 스캔",
+          "딥섹으로 검사",
+          "딥섹 PR 리뷰",
+          "딥섹 CI 게이트"
+        ],
+        "ja": [
+          "ディープセック実行",
+          "deepsecワークフロー",
+          "deepsecでスキャン",
+          "deepsec PRレビュー"
+        ],
+        "zh": [
+          "运行 deepsec",
+          "deepsec 工作流",
+          "用 deepsec 扫描",
+          "deepsec PR 审查"
+        ]
       }
     },
     "debug": {
@@ -640,7 +743,17 @@
           "アイデアちょうだい",
           "一緒に考えよう"
         ],
-        "zh": ["头脑风暴", "创意", "设计探索", "想想", "出主意", "有什么想法", "想个办法", "出点子", "集思广益"],
+        "zh": [
+          "头脑风暴",
+          "创意",
+          "设计探索",
+          "想想",
+          "出主意",
+          "有什么想法",
+          "想个办法",
+          "出点子",
+          "集思广益"
+        ],
         "es": [
           "lluvia de ideas",
           "idear",
@@ -671,7 +784,16 @@
           "vorschläge",
           "lass uns überlegen"
         ],
-        "pt": ["brainstorming", "idear", "explorar design", "pense em", "e se", "ideias para", "sugira", "imagine"],
+        "pt": [
+          "brainstorming",
+          "idear",
+          "explorar design",
+          "pense em",
+          "e se",
+          "ideias para",
+          "sugira",
+          "imagine"
+        ],
         "ru": [
           "мозговой штурм",
           "идеи",
@@ -708,7 +830,7 @@
       "persistent": true,
       "keywords": {
         "*": ["work", "step by step"],
-        "en": ["one by one", "guide me", "walk me through", "manual mode", "one step at a time"],
+        "en": ["one by one", "one step at a time"],
         "ko": [
           "단계별",
           "단계별로",
@@ -717,53 +839,35 @@
           "하나씩 해줘",
           "순서대로 해줘",
           "차근차근",
-          "차근차근 해줘",
-          "수동으로 해줘"
+          "차근차근 해줘"
         ],
-        "ja": ["ステップバイステップ", "一歩ずつ", "ガイドして", "手動で", "一つずつ", "順番にやって", "手順を教えて"],
-        "zh": ["逐步", "一步一步", "指导我", "手动", "一个一个", "按顺序", "带我做"],
-        "es": ["paso a paso", "guíame", "uno por uno", "modo manual", "de a uno", "llévame paso a paso"],
-        "fr": [
-          "étape par étape",
-          "guide-moi",
-          "un par un",
-          "mode manuel",
-          "accompagne-moi",
-          "montre-moi étape par étape"
-        ],
+        "ja": ["ステップバイステップ", "一歩ずつ", "一つずつ", "順番にやって"],
+        "zh": ["逐步", "一步一步", "一个一个", "按顺序"],
+        "es": ["paso a paso", "uno por uno", "de a uno"],
+        "fr": ["étape par étape", "un par un"],
         "de": [
           "schritt für schritt",
-          "führe mich",
           "eins nach dem anderen",
-          "manueller modus",
-          "zeig mir wie",
           "der reihe nach"
         ],
-        "pt": ["passo a passo", "me guie", "um por um", "modo manual", "me acompanhe", "me mostre passo a passo"],
-        "ru": ["шаг за шагом", "направь меня", "по одному", "ручной режим", "покажи по шагам", "веди меня"],
-        "nl": [
-          "stap voor stap",
-          "begeleid me",
-          "een voor een",
-          "handmatige modus",
-          "leid me erdoor",
-          "stap voor stap uitleg"
-        ],
-        "pl": [
-          "krok po kroku",
-          "poprowadź mnie",
-          "jeden po drugim",
-          "tryb ręczny",
-          "przeprowadź mnie",
-          "pokaż krok po kroku"
-        ]
+        "pt": ["passo a passo", "um por um"],
+        "ru": ["шаг за шагом", "по одному"],
+        "nl": ["stap voor stap", "een voor een"],
+        "pl": ["krok po kroku", "jeden po drugim"]
       }
     },
     "deepinit": {
       "persistent": false,
       "keywords": {
         "*": ["deepinit"],
-        "en": ["init project", "initialize", "setup project", "new project", "scaffold", "bootstrap"],
+        "en": [
+          "init project",
+          "initialize",
+          "setup project",
+          "new project",
+          "scaffold",
+          "bootstrap"
+        ],
         "ko": [
           "프로젝트 초기화",
           "코드베이스 초기화",
@@ -784,7 +888,15 @@
           "プロジェクトを作って",
           "プロジェクト設定"
         ],
-        "zh": ["项目初始化", "新项目", "设置项目", "搭建项目", "初始化", "创建项目", "项目配置"],
+        "zh": [
+          "项目初始化",
+          "新项目",
+          "设置项目",
+          "搭建项目",
+          "初始化",
+          "创建项目",
+          "项目配置"
+        ],
         "es": [
           "inicializar proyecto",
           "nuevo proyecto",
@@ -1099,12 +1211,10 @@
           "랄프",
           "멈추지마",
           "멈추지 말고",
-          "끝까지",
           "완료될때까지",
           "될때까지 해",
           "끝날때까지",
           "다 끝내",
-          "다 해",
           "전부 완료",
           "끝까지 해",
           "중단하지마",
@@ -1162,7 +1272,7 @@
           "ne t'arrête pas",
           "complète tout",
           "n'abandonne pas",
-          "continue",
+          "continue sans t'arrêter",
           "finis tout"
         ],
         "de": [
@@ -1184,7 +1294,7 @@
           "complete tudo",
           "não pare até terminar",
           "não desista",
-          "continue",
+          "continue sem parar",
           "finalize tudo"
         ],
         "ru": [
@@ -1601,9 +1711,27 @@
           "演示视频",
           "录屏视频"
         ],
-        "es": ["generar video", "crear video", "hazme un video", "video corto", "video explicativo"],
-        "fr": ["générer une vidéo", "créer une vidéo", "fais-moi une vidéo", "vidéo courte", "vidéo explicative"],
-        "de": ["video generieren", "video erstellen", "erstelle ein video", "kurzvideo", "erklärvideo"]
+        "es": [
+          "generar video",
+          "crear video",
+          "hazme un video",
+          "video corto",
+          "video explicativo"
+        ],
+        "fr": [
+          "générer une vidéo",
+          "créer une vidéo",
+          "fais-moi une vidéo",
+          "vidéo courte",
+          "vidéo explicative"
+        ],
+        "de": [
+          "video generieren",
+          "video erstellen",
+          "erstelle ein video",
+          "kurzvideo",
+          "erklärvideo"
+        ]
       }
     }
   },
@@ -1618,8 +1746,20 @@
           "define boundaries",
           "architecture tradeoffs"
         ],
-        "ko": ["아키텍처 짜줘", "시스템 구조 설계", "경계 정의해줘", "구조 검토해줘", "아키텍처 문서"],
-        "ja": ["アーキテクチャを設計", "システム構成を考えて", "境界を定義", "構成レビュー", "アーキ文書"],
+        "ko": [
+          "아키텍처 짜줘",
+          "시스템 구조 설계",
+          "경계 정의해줘",
+          "구조 검토해줘",
+          "아키텍처 문서"
+        ],
+        "ja": [
+          "アーキテクチャを設計",
+          "システム構成を考えて",
+          "境界を定義",
+          "構成レビュー",
+          "アーキ文書"
+        ],
         "zh": ["设计架构", "系统架构方案", "定义边界", "架构文档", "架构权衡"]
       }
     },
@@ -1640,17 +1780,45 @@
           "server implementation",
           "clean architecture"
         ],
-        "ko": ["api 만들어줘", "엔드포인트 추가", "백엔드 구현", "마이그레이션 작성", "인증 붙여줘"],
-        "ja": ["apiを作って", "エンドポイント追加", "バックエンド実装", "マイグレーション書いて", "認証を実装"],
+        "ko": [
+          "api 만들어줘",
+          "엔드포인트 추가",
+          "백엔드 구현",
+          "마이그레이션 작성",
+          "인증 붙여줘"
+        ],
+        "ja": [
+          "apiを作って",
+          "エンドポイント追加",
+          "バックエンド実装",
+          "マイグレーション書いて",
+          "認証を実装"
+        ],
         "zh": ["写个接口", "加接口", "后端实现", "写迁移", "加认证"]
       }
     },
     "oma-brainstorm": {
       "keywords": {
         "*": [],
-        "en": ["toss around ideas", "kick around options", "spitball", "some ideas please", "ideation session"],
-        "ko": ["아이디어 좀 뽑아줘", "같이 고민해줘", "아이디어 내보자", "방향성 고민"],
-        "ja": ["アイデア出して", "一緒に考えて", "方向性を探りたい", "案を出して"],
+        "en": [
+          "toss around ideas",
+          "kick around options",
+          "spitball",
+          "some ideas please",
+          "ideation session"
+        ],
+        "ko": [
+          "아이디어 좀 뽑아줘",
+          "같이 고민해줘",
+          "아이디어 내보자",
+          "방향성 고민"
+        ],
+        "ja": [
+          "アイデア出して",
+          "一緒に考えて",
+          "方向性を探りたい",
+          "案を出して"
+        ],
         "zh": ["帮我想想", "一起想想办法", "给点灵感"]
       }
     },
@@ -1667,8 +1835,18 @@
           "cli handoff",
           "manual orchestration"
         ],
-        "ko": ["에이전트 조율", "에이전트끼리 협업", "수동으로 에이전트 돌려", "에이전트 순서 잡아줘"],
-        "ja": ["エージェントを調整", "エージェント連携", "手動でエージェント", "エージェントの順序"],
+        "ko": [
+          "에이전트 조율",
+          "에이전트끼리 협업",
+          "수동으로 에이전트 돌려",
+          "에이전트 순서 잡아줘"
+        ],
+        "ja": [
+          "エージェントを調整",
+          "エージェント連携",
+          "手動でエージェント",
+          "エージェントの順序"
+        ],
         "zh": ["协调代理", "代理之间协作", "手动跑代理", "代理之间衔接"]
       }
     },
@@ -1691,8 +1869,20 @@
           "data migration",
           "capacity planning"
         ],
-        "ko": ["스키마 설계", "테이블 설계", "인덱스 튜닝", "쿼리 느려", "용량 산정"],
-        "ja": ["スキーマ設計", "テーブル設計", "インデックス調整", "クエリが遅い", "容量見積"],
+        "ko": [
+          "스키마 설계",
+          "테이블 설계",
+          "인덱스 튜닝",
+          "쿼리 느려",
+          "용량 산정"
+        ],
+        "ja": [
+          "スキーマ設計",
+          "テーブル設計",
+          "インデックス調整",
+          "クエリが遅い",
+          "容量見積"
+        ],
         "zh": ["设计表结构", "表设计", "索引优化", "查询很慢", "容量评估"]
       }
     },
@@ -1711,8 +1901,20 @@
           "crash fix",
           "error investigation"
         ],
-        "ko": ["버그 찾아줘", "에러 원인", "크래시 분석", "스택트레이스 봐줘", "원인 파악해줘"],
-        "ja": ["バグを探して", "エラー原因", "クラッシュを分析", "スタックトレースを見て", "原因を特定"],
+        "ko": [
+          "버그 찾아줘",
+          "에러 원인",
+          "크래시 분석",
+          "스택트레이스 봐줘",
+          "원인 파악해줘"
+        ],
+        "ja": [
+          "バグを探して",
+          "エラー原因",
+          "クラッシュを分析",
+          "スタックトレースを見て",
+          "原因を特定"
+        ],
         "zh": ["找出 bug", "错误原因", "分析崩溃", "看堆栈", "定位原因"]
       }
     },
@@ -1730,8 +1932,19 @@
           "responsive layout",
           "motion design"
         ],
-        "ko": ["디자인 토큰", "랜딩 만들어줘", "컬러 팔레트 잡아줘", "타이포 스케일", "모션 가이드"],
-        "ja": ["デザイントークン", "ランディング作成", "カラーパレット決めて", "モーション設計"],
+        "ko": [
+          "디자인 토큰",
+          "랜딩 만들어줘",
+          "컬러 팔레트 잡아줘",
+          "타이포 스케일",
+          "모션 가이드"
+        ],
+        "ja": [
+          "デザイントークン",
+          "ランディング作成",
+          "カラーパレット決めて",
+          "モーション設計"
+        ],
         "zh": ["设计令牌", "做个落地页", "定配色", "字体层级", "动效规范"]
       }
     },
@@ -1751,14 +1964,42 @@
           "release automation",
           "build automation"
         ],
-        "ko": ["mise 태스크", "ci 파이프라인", "릴리즈 자동화", "깃 훅 설정", "모노레포 워크플로우"],
-        "ja": ["miseタスク", "ciパイプライン", "リリース自動化", "gitフック", "モノレポ作業"],
-        "zh": ["mise 任务", "ci 流水线", "发布自动化", "git 钩子", "monorepo 工作流"]
+        "ko": [
+          "mise 태스크",
+          "ci 파이프라인",
+          "릴리즈 자동화",
+          "깃 훅 설정",
+          "모노레포 워크플로우"
+        ],
+        "ja": [
+          "miseタスク",
+          "ciパイプライン",
+          "リリース自動化",
+          "gitフック",
+          "モノレポ作業"
+        ],
+        "zh": [
+          "mise 任务",
+          "ci 流水线",
+          "发布自动化",
+          "git 钩子",
+          "monorepo 工作流"
+        ]
       }
     },
     "oma-frontend": {
       "keywords": {
-        "*": ["shadcn", "FSD", "next.js", "nextjs", "react", "tailwind", "tsx", "frontend", "angular"],
+        "*": [
+          "shadcn",
+          "FSD",
+          "next.js",
+          "nextjs",
+          "react",
+          "tailwind",
+          "tsx",
+          "frontend",
+          "angular"
+        ],
         "en": [
           "make a react component",
           "build a next page",
@@ -1771,9 +2012,28 @@
           "frontend ui",
           "FSD architecture"
         ],
-        "ko": ["리액트 컴포넌트", "넥스트 페이지", "tailwind로 스타일", "shadcn 붙여줘", "프론트 구현", "앵귤러"],
-        "ja": ["reactコンポーネント", "nextページ", "tailwindで装飾", "shadcn導入", "フロント実装"],
-        "zh": ["写个 react 组件", "next 页面", "用 tailwind", "接入 shadcn", "前端实现"]
+        "ko": [
+          "리액트 컴포넌트",
+          "넥스트 페이지",
+          "tailwind로 스타일",
+          "shadcn 붙여줘",
+          "프론트 구현",
+          "앵귤러"
+        ],
+        "ja": [
+          "reactコンポーネント",
+          "nextページ",
+          "tailwindで装飾",
+          "shadcn導入",
+          "フロント実装"
+        ],
+        "zh": [
+          "写个 react 组件",
+          "next 页面",
+          "用 tailwind",
+          "接入 shadcn",
+          "前端实现"
+        ]
       }
     },
     "oma-hwp": {
@@ -1788,7 +2048,16 @@
           "hangul word processor",
           "hwp ingestion"
         ],
-        "ko": ["한글 파일", "한글 변환", "한글 파싱", "hwp 변환", "hwp 파싱", "hwp 마크다운", "hwpx 변환", "hwpx 파싱"],
+        "ko": [
+          "한글 파일",
+          "한글 변환",
+          "한글 파싱",
+          "hwp 변환",
+          "hwp 파싱",
+          "hwp 마크다운",
+          "hwpx 변환",
+          "hwpx 파싱"
+        ],
         "ja": ["hwp変換", "hwpをマークダウン", "hwpを解析", "韓国語ワープロ"],
         "zh": ["hwp 转换", "hwp 解析", "hwp 转 markdown", "韩文文档"]
       }
@@ -1812,9 +2081,27 @@
           "swiftui view",
           "ios native app"
         ],
-        "ko": ["플러터 화면", "리액트 네이티브 화면", "다트 위젯", "안드로이드 아이폰 앱", "모바일 앱"],
-        "ja": ["flutter画面", "react native画面", "dartウィジェット", "iosアンドロイド", "モバイルアプリ"],
-        "zh": ["flutter 页面", "react native 页面", "dart 组件", "安卓 ios", "移动端应用"]
+        "ko": [
+          "플러터 화면",
+          "리액트 네이티브 화면",
+          "다트 위젯",
+          "안드로이드 아이폰 앱",
+          "모바일 앱"
+        ],
+        "ja": [
+          "flutter画面",
+          "react native画面",
+          "dartウィジェット",
+          "iosアンドロイド",
+          "モバイルアプリ"
+        ],
+        "zh": [
+          "flutter 页面",
+          "react native 页面",
+          "dart 组件",
+          "安卓 ios",
+          "移动端应用"
+        ]
       }
     },
     "oma-market": {
@@ -1843,7 +2130,13 @@
           "사용자 불만",
           "경쟁 분석"
         ],
-        "ja": ["市場調査", "ペインポイント", "ユーザー不満", "競合調査", "トレンド分析"]
+        "ja": [
+          "市場調査",
+          "ペインポイント",
+          "ユーザー不満",
+          "競合調査",
+          "トレンド分析"
+        ]
       }
     },
     "oma-observability": {
@@ -2091,7 +2384,7 @@
         ]
       }
     },
-    "oma-orchestrator": {
+    "oma-orchestration": {
       "keywords": {
         "*": ["MCP Memory"],
         "en": [
@@ -2105,8 +2398,18 @@
           "review loop",
           "mcp memory coordination"
         ],
-        "ko": ["에이전트 병렬 실행", "동시에 에이전트 돌려", "fan-out", "리뷰 루프 돌려"],
-        "ja": ["エージェント並列実行", "同時にエージェント", "fan-out", "レビューループ"],
+        "ko": [
+          "에이전트 병렬 실행",
+          "동시에 에이전트 돌려",
+          "fan-out",
+          "리뷰 루프 돌려"
+        ],
+        "ja": [
+          "エージェント並列実行",
+          "同時にエージェント",
+          "fan-out",
+          "レビューループ"
+        ],
         "zh": ["并行跑代理", "同时派发代理", "fan-out 任务", "评审循环"]
       }
     },
@@ -2143,8 +2446,20 @@
           "scope definition",
           "prioritization matrix"
         ],
-        "ko": ["요구사항 정리", "스펙 문서", "우선순위 매겨줘", "스코프 정의", "제품 로드맵"],
-        "ja": ["要件を整理", "スペック作成", "優先度付け", "スコープ定義", "プロダクトロードマップ"],
+        "ko": [
+          "요구사항 정리",
+          "스펙 문서",
+          "우선순위 매겨줘",
+          "스코프 정의",
+          "제품 로드맵"
+        ],
+        "ja": [
+          "要件を整理",
+          "スペック作成",
+          "優先度付け",
+          "スコープ定義",
+          "プロダクトロードマップ"
+        ],
         "zh": ["梳理需求", "写规格书", "排优先级", "界定范围", "产品路线图"]
       }
     },
@@ -2162,7 +2477,12 @@
           "test coverage"
         ],
         "ko": ["접근성 점검", "성능 점검", "커버리지 확인", "품질 게이트"],
-        "ja": ["アクセシビリティ確認", "パフォーマンス点検", "カバレッジ確認", "品質ゲート"],
+        "ja": [
+          "アクセシビリティ確認",
+          "パフォーマンス点検",
+          "カバレッジ確認",
+          "品質ゲート"
+        ],
         "zh": ["无障碍检查", "性能检查", "覆盖率报告", "质量门禁"]
       }
     },
@@ -2181,8 +2501,20 @@
           "transcript analysis",
           "multi tool recap"
         ],
-        "ko": ["오늘 한 일 정리", "하루 요약", "주간 요약", "작업 내용 정리", "대화 요약"],
-        "ja": ["今日の作業まとめ", "日次サマリ", "週次サマリ", "作業振り返り", "会話まとめ"],
+        "ko": [
+          "오늘 한 일 정리",
+          "하루 요약",
+          "주간 요약",
+          "작업 내용 정리",
+          "대화 요약"
+        ],
+        "ja": [
+          "今日の作業まとめ",
+          "日次サマリ",
+          "週次サマリ",
+          "作業振り返り",
+          "会話まとめ"
+        ],
         "zh": ["今天做了什么", "日报总结", "周报总结", "工作回顾", "对话总结"]
       }
     },
@@ -2199,9 +2531,32 @@
           "rebase workflow",
           "git worktree"
         ],
-        "ko": ["머지 충돌 해결", "리베이스해줘", "워크트리 써줘"],
-        "ja": ["マージ衝突解決", "リベースして", "リリースタグ", "worktree使って"],
-        "zh": ["解决合并冲突", "帮我 rebase", "打发布标签", "用 worktree"]
+        "ko": [
+          "머지 충돌 해결",
+          "리베이스해줘",
+          "워크트리 써줘",
+          "브랜칭 전략",
+          "브랜치 전략 세워줘",
+          "릴리즈 태그 달아줘",
+          "체리픽해줘"
+        ],
+        "ja": [
+          "マージ衝突解決",
+          "リベースして",
+          "リリースタグ",
+          "worktree使って",
+          "ブランチ戦略",
+          "チェリーピック",
+          "リリースタグ付けて"
+        ],
+        "zh": [
+          "解决合并冲突",
+          "帮我 rebase",
+          "打发布标签",
+          "用 worktree",
+          "分支策略",
+          "帮我 cherry-pick"
+        ]
       }
     },
     "oma-search": {
@@ -2220,8 +2575,20 @@
           "library reference",
           "context7 docs"
         ],
-        "ko": ["검색해줘", "찾아줘", "레퍼런스 찾아", "문서 찾아줘", "라이브러리 찾아줘"],
-        "ja": ["検索して", "調べて", "ドキュメント探して", "ライブラリ調べて", "リファレンス探して"],
+        "ko": [
+          "검색해줘",
+          "찾아줘",
+          "레퍼런스 찾아",
+          "문서 찾아줘",
+          "라이브러리 찾아줘"
+        ],
+        "ja": [
+          "検索して",
+          "調べて",
+          "ドキュメント探して",
+          "ライブラリ調べて",
+          "リファレンス探して"
+        ],
         "zh": ["帮我查", "搜一下", "找找文档", "找个库", "查参考资料"]
       }
     },
@@ -2238,8 +2605,19 @@
           "html slides",
           "convert pptx"
         ],
-        "ko": ["발표자료 만들어", "슬라이드 만들어", "프레젠테이션 만들어", "피피티 만들어", "덱 만들어"],
-        "ja": ["プレゼン作って", "スライド作って", "発表資料作って", "デッキ作って"],
+        "ko": [
+          "발표자료 만들어",
+          "슬라이드 만들어",
+          "프레젠테이션 만들어",
+          "피피티 만들어",
+          "덱 만들어"
+        ],
+        "ja": [
+          "プレゼン作って",
+          "スライド作って",
+          "発表資料作って",
+          "デッキ作って"
+        ],
         "zh": ["做个演示", "做幻灯片", "做个PPT", "做演示文稿"]
       }
     },
@@ -2258,12 +2636,30 @@
           "oidc setup",
           "cost optimization"
         ],
-        "ko": ["테라폼 플랜", "인프라 프로비저닝", "iac 모듈", "클라우드 리소스", "비용 최적화"],
-        "ja": ["terraformプラン", "インフラ構築", "iacモジュール", "クラウドリソース", "コスト最適化"],
-        "zh": ["terraform plan", "搭建基础设施", "iac 模块", "云资源", "成本优化"]
+        "ko": [
+          "테라폼 플랜",
+          "인프라 프로비저닝",
+          "iac 모듈",
+          "클라우드 리소스",
+          "비용 최적화"
+        ],
+        "ja": [
+          "terraformプラン",
+          "インフラ構築",
+          "iacモジュール",
+          "クラウドリソース",
+          "コスト最適化"
+        ],
+        "zh": [
+          "terraform plan",
+          "搭建基础设施",
+          "iac 模块",
+          "云资源",
+          "成本优化"
+        ]
       }
     },
-    "oma-translator": {
+    "oma-translation": {
       "keywords": {
         "*": ["arb", "i18n"],
         "en": [
@@ -2277,7 +2673,13 @@
           "multilingual content",
           "arb translation"
         ],
-        "ko": ["번역해줘", "번역 부탁", "다국어로", "영어로 바꿔줘", "현지화해줘"],
+        "ko": [
+          "번역해줘",
+          "번역 부탁",
+          "다국어로",
+          "영어로 바꿔줘",
+          "현지화해줘"
+        ],
         "ja": ["翻訳して", "英訳", "多言語化", "ローカライズして", "訳して"],
         "zh": ["翻译一下", "帮我翻译", "多语言", "本地化", "翻成英文"]
       }
@@ -2330,12 +2732,25 @@
           "マッチャーを書く",
           "ファインディングをトリアージ"
         ],
-        "zh": ["漏洞扫描", "安全扫描", "深度安全扫描", "PR 安全审查", "编写自定义匹配器", "重新验证发现"]
+        "zh": [
+          "漏洞扫描",
+          "安全扫描",
+          "深度安全扫描",
+          "PR 安全审查",
+          "编写自定义匹配器",
+          "重新验证发现"
+        ]
       }
     },
     "oma-image": {
       "keywords": {
-        "*": ["nano-banana", "nanobanana", "gpt-image", "pollinations", "oma-image"],
+        "*": [
+          "nano-banana",
+          "nanobanana",
+          "gpt-image",
+          "pollinations",
+          "oma-image"
+        ],
         "en": [
           "generate image",
           "generate an image",
@@ -2384,10 +2799,35 @@
           "イラストを生成",
           "写真を生成"
         ],
-        "zh": ["生成图像", "生成图片", "生成一张", "画一张", "画一幅", "帮我画", "出图", "图像生成", "图片生成"],
-        "es": ["generar imagen", "crear imagen", "hazme una imagen", "genera una foto"],
-        "fr": ["générer une image", "créer une image", "fais-moi une image", "dessine-moi"],
-        "de": ["bild generieren", "bild erstellen", "erstelle ein bild", "zeichne mir"]
+        "zh": [
+          "生成图像",
+          "生成图片",
+          "生成一张",
+          "画一张",
+          "画一幅",
+          "帮我画",
+          "出图",
+          "图像生成",
+          "图片生成"
+        ],
+        "es": [
+          "generar imagen",
+          "crear imagen",
+          "hazme una imagen",
+          "genera una foto"
+        ],
+        "fr": [
+          "générer une image",
+          "créer une image",
+          "fais-moi une image",
+          "dessine-moi"
+        ],
+        "de": [
+          "bild generieren",
+          "bild erstellen",
+          "erstelle ein bild",
+          "zeichne mir"
+        ]
       }
     },
     "oma-video": {
@@ -2454,9 +2894,27 @@
           "演示视频",
           "录屏视频"
         ],
-        "es": ["generar video", "crear video", "hazme un video", "video corto", "video explicativo"],
-        "fr": ["générer une vidéo", "créer une vidéo", "fais-moi une vidéo", "vidéo courte", "vidéo explicative"],
-        "de": ["video generieren", "video erstellen", "erstelle ein video", "kurzvideo", "erklärvideo"]
+        "es": [
+          "generar video",
+          "crear video",
+          "hazme un video",
+          "video corto",
+          "video explicativo"
+        ],
+        "fr": [
+          "générer une vidéo",
+          "créer une vidéo",
+          "fais-moi une vidéo",
+          "vidéo courte",
+          "vidéo explicative"
+        ],
+        "de": [
+          "video generieren",
+          "video erstellen",
+          "erstelle ein video",
+          "kurzvideo",
+          "erklärvideo"
+        ]
       }
     },
     "oma-voice": {
@@ -2552,7 +3010,10 @@
           "기술 부채",
           "클래스 분리",
           "메서드 추출",
-          "코드 정리해줘"
+          "코드 정리해줘",
+          "특성화 테스트",
+          "핫스팟",
+          "리팩토링 계획"
         ],
         "ja": [
           "リファクタリング",
@@ -2561,9 +3022,23 @@
           "コードスメル",
           "技術的負債",
           "クラスを分割",
-          "メソッド抽出"
+          "メソッド抽出",
+          "特性化テスト",
+          "ホットスポット",
+          "リファクタリング計画"
         ],
-        "zh": ["重构", "降低复杂度", "测量复杂度", "代码异味", "技术债", "拆分类", "提取方法"]
+        "zh": [
+          "重构",
+          "降低复杂度",
+          "测量复杂度",
+          "代码异味",
+          "技术债",
+          "拆分类",
+          "提取方法",
+          "特征化测试",
+          "热点",
+          "重构计划"
+        ]
       }
     }
   },
@@ -2602,7 +3077,13 @@
       "why build",
       "why create",
       "why make",
-      "artifact"
+      "artifact",
+      "is this a bug",
+      "is it a bug",
+      "is that a bug",
+      "is this an error",
+      "why did it",
+      "why does it"
     ],
     "ko": [
       "뭐야",
@@ -2639,23 +3120,107 @@
       "이 워크플로우",
       "워크플로우 자체",
       "고도화",
-      "아티팩트"
+      "아티팩트",
+      "버그임",
+      "버그인가",
+      "버그인가요",
+      "버그야",
+      "버그인지",
+      "문제인가",
+      "문제임",
+      "에러인가"
     ],
-    "ja": ["とは", "って何", "どうやって", "説明して", "キーワード", "検出", "誤検出"],
+    "ja": [
+      "とは",
+      "って何",
+      "どうやって",
+      "説明して",
+      "キーワード",
+      "検出",
+      "誤検出"
+    ],
     "zh": ["是什么", "什么是", "怎么", "解释", "关键词", "检测", "误报"],
-    "es": ["qué es", "cómo", "explica", "palabra clave", "falso positivo", "detectado"],
-    "fr": ["c'est quoi", "comment", "explique", "mot-clé", "faux positif", "détecté"],
-    "de": ["was ist", "wie", "erkläre", "schlüsselwort", "falsch positiv", "erkannt"],
-    "pt": ["o que é", "como", "explique", "palavra-chave", "falso positivo", "detectado"],
-    "ru": ["что такое", "как", "объясни", "ключевое слово", "ложное срабатывание", "обнаружено"],
-    "nl": ["wat is", "hoe", "leg uit", "sleutelwoord", "vals positief", "gedetecteerd"],
-    "pl": ["co to", "jak", "wyjaśnij", "słowo kluczowe", "fałszywy alarm", "wykryto"]
+    "es": [
+      "qué es",
+      "cómo",
+      "explica",
+      "palabra clave",
+      "falso positivo",
+      "detectado"
+    ],
+    "fr": [
+      "c'est quoi",
+      "comment",
+      "explique",
+      "mot-clé",
+      "faux positif",
+      "détecté"
+    ],
+    "de": [
+      "was ist",
+      "wie",
+      "erkläre",
+      "schlüsselwort",
+      "falsch positiv",
+      "erkannt"
+    ],
+    "pt": [
+      "o que é",
+      "como",
+      "explique",
+      "palavra-chave",
+      "falso positivo",
+      "detectado"
+    ],
+    "ru": [
+      "что такое",
+      "как",
+      "объясни",
+      "ключевое слово",
+      "ложное срабатывание",
+      "обнаружено"
+    ],
+    "nl": [
+      "wat is",
+      "hoe",
+      "leg uit",
+      "sleutelwoord",
+      "vals positief",
+      "gedetecteerd"
+    ],
+    "pl": [
+      "co to",
+      "jak",
+      "wyjaśnij",
+      "słowo kluczowe",
+      "fałszywy alarm",
+      "wykryto"
+    ]
   },
-  "excludedWorkflows": ["tools", "stack-set", "schedule"],
+  "excludedWorkflows": ["tools", "stack-set", "schedule", "convert"],
   "cjkScripts": ["ko", "ja", "zh"],
   "extensionRouting": {
-    "frontend-engineer": ["tsx", "jsx", "css", "scss", "less", "vue", "svelte", "html"],
-    "backend-engineer": ["go", "py", "java", "rs", "rb", "php", "controller", "service", "resolver"],
+    "frontend-engineer": [
+      "tsx",
+      "jsx",
+      "css",
+      "scss",
+      "less",
+      "vue",
+      "svelte",
+      "html"
+    ],
+    "backend-engineer": [
+      "go",
+      "py",
+      "java",
+      "rs",
+      "rb",
+      "php",
+      "controller",
+      "service",
+      "resolver"
+    ],
     "db-engineer": ["sql", "prisma", "graphql", "migration"],
     "mobile-engineer": ["dart", "swift", "kt", "xib", "storyboard"],
     "designer": ["figma", "sketch", "svg"]
