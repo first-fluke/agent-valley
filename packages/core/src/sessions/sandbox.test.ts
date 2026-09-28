@@ -5,11 +5,15 @@
  * real sandbox-exec/bwrap binaries to be installed to run.
  */
 
-import { existsSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import type { Issue } from "../domain/models"
 import { logger } from "../observability/logger"
+import { mergeAndPush, pushBranch } from "../workspace/delivery-strategy"
+import { cleanupWorkspace, createWorkspace, detectUnfinishedWork, getDiffStat } from "../workspace/worktree-lifecycle"
 import {
   ALLOW_UNSANDBOXED_ENV_VAR,
   DEFAULT_NETWORK_ALLOWLIST,
@@ -20,6 +24,7 @@ import {
 } from "./sandbox"
 import { resolveBinaryPath } from "./sandbox-binary"
 import { buildDarwinSandboxCommand, resetSandboxExecCache } from "./sandbox-darwin"
+import { linkedWorktreeGitPaths } from "./sandbox-git"
 import { buildLinuxSandboxCommand, resetBwrapCache } from "./sandbox-linux"
 
 const BASE_REQUEST = {
@@ -27,6 +32,31 @@ const BASE_REQUEST = {
   command: "claude",
   args: ["--print", "--dangerously-skip-permissions"],
   workspacePath: "/workspaces/ACR-42",
+}
+
+function git(cwd: string, ...args: string[]): string {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" })
+  if (result.status !== 0) throw new Error(`git ${args[0]} failed: ${result.stderr}`)
+  return result.stdout.trim()
+}
+
+function withGitWorktrees(run: (paths: { repo: string; first: string; second: string }) => void): void {
+  const fixture = mkdtempSync(join(process.cwd(), ".sandbox-git-test-"))
+  const repo = join(fixture, "repo")
+  const first = join(fixture, "issue-one")
+  const second = join(fixture, "issue-two")
+  try {
+    mkdirSync(repo)
+    git(repo, "init", "-q")
+    writeFileSync(join(repo, "file.txt"), "base\n")
+    git(repo, "add", "file.txt")
+    git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
+    git(repo, "worktree", "add", "-qb", "feature/ONE", first)
+    git(repo, "worktree", "add", "-qb", "feature/TWO", second)
+    run({ repo, first, second })
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 }
 
 describe("resolveNetworkAllowlist", () => {
@@ -90,7 +120,7 @@ describe("buildDarwinSandboxCommand", () => {
     expect(profile).toContain('(remote tcp "*:443")')
     expect(profile).toContain('(remote tcp "*:80")')
     // Original command + args are appended after the profile.
-    expect(result.args.slice(2)).toEqual([BASE_REQUEST.command, ...BASE_REQUEST.args])
+    expect(result.args.slice(-BASE_REQUEST.args.length - 1)).toEqual([BASE_REQUEST.command, ...BASE_REQUEST.args])
   })
 
   test("escapes quotes in paths so the profile stays syntactically valid", () => {
@@ -122,22 +152,369 @@ describe("buildDarwinSandboxCommand", () => {
     expect(profile).toContain(`(deny file-read* (literal "${join(process.cwd(), "valley.yaml")}"))`)
   })
 
+  test.skipIf(process.platform !== "darwin")(
+    "denies synthetic relay credentials even inside a writable workspace",
+    () => {
+      const fixture = mkdtempSync(join(process.cwd(), ".sandbox-credential-test-"))
+      const fakeHome = join(fixture, "home")
+      const credentialDir = join(fakeHome, ".agent-valley")
+      const credentialPath = join(credentialDir, "credentials.json")
+      const inactiveDir = join(fakeHome, ".codex")
+      const inactiveCanary = join(inactiveDir, "synthetic-auth.json")
+      try {
+        mkdirSync(credentialDir, { recursive: true })
+        mkdirSync(inactiveDir)
+        writeFileSync(credentialPath, "synthetic-token-only")
+        writeFileSync(inactiveCanary, "synthetic-inactive-token")
+        const run = (command: string, args: string[]) => {
+          const plan = buildDarwinSandboxCommand(
+            { ...BASE_REQUEST, workspacePath: fakeHome, command, args, networkAllowlist: [] },
+            "/usr/bin/sandbox-exec",
+            fakeHome,
+          )
+          return spawnSync(plan.command, plan.args, { cwd: fakeHome, encoding: "utf8" })
+        }
+        expect(run("/bin/cat", [credentialPath]).status).not.toBe(0)
+        expect(run("/usr/bin/touch", [credentialPath]).status).not.toBe(0)
+        expect(run("/bin/cat", [inactiveCanary]).status).not.toBe(0)
+        expect(run("/usr/bin/touch", [inactiveCanary]).status).not.toBe(0)
+        expect(readFileSync(credentialPath, "utf8")).toBe("synthetic-token-only")
+        expect(readFileSync(inactiveCanary, "utf8")).toBe("synthetic-inactive-token")
+      } finally {
+        rmSync(fixture, { recursive: true, force: true })
+      }
+    },
+  )
+
   test("does not grant write access to a blanket ~/.config directory", () => {
     const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
     const profile = result.args[1] as string
     expect(profile).not.toContain(`(allow file-write* (subpath "${homedir()}/.config"))`)
   })
 
-  test("still grants write access to per-agent-CLI dirs, including ~/.gemini", () => {
+  test("grants only the active agent's vendor directory", () => {
     const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
     const profile = result.args[1] as string
-    for (const dir of [".claude", ".codex", ".cursor", ".grok", ".gemini", ".cache", ".npm", ".bun"]) {
+    for (const dir of [".claude", ".cache", ".npm", ".bun"]) {
       expect(profile).toContain(`(allow file-write* (subpath "${homedir()}/${dir}"))`)
     }
+    for (const dir of [".codex", ".cursor", ".grok", ".gemini", ".kimi-code"]) {
+      expect(profile).toContain(`(deny file-read* (subpath "${homedir()}/${dir}"))`)
+      expect(profile).not.toContain(`(allow file-write* (subpath "${homedir()}/${dir}"))`)
+    }
+    const antigravity = buildDarwinSandboxCommand({
+      ...BASE_REQUEST,
+      agentType: "antigravity",
+      networkAllowlist: [],
+    }).args[1] as string
+    expect(antigravity).toContain(`(allow file-write* (subpath "${homedir()}/.gemini"))`)
+    expect(antigravity).not.toContain(`(deny file-read* (subpath "${homedir()}/.gemini"))`)
+    const opencode = buildDarwinSandboxCommand({
+      ...BASE_REQUEST,
+      agentType: "opencode",
+      networkAllowlist: [],
+    }).args[1] as string
+    expect(opencode).toContain(`(allow file-write* (subpath "${homedir()}/.local/share/opencode"))`)
+    expect(opencode).toContain(`(allow file-write* (subpath "${homedir()}/.config/opencode"))`)
+    expect(opencode).toContain(`(deny file-read* (subpath "${homedir()}/.claude"))`)
+  })
+
+  test.skipIf(process.platform !== "darwin")("commits in a real linked worktree and denies sibling metadata", () => {
+    withGitWorktrees(({ repo, first, second }) => {
+      const gitPaths = linkedWorktreeGitPaths(first)
+      const siblingPaths = linkedWorktreeGitPaths(second)
+      expect(gitPaths).not.toBeNull()
+      expect(siblingPaths).not.toBeNull()
+      const run = (...command: string[]) => {
+        const plan = buildDarwinSandboxCommand({
+          ...BASE_REQUEST,
+          workspacePath: first,
+          command: command[0] as string,
+          args: command.slice(1),
+          networkAllowlist: [],
+        })
+        return spawnSync(plan.command, plan.args, {
+          cwd: first,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_AUTHOR_NAME: "Test",
+            GIT_AUTHOR_EMAIL: "test@example.invalid",
+            GIT_COMMITTER_NAME: "Test",
+            GIT_COMMITTER_EMAIL: "test@example.invalid",
+          },
+        })
+      }
+
+      writeFileSync(join(first, "file.txt"), "changed\n")
+      expect(run("git", "status", "--short").status).toBe(0)
+      const add = run("git", "add", "file.txt")
+      expect(add.status).toBe(0)
+      const commit = run("git", "commit", "-qm", "change")
+      expect(commit.stderr).not.toContain("packed-refs")
+      expect(commit.status).toBe(0)
+      expect(git(first, "show", "HEAD:file.txt")).toBe("changed")
+
+      const siblingHead = git(second, "rev-parse", "HEAD")
+      expect(run("git", "update-ref", "refs/heads/feature/TWO", git(first, "rev-parse", "HEAD")).status).not.toBe(0)
+      expect(git(second, "rev-parse", "HEAD")).toBe(siblingHead)
+
+      for (const forbidden of [
+        join(siblingPaths?.gitDir as string, "index.lock"),
+        `${siblingPaths?.branchRef}.lock`,
+        join(repo, ".git", "config.lock"),
+        join(repo, ".git", "objects", "info", "alternates"),
+        join(repo, ".git", "objects", "pack", "forbidden.pack"),
+      ]) {
+        const denied = run("/usr/bin/touch", forbidden)
+        expect(denied.status).not.toBe(0)
+        expect(existsSync(forbidden)).toBe(false)
+      }
+      const infoDir = join(repo, ".git", "objects", "info")
+      expect(existsSync(infoDir)).toBe(true)
+      expect(run("/bin/mv", infoDir, `${infoDir}-moved`).status).not.toBe(0)
+      expect(existsSync(infoDir)).toBe(true)
+    })
+  })
+
+  test("does not grant Git metadata from a forged worktree pointer", () => {
+    withGitWorktrees(({ first, second }) => {
+      const sibling = linkedWorktreeGitPaths(second)
+      expect(sibling).not.toBeNull()
+      writeFileSync(join(first, ".git"), `gitdir: ${sibling?.gitDir}\n`)
+      expect(linkedWorktreeGitPaths(first)).toBeNull()
+      const profile = buildDarwinSandboxCommand({ ...BASE_REQUEST, workspacePath: first, networkAllowlist: [] }).args[1]
+      expect(profile).not.toContain(sibling?.gitDir)
+    })
   })
 })
 
 describe("buildLinuxSandboxCommand", () => {
+  test("masks relay credentials after workspace binds", () => {
+    const fixture = mkdtempSync(join(process.cwd(), ".sandbox-linux-mask-test-"))
+    const fakeHome = join(fixture, "home")
+    try {
+      mkdirSync(fakeHome)
+      const result = buildLinuxSandboxCommand(
+        { ...BASE_REQUEST, workspacePath: fakeHome, networkAllowlist: [] },
+        "bwrap",
+        fakeHome,
+      )
+      const workspaceBind = result.args.findIndex((arg, i) => arg === "--bind-try" && result.args[i + 1] === fakeHome)
+      const credentialMask = result.args.findIndex(
+        (arg, i) => arg === "--tmpfs" && result.args[i + 1] === join(fakeHome, ".agent-valley"),
+      )
+      expect(workspaceBind).toBeGreaterThan(-1)
+      expect(credentialMask).toBeGreaterThan(workspaceBind)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  test("rejects reused linked or broken worktrees on Linux without deleting issue files", async () => {
+    const fixture = mkdtempSync(join(process.cwd(), ".sandbox-linux-reuse-test-"))
+    const repo = join(fixture, "repo")
+    try {
+      mkdirSync(repo)
+      git(repo, "init", "-qb", "main")
+      writeFileSync(join(repo, "file.txt"), "base\n")
+      git(repo, "add", "file.txt")
+      git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
+      const issue = {
+        id: "reuse",
+        identifier: "REUSE-1",
+        title: "feat: reuse",
+        description: "",
+        status: { id: "todo", name: "Todo", type: "unstarted" },
+        team: { id: "team", key: "REUSE" },
+        labels: [],
+        url: "",
+        score: null,
+        parentId: null,
+        children: [],
+        relations: [],
+      } satisfies Issue
+      const workspace = await createWorkspace(repo, issue, "darwin")
+      const issueFile = join(workspace.path, "pending.txt")
+      writeFileSync(issueFile, "keep this work")
+      await expect(createWorkspace(repo, issue, "linux")).rejects.toThrow(/linked or broken Git worktree/)
+      expect(readFileSync(issueFile, "utf8")).toBe("keep this work")
+      rmSync(join(workspace.path, ".git"))
+      await expect(createWorkspace(repo, issue, "linux")).rejects.toThrow(/linked or broken Git worktree/)
+      expect(readFileSync(issueFile, "utf8")).toBe("keep this work")
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  test("replays Linux retry commits onto a rebased imported branch without losing source changes", async () => {
+    const fixture = mkdtempSync(join(process.cwd(), ".sandbox-linux-retry-test-"))
+    const repo = join(fixture, "repo")
+    try {
+      mkdirSync(repo)
+      git(repo, "init", "-qb", "main")
+      writeFileSync(join(repo, "base.txt"), "base\n")
+      git(repo, "add", "base.txt")
+      git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
+      const issue = {
+        id: "retry",
+        identifier: "RETRY-1",
+        title: "feat: retry",
+        description: "",
+        status: { id: "todo", name: "Todo", type: "unstarted" },
+        team: { id: "team", key: "RETRY" },
+        labels: [],
+        url: "",
+        score: null,
+        parentId: null,
+        children: [],
+        relations: [],
+      } satisfies Issue
+      const workspace = await createWorkspace(repo, issue, "linux")
+      writeFileSync(join(workspace.path, "feature.txt"), "original change\n")
+      git(workspace.path, "add", "feature.txt")
+      git(workspace.path, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "feature")
+      expect((await pushBranch(workspace, repo)).ok).toBe(true)
+
+      writeFileSync(join(repo, "main.txt"), "new main change\n")
+      git(repo, "add", "main.txt")
+      git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "main advance")
+      git(repo, "rebase", "main", workspace.branch)
+      git(repo, "checkout", "-q", "main")
+
+      writeFileSync(join(workspace.path, "retry.txt"), "retry change\n")
+      git(workspace.path, "add", "retry.txt")
+      git(workspace.path, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "retry")
+      expect((await pushBranch(workspace, repo)).ok).toBe(true)
+      expect(git(repo, "show", `${workspace.branch}:feature.txt`)).toBe("original change")
+      expect(git(repo, "show", `${workspace.branch}:main.txt`)).toBe("new main change")
+      expect(git(repo, "show", `${workspace.branch}:retry.txt`)).toBe("retry change")
+      expect(git(workspace.path, "show", "HEAD:retry.txt")).toBe("retry change")
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+  test("rejects a linked worktree because its shared refs cannot be bound individually", () => {
+    withGitWorktrees(({ first }) => {
+      expect(() => buildLinuxSandboxCommand({ ...BASE_REQUEST, workspacePath: first, networkAllowlist: [] })).toThrow(
+        /isolated Git clone/,
+      )
+    })
+  })
+
+  test("creates an isolated Linux workspace from a non-main default branch", async () => {
+    const fixture = mkdtempSync(join(process.cwd(), ".sandbox-linux-trunk-test-"))
+    const repo = join(fixture, "repo")
+    try {
+      mkdirSync(repo)
+      git(repo, "init", "-qb", "trunk")
+      writeFileSync(join(repo, "file.txt"), "base\n")
+      git(repo, "add", "file.txt")
+      git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
+      const issue = { id: "trunk", identifier: "TRUNK-1", title: "feat: trunk" } as Issue
+      const workspace = await createWorkspace(repo, issue, "linux")
+      expect(git(workspace.path, "show", "HEAD:file.txt")).toBe("base")
+      expect(git(workspace.path, "branch", "--show-current")).toBe(workspace.branch)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  test("creates an isolated Linux workspace with private Git metadata and no parent bind", async () => {
+    const fixture = mkdtempSync(join(process.cwd(), ".sandbox-linux-test-"))
+    const repo = join(fixture, "repo")
+    try {
+      mkdirSync(repo)
+      git(repo, "init", "-qb", "main")
+      writeFileSync(join(repo, "file.txt"), "base\n")
+      git(repo, "add", "file.txt")
+      git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
+      const issue = {
+        id: "one",
+        identifier: "ONE-1",
+        title: "feat: isolated metadata",
+        description: "",
+        status: { id: "todo", name: "Todo", type: "unstarted" },
+        team: { id: "team", key: "ONE" },
+        labels: [],
+        url: "",
+        score: null,
+        parentId: null,
+        children: [],
+        relations: [],
+      } satisfies Issue
+      const workspace = await createWorkspace(repo, issue, "linux")
+      expect(existsSync(join(workspace.path, ".git", "HEAD"))).toBe(true)
+      expect(linkedWorktreeGitPaths(workspace.path)).toBeNull()
+      writeFileSync(join(workspace.path, "file.txt"), "changed\n")
+      git(workspace.path, "add", "file.txt")
+      git(workspace.path, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "change")
+      expect(git(workspace.path, "show", "HEAD:file.txt")).toBe("changed")
+      expect(git(workspace.path, "remote")).toBe("")
+      expect((await detectUnfinishedWork(workspace)).hasCodeChanges).toBe(true)
+      expect(await getDiffStat(workspace)).toContain("1 file changed")
+
+      const plan = buildLinuxSandboxCommand({ ...BASE_REQUEST, workspacePath: workspace.path, networkAllowlist: [] })
+      const boundTargets = plan.args.flatMap((arg, i) => (arg === "--bind-try" ? [plan.args[i + 1]] : []))
+      expect(boundTargets).toContain(workspace.path)
+      expect(boundTargets).not.toContain(join(repo, ".git"))
+
+      expect(await pushBranch(workspace, repo)).toEqual({ ok: true })
+      expect(git(repo, "show", `${workspace.branch}:file.txt`)).toBe("changed")
+      expect((await mergeAndPush(workspace, repo)).ok).toBe(true)
+      expect(git(repo, "show", "main:file.txt")).toBe("changed")
+      await cleanupWorkspace(workspace, repo)
+      expect(existsSync(workspace.path)).toBe(false)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  test("delivers an isolated Linux branch to a local origin", async () => {
+    const fixture = mkdtempSync(join(process.cwd(), ".sandbox-linux-delivery-test-"))
+    const repo = join(fixture, "repo")
+    const origin = join(fixture, "origin.git")
+    try {
+      mkdirSync(repo)
+      mkdirSync(origin)
+      git(repo, "init", "-qb", "main")
+      git(origin, "init", "--bare", "-q")
+      writeFileSync(join(repo, "file.txt"), "base\n")
+      git(repo, "add", "file.txt")
+      git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
+      git(repo, "remote", "add", "origin", origin)
+      git(repo, "push", "-q", "origin", "main")
+      const issue = {
+        id: "delivery",
+        identifier: "DEL-1",
+        title: "feat: isolated delivery",
+        description: "",
+        status: { id: "todo", name: "Todo", type: "unstarted" },
+        team: { id: "team", key: "DEL" },
+        labels: [],
+        url: "",
+        score: null,
+        parentId: null,
+        children: [],
+        relations: [],
+      } satisfies Issue
+      const workspace = await createWorkspace(repo, issue, "linux")
+      expect(git(workspace.path, "remote", "get-url", "origin")).toBe(origin)
+      writeFileSync(join(workspace.path, "file.txt"), "delivered\n")
+      git(workspace.path, "add", "file.txt")
+      git(workspace.path, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "delivery")
+
+      expect((await pushBranch(workspace, repo)).ok).toBe(true)
+      expect(git(origin, "show", `${workspace.branch}:file.txt`)).toBe("delivered")
+      expect((await mergeAndPush(workspace, repo)).ok).toBe(true)
+      expect(git(origin, "show", "main:file.txt")).toBe("delivered")
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   test("binds the workspace read-write and appends the base command at the tail", () => {
     const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
     expect(result.command).toBe("bwrap")
@@ -202,15 +579,27 @@ describe("buildLinuxSandboxCommand", () => {
     expect(boundTargets).not.toContain(bareConfig)
   })
 
-  test("still bind-try's per-agent-CLI dirs read-write, including ~/.gemini", () => {
+  test("binds only the active agent's vendor directory and masks inactive ones", () => {
     const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
     const home = homedir()
-    for (const dir of [".claude", ".codex", ".cursor", ".grok", ".gemini", ".cache", ".npm", ".bun"]) {
+    for (const dir of [".claude", ".cache", ".npm", ".bun"]) {
       const target = `${home}/${dir}`
       const idx = result.args.indexOf(target)
       expect(idx).toBeGreaterThan(-1)
       expect(result.args[idx - 1]).toBe("--bind-try")
     }
+    for (const dir of [".codex", ".cursor", ".grok", ".gemini", ".kimi-code"]) {
+      const target = `${home}/${dir}`
+      const idx = result.args.indexOf(target)
+      expect(idx).toBeGreaterThan(-1)
+      expect(result.args[idx - 1]).toBe("--tmpfs")
+    }
+    const antigravity = buildLinuxSandboxCommand(
+      { ...BASE_REQUEST, agentType: "antigravity", networkAllowlist: [] },
+      "bwrap",
+    )
+    const geminiIndex = antigravity.args.indexOf(`${home}/.gemini`)
+    expect(antigravity.args[geminiIndex - 1]).toBe("--bind-try")
   })
 
   test("workspace path stays read-write via --bind-try regardless of the credential mask", () => {

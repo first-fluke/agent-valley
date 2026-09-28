@@ -70,7 +70,7 @@
  *     `isWeakAsciiKeyword` for the exact rule and rationale.
  */
 
-import { existsSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 export interface WorkflowKeywordDef {
@@ -313,12 +313,42 @@ export function routeIssue(text: string, table: TriggerTable): RouteResult {
 // ── Trigger table loading (fail-soft, cached) ──────────────────────────
 
 function isTriggerTableShape(value: unknown): value is TriggerTable {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const table = value as Record<string, unknown>
+  // OMA's current triggers.json has no version field. A future explicit
+  // version must be recognized before its shape is interpreted as v1.
+  if (table.schemaVersion !== undefined && table.schemaVersion !== 1) return false
+  if (table.version !== undefined && table.version !== 1) return false
+  const stringBanks = (bank: unknown): bank is Record<string, string[]> =>
+    typeof bank === "object" &&
+    bank !== null &&
+    !Array.isArray(bank) &&
+    Object.values(bank).every((words) => Array.isArray(words) && words.every((word) => typeof word === "string"))
+  if (!table.workflows || typeof table.workflows !== "object" || Array.isArray(table.workflows)) return false
+  if (!table.skills || typeof table.skills !== "object" || Array.isArray(table.skills)) return false
+  if (!stringBanks(table.informationalPatterns)) return false
+  if (!Array.isArray(table.excludedWorkflows) || !table.excludedWorkflows.every((name) => typeof name === "string"))
+    return false
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "workflows" in value &&
-    typeof (value as Record<string, unknown>).workflows === "object"
+    Object.values(table.workflows).every((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false
+      const workflow = entry as Record<string, unknown>
+      return typeof workflow.persistent === "boolean" && stringBanks(workflow.keywords)
+    }) &&
+    Object.values(table.skills).every((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false
+      return stringBanks((entry as Record<string, unknown>).keywords)
+    })
   )
+}
+
+export function parseTriggerTable(content: string): TriggerTable | null {
+  try {
+    const parsed: unknown = JSON.parse(content)
+    return isTriggerTableShape(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -328,16 +358,14 @@ function isTriggerTableShape(value: unknown): value is TriggerTable {
  */
 export function loadTriggerTable(rootDir: string): TriggerTable | null {
   const path = join(rootDir, ".agents", "hooks", "core", "triggers.json")
-  if (!existsSync(path)) return null
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"))
-    return isTriggerTableShape(parsed) ? parsed : null
+    return parseTriggerTable(readFileSync(path, "utf-8"))
   } catch {
     return null
   }
 }
 
-const triggerTableCache = new Map<string, TriggerTable | null>()
+const triggerTableCache = new Map<string, { content: string | null; table: TriggerTable | null }>()
 
 /**
  * Cached variant of `loadTriggerTable`, keyed by `rootDir`. Defaults to
@@ -345,10 +373,19 @@ const triggerTableCache = new Map<string, TriggerTable | null>()
  * used by `yaml-loader.ts` elsewhere in this package.
  */
 export function getCachedTriggerTable(rootDir: string = process.cwd()): TriggerTable | null {
-  if (!triggerTableCache.has(rootDir)) {
-    triggerTableCache.set(rootDir, loadTriggerTable(rootDir))
+  const path = join(rootDir, ".agents", "hooks", "core", "triggers.json")
+  let content: string | null = null
+  try {
+    content = readFileSync(path, "utf-8")
+  } catch {
+    // A missing target-workspace table is normal; it may appear later.
   }
-  return triggerTableCache.get(rootDir) ?? null
+  const cached = triggerTableCache.get(rootDir)
+  if (cached?.content === content) return cached.table
+  let table: TriggerTable | null = null
+  if (content !== null) table = parseTriggerTable(content)
+  triggerTableCache.set(rootDir, { content, table })
+  return table
 }
 
 /** Test-only escape hatch — clears the module-level cache between test cases. */

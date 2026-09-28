@@ -1,128 +1,72 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import type { TeamState, TeamNode, ConnectionStatus } from "../types/team"
-import { replayLedger } from "@agent-valley/core/relay/replay"
-import type { LedgerEvent } from "@agent-valley/core/domain/ledger"
-import type { NodePresence } from "@agent-valley/core/domain/ledger"
+import { useEffect, useState } from "react"
+import type { ConnectionStatus, TeamState } from "@/features/team/types/team"
 
-interface LedgerRow {
-  seq: number
-  team_id: string
-  node_id: string
-  user_id: string
-  type: string
-  payload: Record<string, unknown>
-  client_timestamp: string
-  created_at: string
+interface TeamLedgerResponse {
+  mode: "standalone" | "team"
+  status?: "connected" | "error"
+  state?: TeamState
+  code?: string
+  message?: string
 }
 
-/** Convert Supabase REST row to LedgerEvent for shared replay */
-function rowToLedgerEvent(row: LedgerRow): LedgerEvent {
-  return {
-    v: 1,
-    seq: row.seq,
-    relayTimestamp: row.created_at,
-    clientTimestamp: row.client_timestamp,
-    nodeId: row.node_id,
-    type: row.type as LedgerEvent["type"],
-    payload: row.payload as any,
-  } as LedgerEvent
-}
-
-/** Convert domain NodePresence (Map-based) to dashboard TeamNode (array-based) */
-function toTeamNodes(nodes: Map<string, NodePresence>): TeamNode[] {
-  return Array.from(nodes.values()).map((n) => ({
-    nodeId: n.nodeId,
-    displayName: n.displayName,
-    defaultAgentType: n.defaultAgentType,
-    maxParallel: n.maxParallel,
-    online: n.online,
-    joinedAt: n.joinedAt,
-    activeIssues: n.activeIssues,
-  }))
-}
-
-interface UseTeamLedgerOptions {
-  supabaseUrl: string
-  supabaseAnonKey: string
-  teamId: string
-}
-
-export function useTeamLedger(options: UseTeamLedgerOptions | null) {
+/** Reads the local dashboard relay; Supabase credentials stay on the server. */
+export function useTeamLedger() {
   const [teamState, setTeamState] = useState<TeamState | null>(null)
   const [status, setStatus] = useState<ConnectionStatus>("connecting")
-  const lastSeqRef = useRef(0)
+  const [mode, setMode] = useState<"standalone" | "team">("standalone")
+  const [error, setError] = useState<string | null>(null)
+  const [errorCode, setErrorCode] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!options) {
-      setStatus("disconnected")
-      return
-    }
-
     let active = true
-    const { supabaseUrl, supabaseAnonKey, teamId } = options
-
-    const fetchAndSync = async () => {
+    let loading = false
+    const sync = async () => {
+      if (loading) return
+      loading = true
       try {
-        const res = await fetch(
-          `${supabaseUrl}/rest/v1/ledger_events?team_id=eq.${teamId}&order=seq.desc&limit=1000`,
-          {
-            headers: {
-              apikey: supabaseAnonKey,
-              Authorization: `Bearer ${supabaseAnonKey}`,
-            },
-          },
-        )
-
-        if (!res.ok) throw new Error(`Fetch failed: ${res.status}`)
-
-        const rows = (await res.json()) as LedgerRow[]
+        const response = await fetch("/api/team/ledger", { cache: "no-store" })
+        const result = (await response.json()) as TeamLedgerResponse
         if (!active) return
-
-        const events = rows.map(rowToLedgerEvent)
-        const state = replayLedger(events)
-
-        lastSeqRef.current = state.lastSeq
-        setTeamState({ nodes: toTeamNodes(state.nodes), lastSeq: state.lastSeq })
-        setStatus("connected")
+        if (result.mode === "standalone") {
+          setMode("standalone")
+          setStatus("disconnected")
+          setTeamState(null)
+          setError(null)
+          setErrorCode(null)
+        } else if (result.mode === "team" && result.status === "connected" && result.state) {
+          setMode("team")
+          setStatus("connected")
+          setTeamState(result.state)
+          setError(null)
+          setErrorCode(null)
+        } else {
+          setMode("team")
+          setStatus("error")
+          setTeamState(null)
+          setError(result.message ?? "Team ledger is unavailable.")
+          setErrorCode(result.code ?? "team_unavailable")
+        }
       } catch {
-        if (active) setStatus("error")
+        if (!active) return
+        setMode("team")
+        setStatus("error")
+        setTeamState(null)
+        setError("Cannot reach the team ledger. Check the dashboard connection.")
+        setErrorCode("team_unavailable")
+      } finally {
+        loading = false
       }
     }
 
-    // Poll for incremental changes
-    const pollInterval = setInterval(async () => {
-      if (!active) return
-      try {
-        const res = await fetch(
-          `${supabaseUrl}/rest/v1/ledger_events?team_id=eq.${teamId}&seq=gt.${lastSeqRef.current}&order=seq.asc`,
-          {
-            headers: {
-              apikey: supabaseAnonKey,
-              Authorization: `Bearer ${supabaseAnonKey}`,
-            },
-          },
-        )
-        if (!res.ok) return
-
-        const rows = (await res.json()) as LedgerRow[]
-        if (rows.length === 0 || !active) return
-
-        // Re-fetch full ledger and replay (simpler than incremental merge)
-        await fetchAndSync()
-      } catch {
-        // silent — will retry next poll
-      }
-    }, 3000)
-
-    fetchAndSync()
-
+    void sync()
+    const timer = setInterval(() => void sync(), 5000)
     return () => {
       active = false
-      clearInterval(pollInterval)
+      clearInterval(timer)
     }
-  }, [options?.supabaseUrl, options?.supabaseAnonKey, options?.teamId])
+  }, [])
 
-  return { teamState, status }
+  return { teamState, status, mode, error, errorCode }
 }

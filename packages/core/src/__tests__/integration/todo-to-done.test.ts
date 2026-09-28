@@ -50,7 +50,14 @@ beforeEach(async () => {
   repo = await createGitRepo()
   rig = buildOrchestratorRig({
     workspaceRoot: repo.repoDir,
-    overrides: { deliveryMode: "merge", maxParallel: 2 },
+    overrides: {
+      deliveryMode: "merge",
+      maxParallel: 2,
+      verify: {
+        command: "test -f agent-output.txt && git cat-file -e HEAD:agent-output.txt",
+        timeoutSec: 30,
+      },
+    },
   })
 
   // Register a fake claude session that, when started, writes a real file

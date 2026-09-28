@@ -152,6 +152,8 @@ describe("decideLedgerRelay — gating decision", () => {
 })
 
 describe("wireLedgerRelay — factory", () => {
+  afterEach(() => vi.restoreAllMocks())
+
   test("single-node config returns null without calling the credentials loader's side effects", () => {
     const orchestrator = makeFakeOrchestrator()
     const config = makeConfig()
@@ -170,9 +172,41 @@ describe("wireLedgerRelay — factory", () => {
   test("team mode with a valid session constructs and attaches a LedgerBridge", async () => {
     const orchestrator = makeFakeOrchestrator()
     const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
-    const bridge = wireLedgerRelay(orchestrator, config, () => ({ accessToken: "tok", userId: "u1", expiresAt: 0 }))
+    const bridge = wireLedgerRelay(orchestrator, config, () => ({
+      accessToken: "tok",
+      userId: "11111111-1111-4111-8111-111111111111",
+      expiresAt: 0,
+    }))
     expect(bridge).not.toBeNull()
     await bridge?.dispose()
+  })
+
+  test("relay publishes the authenticated user ID as the node ID prefix", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: true } as Response)
+    const orchestrator = makeFakeOrchestrator()
+    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
+    const userId = "11111111-1111-4111-8111-111111111111"
+    const bridge = wireLedgerRelay(orchestrator, config, () => ({ accessToken: "tok", userId, expiresAt: 0 }))
+    expect(bridge).not.toBeNull()
+
+    orchestrator.publish("agent.start", { agentType: "claude", issueKey: "PROJ-1", issueId: "i1" })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string) as {
+      node_id: string
+      user_id: string
+    }
+    expect(body.user_id).toBe(userId)
+    expect(body.node_id.startsWith(`${userId}:`)).toBe(true)
+    expect(body.node_id.length).toBeGreaterThan(userId.length + 1)
+    await bridge?.dispose()
+  })
+
+  test("invalid stored user identity disables the team relay", () => {
+    const orchestrator = makeFakeOrchestrator()
+    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
+    expect(
+      wireLedgerRelay(orchestrator, config, () => ({ accessToken: "tok", userId: "alice", expiresAt: 0 })),
+    ).toBeNull()
   })
 
   test("a throwing credentials loader is caught — relay disabled, never crashes bootstrap", () => {

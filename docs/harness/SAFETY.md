@@ -198,26 +198,26 @@ guarantee it can't.
 ## 4. Dashboard / Intervention Endpoint Auth (v0.2+)
 
 `/api/status`, `/api/events`, and `/api/intervention` (dashboard-auth.ts)
-are localhost-only by default: the handler applies a best-effort
-"looks local" check on the `Host` header (plus `X-Forwarded-For`, since
-ngrok fronts the dashboard by default). This heuristic is a dev
-convenience only — the `Host` header is attacker-controlled and forgeable
-by anyone who can reach the bound port, and Next.js Route Handlers have
-no access to the underlying socket to verify true local origin. The real
-access control is a bearer token, enforced fail-closed:
+are served on a loopback-bound dashboard by default. Public tunnels terminate
+at a separate webhook-only listener. A `Host` header is attacker-controlled;
+the route's local-request heuristic is a convenience check, not network
+authentication. Configured tokens are enforced for all requests, including
+those with a forged localhost `Host`. Browser login exchanges tokens for
+HttpOnly, SameSite cookies; intervention cookie requests require a matching
+`Origin`. CLI status/top use Bearer authentication:
 
 | Env var | Endpoint(s) | Effect |
 |---|---|---|
-| `SYMPHONY_DASHBOARD_TOKEN` | `/api/status`, `/api/events` | When set, non-local requests must send `Authorization: Bearer <token>`. |
-| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | `/api/status`, `/api/events` | Opts the endpoints into remote access. Requires `SYMPHONY_DASHBOARD_TOKEN` to also be set — if the flag is on but no token is configured, **all** requests (including local ones) are rejected. Unauthenticated remote access is never permitted. |
+| `SYMPHONY_DASHBOARD_TOKEN` | `/api/status`, `/api/events` | When set, every request needs a matching Bearer token or browser session cookie. |
+| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | `/api/status`, `/api/events` | Requires `SYMPHONY_DASHBOARD_TOKEN`; without it, **all** requests (including local ones) are rejected. |
 | `SYMPHONY_INTERVENTION_TOKEN` | `/api/intervention` | Same pattern as `SYMPHONY_DASHBOARD_TOKEN`, scoped to the intervention endpoint (pause/resume/append_prompt/abort). |
 | `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | `/api/intervention` | Same pattern as `SYMPHONY_ALLOW_REMOTE_STATUS`, fail-closed without `SYMPHONY_INTERVENTION_TOKEN`. |
 
-Policy order per request: (1) if the relevant `ALLOW_REMOTE` flag is set,
-a matching token is mandatory — no token configured means the endpoint
-rejects everything, local or remote; (2) otherwise, requests that look
-local are allowed through; (3) otherwise, a configured token is checked
-if present; (4) otherwise, the request is rejected as localhost-only.
+Policy order per request: (1) remote flag without its token rejects every
+request; (2) a configured token requires valid Bearer or signed cookie;
+(3) without a token, only local-looking requests pass. A non-loopback CLI
+bind requires both status and intervention tokens. Direct dashboard package
+scripts always bind loopback.
 
 ---
 

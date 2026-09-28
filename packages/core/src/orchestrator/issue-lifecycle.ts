@@ -13,10 +13,12 @@ import { resolveRouteWithScore } from "../config/routing"
 import { renderPrompt } from "../config/workflow-loader"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
+import { buildOmaGuidance, prepareOmaAttempt } from "../oma/receipt-adapter"
 import { formatBudgetBlockComment } from "./budget-service"
 import { createCompletionCallbacks } from "./completion-handler"
 import type { OrchestratorCore } from "./orchestrator-core"
 import { analyzeScoreInBackground } from "./scoring-service"
+import { resolveVerifyCommand } from "./verification-gate"
 
 export interface RetryContext {
   attemptCount: number
@@ -177,8 +179,25 @@ export class IssueLifecycle {
     // Release the processing lock now that activeWorkspaces is set
     core.releaseProcessing(issue.id)
 
+    const verifyCommand = resolveVerifyCommand(core.config, route)
+    if (core.config.oma?.mode === "strict") {
+      try {
+        await prepareOmaAttempt({
+          issue,
+          attempt,
+          workspace,
+          agentId: route.agentType,
+          verifyCommand: verifyCommand ?? "",
+        })
+      } catch (err) {
+        const callbacks = createCompletionCallbacks(core.buildCompletionDeps(), issue, workspace, attempt, route)
+        await callbacks.onError({ code: "UNKNOWN", message: `OMA setup failed: ${String(err)}`, recoverable: false })
+        return
+      }
+    }
+
     // Render prompt
-    const prompt = renderPrompt(
+    let prompt = renderPrompt(
       core.getPromptTemplate(),
       issue,
       workspace.path,
@@ -186,6 +205,20 @@ export class IssueLifecycle {
       retryContext?.attemptCount ?? 0,
       retryContext?.lastError ?? "",
     )
+    const task = route.task ?? core.config.task ?? { kind: "code" }
+    if (task.kind === "analysis") {
+      prompt += `\n\nThis is an operator-configured analysis task. Write a nonempty report in this worktree at ${task.reportPath.replaceAll("{{attempt.id}}", attempt.id)}. Text output alone does not complete the task.`
+    }
+    if (core.config.oma?.mode === "strict") {
+      prompt += `\n\n${buildOmaGuidance({
+        issue,
+        attempt,
+        workspace,
+        agentId: route.agentType,
+        verifyCommand: verifyCommand ?? "",
+        reportPath: task.kind === "analysis" ? task.reportPath : undefined,
+      })}`
+    }
 
     core.emitEvent("agent.start", {
       agentType: route.agentType,

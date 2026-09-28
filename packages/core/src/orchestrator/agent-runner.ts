@@ -18,7 +18,13 @@ export interface RunOptions {
 
 export interface RunCallbacks {
   onComplete: (result: RunAttempt) => void
-  onError: (error: { code: string; message: string; recoverable: boolean }) => void
+  onError: (error: {
+    code: string
+    message: string
+    recoverable: boolean
+    exitCode?: number
+    tokenUsage?: RunAttempt["tokenUsage"]
+  }) => void
   onHeartbeat: (timestamp: string) => void
   /**
    * Fired once the session's OS child process is actually spawned (see

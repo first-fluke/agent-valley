@@ -1,13 +1,3 @@
-/**
- * OrchestratorCore — Owns OrchestratorRuntimeState and the supporting
- * sub-services (retry queue, DAG scheduler, agent runner). This is the
- * single authority for in-memory state mutations. Webhook routing and
- * issue lifecycle handlers access state only through the narrow API
- * exposed here.
- *
- * Design: docs/plans/v0-2-bigbang-design.md § 3.1 / § 5.3 (PR3).
- */
-
 import type { Config } from "../config/yaml-loader"
 import type { Issue, OrchestratorRuntimeState, Workspace } from "../domain/models"
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
@@ -24,25 +14,21 @@ import type { CompletionDeps } from "./completion-handler"
 import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
 import type { InterventionBus } from "./intervention-bus"
+import { PendingFinalizationManager } from "./pending-finalization"
 import { decideRecovery } from "./persistence/recovery"
 import { applyRecoveryDecision, buildPersistedAttempts, cleanupAttemptState } from "./persistence/recovery-apply"
 import type { RunStatePort } from "./persistence/run-state-store"
 import { RunStatePersistence } from "./persistence/run-state-store"
 import { RetryQueue } from "./retry-queue"
 
-/** Reason returned by slot-availability check; callers map to retry / skip. */
 export type SlotDecision = { ok: true } | { ok: false; reason: "already_active" | "concurrency" }
 
-/** Narrow callback the core emits upward to the facade, which forwards into OrchestratorEventEmitter.emitEvent. */
 export type CoreEventEmit = (event: string, payload: Record<string, unknown>) => void
 
-/** Hook the core calls when state settles and idle slots should be re-filled. Supplied by the facade at wiring time. */
 export type FillSlotsHook = () => Promise<void>
 
-/** Supplied by the facade to re-evaluate waiting issues after blocker removal. */
 export type ReevaluateWaitingHook = () => Promise<void>
 
-/** Re-entry point used when a retry queue entry or startup-sync issue needs the full Todo / In Progress dispatch path. */
 export interface LifecycleDispatcher {
   handleIssueTodo: (issue: Issue, retryContext?: { attemptCount: number; lastError: string }) => Promise<void>
   handleIssueInProgress: (issue: Issue, retryContext?: { attemptCount: number; lastError: string }) => Promise<void>
@@ -53,15 +39,10 @@ export interface OrchestratorCoreDeps {
   tracker: IssueTracker
   webhook: WebhookReceiver<ParsedWebhookEvent>
   workspace: WorkspaceGateway
-  /** AgentRunnerPort adapter. Optional — when omitted, the core creates its own SpawnAgentRunnerAdapter (v0.1 behavior). */
   agentRunner?: SpawnAgentRunnerAdapter
-  /** Emit events onto the facade's public event stream. */
   emit: CoreEventEmit
-  /** Optional observability hooks (OTel + Prometheus). Omit for no-op behavior; exporter errors never propagate. */
   observability?: ObservabilityHooks
-  /** Optional per-issue + per-day budget service. Omit to fall back to a no-op that always allows spawn. Design § 4.5. */
   budget?: BudgetService
-  /** Run-state persistence port. Omit to fall back to a real `RunStatePersistence` (`.agent-valley/run-state.json`). */
   runStatePersistence?: RunStatePort
 }
 
@@ -72,15 +53,12 @@ export class OrchestratorCore {
   readonly workspace: WorkspaceGateway
 
   readonly agentRunner: AgentRunnerService
-  /** Port-shaped view of the runner (spawn RunHandle + capabilities()). */
   readonly agentRunnerPort: SpawnAgentRunnerAdapter
   readonly retryQueue: RetryQueue
   readonly dagScheduler: DagScheduler
 
-  /** Observability hooks — defaults to no-op. Exposed read-only. */
   readonly observability: ObservabilityHooks
 
-  /** Budget service — defaults to no-op. Exposed read-only. */
   readonly budget: BudgetService
 
   readonly state: OrchestratorRuntimeState = {
@@ -90,16 +68,12 @@ export class OrchestratorCore {
     lastEventAt: null,
   }
 
-  /** Guards against TOCTOU race: tracks issues currently being processed. */
   readonly processingIssues = new Set<string>()
-  /** Maps issueId -> attemptId for active agent sessions. */
   readonly activeAttempts = new Map<string, string>()
-  /** issueId -> attempt.startedAt, mirrored to disk for crash recovery (see persistence/). */
   private readonly attemptStartedAt = new Map<string, string>()
-  /** issueId -> real OS pid of the spawned agent, when known (see registerAttempt). */
   private readonly attemptPid = new Map<string, number>()
-  /** Durable mirror of activeAttempts + retryQueue so a crash/restart can recover instead of duplicating runs. */
   private readonly runStatePersistence: RunStatePort
+  private readonly pendingFinalizations: PendingFinalizationManager
   private recoveryCompleted = false
   private readonly emit: CoreEventEmit
   private retryTimer: ReturnType<typeof setInterval> | null = null
@@ -107,10 +81,8 @@ export class OrchestratorCore {
   private startupSyncCompleted = false
   private startupSyncInFlight = false
 
-  /** Wired by the facade before start() so the core can trigger lifecycle flows. */
   private dispatcher: LifecycleDispatcher | null = null
   private reevaluateWaiting: ReevaluateWaitingHook | null = null
-  /** Wired by the facade so spawn/cancel flows can keep the bus in sync. */
   private interventionBus: InterventionBus | null = null
 
   constructor(deps: OrchestratorCoreDeps) {
@@ -120,7 +92,6 @@ export class OrchestratorCore {
     this.workspace = deps.workspace
     this.emit = deps.emit
 
-    // Port seam: depends on AgentRunnerPort via SpawnAgentRunnerAdapter; builds one wrapping a fresh AgentRunnerService if omitted.
     this.agentRunnerPort = deps.agentRunner ?? new SpawnAgentRunnerAdapter()
     this.agentRunner = this.agentRunnerPort.service
     this.retryQueue = new RetryQueue(this.config.agentMaxRetries, this.config.agentRetryDelay)
@@ -130,21 +101,35 @@ export class OrchestratorCore {
     this.observability = deps.observability ?? createNoopObservabilityHooks()
     this.budget = deps.budget ?? createNoopBudgetService()
     this.dagScheduler.setCycleObserver(() => this.observability.onDagCycle())
+    this.pendingFinalizations = new PendingFinalizationManager({
+      config: this.config,
+      tracker: this.tracker,
+      workspace: this.workspace,
+      dag: this.dagScheduler,
+      store: this.runStatePersistence,
+      emit: this.emit,
+      observability: this.observability,
+      cleanup: (id, status) => {
+        cleanupAttemptState(this.recoveryApplyDeps(), id, status)
+        this.persistActiveAttempts()
+      },
+      triggerUnblocked: async (ids) => {
+        for (const id of ids) this.state.waitingIssues.delete(id)
+        if (this.reevaluateWaiting) await this.reevaluateWaiting()
+      },
+      fillVacantSlots: () => this.fillVacantSlots(),
+    })
   }
-
-  // ── Facade wiring ──────────────────────────────────────────────────
 
   attachLifecycle(dispatcher: LifecycleDispatcher, reevaluate: ReevaluateWaitingHook): void {
     this.dispatcher = dispatcher
     this.reevaluateWaiting = reevaluate
   }
 
-  /** Wire the intervention bus so spawn/cancel flows can keep it in sync. */
   attachIntervention(bus: InterventionBus): void {
     this.interventionBus = bus
   }
 
-  /** Read-only accessor for collaborators that need to register attempts. */
   getInterventionBus(): InterventionBus | null {
     return this.interventionBus
   }
@@ -169,19 +154,20 @@ export class OrchestratorCore {
       },
       observability: this.observability,
       budget: this.budget,
+      finalizeDelivered: (record) => this.pendingFinalizations.add(record),
     }
   }
-
-  // ── Public event emit (used by issue-lifecycle and router) ────────
 
   emitEvent(event: string, payload: Record<string, unknown>): void {
     this.emit(event, payload)
   }
 
-  // ── Runtime state API (narrow, callable by lifecycle/router) ──────
-
   canAcceptIssue(issueId: string): SlotDecision {
-    if (this.processingIssues.has(issueId) || this.state.activeWorkspaces.has(issueId)) {
+    if (
+      this.processingIssues.has(issueId) ||
+      this.state.activeWorkspaces.has(issueId) ||
+      this.pendingFinalizations.has(issueId)
+    ) {
       return { ok: false, reason: "already_active" }
     }
     if (this.agentRunner.activeCount >= this.config.maxParallel) {
@@ -280,9 +266,16 @@ export class OrchestratorCore {
     this.recoveryCompleted = true
 
     const snapshot = await this.runStatePersistence.load()
+    this.pendingFinalizations.restore(snapshot.pendingFinalizations ?? [])
     if (snapshot.activeAttempts.length === 0 && snapshot.retryQueue.length === 0) return
 
-    const summary = applyRecoveryDecision(decideRecovery(snapshot), this.recoveryApplyDeps())
+    const recoverable = {
+      ...snapshot,
+      activeAttempts: snapshot.activeAttempts.filter((entry) => !this.pendingFinalizations.has(entry.issueId)),
+      retryQueue: snapshot.retryQueue.filter((entry) => !this.pendingFinalizations.has(entry.issueId)),
+    }
+
+    const summary = applyRecoveryDecision(decideRecovery(recoverable), this.recoveryApplyDeps())
 
     this.persistActiveAttempts()
     this.persistRetryQueue()
@@ -324,11 +317,10 @@ export class OrchestratorCore {
     return this.promptTemplate
   }
 
-  // ── Lifecycle (start / stop / startup sync / retry timer) ─────────
-
   async start(): Promise<void> {
     // Recover before startup sync fetches Todo/InProgress issues, so a still-alive attempt isn't re-dispatched.
     await this.recoverFromPersistedState()
+    void this.pendingFinalizations.reconcile()
 
     this.state.isRunning = true
     this.promptTemplate = this.config.promptTemplate
@@ -456,6 +448,7 @@ export class OrchestratorCore {
   }
 
   async processRetryQueue(): Promise<void> {
+    await this.pendingFinalizations.reconcile()
     const ready = this.retryQueue.drain()
     if (ready.length === 0) return
     this.persistRetryQueue()
@@ -475,6 +468,7 @@ export class OrchestratorCore {
       return
     }
     for (const entry of ready) {
+      if (this.pendingFinalizations.has(entry.issueId)) continue
       const issue = issues.find((i) => i.id === entry.issueId)
       if (issue) {
         const retryContext = {
@@ -492,5 +486,9 @@ export class OrchestratorCore {
 
   getStatus(): Record<string, unknown> {
     return buildOrchestratorStatus(this.state, this.activeAttempts, this.agentRunner, this.retryQueue, this.config)
+  }
+
+  async cancelPendingFinalization(issueId: string): Promise<void> {
+    await this.pendingFinalizations.cancel(issueId)
   }
 }

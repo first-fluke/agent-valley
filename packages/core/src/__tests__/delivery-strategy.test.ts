@@ -19,6 +19,7 @@ type Call = { cmd: string; args: string[] }
 const calls: Call[] = []
 const responses: CommandResult[] = []
 const defaultSuccess: CommandResult = { exitCode: 0, stdout: "", stderr: "" }
+let lastDiffExit = 0
 
 vi.mock("../workspace/worktree-lifecycle", async () => {
   const actual = await vi.importActual<typeof import("../workspace/worktree-lifecycle")>(
@@ -28,7 +29,19 @@ vi.mock("../workspace/worktree-lifecycle", async () => {
     ...actual,
     runCommand: vi.fn(async (cmd: string, args: string[]) => {
       calls.push({ cmd, args })
-      return responses.shift() ?? defaultSuccess
+      // Base discovery and ancestry checks are independent of the older
+      // queue-based scenarios; keep their response queues focused on delivery.
+      if (args[0] === "symbolic-ref" && args.at(-1) === "HEAD") return { exitCode: 0, stdout: "main\n", stderr: "" }
+      if (args[0] === "symbolic-ref") return { exitCode: 1, stdout: "", stderr: "" }
+      if (args[0] === "config" && args[1] === "--local") return { exitCode: 0, stdout: "main\n", stderr: "" }
+      if (args[0] === "show-ref") return defaultSuccess
+      if (args[0] === "merge-base") {
+        const merged = calls.some((call) => call.args[0] === "merge")
+        return { exitCode: merged || lastDiffExit === 0 ? 0 : 1, stdout: "", stderr: "" }
+      }
+      const result = responses.shift() ?? defaultSuccess
+      if (args[0] === "diff" && args[1] === "--quiet") lastDiffExit = result.exitCode
+      return result
     }),
   }
 })
@@ -55,6 +68,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
 beforeEach(() => {
   calls.length = 0
   responses.length = 0
+  lastDiffExit = 0
 })
 
 describe("mergeAndPush — verification gate guard", () => {

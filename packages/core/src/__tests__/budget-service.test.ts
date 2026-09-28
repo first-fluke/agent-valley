@@ -50,6 +50,7 @@ function makeFakePersistence(
     dayKey: initial?.dayKey ?? "",
     perDay: initial?.perDay ?? { tokens: 0, usd: 0 },
     perIssue: initial?.perIssue ?? {},
+    recordedAttemptIds: initial?.recordedAttemptIds ?? [],
   }
   return {
     savedCalls,
@@ -64,6 +65,7 @@ function makeFakePersistence(
         dayKey: currentDayKey,
         perDay: rolledOver ? { tokens: 0, usd: 0 } : stored.perDay,
         perIssue: stored.perIssue,
+        recordedAttemptIds: stored.recordedAttemptIds,
       }
     },
     save(snapshot) {
@@ -75,6 +77,22 @@ function makeFakePersistence(
     },
   }
 }
+
+test("recordUsage deduplicates by attempt ID, including after hydration", async () => {
+  const persistence = makeFakePersistence()
+  const usage = { input: 12, output: 8, model: "claude-sonnet" }
+  const first = createInMemoryBudgetService({ caps: makeCaps(), persistence })
+  await first.recordUsage("attempt-1", "issue-1", usage)
+  await first.recordUsage("attempt-1", "issue-1", usage)
+  expect(first.getIssueUsed("issue-1").tokens).toBe(20)
+  expect(persistence.savedCalls).toHaveLength(1)
+
+  const restarted = createInMemoryBudgetService({ caps: makeCaps(), persistence })
+  await readyOf(restarted)
+  await restarted.recordUsage("attempt-1", "issue-1", usage)
+  expect(restarted.getIssueUsed("issue-1").tokens).toBe(20)
+  expect(persistence.savedCalls).toHaveLength(1)
+})
 
 function makeCaps(overrides: Partial<BudgetCaps> = {}): BudgetCaps {
   return {

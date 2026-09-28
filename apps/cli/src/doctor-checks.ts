@@ -18,6 +18,7 @@
  * logic.
  */
 
+import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -60,6 +61,8 @@ export interface DoctorDeps {
   resolveGlobalConfigPath: () => string
   loadGlobalConfig: (configPath?: string) => GlobalConfig | null
   loadProjectConfig: (projectRoot?: string) => ProjectConfig | null
+  /** Read-only local CLI version probe; used only when strict OMA is configured. */
+  getOmaVersion?: () => string | null
 }
 
 export function defaultDoctorDeps(): DoctorDeps {
@@ -76,6 +79,10 @@ export function defaultDoctorDeps(): DoctorDeps {
     resolveGlobalConfigPath,
     loadGlobalConfig,
     loadProjectConfig,
+    getOmaVersion: () => {
+      const result = spawnSync("oma", ["--version"], { encoding: "utf-8", timeout: 5_000 })
+      return result.status === 0 ? result.stdout.trim() : null
+    },
   }
 }
 

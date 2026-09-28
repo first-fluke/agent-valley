@@ -7,20 +7,15 @@
  *                       | { kind: "append_prompt", text: string }
  *                       | { kind: "abort", reason: string }
  *
- * Auth: gated by authorizeInterventionRequest (@/lib/dashboard-auth). Local
- *       requests pass a best-effort Host-header check by default; any
- *       non-local request (or SYMPHONY_ALLOW_REMOTE_INTERVENTION=1) requires
- *       a matching `Authorization: Bearer <SYMPHONY_INTERVENTION_TOKEN>`.
- *       See @/lib/dashboard-auth.ts for the full policy and rationale —
- *       the Host header alone is forgeable and is never the sole gate for
- *       non-local traffic.
+ * Auth: Bearer for API callers or a signed browser session cookie. Cookie
+ *       requests also require a same-origin Origin header.
  *
  * Delegates all decisions to InterventionBus — the handler itself
  * contains no business logic (clean-architecture: Presentation → Application).
  */
 
 import type { InterventionCommand } from "@agent-valley/core/domain/ports/agent-runner"
-import { authorizeInterventionRequest } from "@/lib/dashboard-auth"
+import { authorizeInterventionMutation } from "@/lib/dashboard-auth"
 import { getOrchestrator } from "@/lib/orchestrator-singleton"
 
 export const dynamic = "force-dynamic"
@@ -54,7 +49,7 @@ function parseCommand(value: unknown): InterventionCommand | { error: string } {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const unauthorized = authorizeInterventionRequest(request)
+  const unauthorized = authorizeInterventionMutation(request)
   if (unauthorized) return unauthorized
 
   let body: unknown

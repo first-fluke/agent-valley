@@ -9,9 +9,12 @@
  *   https://prometheus.io/docs/instrumenting/exposition_formats/
  */
 
+import { authorizeStatusRequest } from "@/lib/dashboard-auth"
 import { getMetricsEndpoint } from "@/lib/metrics-singleton"
 
-export function GET(): Response {
+export function GET(request: Request): Response {
+  const unauthorized = authorizeStatusRequest(request)
+  if (unauthorized) return unauthorized
   const endpoint = getMetricsEndpoint()
   if (!endpoint || !endpoint.enabled) {
     return new Response("Not found", { status: 404 })

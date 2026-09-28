@@ -140,26 +140,59 @@ FAIL: WORKSPACE_ROOT is not set.
 
 ---
 
-## Step 5: Dashboard Status Endpoints (Optional)
+## Step 5: Dashboard and webhook access
 
-`/api/status` and `/api/events` expose orchestrator runtime state (active
-workspaces, issue identifiers, retry queue). `bun av dev` tunnels the dashboard
-through ngrok for Linear webhook delivery, so by default these endpoints are
-**blocked for any request whose `Host` header is not `localhost`** (best-effort
-check — see `docs/harness/SAFETY.md` § 4 for why this alone is not a security
-boundary).
+`av up`, `av dev`, and the dashboard's direct `dev`/`start` scripts bind
+the dashboard to `127.0.0.1` by default. The tunnel points to a separate
+loopback listener (port `SERVER_PORT + 1`) that forwards only POST
+`/api/webhook` and POST `/api/webhook/github`. Control routes and the UI
+are unavailable through that tunnel.
 
 If you only open the dashboard at `http://localhost:PORT`, you need nothing —
 it works out of the box. Remote access requires one of:
 
 | Env var | Effect |
 |---|---|
-| `SYMPHONY_DASHBOARD_TOKEN=<token>` | Non-local requests must include `Authorization: Bearer <token>` |
-| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | Opts into remote access — **requires `SYMPHONY_DASHBOARD_TOKEN` to also be set**. If the flag is on without a token, every request (including local ones) is rejected; unauthenticated remote access is never allowed. |
+| `SYMPHONY_DASHBOARD_TOKEN=<token>` | Browser sign-in for `/api/status` and `/api/events`; CLI status/top send this token as Bearer when present in their environment. |
+| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | Requires `SYMPHONY_DASHBOARD_TOKEN` even for local requests; without it, every request is rejected. |
+| `SYMPHONY_INTERVENTION_TOKEN=<token>` | Browser sign-in for intervention. Use a separate token from the status token. |
+| `SYMPHONY_DASHBOARD_HOST=<host>` | CLI-managed dashboard bind address. Non-loopback values require both dashboard and intervention tokens. |
+| `SYMPHONY_WEBHOOK_PORT=<port>` | Override the webhook-only listener port; default is `SERVER_PORT + 1`. Point any named tunnel at this port. |
 
 `/api/intervention` (pause/resume/append_prompt/abort a live agent run) is
-gated the same way via `SYMPHONY_INTERVENTION_TOKEN` and
-`SYMPHONY_ALLOW_REMOTE_INTERVENTION=1`.
+gated by `SYMPHONY_INTERVENTION_TOKEN` and
+`SYMPHONY_ALLOW_REMOTE_INTERVENTION=1`. The browser signs in with configured
+tokens at the dashboard and receives short-lived HttpOnly, SameSite cookies.
+Browser mutation requests must include a matching `Origin` header. Do not
+place shared secrets in `NEXT_PUBLIC_*` variables.
 
-`/api/webhook` is always public — it verifies Linear's HMAC signature
-independently, so the host gate does not apply.
+`/api/webhook` and `/api/webhook/github` verify tracker signatures after
+the webhook-only listener forwards them.
+
+## Team dashboard
+
+Team mode needs `team.supabase_url`, `team.supabase_anon_key`, and
+`team.id` in `valley.yaml` or `~/.config/agent-valley/settings.yaml`.
+Run `av login` on the dashboard machine and restart the dashboard. The
+dashboard reads the saved user session on the server and queries Supabase with
+that user's access token, so the `team_members` and `ledger_events` RLS
+policies must allow that user to read the configured team. The browser receives
+only the replayed team state through `/api/team/ledger`; it never receives the
+Supabase access token or anon key.
+
+Apply `supabase/migrations/002_team_rls_identity.sql` after the initial team
+dashboard migration for existing databases. It removes recursive membership
+reads and requires new ledger event node IDs to start with the authenticated
+user UUID, followed by `:` and a nonempty machine name. `team_members.display_name`
+is for display only and does not grant node ownership. Existing username-prefixed
+events remain readable, but older running publishers cannot add new events until
+they restart with the updated node ID generator. The migration is not applied
+automatically by the dashboard. To exercise the policies against synthetic data
+in an isolated local PostgreSQL cluster, run
+`bash supabase/tests/run-team-rls-local.sh`; it exits 77 when no local server
+binary is installed.
+
+When team mode is absent, the dashboard shows the local orchestrator. A missing,
+expired, or mismatched `av login` session, denied membership, or upstream error
+keeps the local view visible and displays the cause. `av login` does not
+refresh a running dashboard's ledger publisher; restart after logging in again.

@@ -26,6 +26,7 @@ vi.mock("@/lib/metrics-singleton", () => ({
 }))
 
 const { GET: metricsGET } = await import("@/app/api/metrics/route")
+const localRequest = () => new Request("http://localhost/api/metrics", { headers: { host: "localhost" } })
 
 describe("GET /api/metrics", () => {
   beforeEach(() => {
@@ -37,8 +38,21 @@ describe("GET /api/metrics", () => {
   })
 
   test("returns 404 when endpoint is not configured", async () => {
-    const res = metricsGET()
+    const res = metricsGET(localRequest())
     expect(res.status).toBe(404)
+  })
+
+  test("requires the dashboard token before exposing metrics", () => {
+    process.env.SYMPHONY_DASHBOARD_TOKEN = "metrics-secret"
+    try {
+      expect(metricsGET(localRequest()).status).toBe(401)
+      const bearer = new Request("http://localhost/api/metrics", {
+        headers: { host: "localhost", authorization: "Bearer metrics-secret" },
+      })
+      expect(metricsGET(bearer).status).toBe(404)
+    } finally {
+      delete process.env.SYMPHONY_DASHBOARD_TOKEN
+    }
   })
 
   test("returns 404 when Prometheus is disabled", async () => {
@@ -47,7 +61,7 @@ describe("GET /api/metrics", () => {
       path: "/api/metrics",
       metrics: createPromMetrics({ enabled: false }),
     }
-    const res = metricsGET()
+    const res = metricsGET(localRequest())
     expect(res.status).toBe(404)
   })
 
@@ -56,7 +70,7 @@ describe("GET /api/metrics", () => {
     metrics.counter("av_agent_runs_total", { agent: "claude", result: "success" }).inc()
 
     mockEndpoint = { enabled: true, path: "/api/metrics", metrics }
-    const res = metricsGET()
+    const res = metricsGET(localRequest())
 
     expect(res.status).toBe(200)
     expect(res.headers.get("content-type")).toMatch(/text\/plain; version=0\.0\.4/)
@@ -77,7 +91,7 @@ describe("GET /api/metrics", () => {
     }
     mockEndpoint = { enabled: true, path: "/api/metrics", metrics: throwingMetrics }
 
-    const res = metricsGET()
+    const res = metricsGET(localRequest())
     expect(res.status).toBe(200)
     const body = await res.text()
     expect(body).toBe("")

@@ -98,6 +98,35 @@ describe("RunStatePersistence", () => {
     expect(snapshot.retryQueue[0]?.category).toBe("capability")
   })
 
+  test("pending tracker finalization round-trips before a Done retry", async () => {
+    const writer = new RunStatePersistence(TEST_STORE)
+    writer.replacePendingFinalizations([
+      {
+        issueId: "i1",
+        issueKey: "AV-1",
+        parentId: null,
+        attemptId: "a1",
+        agentType: "codex",
+        workspace: {
+          issueId: "i1",
+          path: "/ws/i1",
+          key: "AV-1",
+          branch: "feature/AV-1",
+          status: "running",
+          createdAt: "2026-09-28T00:00:00.000Z",
+        },
+        deliveryMode: "pr",
+        hasCodeChanges: true,
+        autoCommitted: false,
+        durationMs: 12,
+      },
+    ])
+    await writer.flushOrThrow()
+
+    const reader = new RunStatePersistence(TEST_STORE)
+    expect((await reader.load()).pendingFinalizations).toMatchObject([{ issueId: "i1", attemptId: "a1" }])
+  })
+
   test("a pre-classification snapshot on disk (no category key) defaults to 'infra' on load", async () => {
     await mkdir(TEST_STORE.replace(/\/[^/]+$/, ""), { recursive: true })
     await writeFile(

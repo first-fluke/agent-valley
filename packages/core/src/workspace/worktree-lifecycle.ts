@@ -9,6 +9,7 @@
  */
 
 import { spawn } from "node:child_process"
+import { lstatSync, realpathSync } from "node:fs"
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
@@ -85,6 +86,38 @@ export function repoRootOf(workspace: Workspace, fallback: string): string {
   return idx > 0 ? workspace.path.slice(0, idx) : fallback
 }
 
+/** Is this workspace backed by a private repository instead of a linked worktree? */
+export function isIsolatedGitWorkspace(workspace: Workspace): boolean {
+  try {
+    return lstatSync(`${workspace.path}/.git`).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+async function validateReusableWorkspace(workspace: Workspace, platform: NodeJS.Platform): Promise<void> {
+  if (platform === "linux" && !isIsolatedGitWorkspace(workspace)) {
+    throw new Error(
+      `Existing workspace ${workspace.path} is a linked or broken Git worktree that Linux cannot sandbox safely. ` +
+        "Preserve its changes, then recreate this issue as an isolated workspace before retrying.",
+    )
+  }
+  const top = await runCommand("git", ["rev-parse", "--show-toplevel"], { cwd: workspace.path })
+  const branch = await runCommand("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: workspace.path })
+  let sameWorkspace = false
+  try {
+    sameWorkspace = realpathSync(top.stdout.trim()) === realpathSync(workspace.path)
+  } catch {
+    // Missing or broken Git metadata is reported by the actionable error below.
+  }
+  if (top.exitCode !== 0 || !sameWorkspace || branch.exitCode !== 0 || branch.stdout.trim() !== workspace.branch) {
+    throw new Error(
+      `Existing workspace ${workspace.path} has missing Git metadata or is not on ${workspace.branch}. ` +
+        "Preserve its changes and repair the Git workspace before retrying this issue.",
+    )
+  }
+}
+
 async function removeEmptyDirectory(path: string): Promise<void> {
   try {
     const entries = await readdir(path)
@@ -124,13 +157,50 @@ async function bootstrapMetadata(workspacePath: string, issue: Issue, branch: st
   )
 }
 
-/** Create (or reuse) a git worktree under `root` for the given issue. */
-export async function createWorkspace(root: string, issue: Issue): Promise<Workspace> {
+/** Linux bwrap cannot grant a Git lockfile without exposing its sibling refs. */
+async function createIsolatedGitWorkspace(root: string, path: string, branch: string): Promise<CommandResult> {
+  const clone = await runCommand("git", ["clone", "--local", "--no-hardlinks", "--quiet", root, path], {
+    cwd: root,
+  })
+  if (clone.exitCode !== 0) return clone
+
+  const checkout = await runCommand("git", ["checkout", "-qb", branch], { cwd: path })
+  if (checkout.exitCode !== 0) return checkout
+
+  // Keep delivery pointed at the source repository's real origin, if set.
+  const upstream = await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })
+  if (upstream.exitCode === 0 && upstream.stdout.trim()) {
+    return runCommand("git", ["remote", "set-url", "origin", upstream.stdout.trim()], { cwd: path })
+  }
+  return runCommand("git", ["remote", "remove", "origin"], { cwd: path })
+}
+
+/** Create (or reuse) a workspace: linked worktree on macOS, isolated clone on Linux. */
+export async function createWorkspace(
+  root: string,
+  issue: Issue,
+  platform: NodeJS.Platform = process.platform,
+): Promise<Workspace> {
   const key = deriveKey(issue.identifier)
   const path = `${root}/${key}`
   const branch = deriveBranchName(issue.identifier, issue.title)
 
   await removeEmptyDirectory(path)
+
+  if (platform === "linux") {
+    const existing = await getWorkspace(root, issue.id)
+    if (existing) {
+      await validateReusableWorkspace(existing, platform)
+      return existing
+    }
+    const { exitCode, stderr } = await createIsolatedGitWorkspace(root, path, branch)
+    if (exitCode !== 0) {
+      throw new Error(`git isolated clone failed: ${stderr}\n  Fix: Ensure ${root} is a readable git repository`)
+    }
+    await bootstrapMetadata(path, issue, branch)
+    logger.info("workspace-manager", "Workspace created", { issueId: issue.id, workspacePath: path })
+    return { issueId: issue.id, path, key, branch, status: "idle", createdAt: new Date().toISOString() }
+  }
 
   let { exitCode, stderr } = await runCommand("git", ["worktree", "add", path, "-b", branch], { cwd: root })
 
@@ -144,6 +214,7 @@ export async function createWorkspace(root: string, issue: Issue): Promise<Works
   if (exitCode !== 0) {
     const existing = await getWorkspace(root, issue.id)
     if (existing) {
+      await validateReusableWorkspace(existing, platform)
       logger.info("workspace-manager", "Reusing existing workspace", { issueId: issue.id, workspacePath: path })
       return existing
     }
@@ -202,10 +273,12 @@ export async function saveAttempt(workspace: Workspace, attempt: RunAttempt): Pr
   await writeFile(path, JSON.stringify(attempt, null, 2), "utf-8")
 }
 
-/** Remove the git worktree and its directory. Tolerates already-removed directories. */
+/** Remove the linked worktree or isolated clone. Tolerates already-removed directories. */
 export async function cleanupWorkspace(workspace: Workspace, rootFallback: string): Promise<void> {
   const root = repoRootOf(workspace, rootFallback)
-  await runCommand("git", ["worktree", "remove", workspace.path, "--force"], { cwd: root })
+  if (!isIsolatedGitWorkspace(workspace)) {
+    await runCommand("git", ["worktree", "remove", workspace.path, "--force"], { cwd: root })
+  }
   await rm(workspace.path, { recursive: true, force: true })
 
   logger.info("workspace-manager", "Workspace cleaned up", {

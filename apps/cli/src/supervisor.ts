@@ -8,10 +8,12 @@
 import { spawn } from "node:child_process"
 import { appendFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { dashboardHost, startWebhookProxy, webhookPort } from "./webhook-proxy"
 
 const dashboardCwd = process.argv[2] ?? "."
 const port = process.argv[3] ?? "9741"
 const mode = process.argv[4] ?? "start"
+const listenHost = dashboardHost()
 const logFile = resolve(process.cwd(), ".av.log")
 
 const MAX_RESTARTS = 20
@@ -44,17 +46,17 @@ function startDashboard(): void {
   let proc: ReturnType<typeof spawn>
 
   if (mode === "start") {
-    proc = spawn("bun", ["next", "start", "-p", port], {
+    proc = spawn("bun", ["next", "start", "-p", port, "-H", listenHost], {
       cwd: dashboardCwd,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, PORT: port, HOSTNAME: "0.0.0.0" },
+      env: { ...process.env, PORT: port, HOSTNAME: listenHost },
     })
     log(`Dashboard started via next start (pid: ${proc.pid}, port: ${port})`)
   } else {
-    proc = spawn("bun", ["next", "dev", "--turbopack", "-p", port], {
+    proc = spawn("bun", ["next", "dev", "--turbopack", "-p", port, "-H", listenHost], {
       cwd: dashboardCwd,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, PORT: port, HOSTNAME: "0.0.0.0" },
+      env: { ...process.env, PORT: port, HOSTNAME: listenHost },
     })
     log(`Dashboard started via next dev (pid: ${proc.pid}, port: ${port})`)
   }
@@ -80,4 +82,12 @@ function startDashboard(): void {
 }
 
 log(`Supervisor started — port ${port}, mode ${mode}, cwd ${dashboardCwd}`)
-startDashboard()
+startWebhookProxy(port, webhookPort(port))
+  .then(() => {
+    log(`Webhook-only proxy listening on 127.0.0.1:${webhookPort(port)}`)
+    startDashboard()
+  })
+  .catch((error: unknown) => {
+    log(`Webhook proxy failed: ${String(error)}. Set SYMPHONY_WEBHOOK_PORT to an unused port.`)
+    process.exit(1)
+  })

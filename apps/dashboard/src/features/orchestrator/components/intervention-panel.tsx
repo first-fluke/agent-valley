@@ -27,7 +27,7 @@ export interface ActiveAttempt {
 const CAPS_BY_AGENT: Record<string, InterventionKind[]> = {
   claude: ["append_prompt", "abort"],
   codex: ["pause", "resume", "append_prompt", "abort"],
-  gemini: ["append_prompt", "abort"],
+  antigravity: ["append_prompt", "abort"],
 }
 
 function capabilitiesFor(agentType: string): InterventionKind[] {
@@ -103,11 +103,6 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
         const doPost =
           post ??
           (async (body: { attemptId: string; command: unknown }) => {
-            // TODO(oma-deferred): once a client-exposed intervention token
-            // mechanism lands (SYMPHONY_INTERVENTION_TOKEN, see
-            // apps/dashboard/src/lib/dashboard-auth.ts), add an
-            // `Authorization: Bearer <token>` header here. Local/localhost
-            // requests without a token continue to work by design.
             const res = await fetch("/api/intervention", {
               method: "POST",
               headers: { "Content-Type": "application/json" },

@@ -6,8 +6,8 @@
  *     /lib64, /etc, /opt, /var) plus a read-only view of $HOME, MINUS an
  *     explicit credential denylist masked out with a `--tmpfs`/`/dev/null`
  *     overlay (see "Credential denylist" below).
- *   - Read-write access to the workspace directory + a curated set of
- *     per-agent-CLI cache/config directories under $HOME (bound AFTER the
+ *   - Read-write access to the workspace, active agent CLI home, and
+ *     shared tool caches under $HOME (bound AFTER the
  *     read-only $HOME mount so they override it) + the OS tmp dir.
  *
  * Credential denylist (closes a HIGH-severity secret-exfiltration gap —
@@ -20,6 +20,8 @@
  * path" idiom bwrap/Docker both use) over:
  *   - `~/.config/agent-valley` — holds LINEAR_API_KEY + other
  *     orchestrator secrets in settings.yaml.
+ *   - `~/.agent-valley` — relay credentials and local state.
+ *   - inactive agent vendor homes — credentials unrelated to this CLI.
  *   - the project's `valley.yaml` — team webhook secret, Linear team
  *     id/uuid (only masked when it resolves under `$HOME`, i.e. is
  *     actually part of the mounted tree — see `maskCredentialPaths`).
@@ -28,18 +30,13 @@
  *     ssh-agent unix-domain socket (unaffected by filesystem
  *     confinement), not by reading private key files directly.
  *
- * This module deliberately keeps the rest of `$HOME` broadly readable
- * (rather than switching to a fully-scoped per-directory allowlist)
- * because git worktrees created by WorkspaceManager live as
- * subdirectories of `workspace.root`, while the shared `.git` metadata
- * (refs, objects, per-worktree HEAD/index under `.git/worktrees/<key>/`)
- * lives in the PARENT of the per-issue workspace path — outside
- * `req.workspacePath` itself. When `workspace.root` sits under `$HOME`
- * (a common setup), narrowing the read-only `$HOME` view to a curated
- * subdir allowlist would make ordinary `git status`/`git diff` inside the
- * worktree fail. Masking specific credential paths out of the existing
- * broad view avoids that regression while still closing the reported
- * gap. This does NOT close every credential-exposure path — cloud CLI
+ * Linux workspaces use isolated local clones: their Git index, refs,
+ * objects, and lockfiles live inside the writable workspace. A linked
+ * worktree is rejected because binding its shared ref directory writable
+ * would also expose refs owned by other issues. The rest of `$HOME` stays
+ * readable for toolchains, apart from the credential masks above. This
+ * does NOT close every credential-exposure path — the active CLI must read
+ * its own credentials, and cloud CLI
  * credential caches (e.g. `~/.aws`, `~/.config/gcloud`) and other tools'
  * dotfiles under `$HOME` remain readable; see the residual-gap note in
  * SAFETY.md.
@@ -60,7 +57,9 @@
 import { existsSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
+import { agentHomeAccess } from "./sandbox-agent-paths"
 import { resolveBinaryPath } from "./sandbox-binary"
+import { linkedWorktreeGitPaths } from "./sandbox-git"
 import type { SandboxBuildRequest, SandboxCommand } from "./sandbox-types"
 
 const READONLY_ROOTS = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/var"]
@@ -83,9 +82,19 @@ export function resetBwrapCache(): void {
   cachedPath = undefined
 }
 
-export function buildLinuxSandboxCommand(req: SandboxBuildRequest, bwrapPath = "bwrap"): SandboxCommand {
-  const home = homedir()
+export function buildLinuxSandboxCommand(
+  req: SandboxBuildRequest,
+  bwrapPath = "bwrap",
+  home = homedir(),
+): SandboxCommand {
+  if (linkedWorktreeGitPaths(req.workspacePath)) {
+    throw new Error(
+      `sessions/sandbox: Linux cannot safely mount shared Git refs for linked worktree ${req.workspacePath}. ` +
+        "Recreate this workspace with WorkspaceManager on Linux to use an isolated Git clone.",
+    )
+  }
   const tmp = tmpdir()
+  const agentPaths = agentHomeAccess(req.agentType, home)
 
   const args: string[] = ["--die-with-parent", "--unshare-pid", "--proc", "/proc", "--dev", "/dev"]
 
@@ -98,37 +107,19 @@ export function buildLinuxSandboxCommand(req: SandboxBuildRequest, bwrapPath = "
   // while the rest of $HOME stays read-only.
   if (existsSync(home)) {
     args.push("--ro-bind", home, home)
-    maskCredentialPaths(args, home)
   }
 
-  const writablePaths = [
-    req.workspacePath,
-    tmp,
-    `${home}/.claude`,
-    `${home}/.codex`,
-    `${home}/.cursor`,
-    `${home}/.grok`,
-    `${home}/.kimi-code`,
-    `${home}/.gemini`,
-    // opencode is the one agent CLI that stores its own state under
-    // `~/.local/share` and `~/.config` instead of a top-level dotdir —
-    // both are scoped to `.../opencode` specifically, not a blanket grant
-    // (see the `${home}/.config` note below).
-    `${home}/.local/share/opencode`,
-    `${home}/.config/opencode`,
-    `${home}/.cache`,
-    `${home}/.npm`,
-    `${home}/.bun`,
-  ]
+  const writablePaths = [req.workspacePath, tmp, ...agentPaths.active, `${home}/.cache`, `${home}/.npm`, `${home}/.bun`]
   // NOTE: deliberately no blanket `${home}/.config` entry here — see the
   // module docstring "Credential denylist" section. Agent CLIs this
-  // project spawns store their own config directly under `~/.config` only
-  // in opencode's case (scoped to `~/.config/opencode` above); the rest
-  // use dotdirs like `~/.claude`, `~/.codex`, or `~/.gemini`, listed
-  // above.
+  // project spawns get only their active vendor path.
   for (const p of writablePaths) {
     args.push("--bind-try", p, p)
   }
+
+  // Masks come last so even a workspace nested under a protected directory
+  // cannot expose host credentials through its later read-write bind.
+  if (existsSync(home)) maskCredentialPaths(args, home, agentPaths.inactive)
 
   args.push("--chdir", req.workspacePath)
   args.push("--")
@@ -157,8 +148,8 @@ export function buildLinuxSandboxCommand(req: SandboxBuildRequest, bwrapPath = "
  * create a bind destination inside a tree that already exists in the
  * mount namespace being built.
  */
-function maskCredentialPaths(args: string[], home: string): void {
-  const maskDirs = [`${home}/.config/agent-valley`, `${home}/.ssh`]
+function maskCredentialPaths(args: string[], home: string, inactiveAgentPaths: string[]): void {
+  const maskDirs = [`${home}/.config/agent-valley`, `${home}/.agent-valley`, `${home}/.ssh`, ...inactiveAgentPaths]
   for (const dir of maskDirs) {
     args.push("--tmpfs", dir)
   }

@@ -2,6 +2,9 @@
  * Workflow Loader tests — prompt rendering and input sanitization.
  * parseWorkflow was removed — config now comes from valley.yaml via yaml-loader.
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, test } from "vitest"
 import {
   buildRoutingGuidance,
@@ -62,6 +65,29 @@ describe("renderPrompt", () => {
     expect(result).toContain("attempt-abc")
     expect(result).toContain("0")
     expect(result).not.toContain("{{")
+  })
+
+  test("loads routing from the target workspace instead of the process directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "av-target-route-"))
+    const target = join(root, "target")
+    const wrong = join(root, "wrong")
+    const table = (skill: string) => ({
+      workflows: {},
+      skills: { [skill]: { keywords: { "*": ["target phrase"] } } },
+      informationalPatterns: {},
+      excludedWorkflows: [],
+    })
+    try {
+      for (const dir of [target, wrong]) mkdirSync(join(dir, ".agents", "hooks", "core"), { recursive: true })
+      writeFileSync(join(target, ".agents", "hooks", "core", "triggers.json"), JSON.stringify(table("oma-target")))
+      writeFileSync(join(wrong, ".agents", "hooks", "core", "triggers.json"), JSON.stringify(table("oma-wrong")))
+      const issue = makeIssue({ description: "target phrase" })
+
+      expect(renderPrompt(template, issue, target, makeAttempt(), 0)).toContain("oma-target")
+      expect(renderPrompt(template, issue, target, makeAttempt(), 0)).not.toContain("oma-wrong")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test("retry reason is rendered and sanitized", () => {

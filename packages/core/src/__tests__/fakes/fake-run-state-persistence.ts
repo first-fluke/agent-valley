@@ -5,6 +5,7 @@
 
 import type {
   PersistedAttempt,
+  PersistedFinalization,
   PersistedRetryEntry,
   RunStatePort,
   RunStateSnapshot,
@@ -14,6 +15,7 @@ export class FakeRunStatePersistence implements RunStatePort {
   /** Calls recorded for assertions. */
   public replaceActiveAttemptsCalls: PersistedAttempt[][] = []
   public replaceRetryQueueCalls: PersistedRetryEntry[][] = []
+  public replacePendingFinalizationsCalls: PersistedFinalization[][] = []
 
   private snapshot: RunStateSnapshot
 
@@ -23,6 +25,7 @@ export class FakeRunStatePersistence implements RunStatePort {
       updatedAt: "",
       activeAttempts: initial.activeAttempts ?? [],
       retryQueue: initial.retryQueue ?? [],
+      pendingFinalizations: initial.pendingFinalizations ?? [],
     }
   }
 
@@ -40,9 +43,16 @@ export class FakeRunStatePersistence implements RunStatePort {
     this.replaceRetryQueueCalls.push(entries)
   }
 
+  replacePendingFinalizations(entries: PersistedFinalization[]): void {
+    this.snapshot = { ...this.snapshot, pendingFinalizations: entries }
+    this.replacePendingFinalizationsCalls.push(entries)
+  }
+
   async flush(): Promise<void> {
     // In-memory: nothing to flush.
   }
+
+  async flushOrThrow(): Promise<void> {}
 
   /** Test helper — current in-memory snapshot. */
   current(): RunStateSnapshot {

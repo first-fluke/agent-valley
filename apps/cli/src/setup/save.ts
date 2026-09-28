@@ -70,4 +70,13 @@ export async function saveConfig(ctx: ResolvedSetupContext): Promise<void> {
     mkdirSync(ctx.workspaceRoot, { recursive: true })
     p.log.success(`Workspace directory created: ${ctx.workspaceRoot}`)
   }
+
+  p.note(
+    [
+      "Before starting work, set verify.command in valley.yaml to a check that exists in this project.",
+      "For report-only work, configure task.kind: analysis and task.report_path with {{attempt.id}} instead.",
+      "Run av doctor to confirm the completion configuration.",
+    ].join("\n"),
+    "Required completion setup",
+  )
 }

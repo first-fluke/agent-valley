@@ -3,6 +3,8 @@
  * Unit tests use an injected TriggerTable (never depend on the real
  * .agents/hooks/core/triggers.json), except the final integration test.
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { beforeEach, describe, expect, test } from "vitest"
 import {
@@ -295,6 +297,43 @@ describe("getCachedTriggerTable", () => {
     const dir = "/nonexistent/path/that/does/not/exist"
     expect(getCachedTriggerTable(dir)).toBeNull()
     expect(getCachedTriggerTable(dir)).toBeNull()
+  })
+
+  test("reloads when a table appears, changes, or becomes malformed", () => {
+    const root = mkdtempSync(join(tmpdir(), "av-trigger-"))
+    const hookDir = join(root, ".agents", "hooks", "core")
+    const path = join(hookDir, "triggers.json")
+    try {
+      expect(getCachedTriggerTable(root)).toBeNull()
+      mkdirSync(hookDir, { recursive: true })
+      writeFileSync(path, JSON.stringify(makeTable()))
+      expect(getCachedTriggerTable(root)?.workflows.debug).toBeDefined()
+      const changed = makeTable()
+      const debug = changed.workflows.debug
+      if (!debug) throw new Error("missing debug workflow fixture")
+      debug.keywords.en = ["route changed"]
+      writeFileSync(path, JSON.stringify(changed))
+      expect(getCachedTriggerTable(root)?.workflows.debug?.keywords.en).toEqual(["route changed"])
+      writeFileSync(path, "{invalid")
+      expect(getCachedTriggerTable(root)).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("rejects an unsupported schema version and malformed keyword banks", () => {
+    const root = mkdtempSync(join(tmpdir(), "av-trigger-version-"))
+    const hookDir = join(root, ".agents", "hooks", "core")
+    const path = join(hookDir, "triggers.json")
+    mkdirSync(hookDir, { recursive: true })
+    try {
+      writeFileSync(path, JSON.stringify({ ...makeTable(), schemaVersion: 2 }))
+      expect(loadTriggerTable(root)).toBeNull()
+      writeFileSync(path, JSON.stringify({ ...makeTable(), skills: { broken: { keywords: { en: "not an array" } } } }))
+      expect(loadTriggerTable(root)).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 

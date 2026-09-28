@@ -71,7 +71,7 @@ export function wireLedgerRelay(
     // narrows at runtime, not at the type level).
     if (!config.supabaseUrl || !config.supabaseAnonKey || !config.teamId || !credentials) return null
 
-    const nodeId = generateNodeId()
+    const nodeId = generateNodeId(credentials.userId)
     const publisher = new SupabaseLedgerClient(
       config.supabaseUrl,
       config.supabaseAnonKey,

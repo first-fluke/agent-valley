@@ -6,7 +6,11 @@ const SPRITE_SIZE = 32
 const AGENT_COLORS: Record<AgentType, { primary: string; secondary: string }> = {
   claude: { primary: "#E87B35", secondary: "#2D1B00" },
   codex: { primary: "#10A37F", secondary: "#1A1A2E" },
-  gemini: { primary: "#4285F4", secondary: "#A142F4" },
+  antigravity: { primary: "#4285F4", secondary: "#A142F4" },
+  cursor: { primary: "#7B61FF", secondary: "#27213A" },
+  grok: { primary: "#5C6670", secondary: "#15191D" },
+  kimi: { primary: "#4E9AA8", secondary: "#153038" },
+  opencode: { primary: "#CE8A46", secondary: "#382313" },
 }
 
 function createCanvas(): OffscreenCanvas {
@@ -88,7 +92,7 @@ function drawCodexFeatures(ctx: OffscreenCanvasRenderingContext2D) {
   ctx.fillRect(14, 0, 4, 2)
 }
 
-function drawGeminiFeatures(ctx: OffscreenCanvasRenderingContext2D) {
+function drawAntigravityFeatures(ctx: OffscreenCanvasRenderingContext2D) {
   ctx.fillStyle = "#4285F4"
   ctx.fillRect(12, 2, 4, 4)
   ctx.fillStyle = "#A142F4"
@@ -107,7 +111,7 @@ function drawDefaultSkin(ctx: OffscreenCanvasRenderingContext2D, agentType: Agen
   switch (agentType) {
     case "claude": drawClaudeFeatures(ctx); break
     case "codex": drawCodexFeatures(ctx); break
-    case "gemini": drawGeminiFeatures(ctx); break
+    case "antigravity": drawAntigravityFeatures(ctx); break
   }
 }
 

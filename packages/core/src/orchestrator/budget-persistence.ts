@@ -31,6 +31,8 @@ export interface BudgetUsageSnapshot {
   dayKey: string
   perDay: BudgetUsageCounter
   perIssue: Record<string, BudgetUsageCounter>
+  /** Attempt IDs already included in the counters; retained across restarts. */
+  recordedAttemptIds?: string[]
 }
 
 function emptySnapshot(dayKey: string): BudgetUsageSnapshot {
@@ -50,7 +52,12 @@ export interface BudgetUsagePort {
    */
   load(currentDayKey: string): Promise<BudgetUsageSnapshot>
   /** Fire-and-forget persist through a serialized write queue. */
-  save(snapshot: { dayKey: string; perDay: BudgetUsageCounter; perIssue: Record<string, BudgetUsageCounter> }): void
+  save(snapshot: {
+    dayKey: string
+    perDay: BudgetUsageCounter
+    perIssue: Record<string, BudgetUsageCounter>
+    recordedAttemptIds?: string[]
+  }): void
   /** Await any in-flight writes. Test-only convenience. */
   flush(): Promise<void>
 }
@@ -79,7 +86,16 @@ export class BudgetUsagePersistence implements BudgetUsagePort {
         perIssueCount: String(Object.keys(perIssue).length),
       })
 
-      return { version: 1, updatedAt: parsed.updatedAt ?? "", dayKey: currentDayKey, perDay, perIssue }
+      return {
+        version: 1,
+        updatedAt: parsed.updatedAt ?? "",
+        dayKey: currentDayKey,
+        perDay,
+        perIssue,
+        recordedAttemptIds: Array.isArray(parsed.recordedAttemptIds)
+          ? parsed.recordedAttemptIds.filter((id): id is string => typeof id === "string")
+          : [],
+      }
     } catch {
       // File doesn't exist (first boot) or is corrupt — start fresh. Not
       // an error: there is simply nothing to recover, matching
@@ -88,7 +104,12 @@ export class BudgetUsagePersistence implements BudgetUsagePort {
     }
   }
 
-  save(snapshot: { dayKey: string; perDay: BudgetUsageCounter; perIssue: Record<string, BudgetUsageCounter> }): void {
+  save(snapshot: {
+    dayKey: string
+    perDay: BudgetUsageCounter
+    perIssue: Record<string, BudgetUsageCounter>
+    recordedAttemptIds?: string[]
+  }): void {
     this.writeQueue = this.writeQueue
       .then(() => this.persist(snapshot))
       .catch((err) => {
@@ -100,6 +121,7 @@ export class BudgetUsagePersistence implements BudgetUsagePort {
     dayKey: string
     perDay: BudgetUsageCounter
     perIssue: Record<string, BudgetUsageCounter>
+    recordedAttemptIds?: string[]
   }): Promise<void> {
     try {
       await mkdir(dirname(this.storePath), { recursive: true })

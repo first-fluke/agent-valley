@@ -8,6 +8,11 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 5.4, § 6.7 (E27)
  */
 
+import { randomUUID } from "node:crypto"
+import { lstatSync } from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 import {
@@ -19,7 +24,7 @@ import {
   isRegeneratableLockfile,
   type WorkspaceValidationResult,
 } from "./safety-net"
-import { repoRootOf, runCommand } from "./worktree-lifecycle"
+import { isIsolatedGitWorkspace, repoRootOf, runCommand } from "./worktree-lifecycle"
 
 export interface DeliveryResult {
   ok: boolean
@@ -38,9 +43,107 @@ export interface DraftPrResult {
   url?: string
 }
 
+/** Bring a Linux clone's issue branch into the source repository for delivery. */
+async function importIsolatedBranch(workspace: Workspace, root: string): Promise<string | null> {
+  if (!isIsolatedGitWorkspace(workspace)) return null
+  const ref = `refs/heads/${workspace.branch}`
+  const importedRef = `refs/agent-valley/imports/${randomUUID().replaceAll("-", "")}`
+  // Fetch into a private ref first. Directly fetching cloneRef:sourceRef can
+  // reject after the source branch was rebased, before retry objects arrive.
+  const fetched = await runCommand("git", ["fetch", "--no-tags", workspace.path, `${ref}:${importedRef}`], {
+    cwd: root,
+  })
+  if (fetched.exitCode !== 0) {
+    return `Could not import ${workspace.branch} from isolated workspace: ${fetched.stderr.trim()}\n  Fix: Restore the issue branch before delivery.`
+  }
+
+  let temporaryWorktree: string | null = null
+  let worktreeAdded = false
+  try {
+    const imported = await runCommand("git", ["rev-parse", "--verify", importedRef], { cwd: root })
+    if (imported.exitCode !== 0) return `Could not read imported branch ${workspace.branch}.`
+    const cloneHead = imported.stdout.trim()
+    const current = await runCommand("git", ["rev-parse", "--verify", ref], { cwd: root })
+    const currentHead = current.exitCode === 0 ? current.stdout.trim() : null
+    if (!currentHead) {
+      const created = await runCommand("git", ["update-ref", ref, cloneHead, "0".repeat(40)], { cwd: root })
+      return created.exitCode === 0
+        ? null
+        : `Could not create source branch ${workspace.branch}: ${created.stderr.trim()}`
+    }
+    if (currentHead === cloneHead) return null
+    if (
+      (await runCommand("git", ["merge-base", "--is-ancestor", cloneHead, currentHead], { cwd: root })).exitCode === 0
+    ) {
+      return null
+    }
+    if (
+      (await runCommand("git", ["merge-base", "--is-ancestor", currentHead, cloneHead], { cwd: root })).exitCode === 0
+    ) {
+      const updated = await runCommand("git", ["update-ref", ref, cloneHead, currentHead], { cwd: root })
+      return updated.exitCode === 0 ? null : `Source branch ${workspace.branch} changed during import; retry delivery.`
+    }
+
+    const range = `${currentHead}...${cloneHead}`
+    const merges = await runCommand("git", ["rev-list", "--right-only", "--merges", range], { cwd: root })
+    if (merges.exitCode !== 0 || merges.stdout.trim()) {
+      return `Retry branch ${workspace.branch} contains merge commits. Resolve the diverged branch manually before delivery.`
+    }
+    const replay = await runCommand(
+      "git",
+      ["rev-list", "--reverse", "--right-only", "--cherry-pick", "--no-merges", range],
+      { cwd: root },
+    )
+    if (replay.exitCode !== 0) return `Could not compare retry commits for ${workspace.branch}: ${replay.stderr.trim()}`
+    const commits = replay.stdout.trim().split("\n").filter(Boolean)
+    if (commits.length === 0) return null
+
+    temporaryWorktree = await mkdtemp(join(tmpdir(), "av-branch-import-"))
+    const added = await runCommand("git", ["worktree", "add", "--detach", temporaryWorktree, currentHead], {
+      cwd: root,
+    })
+    if (added.exitCode !== 0) return `Could not prepare retry import for ${workspace.branch}: ${added.stderr.trim()}`
+    worktreeAdded = true
+    for (const commit of commits) {
+      const identity = await runCommand("git", ["show", "-s", "--format=%cn%x00%ce", commit], { cwd: root })
+      const [name, email] = identity.stdout.trim().split("\0")
+      if (identity.exitCode !== 0 || !name || !email)
+        return `Could not read retry commit identity for ${workspace.branch}.`
+      const picked = await runCommand("git", ["cherry-pick", commit], {
+        cwd: temporaryWorktree,
+        env: { GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email },
+      })
+      if (picked.exitCode !== 0) {
+        await runCommand("git", ["cherry-pick", "--abort"], { cwd: temporaryWorktree })
+        return `Retry commit for ${workspace.branch} conflicts with the rebased branch: ${picked.stderr.trim()}\n  Fix: Reapply the change on the current branch before delivery.`
+      }
+    }
+    const replayed = await runCommand("git", ["rev-parse", "HEAD"], { cwd: temporaryWorktree })
+    if (replayed.exitCode !== 0) return `Could not read replayed retry branch ${workspace.branch}.`
+    const updated = await runCommand("git", ["update-ref", ref, replayed.stdout.trim(), currentHead], { cwd: root })
+    return updated.exitCode === 0
+      ? null
+      : `Source branch ${workspace.branch} changed during retry import; retry delivery.`
+  } finally {
+    if (temporaryWorktree) {
+      if (worktreeAdded) await runCommand("git", ["worktree", "remove", "--force", temporaryWorktree], { cwd: root })
+      await rm(temporaryWorktree, { recursive: true, force: true })
+    }
+    await runCommand("git", ["update-ref", "-d", importedRef], { cwd: root })
+  }
+}
+
 /** Check that the feature branch has no unmerged or conflict-marker files before delivery. */
-async function validateBranchBeforeMerge(root: string, branch: string): Promise<WorkspaceValidationResult> {
-  const { stdout: unmergedOut } = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: root })
+async function validateBranchBeforeMerge(
+  root: string,
+  base: string,
+  branch: string,
+): Promise<WorkspaceValidationResult> {
+  const unmerged = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: root })
+  if (unmerged.exitCode !== 0) {
+    return { ok: false, error: `Could not inspect unmerged files: ${unmerged.stderr.trim()}` }
+  }
+  const unmergedOut = unmerged.stdout
   const unmergedFiles = unmergedOut
     .trim()
     .split("\n")
@@ -52,7 +155,11 @@ async function validateBranchBeforeMerge(root: string, branch: string): Promise<
     }
   }
 
-  const { stdout: branchOut } = await runCommand("git", ["diff", "--name-only", `main...${branch}`], { cwd: root })
+  const changed = await runCommand("git", ["diff", "--name-only", `${base}...${branch}`], { cwd: root })
+  if (changed.exitCode !== 0) {
+    return { ok: false, error: `Could not inspect ${branch} against ${base}: ${changed.stderr.trim()}` }
+  }
+  const branchOut = changed.stdout
   const changedFiles = branchOut
     .trim()
     .split("\n")
@@ -67,7 +174,7 @@ async function validateBranchBeforeMerge(root: string, branch: string): Promise<
     })
   }
 
-  const checkResult = await runCommand("git", ["diff", "--check", `main...${branch}`], { cwd: root })
+  const checkResult = await runCommand("git", ["diff", "--check", `${base}...${branch}`], { cwd: root })
   if (checkResult.exitCode !== 0) {
     const details = (checkResult.stdout || checkResult.stderr).trim()
     return {
@@ -79,6 +186,79 @@ async function validateBranchBeforeMerge(root: string, branch: string): Promise<
   }
 
   return { ok: true }
+}
+
+function gitFailure(action: string, result: { stderr: string; stdout: string }, fix: string): DeliveryResult {
+  return {
+    ok: false,
+    error: `${action} failed: ${(result.stderr || result.stdout).trim() || "Git returned an error."}\n  Fix: ${fix}`,
+  }
+}
+
+/** A linked issue branch is checked out in its own worktree and must be rebased there. */
+function linkedWorktreePath(workspace: Workspace): string | null {
+  try {
+    return lstatSync(`${workspace.path}/.git`).isFile() ? workspace.path : null
+  } catch {
+    return null
+  }
+}
+
+/** Resolve a stable delivery target without treating an arbitrary checkout as the base. */
+async function resolveDeliveryBase(
+  root: string,
+  issueBranch: string,
+  hasRemote: boolean,
+): Promise<{ base: string; currentBranch: string } | null> {
+  const localHead = await runCommand("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: root })
+  const currentBranch = localHead.exitCode === 0 ? localHead.stdout.trim() : ""
+  let base = ""
+  // Operators can pin the target in this repository's .git/config with:
+  // git config --local agent-valley.baseBranch trunk
+  const configured = await runCommand("git", ["config", "--local", "--get", "agent-valley.baseBranch"], {
+    cwd: root,
+  })
+  if (configured.exitCode === 0 && configured.stdout.trim()) {
+    base = configured.stdout.trim()
+  } else if (hasRemote) {
+    const remoteHead = await runCommand("git", ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], {
+      cwd: root,
+    })
+    if (remoteHead.exitCode === 0 && remoteHead.stdout.trim().startsWith("origin/")) {
+      base = remoteHead.stdout.trim().slice("origin/".length)
+    }
+  }
+  if (!base && hasRemote) {
+    // A single tracked remote branch can identify the target when origin/HEAD
+    // is absent. The current checkout is never evidence by itself.
+    const tracked = await runCommand("git", ["for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin"], {
+      cwd: root,
+    })
+    if (tracked.exitCode === 0) {
+      const candidates = tracked.stdout
+        .trim()
+        .split("\n")
+        .filter((name) => name && name !== "HEAD" && name !== issueBranch)
+      if (candidates.length === 1) base = candidates[0] as string
+    }
+  }
+  if (!base) {
+    // A repository with only one non-issue local branch has a single possible
+    // target. Multiple candidates require an explicit repo-local setting.
+    const local = await runCommand("git", ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads"], {
+      cwd: root,
+    })
+    if (local.exitCode === 0) {
+      const candidates = local.stdout
+        .trim()
+        .split("\n")
+        .filter((name) => name && name !== issueBranch)
+      if (candidates.length === 1) base = candidates[0] as string
+    }
+  }
+  if (!base || base === issueBranch) return null
+  const exists = await runCommand("git", ["show-ref", "--verify", "--quiet", `refs/heads/${base}`], { cwd: root })
+  return exists.exitCode === 0 ? { base, currentBranch } : null
 }
 
 /**
@@ -157,7 +337,8 @@ async function autoResolveRebaseConflicts(root: string, branch: string): Promise
 }
 
 /**
- * Rebase the feature branch onto main, fast-forward merge, and push. Retries up to 3 times on push rejection.
+ * Rebase the issue branch onto the repository base, merge, then push when an
+ * origin exists. A rejected push leaves local commits intact for a safe retry.
  *
  * `opts.verified` is NOT the enforcement point for the verification gate.
  * The only current caller (`completion-handler.ts`) never passes `opts` at
@@ -187,113 +368,141 @@ export async function mergeAndPush(
 
   const root = repoRootOf(workspace, rootFallback)
   const branch = workspace.branch
-  const maxAttempts = 3
 
   const hasRemote = (await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })).exitCode === 0
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    // 1. Update main to latest
-    if (hasRemote) {
-      await runCommand("git", ["checkout", "main"], { cwd: root })
-      await runCommand("git", ["pull", "--ff-only", "origin", "main"], { cwd: root })
+  const resolution = await resolveDeliveryBase(root, branch, hasRemote)
+  if (!resolution) {
+    return {
+      ok: false,
+      error: `Could not identify the repository base branch for ${branch}.\n  Fix: Set origin/HEAD or run git config --local agent-valley.baseBranch <base-branch> in the source repository, then retry delivery.`,
     }
+  }
+  const { base, currentBranch } = resolution
 
-    // 2. Check if branch has any commits ahead of main
-    const { exitCode: diffExit } = await runCommand("git", ["diff", "--quiet", `main...${branch}`], { cwd: root })
-    if (diffExit === 0) {
-      logger.info("workspace-manager", "No changes to merge", { branch })
-      return { ok: true }
-    }
+  const importError = await importIsolatedBranch(workspace, root)
+  if (importError) return { ok: false, error: importError }
 
-    const preRebaseValidation = await validateBranchBeforeMerge(root, branch)
-    if (!preRebaseValidation.ok) {
-      logger.error("workspace-manager", "Branch validation failed before merge delivery", {
-        branch,
-        error: preRebaseValidation.error,
-      })
-      return { ok: false, error: preRebaseValidation.error }
-    }
-
-    // 3. Rebase feature branch onto latest main.
-    //    This puts agent's work on top of all other agents' merged work.
-    //    If conflict: agent's code adapts to main, not the other way around.
-    const { exitCode: rebaseExit, stderr: rebaseErr } = await runCommand("git", ["rebase", "main", branch], {
-      cwd: root,
-    })
-
-    if (rebaseExit !== 0) {
-      // rerere might resolve it
-      const { exitCode: conflictCheck } = await runCommand("git", ["diff", "--check"], { cwd: root })
-      if (conflictCheck !== 0) {
-        const resolved = await autoResolveRebaseConflicts(root, branch)
-        if (!resolved.ok) {
-          await runCommand("git", ["rebase", "--abort"], { cwd: root })
-          logger.error("workspace-manager", "Rebase failed with unresolved conflicts", {
-            branch,
-            error: resolved.error ?? rebaseErr,
-            retryable: resolved.retryable ?? false,
-          })
-          return {
-            ok: false,
-            error: resolved.error ?? `Rebase conflict on ${branch}: ${rebaseErr}`,
-            retryable: resolved.retryable,
-            retryPrompt: resolved.retryPrompt,
-          }
-        }
-      } else {
-        // rerere resolved — continue rebase
-        await runCommand("git", ["add", "."], { cwd: root })
-        await runCommand("git", ["rebase", "--continue"], { cwd: root, env: { ...process.env, GIT_EDITOR: "true" } })
-      }
-    }
-
-    const postRebaseValidation = await validateBranchBeforeMerge(root, branch)
-    if (!postRebaseValidation.ok) {
-      logger.error("workspace-manager", "Branch validation failed after rebase", {
-        branch,
-        error: postRebaseValidation.error,
-      })
-      return { ok: false, error: postRebaseValidation.error }
-    }
-
-    // 4. Fast-forward merge into main (guaranteed clean after rebase)
-    await runCommand("git", ["checkout", "main"], { cwd: root })
-    const { exitCode: mergeExit } = await runCommand("git", ["merge", "--ff-only", branch], { cwd: root })
-    if (mergeExit !== 0) {
-      logger.warn("workspace-manager", "ff-only merge failed, falling back to regular merge", { branch })
-      await runCommand("git", ["merge", branch, "--no-edit"], { cwd: root })
-    }
-
-    // 5. Push main
-    if (hasRemote) {
-      const { exitCode: pushExit, stderr: pushErr } = await runCommand("git", ["push", "origin", "main"], {
-        cwd: root,
-      })
-      if (pushExit !== 0) {
-        if (attempt < maxAttempts) {
-          logger.warn("workspace-manager", `Push rejected, retrying (${attempt}/${maxAttempts})`, { branch })
-          await runCommand("git", ["reset", "--hard", "origin/main"], { cwd: root })
-          continue
-        }
-        logger.error("workspace-manager", "Push failed after retries", { error: pushErr })
-        return { ok: false, error: `Push failed: ${pushErr}` }
-      }
-    }
-
-    // 6. Delete the feature branch
-    await runCommand("git", ["branch", "-D", branch], { cwd: root })
-
-    logger.info("workspace-manager", "Merged and pushed", { branch })
-    return { ok: true }
+  if (hasRemote || currentBranch !== base) {
+    const checkout = await runCommand("git", ["checkout", base], { cwd: root })
+    if (checkout.exitCode !== 0)
+      return gitFailure(
+        `Checkout of ${base}`,
+        checkout,
+        "Preserve local changes, then check out the base branch and retry.",
+      )
   }
 
-  return { ok: false, error: `Merge+push failed after ${maxAttempts} attempts` }
+  if (hasRemote) {
+    const pull = await runCommand("git", ["pull", "--ff-only", "origin", base], { cwd: root })
+    if (pull.exitCode !== 0)
+      return gitFailure(`Update of ${base}`, pull, "Reconcile the local and remote base branches before retrying.")
+  }
+
+  const diff = await runCommand("git", ["diff", "--quiet", `${base}...${branch}`], { cwd: root })
+  if (diff.exitCode !== 0 && diff.exitCode !== 1)
+    return gitFailure(`Diff of ${branch} against ${base}`, diff, "Restore the issue and base branches before retrying.")
+
+  const integrated = await runCommand("git", ["merge-base", "--is-ancestor", branch, base], { cwd: root })
+  if (integrated.exitCode > 1 || integrated.exitCode < 0)
+    return gitFailure(`Integration check for ${branch}`, integrated, "Restore the issue branch before retrying.")
+
+  if (integrated.exitCode !== 0) {
+    const preRebaseValidation = await validateBranchBeforeMerge(root, base, branch)
+    if (!preRebaseValidation.ok) return { ok: false, error: preRebaseValidation.error }
+
+    const linkedPath = linkedWorktreePath(workspace)
+    const rebaseCwd = linkedPath ?? root
+    if (linkedPath) {
+      const checkedOut = await runCommand("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: linkedPath })
+      if (checkedOut.exitCode !== 0 || checkedOut.stdout.trim() !== branch)
+        return {
+          ok: false,
+          error: `Issue worktree is not on ${branch}.\n  Fix: Restore its issue branch before retrying delivery.`,
+        }
+    }
+    const rebase = await runCommand("git", linkedPath ? ["rebase", base] : ["rebase", base, branch], {
+      cwd: rebaseCwd,
+    })
+    if (rebase.exitCode !== 0) {
+      await runCommand("git", ["diff", "--check"], { cwd: rebaseCwd })
+      const conflict = await autoResolveRebaseConflicts(rebaseCwd, branch)
+      const abort = await runCommand("git", ["rebase", "--abort"], { cwd: rebaseCwd })
+      if (abort.exitCode !== 0)
+        return gitFailure(
+          `Abort of failed rebase for ${branch}`,
+          abort,
+          "Resolve the repository rebase state manually.",
+        )
+      return {
+        ok: false,
+        error: conflict.error ?? `Rebase of ${branch} onto ${base} failed: ${rebase.stderr.trim()}`,
+        retryable: conflict.retryable,
+        retryPrompt: conflict.retryPrompt,
+      }
+    }
+
+    const postRebaseValidation = await validateBranchBeforeMerge(root, base, branch)
+    if (!postRebaseValidation.ok) return { ok: false, error: postRebaseValidation.error }
+
+    const backToBase = await runCommand("git", ["checkout", base], { cwd: root })
+    if (backToBase.exitCode !== 0)
+      return gitFailure(
+        `Checkout of ${base} after rebase`,
+        backToBase,
+        "Preserve the rebased branch and repair the checkout before retrying.",
+      )
+
+    const fastForward = await runCommand("git", ["merge", "--ff-only", branch], { cwd: root })
+    if (fastForward.exitCode !== 0) {
+      const merged = await runCommand("git", ["merge", branch, "--no-edit"], { cwd: root })
+      if (merged.exitCode !== 0) {
+        const abort = await runCommand("git", ["merge", "--abort"], { cwd: root })
+        const fix =
+          abort.exitCode === 0
+            ? "Resolve the base/issue conflict before retrying; both branches remain available."
+            : "Resolve the repository merge state manually; both branches remain available."
+        return gitFailure(`Merge of ${branch} into ${base}`, merged, fix)
+      }
+    }
+
+    const verified = await runCommand("git", ["merge-base", "--is-ancestor", branch, base], { cwd: root })
+    if (verified.exitCode !== 0)
+      return gitFailure(
+        `Final integration check for ${branch}`,
+        verified,
+        "Inspect both branches before retrying delivery.",
+      )
+  }
+
+  if (hasRemote) {
+    const pushed = await runCommand("git", ["push", "origin", base], { cwd: root })
+    if (pushed.exitCode !== 0)
+      return gitFailure(
+        `Push of ${base}`,
+        pushed,
+        "Keep the local commits and reconcile the remote branch before retrying; no reset was run.",
+      )
+  }
+
+  const cleanup = await runCommand("git", ["branch", "-d", branch], { cwd: root })
+  if (cleanup.exitCode !== 0) {
+    logger.warn("workspace-manager", "Delivery succeeded but issue branch cleanup was skipped", {
+      branch,
+      base,
+      error: cleanup.stderr.trim(),
+    })
+  }
+  logger.info("workspace-manager", "Delivered branch", { branch, base, pushed: hasRemote })
+  return { ok: true }
 }
 
 /** Push the feature branch to origin. Returns ok:true silently when no remote is configured. */
 export async function pushBranch(workspace: Workspace, rootFallback: string): Promise<PushResult> {
   const root = repoRootOf(workspace, rootFallback)
   const branch = workspace.branch
+
+  const importError = await importIsolatedBranch(workspace, root)
+  if (importError) return { ok: false, error: importError }
 
   const hasRemote = (await runCommand("git", ["remote", "get-url", "origin"], { cwd: root })).exitCode === 0
   if (!hasRemote) return { ok: true }
@@ -316,6 +525,12 @@ export async function createDraftPR(
 ): Promise<DraftPrResult> {
   const root = repoRootOf(workspace, rootFallback)
   const branch = workspace.branch
+
+  const importError = await importIsolatedBranch(workspace, root)
+  if (importError) {
+    logger.warn("workspace-manager", "Draft PR branch import failed", { branch, error: importError })
+    return { created: false }
+  }
 
   const { stdout: existing } = await runCommand(
     "gh",

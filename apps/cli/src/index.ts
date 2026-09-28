@@ -18,7 +18,9 @@ import { program } from "commander"
 import pc from "picocolors"
 import { registerDoctorCommand } from "./doctor"
 import { registerLinearWebhook } from "./linear-webhook-register"
+import { readStatus } from "./status-client"
 import { spawnTunnel, type TunnelHandle, type TunnelLogger } from "./tunnel"
+import { dashboardHost, startWebhookProxy, webhookPort } from "./webhook-proxy"
 
 /** Project root = cwd where user runs `bunx av` */
 const ROOT = process.cwd()
@@ -128,6 +130,7 @@ program
   .description("Start dashboard + orchestrator + ngrok (background daemon)")
   .action(async () => {
     ensureConfig()
+    dashboardHost()
 
     // Check if already running
     const existing = readPids()
@@ -138,6 +141,7 @@ program
     }
 
     const port = process.env.SERVER_PORT ?? "9741"
+    const publicPort = webhookPort(port)
     const dashboardCwd = resolve(ROOT, "apps/dashboard")
     const supervisorScript = resolve(import.meta.dirname, "supervisor.js")
 
@@ -158,7 +162,7 @@ program
     dashProc.unref()
 
     // Start tunnel (ngrok / cloudflared / none — from valley.yaml)
-    const tunnel = startTunnel(port)
+    const tunnel = startTunnel(publicPort)
     tunnel.child?.unref()
 
     // Write PID file
@@ -233,15 +237,18 @@ program
   .description("Start in foreground (with file watching + auto-restart)")
   .action(async () => {
     ensureConfig()
+    const listenHost = dashboardHost()
 
     const port = process.env.SERVER_PORT ?? "9741"
+    const publicPort = webhookPort(port)
     let dashProc: ChildProcess | null = null
     let shuttingDown = false
 
     const startDashboard = () => {
-      dashProc = spawn("bun", ["run", "dev"], {
+      dashProc = spawn("bun", ["next", "dev", "--turbopack", "-p", port, "-H", listenHost], {
         cwd: resolve(ROOT, "apps/dashboard"),
         stdio: "inherit",
+        env: { ...process.env, HOSTNAME: listenHost },
       })
       console.log(pc.green(`▶ Dashboard started (pid: ${dashProc.pid}) → http://localhost:${port}`))
 
@@ -252,10 +259,11 @@ program
       })
     }
 
+    const webhookProxy = await startWebhookProxy(port, publicPort)
     startDashboard()
 
     // tunnel (ngrok / cloudflared / none — from valley.yaml)
-    const tunnel = startTunnel(port)
+    const tunnel = startTunnel(publicPort)
     tunnel.ready.then((url) => {
       if (url) void registerLinearWebhook(ROOT, url)
     })
@@ -280,6 +288,7 @@ program
       watcher.close()
       dashProc?.kill()
       tunnel.kill()
+      webhookProxy.close()
       process.exit(0)
     }
 
@@ -333,11 +342,10 @@ program
 
     // Orchestrator status
     try {
-      const res = await fetch(`http://localhost:${port}/api/status`)
-      const data = await res.json()
+      const data = await readStatus(port)
       console.log(JSON.stringify(data, null, 2))
-    } catch {
-      console.log(pc.red(`Server is not responding on port ${port}`))
+    } catch (error) {
+      console.log(pc.red(error instanceof Error ? error.message : `Server is not responding on port ${port}`))
     }
   })
 
@@ -373,8 +381,7 @@ program
 
     const render = async () => {
       try {
-        const res = await fetch(`http://localhost:${port}/api/status`)
-        const d = (await res.json()) as Record<string, unknown>
+        const d = await readStatus(port)
         const workspaces = (d.activeWorkspaces as Array<Record<string, unknown>>) ?? []
         const config = (d.config as Record<string, unknown>) ?? {}
         const waiting = (d.waitingIssues as number) ?? 0
@@ -423,9 +430,9 @@ program
 
         console.log()
         console.log(pc.dim("  Press Ctrl+C to exit"))
-      } catch {
+      } catch (error) {
         process.stdout.write("\x1b[2J\x1b[H")
-        console.log(pc.red("  Server not responding. Start with: av up"))
+        console.log(pc.red(error instanceof Error ? error.message : "Server not responding. Start with: av up"))
         console.log(pc.dim("  Press Ctrl+C to exit"))
       }
     }

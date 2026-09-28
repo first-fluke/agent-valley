@@ -61,6 +61,8 @@ export interface AgentError {
   exitCode?: number
   /** Orchestrator uses this to decide whether to retry */
   recoverable: boolean
+  /** Usage observed before a failed or cancelled run, when the adapter has it. */
+  tokenUsage?: RunResult["tokenUsage"]
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

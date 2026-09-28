@@ -79,18 +79,21 @@ prompt: |
 #     - label: "scope:frontend"
 #       workspace_root: /path/to/frontend-repo
 
-# ── Verification Gate (optional) ───────────────────────────────────────
-# Runs the project's own test/lint/typecheck command inside the agent's
-# worktree before delivery (merge/PR) and before the issue transitions to
-# Done. "Done" without this block means only that the agent process exited
-# without error — no test/lint/typecheck is run. On failure, the agent gets
-# another attempt through the existing retry queue (agent.max_retries) with
-# the captured failure output as context; once retries are exhausted the
-# issue is cancelled with an actionable comment instead of being merged.
-# Omit this block to disable the gate (pre-gate behavior, unchanged).
+# ── Verification Gate (required for code tasks) ────────────────────────
+# Set this to the target project's deterministic test/lint/typecheck command.
+# Code tasks cannot transition to Done without a configured passing check.
+# On failure, the agent gets another attempt through the retry queue; once
+# retries are exhausted, the issue is cancelled rather than delivered.
+# Replace this example with commands that exist in the target repository.
 # verify:
 #   command: "bun run typecheck && bun test"  # any shell command; non-zero exit = fail
 #   timeout_sec: 600                          # kill the command after N seconds (default 600)
+
+# For report-only work, choose analysis instead of the default code task.
+# The report path must be inside the worktree and include {{attempt.id}}.
+# task:
+#   kind: analysis
+#   report_path: .agents/results/analysis-{{attempt.id}}.md
 
 # ── Score-Based Routing (optional) ───────────────────────────────────
 # scoring:

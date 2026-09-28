@@ -33,7 +33,9 @@ export interface PushResult {
 }
 
 export interface DraftPrResult {
+  /** False when a PR already existed or creation failed. Check url to confirm delivery. */
   created: boolean
+  /** URL of either the newly created PR or the existing PR. Absent means delivery is unconfirmed. */
   url?: string
 }
 

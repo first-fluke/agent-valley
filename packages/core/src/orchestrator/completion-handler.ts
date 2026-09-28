@@ -1,8 +1,3 @@
-/**
- * Completion Handler — Post-agent-completion logic extracted from Orchestrator.
- * Safety-net (auto-commit), verification gate, delivery (merge/pr), and exit assessment.
- */
-
 import type { ResolvedRoute } from "../config/routing"
 import type { Config } from "../config/yaml-loader"
 import type { Issue, RetryCategory, RunAttempt, Workspace } from "../domain/models"
@@ -11,10 +6,15 @@ import type { WorkspaceGateway } from "../domain/ports/workspace"
 import type { ObservabilityHooks } from "../observability/hooks"
 import { createNoopObservabilityHooks } from "../observability/hooks"
 import { logger } from "../observability/logger"
+import { type OmaEvidenceRequest, type OmaEvidenceResult, validateOmaEvidence } from "../oma/receipt-adapter"
 import type { RunCallbacks } from "./agent-runner"
+import { validateAnalysisArtifact } from "./analysis-artifact"
 import type { BudgetService } from "./budget-service"
+import { handleAgentFailure } from "./completion-error"
+import { recordBudgetUsage } from "./completion-usage"
 import type { DagScheduler } from "./dag-scheduler"
-import { buildParentSummary, buildWorkSummary } from "./helpers"
+import { buildWorkSummary } from "./helpers"
+import type { PersistedFinalization } from "./persistence/run-state-store"
 import { buildVerificationFailurePrompt, resolveVerifyCommand, runVerificationGate } from "./verification-gate"
 
 export interface CompletionDeps {
@@ -24,7 +24,7 @@ export interface CompletionDeps {
   dagScheduler: DagScheduler
   /** Update orchestrator state on completion/failure. Orchestrator remains sole state authority. */
   cleanupState: (issueId: string, status: "done" | "failed") => void
-  saveAttempt: (workspace: Workspace, attempt: RunAttempt) => void
+  saveAttempt: (workspace: Workspace, attempt: RunAttempt) => void | Promise<void>
   /** `category` (see `RetryCategory`) drives RetryQueue's per-category max-attempts policy. Defaults to "infra" when omitted. */
   addRetry: (issueId: string, attemptCount: number, error: string, category?: RetryCategory) => boolean
   emitEvent: (event: string, payload: Record<string, unknown>) => void
@@ -32,19 +32,18 @@ export interface CompletionDeps {
   triggerUnblocked: (issueIds: string[]) => Promise<void>
   /** Observability hooks (OTel + Prom). Defaults to no-op when omitted. */
   observability?: ObservabilityHooks
-  /**
-   * Budget service for post-run token / USD accumulation. When omitted,
-   * the completion handler skips the `recordUsage` hop (useful for unit
-   * tests that do not exercise budget wiring). Reference: design § 4.5,
-   * § 6.4 (E19).
-   */
   budget?: BudgetService
+  /** Additional operator evidence gate for configured analysis tasks. */
+  assessNoCodeOutcome?: (issue: Issue, attempt: RunAttempt) => Promise<boolean> | boolean
+  omaEvidence?: (request: OmaEvidenceRequest) => OmaEvidenceResult | Promise<OmaEvidenceResult>
+  finalizeDelivered: (record: PersistedFinalization) => Promise<void>
 }
 
 interface WorkspaceFailure {
   error: string
   retryable?: boolean
   retryPrompt?: string
+  category?: RetryCategory
 }
 
 export function createCompletionCallbacks(
@@ -55,7 +54,16 @@ export function createCompletionCallbacks(
   route: ResolvedRoute,
 ): RunCallbacks {
   const { config, workspace: wsGateway, tracker } = deps
+  const task = route.task ?? config.task ?? { kind: "code" }
   const observability = deps.observability ?? createNoopObservabilityHooks()
+  let handled = false
+  const saveAttempt = async (result: RunAttempt): Promise<void> => {
+    try {
+      await deps.saveAttempt(workspace, result)
+    } catch (err) {
+      logger.error("completion", "Failed to persist run attempt", { attemptId: result.id, error: String(err) })
+    }
+  }
 
   const handleWorkspaceFailure = async (
     failure: WorkspaceFailure,
@@ -92,6 +100,7 @@ export function createCompletionCallbacks(
       if (!retryAdded) {
         try {
           await tracker.updateIssueState(issue.id, config.workflowStates.cancelled)
+          deps.dagScheduler.updateNodeStatus(issue.id, "cancelled")
         } catch (err) {
           logger.error("completion", "Failed to transition retry-exhausted issue state", {
             issueId: issue.id,
@@ -115,6 +124,7 @@ export function createCompletionCallbacks(
     }
     try {
       await tracker.updateIssueState(issue.id, config.workflowStates.cancelled)
+      deps.dagScheduler.updateNodeStatus(issue.id, "cancelled")
     } catch (err) {
       logger.error("completion", "Failed to transition blocked issue state", {
         issueId: issue.id,
@@ -127,19 +137,60 @@ export function createCompletionCallbacks(
 
   return {
     onComplete: async (completedAttempt) => {
-      deps.cleanupState(issue.id, "done")
-      deps.saveAttempt(workspace, completedAttempt)
+      if (handled) return
+      handled = true
+      let attemptRecorded = false
+      const recordCompletedAttempt = async (): Promise<void> => {
+        if (attemptRecorded) return
+        attemptRecorded = true
+        await recordBudgetUsage(deps.budget, completedAttempt, issue.id)
+        await saveAttempt(completedAttempt)
+      }
+      // In strict mode, receipt validation must run before attempt metadata
+      // or budget persistence can alter the fingerprinted worktree.
+      if (config.oma?.mode !== "strict") await recordCompletedAttempt()
 
       // ── Safety net: detect and rescue uncommitted agent work ──
       let autoCommitted = false
       let hasCodeChanges = false
+      let verifiedAnalysis = false
       let autoCommitBlockedFailure: WorkspaceFailure | null = null
 
       try {
         const unfinished = await wsGateway.detectUnfinishedWork(workspace)
         hasCodeChanges = unfinished.hasCodeChanges
 
-        if (unfinished.hasUncommittedChanges) {
+        if (config.oma?.mode === "strict") {
+          if (unfinished.hasUncommittedChanges) {
+            autoCommitBlockedFailure = {
+              error: "Strict OMA completion requires committed work before receipt verification.",
+              retryable: true,
+              category: "capability",
+            }
+          } else {
+            const evidence = await (deps.omaEvidence ?? validateOmaEvidence)({
+              issue,
+              attempt: completedAttempt,
+              workspace,
+              agentId: route.agentType,
+              verifyCommand: resolveVerifyCommand(config, route) ?? "",
+              kind: task.kind,
+              reportPath: task.kind === "analysis" ? task.reportPath : undefined,
+            })
+            if (!evidence.ok) {
+              autoCommitBlockedFailure = {
+                error: `OMA completion evidence rejected: ${evidence.reason ?? "unknown validation failure"}`,
+                retryable: true,
+                category: "capability",
+              }
+            } else {
+              verifiedAnalysis = !hasCodeChanges
+            }
+          }
+          await recordCompletedAttempt()
+        }
+
+        if (unfinished.hasUncommittedChanges && !autoCommitBlockedFailure) {
           const commitResult = await wsGateway.autoCommit(workspace)
           autoCommitted = commitResult.ok
           if (autoCommitted) {
@@ -158,23 +209,43 @@ export function createCompletionCallbacks(
           }
         }
       } catch (err) {
-        logger.warn("completion", "Safety-net check failed", {
+        await recordCompletedAttempt()
+        logger.error("completion", "Safety-net check failed", {
           issueId: issue.id,
           error: String(err),
         })
+        autoCommitBlockedFailure = { error: `Could not inspect unfinished work: ${String(err)}`, retryable: true }
       }
 
       if (autoCommitBlockedFailure) {
+        const evidenceFailure = autoCommitBlockedFailure.category === "capability"
         await handleWorkspaceFailure(autoCommitBlockedFailure, {
-          retryComment:
-            "Symphony: Auto-commit blocked by regeneratable lockfile conflict — retrying with repair instructions.",
-          manualComment: "Symphony: Auto-commit blocked — manual resolution required",
-          category: "infra", // regeneratable lockfile conflict — environmental, not agent capability
+          retryComment: evidenceFailure
+            ? "Symphony: OMA completion evidence rejected — retrying with repair instructions."
+            : "Symphony: Auto-commit blocked by regeneratable lockfile conflict — retrying with repair instructions.",
+          manualComment: evidenceFailure
+            ? "Symphony: OMA completion evidence rejected — manual resolution required"
+            : "Symphony: Auto-commit blocked — manual resolution required",
+          category: autoCommitBlockedFailure.category ?? "infra",
         })
         return
       }
 
-      // Get diff stat after auto-commit
+      if (task.kind === "analysis" && hasCodeChanges) {
+        await handleWorkspaceFailure(
+          {
+            error: "Analysis task produced code changes; configure task.kind: code in valley.yaml for code delivery.",
+            retryable: true,
+          },
+          {
+            retryComment: "Symphony: Task kind and output differ.",
+            manualComment: "Symphony: Task kind and output differ.",
+            category: "capability",
+          },
+        )
+        return
+      }
+
       let diffStat: string | null = null
       if (hasCodeChanges) {
         try {
@@ -184,7 +255,6 @@ export function createCompletionCallbacks(
         }
       }
 
-      // ── Work summary ──
       try {
         const summary = buildWorkSummary(completedAttempt, { autoCommitted, diffStat })
         await tracker.addIssueComment(issue.id, summary)
@@ -195,12 +265,25 @@ export function createCompletionCallbacks(
         })
       }
 
-      // ── Verification gate ── Runs verify_command in the worktree before delivery/Done.
-      // No-op when unconfigured. On failure, retried via the queue (category "verification");
-      // exhaustion falls through to the shared cancel-with-comment path below.
-      if (hasCodeChanges) {
+      // ── Verification gate ── Runs verify_command before delivery/Done when
+      // OMA strict mode has not already validated the same pinned check.
+      if (hasCodeChanges && config.oma?.mode !== "strict") {
         const verifyCommand = resolveVerifyCommand(config, route)
-        if (verifyCommand) {
+        if (!verifyCommand) {
+          await handleWorkspaceFailure(
+            {
+              error: "Code completion requires verify.command or routing.rules[].verify_command in valley.yaml.",
+              retryable: true,
+            },
+            {
+              retryComment: "Symphony: Verification is not configured.",
+              manualComment: "Symphony: Configure verification before delivery.",
+              category: "verification",
+            },
+          )
+          return
+        }
+        {
           const gateResult = await runVerificationGate(workspace, verifyCommand, {
             timeoutSec: config.verify?.timeoutSec,
           })
@@ -230,18 +313,17 @@ export function createCompletionCallbacks(
             issueId: issue.id,
             command: verifyCommand,
           })
-        } else {
-          logger.debug(
-            "completion",
-            `No verify_command configured — verification gate skipped for ${issue.identifier}`,
-            { issueId: issue.id },
-          )
         }
       }
 
       // ── Delivery ──
-      if (route.deliveryMode === "merge") {
-        const mergeResult = await wsGateway.mergeAndPush(workspace)
+      if (route.deliveryMode === "merge" && hasCodeChanges) {
+        let mergeResult: Awaited<ReturnType<WorkspaceGateway["mergeAndPush"]>>
+        try {
+          mergeResult = await wsGateway.mergeAndPush(workspace)
+        } catch (err) {
+          mergeResult = { ok: false, error: `Merge delivery failed: ${String(err)}`, retryable: true }
+        }
         if (!mergeResult.ok) {
           logger.error("completion", `Merge failed for ${issue.identifier}`, {
             error: mergeResult.error,
@@ -262,42 +344,72 @@ export function createCompletionCallbacks(
           )
           return
         }
-
-        try {
-          await wsGateway.cleanup(workspace)
-        } catch (err) {
-          logger.warn("completion", "Worktree cleanup failed", {
-            issueId: issue.id,
-            error: String(err),
-          })
-        }
       } else if (hasCodeChanges) {
-        // PR mode: push branch + safety-net draft PR creation
-        try {
-          await wsGateway.pushBranch(workspace)
-          // Safety-net: create draft PR if agent didn't
-          const prResult = await wsGateway.createDraftPR(workspace, {
-            title: `${issue.identifier}: ${issue.title}`,
-            body: completedAttempt.agentOutput
-              ? `## Summary\n${completedAttempt.agentOutput.slice(0, 2000)}`
-              : `Automated PR for ${issue.identifier}`,
-          })
-          if (prResult.created) {
-            logger.info("completion", `Safety-net draft PR created for ${issue.identifier}`, { url: prResult.url })
+        // Retry only the failed delivery step. A successful push is not repeated
+        // when PR creation or URL confirmation fails.
+        let pushed = false
+        let prUrl: string | undefined
+        let deliveryError = "PR delivery was not confirmed"
+        for (let deliveryAttempt = 0; deliveryAttempt < 3 && !prUrl; deliveryAttempt++) {
+          if (!pushed) {
+            try {
+              const pushResult = await wsGateway.pushBranch(workspace)
+              pushed = pushResult.ok
+              if (!pushed) {
+                deliveryError = pushResult.error ?? "Branch push failed"
+                continue
+              }
+            } catch (err) {
+              deliveryError = `Branch push failed: ${String(err)}`
+              continue
+            }
           }
-        } catch (err) {
-          logger.warn("completion", "Branch push or PR creation failed in PR mode", {
-            issueId: issue.id,
-            error: String(err),
-          })
+          try {
+            const prResult = await wsGateway.createDraftPR(workspace, {
+              title: `${issue.identifier}: ${issue.title}`,
+              body: completedAttempt.agentOutput
+                ? `## Summary\n${completedAttempt.agentOutput.slice(0, 2000)}`
+                : `Automated PR for ${issue.identifier}`,
+            })
+            if (prResult.url && /^https?:\/\/[^\s/]+\//.test(prResult.url)) {
+              prUrl = prResult.url
+              logger.info("completion", `PR confirmed for ${issue.identifier}`, { url: prUrl })
+            }
+          } catch (err) {
+            deliveryError = `PR creation failed: ${String(err)}`
+          }
+        }
+        if (!prUrl) {
+          await handleWorkspaceFailure(
+            { error: deliveryError },
+            {
+              retryComment: "Symphony: PR delivery failed — retrying delivery.",
+              manualComment: "Symphony: PR delivery failed after three attempts — manual resolution required",
+              category: "infra",
+            },
+          )
+          return
         }
       }
 
       // ── Exit assessment ──
-      const hasOutput = (completedAttempt.agentOutput?.trim().length ?? 0) > 0
-      let targetState = config.workflowStates.done
+      let noCodeComplete = false
+      if (!hasCodeChanges && task.kind === "analysis") {
+        const artifact = await validateAnalysisArtifact(workspace, completedAttempt, task.reportPath)
+        noCodeComplete = artifact.ok && (config.oma?.mode !== "strict" || verifiedAnalysis)
+        if (!artifact.ok)
+          logger.warn("completion", "Analysis artifact rejected", { issueId: issue.id, reason: artifact.reason })
+      }
+      if (noCodeComplete && deps.assessNoCodeOutcome) {
+        try {
+          noCodeComplete = await deps.assessNoCodeOutcome(issue, completedAttempt)
+        } catch (err) {
+          noCodeComplete = false
+          logger.error("completion", "No-code completion assessment failed", { issueId: issue.id, error: String(err) })
+        }
+      }
 
-      if (!hasCodeChanges && !hasOutput) {
+      if (!hasCodeChanges && !noCodeComplete) {
         // Anti-premature-exit: retry once before giving up. "capability" — re-running an incapable attempt rarely helps.
         const prematureRetryAdded = deps.addRetry(
           issue.id,
@@ -324,7 +436,6 @@ export function createCompletionCallbacks(
         }
 
         // Retry exhausted — cancel
-        targetState = config.workflowStates.cancelled
         try {
           await tracker.addIssueComment(
             issue.id,
@@ -337,163 +448,51 @@ export function createCompletionCallbacks(
             error: String(err),
           })
         }
+        try {
+          await tracker.updateIssueState(issue.id, config.workflowStates.cancelled)
+          deps.dagScheduler.updateNodeStatus(issue.id, "cancelled")
+        } catch (err) {
+          logger.error("completion", "Failed to transition retry-exhausted issue state", {
+            issueId: issue.id,
+            error: String(err),
+          })
+        }
+        deps.cleanupState(issue.id, "failed")
+        await deps.fillVacantSlots()
+        return
       }
 
-      try {
-        await tracker.updateIssueState(issue.id, targetState)
-      } catch (err) {
-        logger.error("completion", "Failed to transition issue state", {
-          issueId: issue.id,
-          error: String(err),
-        })
-      }
-
-      const durationMs = Date.now() - new Date(attempt.startedAt).getTime()
-      deps.emitEvent("agent.done", {
-        issueKey: issue.identifier,
+      await deps.finalizeDelivered({
         issueId: issue.id,
-        durationMs,
-        autoCommitted,
-      })
-
-      observability.onAgentDone({
-        agentType: route.agentType,
         issueKey: issue.identifier,
-        issueId: issue.id,
+        parentId: issue.parentId,
         attemptId: attempt.id,
-        durationMs,
+        agentType: route.agentType,
+        workspace,
+        deliveryMode: route.deliveryMode,
+        hasCodeChanges,
+        autoCommitted,
+        durationMs: Date.now() - new Date(attempt.startedAt).getTime(),
         tokenUsage: completedAttempt.tokenUsage,
       })
-
-      // Budget post-run accounting (§ 4.5, § 6.4 E19). When the session
-      // did not surface tokenUsage (e.g. gemini CLI fallback), skip the
-      // hop — `BudgetService.recordUsage` must only be called with real
-      // numbers. Any failure inside recordUsage is logged as WARN and
-      // swallowed so the completion pipeline keeps running.
-      await recordBudgetUsage(deps.budget, completedAttempt, issue.id)
-
-      logger.info("completion", `Agent completed for ${issue.identifier}`, {
-        issueId: issue.id,
-        exitCode: completedAttempt.exitCode ?? undefined,
-        durationMs,
-        autoCommitted,
-        hasCodeChanges,
-      })
-
-      // ── DAG cascade: unblock waiting issues ──
-      deps.dagScheduler.updateNodeStatus(issue.id, "done")
-      const unblocked = deps.dagScheduler.getUnblockedByCompletion(issue.id)
-      if (unblocked.length > 0) {
-        logger.info("completion", `${issue.identifier} completion unblocks ${unblocked.length} issue(s)`)
-        await deps.triggerUnblocked(unblocked)
-      }
-
-      // ── DAG: parent auto-complete ──
-      if (issue.parentId && deps.dagScheduler.allChildrenDone(issue.parentId)) {
-        const children = deps.dagScheduler.getChildrenSummaries(issue.parentId)
-        try {
-          await tracker.addIssueComment(issue.parentId, buildParentSummary(children))
-          await tracker.updateIssueState(issue.parentId, config.workflowStates.done)
-          logger.info("completion", `Parent ${issue.parentId} auto-completed (all children done)`)
-        } catch (err) {
-          logger.warn("completion", "Failed to auto-complete parent", { parentId: issue.parentId, error: String(err) })
-        }
-      }
-
-      await deps.fillVacantSlots()
     },
 
     onError: async (err) => {
-      deps.cleanupState(issue.id, "failed")
-
-      const durationMs = Date.now() - new Date(attempt.startedAt).getTime()
-
-      deps.emitEvent("agent.failed", {
-        issueKey: issue.identifier,
-        issueId: issue.id,
-        error: { code: err.code, message: err.message, retryable: err.recoverable },
-      })
-
-      observability.onAgentFailed({
-        agentType: route.agentType,
-        issueKey: issue.identifier,
-        issueId: issue.id,
-        attemptId: attempt.id,
-        durationMs,
-        retryable: err.recoverable,
-      })
-
-      logger.warn("completion", `Agent failed for ${issue.identifier}`, {
-        issueId: issue.id,
-        error: err.message,
-      })
-
-      if (err.recoverable) {
-        // AgentError codes (TIMEOUT, CRASH, AUTH_FAILED, CANCELLED, UNKNOWN) are all environmental — "infra".
-        const added = deps.addRetry(issue.id, (attempt.retryCount ?? 0) + 1, err.message, "infra")
-        if (!added) {
-          // Max retries exceeded — cancel issue with error comment
-          try {
-            await tracker.addIssueComment(
-              issue.id,
-              `Symphony: Agent failed (${config.agentMaxRetries} retries exceeded)\n\nError: ${err.message}`,
-            )
-          } catch (commentErr) {
-            logger.debug("completion", "Failed to post max-retries comment", {
-              issueId: issue.id,
-              error: String(commentErr),
-            })
-          }
-          try {
-            await tracker.updateIssueState(issue.id, config.workflowStates.cancelled)
-          } catch (stateErr) {
-            logger.error("completion", "Failed to transition to Cancelled", {
-              issueId: issue.id,
-              error: String(stateErr),
-            })
-          }
-        }
+      if (handled) return
+      handled = true
+      const failedAttempt: RunAttempt = {
+        ...attempt,
+        finishedAt: new Date().toISOString(),
+        exitCode: err.exitCode ?? null,
+        tokenUsage: err.tokenUsage,
       }
-
-      await deps.fillVacantSlots()
+      await recordBudgetUsage(deps.budget, failedAttempt, issue.id)
+      await saveAttempt(failedAttempt)
+      await handleAgentFailure(deps, issue, attempt, route, err, observability)
     },
 
     onHeartbeat: (_timestamp) => {
       // Liveness tracking placeholder
     },
-  }
-}
-
-/**
- * Forward session-reported token usage into the BudgetService. Skips
- * silently when the attempt carries no usage block (session could not
- * report) or when no budget is wired on the deps. Any error thrown by
- * recordUsage is downgraded to a WARN log so a flaky observability
- * exporter can never break the completion pipeline.
- *
- * Exported for direct unit testing.
- */
-export async function recordBudgetUsage(
-  budget: BudgetService | undefined,
-  completed: RunAttempt,
-  issueId: string,
-): Promise<void> {
-  if (!budget) return
-  const usage = completed.tokenUsage
-  if (!usage) {
-    logger.debug("completion", "Session reported no tokenUsage — skipping BudgetService.recordUsage", {
-      attemptId: completed.id,
-      issueId,
-    })
-    return
-  }
-  try {
-    await budget.recordUsage(completed.id, issueId, usage)
-  } catch (err) {
-    logger.warn("completion", "BudgetService.recordUsage failed — usage not accumulated", {
-      attemptId: completed.id,
-      issueId,
-      error: String(err),
-    })
   }
 }

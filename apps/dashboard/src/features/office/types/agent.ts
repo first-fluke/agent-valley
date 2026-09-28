@@ -1,3 +1,6 @@
+import type { AgentType } from "@agent-valley/core/domain/ledger"
+export type { AgentType } from "@agent-valley/core/domain/ledger"
+
 export type WorkspaceStatus = "idle" | "running" | "done" | "failed"
 
 export interface ActiveWorkspace {
@@ -28,8 +31,6 @@ export interface OrchestratorState {
   }
   systemMetrics?: SystemMetrics
 }
-
-export type AgentType = "claude" | "codex" | "gemini"
 
 export type CharacterSkin = "default" | "ponytail" | "plumber" | "glasses" | "mohawk"
 

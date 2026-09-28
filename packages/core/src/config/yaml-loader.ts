@@ -1,10 +1,3 @@
-/**
- * YAML Config Loader — Load and merge global + project configuration.
- *
- * Priority: valley.yaml (project) > settings.yaml (global) > hardcoded defaults.
- * Validates merged result with Zod. Fails fast with actionable error messages.
- */
-
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -14,10 +7,9 @@ import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./bu
 import { detectHardware } from "./hardware"
 import { resolveMaxParallel } from "./merge-helpers"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
+import { resolvedTaskSchema, taskSchema } from "./task-schema"
 import { buildTunnelConfig, tunnelMergedSchema, tunnelProjectSchema } from "./tunnel-schema"
 import { buildVerifyConfig, verifyMergedSchema, verifyProjectSchema } from "./verify-schema"
-
-// ── Schemas ─────────────────────────────────────────────────────────
 
 const routingRuleSchema = z.object({
   label: z.string().min(1, "Each routing rule must have a non-empty label"),
@@ -28,6 +20,7 @@ const routingRuleSchema = z.object({
   agent_type: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]).optional(),
   delivery_mode: z.enum(["merge", "pr"]).optional(),
   verify_command: z.string().min(1, "verify_command must be a non-empty shell command").optional(),
+  task: taskSchema.optional(),
 })
 
 const scoreRoutingTierSchema = z
@@ -185,13 +178,12 @@ export const projectConfigSchema = z
     budget: budgetProjectSchema,
     tunnel: tunnelProjectSchema,
     verify: verifyProjectSchema,
+    task: taskSchema.optional(),
+    oma: z.object({ mode: z.enum(["off", "strict"]).default("off") }).optional(),
   })
   .strict()
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>
-
-// ── Merged Config (validated output) ────────────────────────────────
-
 const githubConfigSchema = z.object({
   token: z
     .string()
@@ -252,6 +244,7 @@ const mergedConfigSchema = z
         agentType: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]).optional(),
         deliveryMode: z.enum(["merge", "pr"]).optional(),
         verifyCommand: z.string().optional(),
+        task: resolvedTaskSchema.optional(),
       }),
     ),
     scoringModel: z.string().optional(),
@@ -264,6 +257,8 @@ const mergedConfigSchema = z
     budget: budgetMergedSchema,
     tunnel: tunnelMergedSchema,
     verify: verifyMergedSchema,
+    task: resolvedTaskSchema.optional(),
+    oma: z.object({ mode: z.enum(["off", "strict"]) }).optional(),
   })
   .superRefine((cfg, ctx) => {
     if (cfg.trackerKind === "linear") {
@@ -444,6 +439,7 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
       agentType: r.agent_type,
       deliveryMode: r.delivery_mode,
       verifyCommand: r.verify_command,
+      task: r.task?.kind === "analysis" ? { kind: "analysis" as const, reportPath: r.task.report_path } : r.task,
     })),
     scoringModel: project?.scoring?.model ?? undefined,
     scoreRouting: project?.scoring?.routes ?? undefined,
@@ -455,9 +451,13 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
     budget: buildBudgetConfig(project),
     tunnel: buildTunnelConfig(project),
     verify: buildVerifyConfig(project),
+    task:
+      project?.task?.kind === "analysis"
+        ? { kind: "analysis" as const, reportPath: project.task.report_path }
+        : { kind: "code" as const },
+    oma: { mode: project?.oma?.mode ?? "off" },
   }
 }
-
 // ── Public API ──────────────────────────────────────────────────────
 
 export function isTeamMode(config: Config): boolean {

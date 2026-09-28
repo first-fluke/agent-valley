@@ -218,7 +218,7 @@ export function renderPrompt(
   attempt: RunAttempt,
   retryCount: number,
   retryReason = "",
-  triggerTable: TriggerTable | null = getCachedTriggerTable(),
+  triggerTable: TriggerTable | null = getCachedTriggerTable(workspacePath),
 ): string {
   const sanitizedDescription = wrapUntrustedContent(sanitizeIssueBody(issue.description))
   const sanitizedTitle = wrapUntrustedContent(sanitizeIssueBody(issue.title))

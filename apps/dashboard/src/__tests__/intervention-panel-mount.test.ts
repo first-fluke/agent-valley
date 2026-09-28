@@ -86,8 +86,8 @@ describe("InterventionPanel accessibility (focus management + keyboard close)", 
     expect(panelSource.toLowerCase()).not.toMatch(/authorization["'`]?\s*:\s*["'`]bearer\s+\w/)
   })
 
-  test("leaves a TODO(oma-deferred) marker instead of inventing a token auth flow", () => {
-    expect(panelSource).toContain("TODO(oma-deferred)")
-    expect(panelSource).toContain("SYMPHONY_INTERVENTION_TOKEN")
+  test("uses the server-issued session cookie for intervention", () => {
+    expect(panelSource).toContain('fetch("/api/intervention"')
+    expect(panelSource).not.toContain("NEXT_PUBLIC_")
   })
 })

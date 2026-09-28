@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --turbopack -p 9741",
+    "dev": "next dev --turbopack -p 9741 -H 127.0.0.1",
     "build": "next build",
-    "start": "next start -p 9741"
+    "start": "next start -p 9741 -H 127.0.0.1"
   },
   "dependencies": {
     "@agent-valley/core": "workspace:*",

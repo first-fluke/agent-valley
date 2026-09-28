@@ -1,14 +1,18 @@
 /**
- * Node ID generation — "{username}:{hostname}" format.
- * Used to uniquely identify a local orchestrator instance.
+ * Node ID generation — "{authenticated-user-uuid}:{hostname}" format.
+ * The UUID prefix is checked by the team ledger RLS insert policy.
  */
 
-import { hostname, userInfo } from "node:os"
+import { hostname } from "node:os"
 
-export function generateNodeId(): string {
-  const user = userInfo().username
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function generateNodeId(authenticatedUserId: string): string {
+  if (!UUID_PATTERN.test(authenticatedUserId)) {
+    throw new Error("Team ledger user ID must be a UUID from av login. Fix: Run 'av login' again and restart Symphony.")
+  }
   const machine = hostname()
     .toLowerCase()
     .replace(/\.local$/, "")
-  return `${user}:${machine}`
+  return `${authenticatedUserId.toLowerCase()}:${machine}`
 }

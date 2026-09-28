@@ -4,6 +4,7 @@
  */
 
 import type { Issue } from "../domain/models"
+import type { ResolvedTask } from "./task-schema"
 import type { Config, ScoreRoutingConfig } from "./yaml-loader"
 
 export interface ResolvedRoute {
@@ -11,6 +12,7 @@ export interface ResolvedRoute {
   agentType: "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
   deliveryMode: "merge" | "pr"
   matchedLabel: string | null
+  task?: ResolvedTask
 }
 
 /**
@@ -25,6 +27,7 @@ export function resolveRoute(issue: Issue, config: Config): ResolvedRoute {
         agentType: rule.agentType ?? config.agentType,
         deliveryMode: rule.deliveryMode ?? config.deliveryMode,
         matchedLabel: rule.label,
+        task: rule.task ?? config.task,
       }
     }
   }
@@ -34,6 +37,7 @@ export function resolveRoute(issue: Issue, config: Config): ResolvedRoute {
     agentType: config.agentType,
     deliveryMode: config.deliveryMode,
     matchedLabel: null,
+    task: config.task,
   }
 }
 
@@ -53,6 +57,7 @@ export function resolveRouteWithScore(issue: Issue, config: Config): ResolvedRou
         agentType: tier.agent,
         deliveryMode: config.deliveryMode,
         matchedLabel: `score:${issue.score}`,
+        task: config.task,
       }
     }
   }
@@ -62,6 +67,7 @@ export function resolveRouteWithScore(issue: Issue, config: Config): ResolvedRou
     agentType: config.agentType,
     deliveryMode: config.deliveryMode,
     matchedLabel: null,
+    task: config.task,
   }
 }
 

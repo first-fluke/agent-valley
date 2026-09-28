@@ -1,10 +1,15 @@
 /**
  * Completion Handler tests — safety-net, delivery, and exit assessment.
  */
+
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { ResolvedRoute } from "../config/routing"
 import type { Config } from "../config/yaml-loader"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import type { DraftPrResult } from "../domain/ports/workspace"
 import type { CompletionDeps } from "../orchestrator/completion-handler"
 
 // The verification gate's real implementation spawns a subprocess. Mock it
@@ -77,6 +82,14 @@ function makeRoute(overrides: Partial<ResolvedRoute> = {}): ResolvedRoute {
   }
 }
 
+async function analysisWorkspace(attemptId = "attempt-1"): Promise<Workspace> {
+  const path = await mkdtemp(join(tmpdir(), "av-analysis-"))
+  await writeFile(join(path, `report-${attemptId}.md`), "Completed analysis with findings.", "utf8")
+  return makeWorkspace({ path })
+}
+
+const analysisTask = { kind: "analysis" as const, reportPath: "report-{{attempt.id}}.md" }
+
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     trackerKind: "linear",
@@ -102,7 +115,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     deliveryMode: "merge",
     routingRules: [],
     promptTemplate: "test prompt",
-    verify: { command: undefined, timeoutSec: 600 },
+    verify: { command: "true", timeoutSec: 600 },
     ...overrides,
   } as Config
 }
@@ -146,7 +159,10 @@ function makeFakeWorkspaceGateway(
       retryPrompt: opts.mergeRetryPrompt,
     }),
     pushBranch: async () => ({ ok: opts.pushOk ?? true }),
-    createDraftPR: async () => ({ created: false }),
+    createDraftPR: async (): Promise<DraftPrResult> => ({
+      created: false,
+      url: "https://github.com/example/repo/pull/1",
+    }),
     cleanup: async () => {},
     saveAttempt: async () => {},
   }
@@ -177,7 +193,7 @@ describe("createCompletionCallbacks", () => {
     configOverrides: Partial<Config> = {},
     depsOverrides: Partial<CompletionDeps> = {},
   ): CompletionDeps {
-    return {
+    const deps = {
       config: makeConfig(configOverrides),
       workspace: mockWm as unknown as CompletionDeps["workspace"],
       tracker: makeFakeTracker() as unknown as CompletionDeps["tracker"],
@@ -199,7 +215,28 @@ describe("createCompletionCallbacks", () => {
       },
       triggerUnblocked: async () => {},
       ...depsOverrides,
+    } as CompletionDeps
+    deps.finalizeDelivered ??= async (record) => {
+      await deps.tracker.updateIssueState(record.issueId, deps.config.workflowStates.done)
+      if (record.deliveryMode === "merge" && record.hasCodeChanges) await deps.workspace.cleanup(record.workspace)
+      deps.cleanupState(record.issueId, "done")
+      deps.emitEvent("agent.done", {
+        issueKey: record.issueKey,
+        issueId: record.issueId,
+        attemptId: record.attemptId,
+        durationMs: record.durationMs,
+        autoCommitted: record.autoCommitted,
+      })
+      deps.dagScheduler.updateNodeStatus(record.issueId, "done")
+      const unblocked = deps.dagScheduler.getUnblockedByCompletion(record.issueId)
+      if (unblocked.length > 0) await deps.triggerUnblocked(unblocked)
+      if (record.parentId && deps.dagScheduler.allChildrenDone(record.parentId)) {
+        deps.dagScheduler.getChildrenSummaries(record.parentId)
+        await deps.tracker.updateIssueState(record.parentId, deps.config.workflowStates.done)
+      }
+      await deps.fillVacantSlots()
     }
+    return deps
   }
 
   beforeEach(() => {
@@ -208,6 +245,7 @@ describe("createCompletionCallbacks", () => {
     retryAdds = []
     filledSlots = 0
     vi.mocked(runVerificationGate).mockReset()
+    vi.mocked(runVerificationGate).mockResolvedValue({ ran: true, ok: true, command: "true", output: "" })
   })
 
   describe("onComplete — safety net", () => {
@@ -344,7 +382,7 @@ describe("createCompletionCallbacks", () => {
       expect(filledSlots).toBe(1)
     })
 
-    test("transitions to Done when no changes but has output", async () => {
+    test("rejects text-only output without code changes", async () => {
       const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: false })
       const deps = makeDeps(mockWm)
       const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
@@ -356,7 +394,8 @@ describe("createCompletionCallbacks", () => {
         agentOutput: "No changes needed — the feature already exists",
       })
 
-      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+      expect(events.some((e) => e.event === "agent.done")).toBe(false)
+      expect(retryAdds.at(-1)?.category).toBe("capability")
     })
 
     test("schedules retry when no changes and no output (anti-premature-exit)", async () => {
@@ -507,14 +546,14 @@ describe("createCompletionCallbacks", () => {
   })
 
   describe("onComplete — verification gate", () => {
-    test("no verify_command configured — gate is skipped, merge + Done proceed as before", async () => {
+    test("no verify_command configured blocks delivery and Done", async () => {
       let merged = false
       const mockWm = makeFakeWorkspaceGateway({ hasCodeChanges: true, diffStat: "1 file", mergeOk: true })
       mockWm.mergeAndPush = async () => {
         merged = true
         return { ok: true, error: undefined, retryable: undefined, retryPrompt: undefined }
       }
-      const deps = makeDeps(mockWm) // config.verify.command is undefined by default
+      const deps = makeDeps(mockWm, { verify: { command: undefined, timeoutSec: 600 } })
       const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
 
       await callbacks.onComplete({
@@ -525,8 +564,9 @@ describe("createCompletionCallbacks", () => {
       })
 
       expect(runVerificationGate).not.toHaveBeenCalled()
-      expect(merged).toBe(true)
-      expect(events.some((e) => e.event === "agent.done")).toBe(true)
+      expect(merged).toBe(false)
+      expect(events.some((e) => e.event === "agent.done")).toBe(false)
+      expect(retryAdds.at(-1)?.category).toBe("verification")
     })
 
     test("gate passes — merge proceeds and issue transitions to Done", async () => {
@@ -1043,6 +1083,347 @@ describe("createCompletionCallbacks", () => {
           tokenUsage: { input: 1, output: 1, model: "claude" },
         }),
       ).resolves.toBeUndefined()
+    })
+  })
+
+  describe("terminal outcome and delivery regressions", () => {
+    const completed = () =>
+      makeAttempt({
+        finishedAt: new Date().toISOString(),
+        exitCode: 0,
+        agentOutput: "Implemented change",
+        tokenUsage: { input: 10, output: 5, model: "test-model" },
+      })
+
+    function terminalDeps(mockWm: ReturnType<typeof makeFakeWorkspaceGateway>) {
+      const tracker = makeFakeTracker() as CompletionDeps["tracker"]
+      const states: string[] = []
+      const dagStatuses: string[] = []
+      const budgetCalls: string[] = []
+      tracker.updateIssueState = async (_id: string, state: string) => {
+        states.push(state)
+      }
+      const deps = makeDeps(
+        mockWm,
+        {},
+        {
+          tracker: tracker as CompletionDeps["tracker"],
+          dagScheduler: {
+            updateNodeStatus: (_id: string, status: string) => {
+              dagStatuses.push(status)
+            },
+            getUnblockedByCompletion: () => [],
+            allChildrenDone: () => false,
+            getChildrenSummaries: () => [],
+          } as unknown as CompletionDeps["dagScheduler"],
+          budget: {
+            checkBeforeSpawn: async () => ({ allow: true }),
+            recordUsage: async (id: string) => {
+              budgetCalls.push(id)
+            },
+            getDailyUsed: () => ({ tokens: 0, usd: 0 }),
+            getIssueUsed: () => ({ tokens: 0, usd: 0 }),
+          },
+        },
+      )
+      return { deps, tracker, states, dagStatuses, budgetCalls }
+    }
+
+    test("failed branch push blocks Done and does not create a PR", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: true, pushOk: false })
+      const pr = vi.fn(gateway.createDraftPR)
+      gateway.createDraftPR = pr
+      const { deps, states, dagStatuses, budgetCalls } = terminalDeps(gateway)
+      const callbacks = createCompletionCallbacks(
+        deps,
+        makeIssue(),
+        makeWorkspace(),
+        makeAttempt(),
+        makeRoute({ deliveryMode: "pr" }),
+      )
+
+      await callbacks.onComplete(completed())
+
+      expect(pr).not.toHaveBeenCalled()
+      expect(states).toEqual(["state-cancelled"])
+      expect(dagStatuses).toEqual(["cancelled"])
+      expect(events.some((e) => e.event === "agent.done")).toBe(false)
+      expect(stateCleanups).toEqual([{ issueId: "issue-1", status: "failed" }])
+      expect(budgetCalls).toEqual(["attempt-1"])
+    })
+
+    test("missing PR URL blocks Done after a successful push without replaying push", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: true })
+      const push = vi.fn(gateway.pushBranch)
+      gateway.pushBranch = push
+      gateway.createDraftPR = async () => ({ created: false })
+      const { deps, states, dagStatuses } = terminalDeps(gateway)
+      const callbacks = createCompletionCallbacks(
+        deps,
+        makeIssue(),
+        makeWorkspace(),
+        makeAttempt(),
+        makeRoute({ deliveryMode: "pr" }),
+      )
+
+      await callbacks.onComplete(completed())
+
+      expect(push).toHaveBeenCalledTimes(1)
+      expect(states).toEqual(["state-cancelled"])
+      expect(dagStatuses).toEqual(["cancelled"])
+      expect(events.some((e) => e.event === "agent.done")).toBe(false)
+    })
+
+    test("thrown PR creation retries only PR creation and accepts an existing URL", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: true })
+      const push = vi.fn(gateway.pushBranch)
+      gateway.pushBranch = push
+      const pr = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("temporary gh failure"))
+        .mockResolvedValueOnce({ created: false, url: "https://github.com/example/repo/pull/2" })
+      gateway.createDraftPR = pr
+      const { deps, states, dagStatuses } = terminalDeps(gateway)
+      const callbacks = createCompletionCallbacks(
+        deps,
+        makeIssue(),
+        makeWorkspace(),
+        makeAttempt(),
+        makeRoute({ deliveryMode: "pr" }),
+      )
+
+      await callbacks.onComplete(completed())
+
+      expect(push).toHaveBeenCalledTimes(1)
+      expect(pr).toHaveBeenCalledTimes(2)
+      expect(states).toEqual(["state-done"])
+      expect(dagStatuses).toEqual(["done"])
+    })
+
+    test("thrown branch push retries the push step before creating a PR", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: true })
+      const push = vi.fn().mockRejectedValueOnce(new Error("network error")).mockResolvedValueOnce({ ok: true })
+      gateway.pushBranch = push
+      const pr = vi.fn(gateway.createDraftPR)
+      gateway.createDraftPR = pr
+      const { deps, states } = terminalDeps(gateway)
+      const callbacks = createCompletionCallbacks(
+        deps,
+        makeIssue(),
+        makeWorkspace(),
+        makeAttempt(),
+        makeRoute({ deliveryMode: "pr" }),
+      )
+
+      await callbacks.onComplete(completed())
+
+      expect(push).toHaveBeenCalledTimes(2)
+      expect(pr).toHaveBeenCalledTimes(1)
+      expect(states).toEqual(["state-done"])
+    })
+
+    test("an explicit assessment can reject text-only output without blocking analysis reports", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: false })
+      const { deps, states } = terminalDeps(gateway)
+      deps.config = makeConfig({ task: analysisTask })
+      deps.assessNoCodeOutcome = async (_issue, completedAttempt) =>
+        completedAttempt.agentOutput === "Analysis complete: no code change required"
+      const workspace = await analysisWorkspace()
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), workspace, makeAttempt(), makeRoute())
+
+      await callbacks.onComplete(
+        makeAttempt({ ...completed(), agentOutput: "Analysis complete: no code change required" }),
+      )
+
+      expect(states).toEqual(["state-done"])
+      const promised = createCompletionCallbacks(
+        deps,
+        makeIssue(),
+        workspace,
+        makeAttempt({ id: "attempt-2" }),
+        makeRoute(),
+      )
+      await promised.onComplete(
+        makeAttempt({ ...completed(), id: "attempt-2", agentOutput: "I will investigate this bug." }),
+      )
+      expect(states).toEqual(["state-done"])
+      expect(retryAdds.at(-1)?.category).toBe("capability")
+    })
+
+    test("strict OMA evidence rejects a text-only promise before delivery", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: false })
+      const { deps, states } = terminalDeps(gateway)
+      deps.config = makeConfig({ oma: { mode: "strict" } })
+      deps.omaEvidence = async () => ({ ok: false, reason: "no bound receipt" })
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete(makeAttempt({ ...completed(), agentOutput: "I will investigate this bug." }))
+
+      expect(states).toEqual([])
+      expect(events.some((event) => event.event === "agent.done")).toBe(false)
+      expect(retryAdds.at(-1)?.category).toBe("capability")
+    })
+
+    test("strict OMA evidence validates before auto-commit and accepts a report-backed analysis", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: false })
+      const { deps, states } = terminalDeps(gateway)
+      deps.config = makeConfig({ oma: { mode: "strict" }, task: analysisTask })
+      deps.omaEvidence = async (request) => {
+        expect(request.reportPath).toBe(analysisTask.reportPath)
+        return { ok: true, runId: "current-run" }
+      }
+      const callbacks = createCompletionCallbacks(
+        deps,
+        makeIssue(),
+        await analysisWorkspace(),
+        makeAttempt(),
+        makeRoute(),
+      )
+
+      await callbacks.onComplete(makeAttempt({ ...completed(), agentOutput: null }))
+
+      expect(states).toEqual(["state-done"])
+      expect(events.some((event) => event.event === "agent.done")).toBe(true)
+    })
+
+    test("strict OMA mode leaves uncommitted work untouched so receipts stay current", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: true, hasUncommittedChanges: true })
+      const autoCommit = vi.fn(gateway.autoCommit)
+      gateway.autoCommit = autoCommit
+      const { deps, states } = terminalDeps(gateway)
+      deps.config = makeConfig({ oma: { mode: "strict" } })
+      const evidence = vi.fn().mockResolvedValue({ ok: true })
+      deps.omaEvidence = evidence
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete(completed())
+
+      expect(autoCommit).not.toHaveBeenCalled()
+      expect(evidence).not.toHaveBeenCalled()
+      expect(states).toEqual([])
+    })
+
+    test("strict OMA mode uses its pinned check receipt without rerunning the command", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: true })
+      const { deps, states, budgetCalls } = terminalDeps(gateway)
+      deps.config = makeConfig({ oma: { mode: "strict" }, verify: { command: "npm test", timeoutSec: 600 } })
+      const saved = vi.fn()
+      deps.saveAttempt = saved
+      deps.omaEvidence = async () => {
+        expect(budgetCalls).toEqual([])
+        expect(saved).not.toHaveBeenCalled()
+        return { ok: true, runId: "current-run" }
+      }
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete(completed())
+
+      expect(runVerificationGate).not.toHaveBeenCalled()
+      expect(budgetCalls).toEqual(["attempt-1"])
+      expect(saved).toHaveBeenCalledTimes(1)
+      expect(states).toEqual(["state-done"])
+    })
+
+    test("OMA-off mode rejects a promise without an explicitly configured analysis artifact", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: false })
+      const { deps, states } = terminalDeps(gateway)
+      deps.config = makeConfig({ oma: { mode: "off" } })
+      const evidence = vi.fn().mockResolvedValue({ ok: false })
+      deps.omaEvidence = evidence
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete(
+        makeAttempt({ ...completed(), agentOutput: "Analysis complete: no code change required" }),
+      )
+
+      expect(evidence).not.toHaveBeenCalled()
+      expect(states).toEqual([])
+      expect(retryAdds.at(-1)?.category).toBe("capability")
+    })
+
+    test("OMA-off explicit analysis completes with a current report from this attempt", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: false })
+      const { deps, states } = terminalDeps(gateway)
+      deps.config = makeConfig({ oma: { mode: "off" }, task: analysisTask })
+      const workspace = await analysisWorkspace()
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), workspace, makeAttempt(), makeRoute())
+
+      await callbacks.onComplete(makeAttempt({ ...completed(), agentOutput: null }))
+
+      expect(states).toEqual(["state-done"])
+      expect(events.filter((event) => event.event === "agent.done")).toHaveLength(1)
+    })
+
+    test("records known usage once while tracker finalization remains pending", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: true })
+      const { deps, budgetCalls } = terminalDeps(gateway)
+      const pending = vi.fn(async () => {})
+      deps.finalizeDelivered = pending
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete(completed())
+      await callbacks.onComplete(completed())
+
+      expect(budgetCalls).toEqual(["attempt-1"])
+      expect(pending).toHaveBeenCalledTimes(1)
+      expect(events.some((event) => event.event === "agent.done")).toBe(false)
+    })
+
+    test("retry-exhausted no-op cancels without success cascade", async () => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: false })
+      const { deps, states, dagStatuses, budgetCalls } = terminalDeps(gateway)
+      deps.addRetry = () => false
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onComplete(makeAttempt({ ...completed(), agentOutput: null }))
+
+      expect(states).toEqual(["state-cancelled"])
+      expect(dagStatuses).toEqual(["cancelled"])
+      expect(events.some((e) => e.event === "agent.done")).toBe(false)
+      expect(budgetCalls).toEqual(["attempt-1"])
+    })
+
+    test.each(["verification", "merge"])("records usage once when %s fails before Done", async (failure) => {
+      const gateway = makeFakeWorkspaceGateway({ hasCodeChanges: true, mergeOk: failure !== "merge" })
+      if (failure === "verification") {
+        vi.mocked(runVerificationGate).mockResolvedValue({ ran: true, ok: false, command: "false", output: "failed" })
+      }
+      const { deps, budgetCalls } = terminalDeps(gateway)
+      const config = failure === "verification" ? { verify: { command: "false", timeoutSec: 5 } } : {}
+      const callbacks = createCompletionCallbacks(
+        { ...deps, config: makeConfig(config) },
+        makeIssue(),
+        makeWorkspace(),
+        makeAttempt(),
+        makeRoute(),
+      )
+
+      await callbacks.onComplete(completed())
+
+      expect(budgetCalls).toEqual(["attempt-1"])
+      expect(events.some((e) => e.event === "agent.done")).toBe(false)
+    })
+
+    test("error callback records known usage once", async () => {
+      const gateway = makeFakeWorkspaceGateway()
+      const { deps, budgetCalls } = terminalDeps(gateway)
+      const callbacks = createCompletionCallbacks(deps, makeIssue(), makeWorkspace(), makeAttempt(), makeRoute())
+
+      await callbacks.onError({
+        code: "CANCELLED",
+        message: "interrupted",
+        recoverable: false,
+        tokenUsage: { input: 7, output: 3, model: "test-model" },
+      })
+      await callbacks.onError({
+        code: "CANCELLED",
+        message: "duplicate",
+        recoverable: false,
+        tokenUsage: { input: 7, output: 3, model: "test-model" },
+      })
+
+      expect(budgetCalls).toEqual(["attempt-1"])
+      expect(stateCleanups).toEqual([{ issueId: "issue-1", status: "failed" }])
     })
   })
 })

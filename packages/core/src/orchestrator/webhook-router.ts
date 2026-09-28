@@ -80,6 +80,7 @@ export class WebhookRouter {
           issueId: event.issueId,
           identifier: event.issue.identifier,
         })
+        if (event.to === "cancelled") await core.cancelPendingFinalization(event.issueId)
 
         // Left-InProgress: stop the active agent (Done/Cancelled/Todo/…).
         if (event.from === "in_progress" && event.to !== "in_progress") {
@@ -134,6 +135,7 @@ export class WebhookRouter {
         // Treat as left-in-progress: stop the agent if one is active so
         // we don't leak a worktree when the issue is removed upstream.
         await lifecycle.handleIssueLeftInProgress(event.issueId)
+        await core.cancelPendingFinalization(event.issueId)
         return
       }
     }

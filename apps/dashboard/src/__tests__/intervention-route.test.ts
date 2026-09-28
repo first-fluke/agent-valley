@@ -25,7 +25,7 @@ const { POST: interventionPOST } = await import("@/app/api/intervention/route")
 function localRequest(body: unknown, host = "localhost"): Request {
   return new Request("http://localhost/api/intervention", {
     method: "POST",
-    headers: { host, "content-type": "application/json" },
+    headers: { host, origin: "http://localhost", "content-type": "application/json" },
     body: JSON.stringify(body),
   })
 }
@@ -33,7 +33,7 @@ function localRequest(body: unknown, host = "localhost"): Request {
 function remoteRequest(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request("http://example.com/api/intervention", {
     method: "POST",
-    headers: { host: "example.com", "content-type": "application/json", ...headers },
+    headers: { host: "example.com", origin: "http://example.com", "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   })
 }
@@ -123,7 +123,7 @@ describe("POST /api/intervention", () => {
   test("rejects malformed JSON with 400", async () => {
     const req = new Request("http://localhost/api/intervention", {
       method: "POST",
-      headers: { host: "localhost", "content-type": "application/json" },
+      headers: { host: "localhost", origin: "http://localhost", "content-type": "application/json" },
       body: "{ not json",
     })
     const res = await interventionPOST(req)

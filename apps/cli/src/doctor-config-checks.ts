@@ -23,6 +23,7 @@ import {
   checkSandbox,
   type DoctorDeps,
 } from "./doctor-checks"
+import { checkOma } from "./doctor-oma-checks"
 
 // ── Tunnel ───────────────────────────────────────────────────────────────────
 
@@ -301,6 +302,7 @@ export async function runDoctorChecks(deps: DoctorDeps, options: RunDoctorOption
   results.push(await checkSandbox(deps))
   results.push(checkTunnel(project, deps))
   results.push(checkWebhookSecret(project))
+  results.push(...checkOma(project, deps))
 
   return results
 }

@@ -7,7 +7,7 @@
  */
 
 export interface SandboxBuildRequest {
-  /** Agent type, used only for log/error messages ("claude" | "codex" | "gemini" | custom). */
+  /** Agent type selects the active CLI home ("claude" | "codex" | "antigravity" | custom). */
   agentType: string
   /** Base binary to execute inside the sandbox, e.g. "claude". */
   command: string

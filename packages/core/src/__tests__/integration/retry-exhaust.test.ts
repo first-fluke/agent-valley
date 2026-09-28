@@ -2,16 +2,14 @@
  * Integration test — agent failure → retry queue → cancellation.
  *
  * Routes a failing fake agent through the orchestrator's retry pipeline.
- * With `agentRetryDelay: 0`, the WebhookRouter drains the retry queue
- * synchronously after dispatch (see orchestrator/webhook-router.ts §
- * `await core.processRetryQueue()`), so one webhook post drives both the
- * first failure (retry queued) and the second failure (cap exceeded →
- * cancellation) in a deterministic sequence.
+ * With `agentRetryDelay: 0`, the test waits for the asynchronous failure
+ * handler to queue the retry, then drains it through the same core method
+ * used by the orchestrator's periodic retry scheduler.
  *
  * Scope (v0.2 M3):
  *   - Two attempts observed (two FakeAgentSession instances)
- *   - retryQueueSize grows on first failure (observed via intermediate
- *     status mid-drain) and shrinks back to 0 after exhaustion
+ *   - retryQueueSize grows on first failure and shrinks back to 0
+ *     after exhaustion
  *   - Tracker receives updateIssueState(cancelled) + actionable error comment
  *   - activeWorkspaces drains to 0 at the end
  */
@@ -38,7 +36,6 @@ vi.mock("../../sessions/session-factory", async (importOriginal) => {
 
 let repo: RepoHandle
 let rig: OrchestratorRig
-let retrySizeHighWaterMark = 0
 
 // Register a failing fake claude session — each execute() emits a recoverable
 // error so the orchestrator retry/cancel pipeline can fire.
@@ -53,14 +50,6 @@ function registerFailingClaude(errorMessage = "integration-induced failure"): vo
           type: "error",
           error: { code: "CRASH", message: errorMessage, recoverable: true },
         })
-        // Sample the retryQueueSize right after the error is emitted and
-        // the completion handler has been synchronously invoked. This is
-        // the observation window between "N-th failure queued" and
-        // "(N+1)-th attempt starts".
-        queueMicrotask(() => {
-          const status = rig.orchestrator.getHandlers().getStatus() as { retryQueueSize: number }
-          retrySizeHighWaterMark = Math.max(retrySizeHighWaterMark, status.retryQueueSize)
-        })
       })
     }
     return session
@@ -69,11 +58,10 @@ function registerFailingClaude(errorMessage = "integration-induced failure"): vo
 
 beforeEach(async () => {
   FakeAgentSession.resetRegistry()
-  retrySizeHighWaterMark = 0
   repo = await createGitRepo()
-  // agentMaxRetries=2 → 1st failure queues (count=1). WebhookRouter drains
-  // the queue after dispatch (delay=0 → nextRetryAt is now) → 2nd failure
-  // hits count=2 which equals the cap → addRetry returns false → cancel.
+  // agentMaxRetries=2 → 1st failure queues (count=1). The test drains
+  // the ready queue after observing it; the 2nd failure reaches the cap
+  // and cancels the issue.
   rig = buildOrchestratorRig({
     workspaceRoot: repo.repoDir,
     overrides: { agentMaxRetries: 2, agentRetryDelay: 0, maxParallel: 2 },
@@ -122,8 +110,20 @@ describe("Integration — agent failure retry exhaustion", () => {
     const response = await rig.post(payload)
     expect(response.status).toBe(200)
 
-    // Both attempts should have spawned — the router drains the retry queue
-    // (retry delay = 0 makes nextRetryAt <= now) after the initial dispatch.
+    // The fake emits its failure in a microtask after the webhook router's
+    // immediate queue drain, so wait for the observable queue state before
+    // invoking the scheduler path.
+    const queuedSize = await waitFor(
+      () => (rig.orchestrator.getHandlers().getStatus() as { retryQueueSize: number }).retryQueueSize,
+      { timeoutMs: 4_000, description: "first failure queued for retry" },
+    )
+    expect(queuedSize).toBeGreaterThanOrEqual(1)
+    // The facade does not expose the periodic scheduler hook, so this
+    // integration test invokes its core method directly after the queue is ready.
+    const core = rig.orchestrator as unknown as { core: { processRetryQueue: () => Promise<void> } }
+    await core.core.processRetryQueue()
+
+    // Both attempts should now have spawned.
     await waitFor(() => FakeAgentSession.instances.length >= 2, {
       timeoutMs: 4_000,
       description: "two agent sessions spawned (initial + retry)",
@@ -143,9 +143,7 @@ describe("Integration — agent failure retry exhaustion", () => {
     expect(exhaustion).toBeDefined()
     expect(exhaustion).toContain("integration-induced failure")
 
-    // The retry queue must have grown past 0 between attempts and then
-    // drained back to 0 once the cap was exceeded.
-    expect(retrySizeHighWaterMark).toBeGreaterThanOrEqual(1)
+    // The retry queue drained back to 0 once the cap was exceeded.
 
     const finalStatus = rig.orchestrator.getHandlers().getStatus() as {
       activeWorkspaces: unknown[]

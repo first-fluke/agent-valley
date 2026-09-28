@@ -9,9 +9,8 @@
  *     in the sandboxing task: writes are confined, reads are not — with
  *     the narrow exception of secrets a prompt-injected issue body could
  *     otherwise exfiltrate.
- *   - Filesystem WRITE limited to the workspace directory + a curated set
- *     of per-agent-CLI cache/config directories under $HOME (so the CLI
- *     itself keeps working) + the OS tmp dir.
+ *   - Filesystem WRITE limited to the workspace, active agent CLI home,
+ *     shared tool caches, and OS tmp dir.
  *   - Outbound network restricted to HTTP/HTTPS ports, plus local DNS
  *     resolution and local unix-domain sockets (ssh-agent and similar —
  *     these never leave the host).
@@ -21,6 +20,7 @@
  * doc): the broad `(allow file-read*)` below is followed by explicit
  * `(deny file-read* ...)` rules for `~/.config/agent-valley` (holds
  * LINEAR_API_KEY + other orchestrator secrets in settings.yaml), the
+ * relay's `~/.agent-valley` credentials, inactive agent vendor homes, the
  * project's `valley.yaml` (team webhook secret, Linear team id/uuid —
  * resolved best-effort from the orchestrator's cwd, which is chdir'd to
  * the project root at startup by apps/dashboard/src/lib/bootstrap.ts),
@@ -30,7 +30,8 @@
  * key files directly). Seatbelt profiles are evaluated last-match-wins,
  * so placing these `(deny ...)` rules AFTER `(allow file-read*)` in the
  * generated profile text overrides it for exactly these paths. This does
- * NOT close every credential-exposure path — cloud CLI credential caches
+ * NOT close every credential-exposure path — the active CLI must read its
+ * own credentials, and cloud CLI credential caches
  * (e.g. `~/.aws`, `~/.config/gcloud`) and other tools' dotfiles under
  * `$HOME` remain readable; see the residual-gap note in SAFETY.md.
  *
@@ -60,7 +61,9 @@
 import { realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
+import { agentHomeAccess } from "./sandbox-agent-paths"
 import { resolveBinaryPath } from "./sandbox-binary"
+import { linkedWorktreeGitPaths } from "./sandbox-git"
 import type { SandboxBuildRequest, SandboxCommand } from "./sandbox-types"
 
 const SANDBOX_EXEC_CANDIDATES = ["/usr/bin/sandbox-exec"]
@@ -86,17 +89,19 @@ export function resetSandboxExecCache(): void {
 export function buildDarwinSandboxCommand(
   req: SandboxBuildRequest,
   sandboxExecPath = "/usr/bin/sandbox-exec",
+  home = homedir(),
 ): SandboxCommand {
-  const profile = buildSeatbeltProfile(req)
+  const profile = buildSeatbeltProfile(req, home)
   return {
     command: sandboxExecPath,
     args: ["-p", profile, req.command, ...req.args],
   }
 }
 
-function buildSeatbeltProfile(req: SandboxBuildRequest): string {
-  const home = homedir()
+function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   const tmp = tmpdir()
+  const git = linkedWorktreeGitPaths(req.workspacePath)
+  const agentPaths = agentHomeAccess(req.agentType, home)
 
   // On macOS, os.tmpdir() returns the `/var/folders/...` symlink path, but
   // Seatbelt resolves the real `/private/var/folders/...` path when a
@@ -117,18 +122,7 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
     req.workspacePath,
     tmp,
     ...(tmpReal !== tmp ? [tmpReal] : []),
-    `${home}/.claude`,
-    `${home}/.codex`,
-    `${home}/.cursor`,
-    `${home}/.grok`,
-    `${home}/.kimi-code`,
-    `${home}/.gemini`,
-    // opencode is the one agent CLI that stores its own state under
-    // `~/.local/share` and `~/.config` instead of a top-level dotdir —
-    // both are scoped to `.../opencode` specifically, not a blanket grant
-    // (see the `${home}/.config` note below).
-    `${home}/.local/share/opencode`,
-    `${home}/.config/opencode`,
+    ...agentPaths.active,
     `${home}/.cache`,
     `${home}/.npm`,
     `${home}/.bun`,
@@ -136,12 +130,23 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
   // NOTE: deliberately no blanket `${home}/.config` entry here — that
   // used to make `~/.config/agent-valley/settings.yaml` (and every other
   // tool's config under `~/.config`, e.g. `gh`, `gcloud`) writable by the
-  // sandboxed process. Agent CLIs this project spawns store their own
-  // config directly under `~/.config` only in opencode's case (scoped to
-  // `~/.config/opencode` above); the rest use dotdirs like `~/.claude`,
-  // `~/.codex`, or `~/.gemini`, listed above.
+  // sandboxed process. The active CLI receives only its known paths.
 
   const writeRules = writablePaths.map((p) => `(allow file-write* (subpath ${seatbeltString(p)}))`).join("\n")
+  const gitWriteRules = git
+    ? [git.gitDir, git.objectsDir]
+        .map((p) => `(allow file-write* (subpath ${seatbeltString(p)}))`)
+        .concat(
+          [
+            git.branchRef,
+            `${git.branchRef}.lock`,
+            git.branchReflog,
+            `${git.branchReflog}.lock`,
+            `${git.commonDir}/packed-refs.lock`,
+          ].map((p) => `(allow file-write* (literal ${seatbeltString(p)}))`),
+        )
+        .join("\n")
+    : ""
 
   const deviceWriteRules = ["/dev/null", "/dev/zero", "/dev/tty", "/dev/ptmx"]
     .map((p) => `(allow file-write-data (literal ${seatbeltString(p)}))`)
@@ -149,11 +154,25 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
 
   // See the module docstring "Credential denylist" section for why these
   // exact paths are carved out of the broad read allowance below.
-  const denyReadSubpaths = [`${home}/.config/agent-valley`, `${home}/.ssh`]
+  const denyReadSubpaths = [
+    `${home}/.config/agent-valley`,
+    `${home}/.agent-valley`,
+    `${home}/.ssh`,
+    ...agentPaths.inactive,
+  ]
   const denyReadLiterals = [`${home}/.git-credentials`, join(process.cwd(), "valley.yaml")]
   const denyReadRules = [
     ...denyReadSubpaths.map((p) => `(deny file-read* (subpath ${seatbeltString(p)}))`),
     ...denyReadLiterals.map((p) => `(deny file-read* (literal ${seatbeltString(p)}))`),
+  ].join("\n")
+  // Apply write denies after all workspace/Git grants. A workspace nested
+  // under a credential directory must not re-enable access to that directory.
+  const denyWriteRules = [
+    ...denyReadSubpaths.map((p) => `(deny file-write* (subpath ${seatbeltString(p)}))`),
+    ...denyReadLiterals.map((p) => `(deny file-write* (literal ${seatbeltString(p)}))`),
+    ...(git
+      ? ["info", "pack"].map((name) => `(deny file-write* (subpath ${seatbeltString(join(git.objectsDir, name))}))`)
+      : []),
   ].join("\n")
 
   return `(version 1)
@@ -171,13 +190,15 @@ function buildSeatbeltProfile(req: SandboxBuildRequest): string {
 (allow iokit-open)
 
 ; Filesystem — broad read (minus the credential denylist below), write
-; confined to the workspace + curated per-agent-CLI cache/config dirs +
+; confined to the workspace + active agent CLI home + shared caches +
 ; OS tmp dir.
 (allow file-read*)
 ${denyReadRules}
 (deny file-write*)
 ${writeRules}
+${gitWriteRules}
 ${deviceWriteRules}
+${denyWriteRules}
 
 ; Network — outbound denied by default. Local DNS + unix-domain sockets
 ; (ssh-agent, etc.) are allowed since they never cross the host boundary.

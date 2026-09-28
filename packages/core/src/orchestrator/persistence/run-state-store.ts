@@ -57,15 +57,31 @@ export interface PersistedRetryEntry {
   category?: RetryCategory
 }
 
+export interface PersistedFinalization {
+  phase?: "pending" | "tracker_confirmed"
+  issueId: string
+  issueKey: string
+  parentId: string | null
+  attemptId: string
+  agentType: string
+  workspace: import("../../domain/models").Workspace
+  deliveryMode: "merge" | "pr"
+  hasCodeChanges: boolean
+  autoCommitted: boolean
+  durationMs: number
+  tokenUsage?: import("../../domain/models").RunAttempt["tokenUsage"]
+}
+
 export interface RunStateSnapshot {
   version: 1
   updatedAt: string
   activeAttempts: PersistedAttempt[]
   retryQueue: PersistedRetryEntry[]
+  pendingFinalizations?: PersistedFinalization[]
 }
 
 function emptySnapshot(): RunStateSnapshot {
-  return { version: 1, updatedAt: "", activeAttempts: [], retryQueue: [] }
+  return { version: 1, updatedAt: "", activeAttempts: [], retryQueue: [], pendingFinalizations: [] }
 }
 
 /**
@@ -76,13 +92,16 @@ export interface RunStatePort {
   load(): Promise<RunStateSnapshot>
   replaceActiveAttempts(attempts: PersistedAttempt[]): void
   replaceRetryQueue(entries: PersistedRetryEntry[]): void
+  replacePendingFinalizations(entries: PersistedFinalization[]): void
   /** Await any in-flight writes. Test-only convenience. */
   flush(): Promise<void>
+  flushOrThrow(): Promise<void>
 }
 
 export class RunStatePersistence implements RunStatePort {
   private snapshot: RunStateSnapshot = emptySnapshot()
   private writeQueue: Promise<void> = Promise.resolve()
+  private lastWriteError: unknown = null
 
   constructor(private readonly storePath: string) {}
 
@@ -99,6 +118,7 @@ export class RunStatePersistence implements RunStatePort {
         retryQueue: Array.isArray(parsed.retryQueue)
           ? parsed.retryQueue.map((entry) => ({ ...entry, category: entry.category ?? "infra" }))
           : [],
+        pendingFinalizations: Array.isArray(parsed.pendingFinalizations) ? parsed.pendingFinalizations : [],
       }
       logger.info("run-state-persistence", `Loaded run-state snapshot`, {
         activeAttempts: String(this.snapshot.activeAttempts.length),
@@ -123,8 +143,18 @@ export class RunStatePersistence implements RunStatePort {
     this.persistAsync()
   }
 
+  replacePendingFinalizations(entries: PersistedFinalization[]): void {
+    this.snapshot.pendingFinalizations = entries
+    this.persistAsync()
+  }
+
   async flush(): Promise<void> {
     await this.writeQueue
+  }
+
+  async flushOrThrow(): Promise<void> {
+    await this.writeQueue
+    if (this.lastWriteError) throw this.lastWriteError
   }
 
   /**
@@ -145,8 +175,10 @@ export class RunStatePersistence implements RunStatePort {
       this.snapshot.updatedAt = new Date().toISOString()
       await writeFile(tmpPath, JSON.stringify(this.snapshot, null, 2), "utf-8")
       await rename(tmpPath, this.storePath)
+      this.lastWriteError = null
     } catch (err) {
       logger.error("run-state-persistence", "Failed to save run-state snapshot", { error: String(err) })
+      throw err
     }
   }
 
@@ -155,6 +187,7 @@ export class RunStatePersistence implements RunStatePort {
     this.writeQueue = this.writeQueue
       .then(() => this.saveSnapshot())
       .catch((err) => {
+        this.lastWriteError = err
         logger.error("run-state-persistence", "Async persist failed", { error: String(err) })
       })
   }

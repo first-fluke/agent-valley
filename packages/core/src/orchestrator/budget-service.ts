@@ -167,6 +167,7 @@ export class InMemoryBudgetService implements BudgetService {
   private readonly perDay = new Map<string, UsageCounter>()
   /** History (retained mostly for tests; not rendered anywhere). */
   private readonly history: BudgetUsage[] = []
+  private readonly recordedAttemptIds = new Set<string>()
 
   constructor(opts: BudgetServiceOptions) {
     this.caps = opts.caps
@@ -184,6 +185,7 @@ export class InMemoryBudgetService implements BudgetService {
       for (const [issueId, counter] of Object.entries(snapshot.perIssue)) {
         this.perIssue.set(issueId, { ...counter })
       }
+      for (const id of snapshot.recordedAttemptIds ?? []) this.recordedAttemptIds.add(id)
     } catch (err) {
       logger.error("budget", "Failed to hydrate budget counters from disk — starting from zero", {
         error: String(err),
@@ -302,6 +304,8 @@ export class InMemoryBudgetService implements BudgetService {
     // recordUsage() that lands mid-hydration would have its write clobbered
     // the moment hydrate()'s load() resolves.
     await this.ready
+    if (this.recordedAttemptIds.has(attemptId)) return
+    this.recordedAttemptIds.add(attemptId)
 
     const tokens = Math.max(0, (usage.input ?? 0) + (usage.output ?? 0))
     const cost = computeCost(usage, this.caps.pricing)
@@ -339,6 +343,7 @@ export class InMemoryBudgetService implements BudgetService {
       dayKey,
       perDay: dayAgg,
       perIssue: Object.fromEntries(this.perIssue),
+      recordedAttemptIds: [...this.recordedAttemptIds],
     })
   }
 
