@@ -140,6 +140,113 @@ export function makeBlockOutput(vendor: Vendor, reason: string): string {
   }
 }
 
+/**
+ * Post-tool BLOCK dialect — used when a PostToolUse handler wants the tool
+ * result fed back to the model with a mandatory instruction (refactor-guard).
+ * The tool has already run, so this is feedback, not prevention.
+ *
+ * Claude Code's current spec (code.claude.com/docs/en/hooks, verified 2026-08)
+ * feeds `additionalContext` directly to the model and no longer documents
+ * `{decision:"block"}` for PostToolUse; older builds read the decision keys.
+ * Codex / Qwen / Command Code document BOTH `decision:"block"` + `reason` and
+ * `hookSpecificOutput.additionalContext` on PostToolUse, so emitting the
+ * combined shape covers every wired dialect. Vendors without a usable
+ * post-tool feedback channel (grok: passive stdout-ignored; kiro: output not
+ * processed; antigravity: audit-only `{}`) fall through to the closest
+ * best-effort shape — they are not wired for post_tool events.
+ */
+export function makePostToolBlockOutput(vendor: Vendor, reason: string): string {
+  switch (vendor) {
+    case "claude":
+    case "codex":
+    case "commandcode":
+    case "qwen":
+      return JSON.stringify({
+        decision: "block",
+        reason,
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: reason,
+        },
+      })
+    case "cursor":
+      // Cursor's postToolUse feedback channel is `additional_context` only
+      // (no block). Include the snake_case field its dialect documents.
+      return JSON.stringify({
+        additional_context: reason,
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: reason,
+        },
+      })
+    case "kimi":
+    case "kiro":
+    case "grok":
+    case "antigravity":
+    case "pi":
+      // Best-effort — no documented post-tool feedback channel (or disputed).
+      return makeBlockOutput(vendor, reason)
+  }
+}
+
+/**
+ * Pre-tool DENY dialect — used when a PreToolUse handler blocks a tool call
+ * (scm-guard). Distinct from makeBlockOutput, whose dialects are Stop-shaped
+ * (e.g. cursor's followup_message re-submits a turn instead of denying).
+ * scm-guard is wired for claude/codex/qwen/kimi/kiro/grok/cursor (plus the
+ * opencode/pi bridges, which read the claude dialect from the standalone
+ * entry); the remaining cases are best-effort so the switch stays exhaustive.
+ */
+export function makePreToolDenyOutput(vendor: Vendor, reason: string): string {
+  switch (vendor) {
+    case "claude":
+    case "codex":
+    case "commandcode":
+    case "qwen":
+      // Claude-documented PreToolUse deny shape (Codex/Qwen follow the dialect).
+      return JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: reason,
+        },
+      })
+    case "kimi":
+      // Kimi honours both the Claude-style decision keys and the
+      // hookSpecificOutput deny form (same rationale as makeBlockOutput).
+      return JSON.stringify({
+        decision: "block",
+        reason,
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: reason,
+        },
+      })
+    case "kiro":
+      return JSON.stringify({ decision: "block", reason })
+    case "grok":
+      // Grok PreToolUse output is a gate decision (see makePreToolOutput).
+      return JSON.stringify({ decision: "deny", reason })
+    case "antigravity":
+      // agy PreToolUse output is a gate decision; deny analog of the allow gate.
+      return JSON.stringify({ decision: "deny", reason })
+    case "cursor":
+      // Documented preToolUse output (cursor.com/docs/hooks): permission
+      // allow|deny, user_message shown in the client, agent_message sent to
+      // the agent. Cursor also accepts Claude's nested hookSpecificOutput
+      // form, but the native flat shape is authoritative.
+      return JSON.stringify({
+        permission: "deny",
+        user_message: reason,
+        agent_message: reason,
+      })
+    case "pi":
+      // pi's bridge accepts {block:true, reason} on tool_call interception.
+      return JSON.stringify({ block: true, reason })
+  }
+}
+
 export function makePreToolOutput(vendor: Vendor, updatedInput: Record<string, unknown>): string {
   switch (vendor) {
     case "cursor":

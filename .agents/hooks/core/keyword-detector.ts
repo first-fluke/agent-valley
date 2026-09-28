@@ -16,11 +16,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import { join } from "node:path"
 import { agyConversationId, isAgyInput, readAgyPrompt } from "./agy-input.ts"
 import { UNKNOWN_SESSION_ID, VENDORS } from "./constants.ts"
-import { clearGrokContext } from "./grok-context.ts"
 import { makePromptOutput } from "./hook-output.ts"
 import { isRelayedAgentMessage, normalizePromptInput } from "./prompt-input.ts"
 // triggers.json is imported statically: the bundler inlines it into the oma
-// binary (bundled `oma hook` path needs no file on disk), while a standalone
+// binary (bundled `oma hook run` path needs no file on disk), while a standalone
 // bun run resolves the sibling file next to this module (pi / direct run).
 import embeddedTriggers from "./triggers.json" with { type: "json" }
 import type { HandlerCtx, HandlerResult, HookInput, ModeState, Vendor } from "./types.ts"
@@ -66,6 +65,8 @@ const CLI_INVOCATION_SIGNALS = [
 
 const BRANDS_RE_SOURCE = CLI_INVOCATION_BRANDS.join("|")
 const SIGNALS_RE_SOURCE = CLI_INVOCATION_SIGNALS.join("|")
+// Require a resource and action so conversational mentions of OMA still trigger.
+const OMA_RESOURCE_ACTION = String.raw`oma\s+(?:schedule|memory|model|state|goal|ralph|auth|dashboard|hook|skill|slide|image|video|vault|search|serena)\s+(?:create|list|delete|run|sync|daemon|service|retry|maintain|init|setup|status|import|gc|upgrade|check|probe|propose|get|activate|archive|purge|repair|verify|emit|decisions|inject-log|summary|heal-check|set|terminal|web|audit|lint|eval|optimize|preview|export|asset|style|vendor|provider|api|rss|reaper)(?=\s|$)`
 
 /**
  * Matches CLI invocations at the start of the prompt.
@@ -85,11 +86,11 @@ const SIGNALS_RE_SOURCE = CLI_INVOCATION_SIGNALS.join("|")
  *   2. Bare form: '<brand>\s+<signal>' where <signal> is one of the
  *      enumerated subcommand verbs (agent / auto / exec / run / spawn),
  *      a --flag, or a colon-namespaced subcommand ('agent:spawn').
- *      Examples: 'oma agent:spawn brainstorm', 'claude --help',
+ *      Examples: 'oma agent spawn brainstorm', 'claude --help',
  *      'codex exec --workflow ralph', 'cursor agent', 'qwen run'.
  */
 export const CLI_INVOCATION_AT_START = new RegExp(
-  `^\\s*(?:\\/(?:${BRANDS_RE_SOURCE}):|(?:${BRANDS_RE_SOURCE})\\s+(?:${SIGNALS_RE_SOURCE}))`,
+  `^\\s*(?:${OMA_RESOURCE_ACTION}|\\/(?:${BRANDS_RE_SOURCE}):|(?:${BRANDS_RE_SOURCE})\\s+(?:${SIGNALS_RE_SOURCE}))`,
   "i",
 )
 
@@ -320,13 +321,35 @@ export function escapeRegex(s: string): string {
 
 /**
  * Merge a language-keyed keyword/pattern bank into a single flat list:
- * universal ("*") + English (the universal default) + the configured
- * language's own entries (skipped when lang === "en" to avoid duplicates).
- * Shared by buildPatterns and buildRawPatterns — both keyword banks and
- * pattern banks use this exact `Record<string, string[]>` shape.
+ * universal ("*") + English + EVERY other language's entries, deduped
+ * case-insensitively. Same rationale as RC4 (buildInformationalPatterns):
+ * users prompt in whichever language they think in — `language` in
+ * oma-config.yaml controls the RESPONSE language, not the prompt language —
+ * so gating by config language silently disabled e.g. every Korean trigger
+ * for `language: en` projects. A keyword written in language X can only
+ * match a prompt that contains X-script text (current banks are en/ko/ja/zh;
+ * if a Latin-script bank like es/fr is ever added, phrase distinctiveness is
+ * the gate instead), so merging all languages cannot fire on unrelated
+ * prompts. Shared by buildPatterns and buildRawPatterns — both keyword banks
+ * and pattern banks use this exact `Record<string, string[]>` shape.
  */
-export function collectLangEntries(bank: Record<string, string[]>, lang: string): string[] {
-  return [...(bank["*"] ?? []), ...(bank.en ?? []), ...(lang !== "en" ? (bank[lang] ?? []) : [])]
+export function collectLangEntries(bank: Record<string, string[]>): string[] {
+  const ordered = [
+    ...(bank["*"] ?? []),
+    ...(bank.en ?? []),
+    ...Object.entries(bank)
+      .filter(([key]) => key !== "*" && key !== "en")
+      .flatMap(([, entries]) => entries),
+  ]
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const entry of ordered) {
+    const key = entry.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(entry)
+  }
+  return out
 }
 
 /**
@@ -346,7 +369,7 @@ export function buildPatternEntries(
   lang: string,
   cjkScripts: string[],
 ): KeywordPatternEntry[] {
-  return collectLangEntries(keywords, lang).map((kw) => {
+  return collectLangEntries(keywords).map((kw) => {
     const escaped = escapeRegex(kw).replace(/\s+/g, "\\s+")
     const regex =
       cjkScripts.includes(lang) || /[^\p{ASCII}]/u.test(kw)
@@ -371,13 +394,10 @@ export interface RawPatternEntry {
   source: string
 }
 
-export function buildRawPatternEntries(
-  patterns: Record<string, string[]> | undefined,
-  lang: string,
-): RawPatternEntry[] {
+export function buildRawPatternEntries(patterns: Record<string, string[]> | undefined): RawPatternEntry[] {
   if (!patterns) return []
   const compiled: RawPatternEntry[] = []
-  for (const raw of collectLangEntries(patterns, lang)) {
+  for (const raw of collectLangEntries(patterns)) {
     try {
       compiled.push({ regex: new RegExp(raw, "iu"), source: raw })
     } catch {
@@ -393,8 +413,8 @@ export function buildRawPatternEntries(
  * escaping or word-boundary wrapping — pattern authors are responsible
  * for boundary handling. Invalid patterns are skipped silently.
  */
-export function buildRawPatterns(patterns: Record<string, string[]> | undefined, lang: string): RegExp[] {
-  return buildRawPatternEntries(patterns, lang).map((e) => e.regex)
+export function buildRawPatterns(patterns: Record<string, string[]> | undefined): RegExp[] {
+  return buildRawPatternEntries(patterns).map((e) => e.regex)
 }
 
 export function buildInformationalPatterns(config: TriggerConfig): RegExp[] {
@@ -417,7 +437,11 @@ export function buildInformationalPatterns(config: TriggerConfig): RegExp[] {
 export function isInformationalContext(prompt: string, matchIndex: number, infoPatterns: RegExp[]): boolean {
   const windowStart = Math.max(0, matchIndex - 60)
   const window = prompt.slice(windowStart, matchIndex + 60)
-  return infoPatterns.some((p) => p.test(window))
+  if (infoPatterns.some((p) => p.test(window))) return true
+  if (/\?\s*$/.test(prompt.trim()) && infoPatterns.some((p) => p.test(prompt))) {
+    return true
+  }
+  return false
 }
 
 /**
@@ -438,7 +462,7 @@ export function isPastedContent(matchIndex: number, isPersistent: boolean, promp
  * compound technical token is a reference to an ARTIFACT (CLI subcommand,
  * file, property, path segment), not a request to run the workflow:
  *
- *   `oma ralph:verify`            keyword + ':' + word  (CLI subcommand)
+ *   `oma ralph verify`            keyword + ':' + word  (CLI subcommand)
  *   `ralph.md`, `ralph.exec-tier` keyword + '.' + word  (file / property)
  *   `.agents/workflows/ralph`     word + '/' + keyword  (path segment)
  *
@@ -452,18 +476,34 @@ export function isPastedContent(matchIndex: number, isPersistent: boolean, promp
 export function isTechnicalReference(text: string, matchIndex: number, matchText: string): boolean {
   // buildPatterns boundaries capture one non-word char on each side of the
   // keyword (unless the match touches ^ or $) — peel them off to locate the
-  // keyword span itself. CJK keywords compile without boundaries (lead/trail
-  // stay 0).
-  const lead = /^[^\w-]/.test(matchText) ? 1 : 0
-  const trail = /[^\w-]$/.test(matchText) ? 1 : 0
-  const kStart = matchIndex + lead
-  const kEnd = matchIndex + matchText.length - trail
-  const prev = kStart > 0 ? (text[kStart - 1] ?? "") : ""
-  const prev2 = kStart > 1 ? (text[kStart - 2] ?? "") : ""
-  const next = text[kEnd] ?? ""
-  const next2 = text[kEnd + 1] ?? ""
-  if ((next === ":" || next === ".") && /\w/.test(next2)) return true
-  if (prev === "/" && /\w/.test(prev2)) return true
+  // keyword token itself.
+  const m = matchText.match(/^([^\w-]?)(.*?)([^\w-]?)$/)
+  const leadingNonWord = m?.[1]?.length ?? 0
+  const token = m?.[2] ?? matchText
+  const tokenStart = matchIndex + leadingNonWord
+  const tokenEnd = tokenStart + token.length
+
+  const charBefore = tokenStart > 0 ? text[tokenStart - 1] : ""
+  const charAfter = tokenEnd < text.length ? text[tokenEnd] : ""
+
+  // 1. Path segment: preceded by '/' AND a word char before that slash
+  //    (excludes leading-slash invocations like "/ralph" where charBefore-1 is start or space).
+  if (charBefore === "/" && tokenStart >= 2 && /[\w-]/.test(text[tokenStart - 2] ?? "")) {
+    return true
+  }
+
+  // 2. CLI subcommand: followed by ':' AND a word char after that colon
+  //    (excludes prose colons like "ralph: do this" where charAfter+1 is space).
+  if (charAfter === ":" && tokenEnd + 1 < text.length && /[\w-]/.test(text[tokenEnd + 1] ?? "")) {
+    return true
+  }
+
+  // 3. File extension or property: followed by '.' AND a word char after that dot
+  //    (excludes sentence-ending periods like "run ralph." where charAfter+1 is space/end).
+  if (charAfter === "." && tokenEnd + 1 < text.length && /[\w-]/.test(text[tokenEnd + 1] ?? "")) {
+    return true
+  }
+
   return false
 }
 
@@ -486,6 +526,8 @@ const QUESTION_PATTERNS: RegExp[] = [
   /^.*뭐가\s*있/,
   /^.*어떤\s*(게|것|거)\s*있/,
   /^.*차이가?\s*뭐/,
+  /^.*(버그|문제|오류|에러)\s*(임|인가|인가요|야|이야|인지|\?)/,
+  /^.*(이거|이것|그거|그것)(도|는)?\s*(버그|문제|오류|에러)/,
   // Korean meta-continuation patterns (referring to prior discussion)
   /^.*그것도/,
   /^.*보강할/,
@@ -495,10 +537,11 @@ const QUESTION_PATTERNS: RegExp[] = [
   /^.*\banything worth\b/i,
   /^.*\bwhat.*(feature|difference|reference)/i,
   /^.*\bcompare\b/i,
+  /^.*\b(is this|is it|is that)\s+(a\s+)?(bug|issue|problem|error)\b/i,
 ]
 
 /**
- * Content-agnostic interrogative test. A first line that BOTH leads with an
+ * Content-agnostic interrogative test. A line that BOTH leads with an
  * interrogative word AND ends with '?' is a question *about* something, not a
  * command — regardless of the topic. This generalises to any subject
  * (including workflow names) without enumerating topic words, unlike
@@ -508,15 +551,24 @@ const QUESTION_PATTERNS: RegExp[] = [
 // loose contains — suppressing a question that merely contains a workflow name
 // is exactly the desired behaviour.
 const INTERROGATIVE_WORD =
-  /(?:왜|어째서|어떻게|무슨|무엇|뭐|뭔|뭣|어디|언제|누가|누구|어느|\bwhy\b|\bwhats?\b|\bhow\b|\bwhen\b|\bwhere\b|\bwhich\b|\bwhose\b)/i
+  /(?:왜|어째서|어떻게|무슨|무엇|뭐|뭔|뭣|어디|언제|누가|누구|어느|버그|문제|에러|맞나|인가|인지|맞아|인가요|\bwhy\b|\bwhats?\b|\bhow\b|\bwhen\b|\bwhere\b|\bwhich\b|\bwhose\b|\bbug\b|\bissue\b|\bproblem\b|\berror\b)/i
 
 function isInterrogativeSentence(line: string): boolean {
   return /\?\s*$/.test(line) && INTERROGATIVE_WORD.test(line)
 }
 
 export function isAnalyticalQuestion(prompt: string): boolean {
-  const firstLine = (prompt.split("\n")[0] ?? "").trim()
-  return isInterrogativeSentence(firstLine) || QUESTION_PATTERNS.some((p) => p.test(firstLine))
+  const lines = prompt
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+  const firstLine = lines[0] ?? ""
+  const lastLine = lines[lines.length - 1] ?? ""
+  return (
+    isInterrogativeSentence(firstLine) ||
+    isInterrogativeSentence(lastLine) ||
+    QUESTION_PATTERNS.some((p) => p.test(firstLine) || p.test(lastLine))
+  )
 }
 
 export function stripCodeBlocks(text: string): string {
@@ -634,7 +686,7 @@ function getStateDir(projectDir: string): string {
   return dir
 }
 
-function activateMode(projectDir: string, workflow: string, sessionId: string): void {
+function activateMode(projectDir: string, workflow: string, sessionId: string, omaSid?: string | null): void {
   // Never persist a workflow under the unresolved-session fallback id: such a
   // file cannot be isolated per session and would cross-contaminate any later
   // session that also resolves to UNKNOWN_SESSION_ID. The workflow context is
@@ -645,6 +697,7 @@ function activateMode(projectDir: string, workflow: string, sessionId: string): 
     sessionId,
     activatedAt: new Date().toISOString(),
     reinforcementCount: 0,
+    ...(omaSid ? { omaSid } : {}),
   }
   writeFileSync(join(getStateDir(projectDir), `${workflow}-state-${sessionId}.json`), JSON.stringify(state, null, 2))
 }
@@ -657,11 +710,11 @@ async function activateL1WorkflowSession(
   category = "main",
 ): Promise<string | null> {
   try {
-    const [{ setActiveSession }, { createEventId, emitEvent }] = await Promise.all([
+    const [{ setActiveSession }, { createSessionId, emitEvent }] = await Promise.all([
       import("./state-marker.ts"),
       import("./state-emit.ts"),
     ])
-    const sid = `oma-${createEventId()}`
+    const sid = createSessionId()
     setActiveSession(projectDir, category, sid)
     await emitEvent(projectDir, sid, {
       kind: "session.created",
@@ -693,8 +746,12 @@ export const DEACTIVATION_PHRASES: Record<string, string[]> = {
   pl: ["workflow zakończony", "workflow ukończony"],
 }
 
-export function isDeactivationRequest(prompt: string, lang: string): boolean {
-  const phrases = [...(DEACTIVATION_PHRASES.en ?? []), ...(lang !== "en" ? (DEACTIVATION_PHRASES[lang] ?? []) : [])]
+export function isDeactivationRequest(prompt: string): boolean {
+  // All languages merged, never gated by config language (same rationale as
+  // collectLangEntries): a user prompting in Korean must be able to say
+  // "워크플로우 완료" even when `language: en`. A phrase only matches a prompt
+  // actually written in that language, so merging cannot misfire.
+  const phrases = Object.values(DEACTIVATION_PHRASES).flat()
   const normalized = normalizeForMatching(prompt)
   return phrases.some((phrase) => normalized.includes(normalizeForMatching(phrase)))
 }
@@ -809,7 +866,7 @@ export function pickWinningCandidate(candidates: WorkflowCandidate[]): WorkflowC
 /**
  * Pure decision function — the single logic source for keyword detection.
  *
- * Called in-process by `oma hook` dispatch (Task 3+) and by the standalone
+ * Called in-process by `oma hook run` dispatch (Task 3+) and by the standalone
  * `main()` entry below (pi subprocess path). Both paths share exactly this
  * code; no business logic is duplicated.
  *
@@ -835,10 +892,8 @@ export async function run(input: HookInput, ctx: HandlerCtx): Promise<HandlerRes
   const lang = detectLanguage(projectDir)
 
   // Check for deactivation request before workflow detection
-  if (isDeactivationRequest(prompt, lang)) {
+  if (isDeactivationRequest(prompt)) {
     deactivateAllPersistentModes(projectDir, sessionId)
-    // Grok's resume context lives in a session-start file, not L1 stdout — clear it.
-    if (vendor === "grok") clearGrokContext(projectDir)
     return null
   }
 
@@ -917,7 +972,7 @@ export async function run(input: HookInput, ctx: HandlerCtx): Promise<HandlerRes
     for (const { regex, keyword } of buildPatternEntries(def.keywords, lang, config.cjkScripts)) {
       considerMatch(regex, keyword)
     }
-    for (const { regex, source } of buildRawPatternEntries(def.patterns, lang)) {
+    for (const { regex, source } of buildRawPatternEntries(def.patterns)) {
       considerMatch(regex, source)
     }
   }
@@ -927,10 +982,12 @@ export async function run(input: HookInput, ctx: HandlerCtx): Promise<HandlerRes
 
   const { workflow } = winner
 
+  // Activate the L1 session first so its sid can be recorded in the
+  // persistent-mode state file (the Stop hook emits gate events under it).
+  const omaSid = await activateL1WorkflowSession(projectDir, workflow, vendor, sessionId)
   if (winner.persistent) {
-    activateMode(projectDir, workflow, sessionId)
+    activateMode(projectDir, workflow, sessionId, omaSid)
   }
-  await activateL1WorkflowSession(projectDir, workflow, vendor, sessionId)
   const updatedState = recordKwTrigger(kwState, workflow)
   saveKwState(projectDir, updatedState)
 
@@ -938,7 +995,6 @@ export async function run(input: HookInput, ctx: HandlerCtx): Promise<HandlerRes
     `[OMA WORKFLOW: ${workflow.toUpperCase()}]`,
     `User intent matches the /${workflow} workflow.`,
     `Read and follow \`.agents/workflows/${workflow}.md\` step by step.`,
-    `User request: ${prompt}`,
     `IMPORTANT: Start the workflow IMMEDIATELY. Do not ask for confirmation.`,
   ]
 

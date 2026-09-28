@@ -708,7 +708,7 @@
       "persistent": true,
       "keywords": {
         "*": ["work", "step by step"],
-        "en": ["one by one", "guide me", "walk me through", "manual mode", "one step at a time"],
+        "en": ["one by one", "one step at a time"],
         "ko": [
           "단계별",
           "단계별로",
@@ -717,46 +717,17 @@
           "하나씩 해줘",
           "순서대로 해줘",
           "차근차근",
-          "차근차근 해줘",
-          "수동으로 해줘"
+          "차근차근 해줘"
         ],
-        "ja": ["ステップバイステップ", "一歩ずつ", "ガイドして", "手動で", "一つずつ", "順番にやって", "手順を教えて"],
-        "zh": ["逐步", "一步一步", "指导我", "手动", "一个一个", "按顺序", "带我做"],
-        "es": ["paso a paso", "guíame", "uno por uno", "modo manual", "de a uno", "llévame paso a paso"],
-        "fr": [
-          "étape par étape",
-          "guide-moi",
-          "un par un",
-          "mode manuel",
-          "accompagne-moi",
-          "montre-moi étape par étape"
-        ],
-        "de": [
-          "schritt für schritt",
-          "führe mich",
-          "eins nach dem anderen",
-          "manueller modus",
-          "zeig mir wie",
-          "der reihe nach"
-        ],
-        "pt": ["passo a passo", "me guie", "um por um", "modo manual", "me acompanhe", "me mostre passo a passo"],
-        "ru": ["шаг за шагом", "направь меня", "по одному", "ручной режим", "покажи по шагам", "веди меня"],
-        "nl": [
-          "stap voor stap",
-          "begeleid me",
-          "een voor een",
-          "handmatige modus",
-          "leid me erdoor",
-          "stap voor stap uitleg"
-        ],
-        "pl": [
-          "krok po kroku",
-          "poprowadź mnie",
-          "jeden po drugim",
-          "tryb ręczny",
-          "przeprowadź mnie",
-          "pokaż krok po kroku"
-        ]
+        "ja": ["ステップバイステップ", "一歩ずつ", "一つずつ", "順番にやって"],
+        "zh": ["逐步", "一步一步", "一个一个", "按顺序"],
+        "es": ["paso a paso", "uno por uno", "de a uno"],
+        "fr": ["étape par étape", "un par un"],
+        "de": ["schritt für schritt", "eins nach dem anderen", "der reihe nach"],
+        "pt": ["passo a passo", "um por um"],
+        "ru": ["шаг за шагом", "по одному"],
+        "nl": ["stap voor stap", "een voor een"],
+        "pl": ["krok po kroku", "jeden po drugim"]
       }
     },
     "deepinit": {
@@ -1099,12 +1070,10 @@
           "랄프",
           "멈추지마",
           "멈추지 말고",
-          "끝까지",
           "완료될때까지",
           "될때까지 해",
           "끝날때까지",
           "다 끝내",
-          "다 해",
           "전부 완료",
           "끝까지 해",
           "중단하지마",
@@ -1162,7 +1131,7 @@
           "ne t'arrête pas",
           "complète tout",
           "n'abandonne pas",
-          "continue",
+          "continue sans t'arrêter",
           "finis tout"
         ],
         "de": [
@@ -1184,7 +1153,7 @@
           "complete tudo",
           "não pare até terminar",
           "não desista",
-          "continue",
+          "continue sem parar",
           "finalize tudo"
         ],
         "ru": [
@@ -2091,7 +2060,7 @@
         ]
       }
     },
-    "oma-orchestrator": {
+    "oma-orchestration": {
       "keywords": {
         "*": ["MCP Memory"],
         "en": [
@@ -2199,9 +2168,25 @@
           "rebase workflow",
           "git worktree"
         ],
-        "ko": ["머지 충돌 해결", "리베이스해줘", "워크트리 써줘"],
-        "ja": ["マージ衝突解決", "リベースして", "リリースタグ", "worktree使って"],
-        "zh": ["解决合并冲突", "帮我 rebase", "打发布标签", "用 worktree"]
+        "ko": [
+          "머지 충돌 해결",
+          "리베이스해줘",
+          "워크트리 써줘",
+          "브랜칭 전략",
+          "브랜치 전략 세워줘",
+          "릴리즈 태그 달아줘",
+          "체리픽해줘"
+        ],
+        "ja": [
+          "マージ衝突解決",
+          "リベースして",
+          "リリースタグ",
+          "worktree使って",
+          "ブランチ戦略",
+          "チェリーピック",
+          "リリースタグ付けて"
+        ],
+        "zh": ["解决合并冲突", "帮我 rebase", "打发布标签", "用 worktree", "分支策略", "帮我 cherry-pick"]
       }
     },
     "oma-search": {
@@ -2263,7 +2248,7 @@
         "zh": ["terraform plan", "搭建基础设施", "iac 模块", "云资源", "成本优化"]
       }
     },
-    "oma-translator": {
+    "oma-translation": {
       "keywords": {
         "*": ["arb", "i18n"],
         "en": [
@@ -2552,7 +2537,10 @@
           "기술 부채",
           "클래스 분리",
           "메서드 추출",
-          "코드 정리해줘"
+          "코드 정리해줘",
+          "특성화 테스트",
+          "핫스팟",
+          "리팩토링 계획"
         ],
         "ja": [
           "リファクタリング",
@@ -2561,9 +2549,23 @@
           "コードスメル",
           "技術的負債",
           "クラスを分割",
-          "メソッド抽出"
+          "メソッド抽出",
+          "特性化テスト",
+          "ホットスポット",
+          "リファクタリング計画"
         ],
-        "zh": ["重构", "降低复杂度", "测量复杂度", "代码异味", "技术债", "拆分类", "提取方法"]
+        "zh": [
+          "重构",
+          "降低复杂度",
+          "测量复杂度",
+          "代码异味",
+          "技术债",
+          "拆分类",
+          "提取方法",
+          "特征化测试",
+          "热点",
+          "重构计划"
+        ]
       }
     }
   },
@@ -2602,7 +2604,13 @@
       "why build",
       "why create",
       "why make",
-      "artifact"
+      "artifact",
+      "is this a bug",
+      "is it a bug",
+      "is that a bug",
+      "is this an error",
+      "why did it",
+      "why does it"
     ],
     "ko": [
       "뭐야",
@@ -2639,7 +2647,15 @@
       "이 워크플로우",
       "워크플로우 자체",
       "고도화",
-      "아티팩트"
+      "아티팩트",
+      "버그임",
+      "버그인가",
+      "버그인가요",
+      "버그야",
+      "버그인지",
+      "문제인가",
+      "문제임",
+      "에러인가"
     ],
     "ja": ["とは", "って何", "どうやって", "説明して", "キーワード", "検出", "誤検出"],
     "zh": ["是什么", "什么是", "怎么", "解释", "关键词", "检测", "误报"],
@@ -2651,7 +2667,7 @@
     "nl": ["wat is", "hoe", "leg uit", "sleutelwoord", "vals positief", "gedetecteerd"],
     "pl": ["co to", "jak", "wyjaśnij", "słowo kluczowe", "fałszywy alarm", "wykryto"]
   },
-  "excludedWorkflows": ["tools", "stack-set", "schedule"],
+  "excludedWorkflows": ["tools", "stack-set", "schedule", "convert"],
   "cjkScripts": ["ko", "ja", "zh"],
   "extensionRouting": {
     "frontend-engineer": ["tsx", "jsx", "css", "scss", "less", "vue", "svelte", "html"],

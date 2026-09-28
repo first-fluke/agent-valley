@@ -89,6 +89,7 @@ enum TodosViewState {
     case error(String)
 }
 
+@MainActor
 @Observable
 final class TodosViewModel {
     // MARK: - Published state (observed by the View automatically)
@@ -98,7 +99,9 @@ final class TodosViewModel {
     // Depend on the protocol seam, not the concrete service — enables protocol-based
     // mocking in tests without a third-party mock lib (see §8).
     private let service: any TodoProviding
-    private var loadTask: Task<Void, Never>?
+    // `private(set)` so tests can `await viewModel.loadTask?.value` to observe the
+    // load deterministically instead of sleeping (see §8).
+    private(set) var loadTask: Task<Void, Never>?
 
     init(service: any TodoProviding) {
         self.service = service
@@ -116,7 +119,8 @@ final class TodosViewModel {
             do {
                 // Stale-while-revalidate: the stream yields the cached list first
                 // (instant render), then the revalidated list. State updates per yield.
-                for try await todos in self.service.todosStream() {
+                let stream = await self.service.todosStream()
+                for try await todos in stream {
                     guard !Task.isCancelled else { return }
                     self.viewState = todos.isEmpty ? .empty : .loaded(todos)
                 }
@@ -130,10 +134,21 @@ final class TodosViewModel {
 
     func retry() { load() }
 
-    // Cancel the in-flight task when the view model is deallocated.
-    deinit { loadTask?.cancel() }
+    /// Cancel the in-flight load explicitly (e.g. a "Cancel" button). The `.task`
+    /// modifier already cancels its structured child on view disappear, so this is
+    /// only needed for the unstructured `loadTask` handle kept above.
+    func cancelLoad() { loadTask?.cancel() }
 }
 ```
+
+> **Pitfall — don't cancel in `deinit`.** Under Swift 6 strict concurrency a
+> `deinit` is *nonisolated*, so it cannot touch `@MainActor`-isolated stored state
+> like `loadTask` (isolated `deinit`, SE-0371, only shipped in Swift 6.2). The
+> pattern is fragile for a second reason too: the `Task { [weak self] }` above
+> captures `self` weakly, so an in-flight load holds no strong reference — `deinit`
+> can only run *after* the task already finished, never mid-stream. Rely on `.task`'s
+> automatic cancellation on disappear (structured), and expose `cancelLoad()` for the
+> unstructured handle when you need to stop it sooner.
 
 ---
 
@@ -152,11 +167,11 @@ struct TodosView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle("Todos")
-                .task { viewModel.load() }         // runs on appear, cancelled on disappear
-        }
+        // The router owns the enclosing NavigationStack(path:) (see §9); a feature
+        // view assumes it is already inside one and never wraps itself in a stack.
+        content
+            .navigationTitle("Todos")
+            .task { viewModel.load() }             // runs on appear, cancelled on disappear
     }
 
     // MARK: - Content switch
@@ -233,7 +248,8 @@ public final class APIClient {
     public init(serverURL: URL, tokenProvider: @escaping () -> String?) {
         let transport = URLSessionTransport()
         let authMiddleware = BearerAuthMiddleware(tokenProvider: tokenProvider)
-        self.client = try! Client(
+        // The generated Client initialiser is non-throwing — no `try` needed.
+        self.client = Client(
             serverURL: serverURL,
             transport: transport,
             middlewares: [authMiddleware]
@@ -276,15 +292,17 @@ public struct BearerAuthMiddleware: ClientMiddleware {
 
 ## 6. Generated-Client Call Pattern
 
-> Isolates the raw generated-`Client` call + response mapping. The **production**
-> `TodoService` wraps this with a `ResponseCache` (read-through + invalidation) —
-> see §10. Use the cached form for real features; this excerpt is the inner call only.
+> Isolates the raw generated-`Client` call + response mapping — this is the **inner
+> call shape** only. The **production** service is the cached `TodoService` in §10
+> that wraps this shape with a `ResponseCache` (read-through + invalidation). Use the
+> cached form for real features; this type is named `TodoServiceUncached` so it never
+> collides with §10's `TodoService`.
 
 ```swift
-// Core/Networking/TodoService.swift  (excerpt showing call + response handling)
+// Core/Networking/TodoServiceUncached.swift  (excerpt showing call + response handling)
 import OpenAPIRuntime
 
-public final class TodoService {
+public final class TodoServiceUncached {
     private let client: Client
 
     public init(client: Client) {
@@ -307,7 +325,6 @@ public final class TodoService {
 
     public enum APIError: Error {
         case undocumented(statusCode: Int)
-        case notFound
     }
 }
 ```
@@ -334,27 +351,128 @@ struct MyApp: App {
 }
 
 // ---------------------------------------------------------------------------
+// Core/Security/KeychainTokenStore.swift
+// ---------------------------------------------------------------------------
+import Foundation
+import Security
+
+/// Minimal Keychain-backed token store — no third-party dependency.
+/// Secrets (access tokens, refresh tokens) belong in the Keychain, never in
+/// `UserDefaults`, which is an unencrypted plist readable from a device backup.
+struct KeychainTokenStore {
+    let service: String   // e.g. Bundle.main.bundleIdentifier ?? "MyApp"
+
+    /// Read a stored token, or nil if absent.
+    func token(account: String = "accessToken") -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// Insert or overwrite a token (delete-then-add keeps it idempotent).
+    func setToken(_ value: String, account: String = "accessToken") {
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = Data(value.utf8)
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    /// Remove a stored token (e.g. on sign-out).
+    func deleteToken(account: String = "accessToken") {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // App/AppDependencies.swift
 // ---------------------------------------------------------------------------
 import Foundation
+import OSLog
 
 /// Builds and owns shared singletons. Constructed once in @main.
 final class AppDependencies {
     let todoService: TodoService
-
     init() {
+        let logger = Logger(
+            subsystem: Bundle.main.bundleIdentifier ?? "MyApp",
+            category: "ResponseCache"
+        )
         let serverURL = URL(string: ProcessInfo.processInfo.environment["API_BASE_URL"]
                            ?? "https://api.example.com")!
+        // Secrets come from the Keychain — never UserDefaults (see tech-stack.md).
+        let tokens = KeychainTokenStore(service: Bundle.main.bundleIdentifier ?? "MyApp")
         let apiClient = APIClient(serverURL: serverURL, tokenProvider: {
-            // TODO: replace with real keychain / token store lookup
-            UserDefaults.standard.string(forKey: "accessToken")
+            tokens.token()
         })
-        // Repository-layer response cache (hyperoslo/Cache) — see snippets §10.
-        let todoCache = try! ResponseCache<[Components.Schemas.Todo]>(name: "Todos")
-        self.todoService = TodoService(client: apiClient.client, cache: todoCache)
+        // `accountID` is a stable, non-secret server identifier, never a token or email.
+        let accountID = "current-account-id" // Obtain from validated auth/session claims.
+        let todoCache: ResponseCache<[Components.Schemas.Todo]>?
+        do {
+            todoCache = try ResponseCache(name: "todos-\(accountID)")
+        } catch {
+            // Caching is optional. Do not log the account ID, token, or storage path.
+            logger.notice("Response cache unavailable; continuing network-only")
+            todoCache = nil
+        }
+        self.todoService = TodoService(client: apiClient.client, cache: todoCache, accountID: accountID)
     }
 }
 ```
+
+```swift
+// App/AccountServiceController.swift
+// Publish a newly built service only after the old account has been closed.
+@MainActor
+final class AccountServiceController {
+    private(set) var todoService: TodoService?
+    private var transitionGeneration = 0
+
+    func switchAccount(to replacement: TodoService) async {
+        transitionGeneration += 1
+        let generation = transitionGeneration
+        let current = todoService
+        // Remove the old service from the UI before awaiting; another transition may begin.
+        todoService = nil
+        if let current {
+            await current.close() // cancels in-flight reads and purges this account's cache
+        }
+        guard generation == transitionGeneration else {
+            await replacement.close()
+            return
+        }
+        todoService = replacement // replacement has a new client and account-scoped cache
+    }
+
+    func signOut() async {
+        transitionGeneration += 1
+        let current = todoService
+        todoService = nil
+        if let current { await current.close() }
+    }
+}
+```
+
+Build `replacement` with the new account's credentials and non-secret account identifier. Do not
+reuse a service, token provider, or disk namespace across accounts.
 
 ---
 
@@ -371,7 +489,7 @@ final class MockTodoService: TodoProviding, @unchecked Sendable {
     var stubbedTodos: [Components.Schemas.Todo] = []
     var shouldThrow: Error?
 
-    func todosStream() -> AsyncThrowingStream<[Components.Schemas.Todo], Error> {
+    func todosStream() async -> AsyncThrowingStream<[Components.Schemas.Todo], Error> {
         AsyncThrowingStream { continuation in
             if let error = shouldThrow {
                 continuation.finish(throwing: error)
@@ -397,6 +515,10 @@ final class MockTodoService: TodoProviding, @unchecked Sendable {
 
 // MARK: - Tests
 
+// The view model is `@MainActor`, so the test methods are too. Instead of polling
+// with `Task.sleep`, await the exposed `loadTask` handle — the assertion runs only
+// once the load has actually finished, so the test is deterministic and fast.
+@MainActor
 final class TodosViewModelTests: XCTestCase {
     // Test that a successful response transitions to .loaded.
     func testLoad_success_transitionsToLoaded() async {
@@ -407,8 +529,7 @@ final class TodosViewModelTests: XCTestCase {
         let sut = TodosViewModel(service: mock)
 
         sut.load()
-        // Give the Task a tick to complete.
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await sut.loadTask?.value          // wait for the load to complete
 
         guard case .loaded(let todos) = sut.viewState else {
             return XCTFail("Expected .loaded, got \(sut.viewState)")
@@ -424,7 +545,7 @@ final class TodosViewModelTests: XCTestCase {
         let sut = TodosViewModel(service: mock)
 
         sut.load()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await sut.loadTask?.value
 
         guard case .empty = sut.viewState else {
             return XCTFail("Expected .empty, got \(sut.viewState)")
@@ -438,7 +559,7 @@ final class TodosViewModelTests: XCTestCase {
         let sut = TodosViewModel(service: mock)
 
         sut.load()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await sut.loadTask?.value
 
         guard case .error = sut.viewState else {
             return XCTFail("Expected .error, got \(sut.viewState)")
@@ -446,6 +567,8 @@ final class TodosViewModelTests: XCTestCase {
     }
 }
 ```
+
+---
 
 ## 9. Navigation: interactive swipe-back on nav-bar-hidden routes
 
@@ -492,6 +615,19 @@ private struct InteractiveSwipeBack: UIViewControllerRepresentable {
 
         override func didMove(toParent parent: UIViewController?) {
             super.didMove(toParent: parent)
+            reassertSwipeBack()
+        }
+        // UIKit re-disables the recognizer on every nav-bar-hidden transition, so
+        // re-assert on each appear — not just once at insertion (`didMove`).
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            reassertSwipeBack()
+        }
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            reassertSwipeBack()
+        }
+        private func reassertSwipeBack() {
             guard let r = navigationController?.interactivePopGestureRecognizer else { return }
             r.delegate = self
             r.isEnabled = true
@@ -552,7 +688,7 @@ NewPostView()
 
 ## 10. Repository-layer response cache (hyperoslo/Cache)
 
-Read-through caching is **mandatory at the Repository (Service) layer**. Cache the
+When response caching is required, implement it at the Repository (Service) layer. Cache the
 **decoded** `Components.Schemas.*` models returned by the generated `Client` — never
 intercept `HTTPBody` in a middleware (it is a single-consumption stream). `hyperoslo/Cache`'s
 `Storage` is not `Sendable`, so it is always owned by an `actor`.
@@ -562,13 +698,13 @@ intercept `HTTPBody` in a middleware (it is a single-consumption stream). `hyper
 import Foundation
 import Cache
 
-/// Actor wrapper over hyperoslo/Cache. One instance per cached value type.
+/// Actor wrapper over hyperoslo/Cache. One instance per cached value type and account namespace.
 /// Owns a non-Sendable `Storage`, so all access is actor-isolated → Swift 6 clean.
 actor ResponseCache<Value: Codable & Sendable> {
     private let storage: Storage<String, Value>
 
     /// - Parameters:
-    ///   - name: disk namespace (one folder per cache, e.g. "Todos").
+    ///   - name: disk namespace. Include a stable, non-secret account/tenant identifier.
     ///   - memoryExpiry: in-memory TTL — fast path, lost on app relaunch.
     ///   - diskExpiry: on-disk TTL — survives relaunch. Never use `.never`.
     init(
@@ -576,9 +712,13 @@ actor ResponseCache<Value: Codable & Sendable> {
         memoryExpiry: Expiry = .seconds(120),
         diskExpiry: Expiry = .seconds(60 * 60)
     ) throws {
+        // `fileManager:` is REQUIRED on the 7.4.0 release tag (last release, 2024-08).
+        // The README shows the master signature where it defaults to `.default`, but
+        // that default is unreleased — pass it explicitly and pin the exact version.
         self.storage = try Storage<String, Value>(
             diskConfig: DiskConfig(name: name, expiry: diskExpiry),
             memoryConfig: MemoryConfig(expiry: memoryExpiry, countLimit: 200, totalCostLimit: 0),
+            fileManager: .default,
             transformer: TransformerFactory.forCodable(ofType: Value.self)
         )
     }
@@ -605,7 +745,7 @@ import Foundation
 /// Protocol seam the view models depend on. Keeps the cached `TodoService`
 /// swappable for a protocol-based mock in tests (no third-party mock lib).
 public protocol TodoProviding: Sendable {
-    func todosStream() -> AsyncThrowingStream<[Components.Schemas.Todo], Error>
+    func todosStream() async -> AsyncThrowingStream<[Components.Schemas.Todo], Error>
     func createTodo(title: String) async throws -> Components.Schemas.Todo
     func toggleTodo(id: String) async throws -> Components.Schemas.Todo
     func deleteTodo(id: String) async throws
@@ -616,16 +756,40 @@ public protocol TodoProviding: Sendable {
 // Core/Networking/TodoService.swift  (cached repository)
 import Foundation
 
-public final class TodoService: TodoProviding {
+public actor TodoService: TodoProviding {
     private let client: Client
-    private let cache: ResponseCache<[Components.Schemas.Todo]>
+    private let cache: ResponseCache<[Components.Schemas.Todo]>?
+    private let accountID: String
+    private var isActive = true
+    private var requests: [UUID: Task<Void, Never>] = [:]
 
-    public init(client: Client, cache: ResponseCache<[Components.Schemas.Todo]>) {
+    public init(
+        client: Client,
+        cache: ResponseCache<[Components.Schemas.Todo]>?,
+        accountID: String
+    ) {
         self.client = client
         self.cache = cache
+        self.accountID = accountID
     }
 
-    private static let listKey = "listTodos"
+    private var listKey: String { "\(accountID):listTodos" }
+
+    /// Call before replacing an account or signing out. Cancels reads, clears
+    /// account-scoped cache data, and prevents a late response from reaching the old UI.
+    public func close() async {
+        isActive = false
+        let pendingRequests = Array(requests.values)
+        let pendingContinuations = Array(continuations.values)
+        requests.removeAll()
+        continuations.removeAll()
+        pendingContinuations.forEach { $0.finish() }
+        pendingRequests.forEach { $0.cancel() }
+        // Wait for cancelled work before purging. A request that was suspended in a cache
+        // write cannot repopulate this account's namespace after the purge.
+        for task in pendingRequests { await task.value }
+        await cache?.invalidateAll()
+    }
 
     // MARK: - Read (stale-while-revalidate)
 
@@ -633,23 +797,65 @@ public final class TodoService: TodoProviding {
     /// The View model iterates with `for try await` and updates state on each yield.
     /// If the network fails but a cached value exists, the stale value stands and
     /// the error is swallowed; with no cache, the error surfaces.
-    public func todosStream() -> AsyncThrowingStream<[Components.Schemas.Todo], Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                let cached = await cache.value(forKey: Self.listKey)
-                if let cached { continuation.yield(cached) }     // serve stale immediately
-                do {
-                    let fresh = try await fetchTodos()
-                    await cache.store(fresh, forKey: Self.listKey)
-                    continuation.yield(fresh)                     // then revalidate
-                    continuation.finish()
-                } catch {
-                    cached == nil ? continuation.finish(throwing: error)
-                                  : continuation.finish()
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
+    public func todosStream() async -> AsyncThrowingStream<[Components.Schemas.Todo], Error> {
+        let requestID = UUID()
+        var continuation: AsyncThrowingStream<[Components.Schemas.Todo], Error>.Continuation!
+        let stream = AsyncThrowingStream<[Components.Schemas.Todo], Error> { continuation = $0 }
+
+        guard isActive else {
+            continuation.finish()
+            return stream
         }
+
+        // Registration happens while this actor is isolated. `close()` therefore sees both
+        // the request and its continuation before it can cancel or purge the account cache.
+        continuations[requestID] = continuation
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.runRequest(requestID)
+        }
+        requests[requestID] = task
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.cancelRequest(requestID) }
+        }
+        return stream
+    }
+
+    private var continuations: [UUID: AsyncThrowingStream<[Components.Schemas.Todo], Error>.Continuation] = [:]
+
+    private func runRequest(_ requestID: UUID) async {
+        guard let continuation = continuations[requestID] else { return }
+        defer { finishRequest(requestID) }
+
+        let cached = await cache?.value(forKey: listKey)
+        guard isActive, !Task.isCancelled else { return }
+        if let cached { continuation.yield(cached) }
+
+        do {
+            let fresh = try await fetchTodos()
+            guard isActive, !Task.isCancelled else { return }
+            if let cache { await cache.store(fresh, forKey: listKey) }
+            // `close()` may have run while the cache actor was awaited.
+            guard isActive, !Task.isCancelled else { return }
+            continuation.yield(fresh)
+        } catch {
+            guard isActive, !Task.isCancelled else { return }
+            if cached == nil { continuation.finish(throwing: error) }
+        }
+    }
+
+    private func finishRequest(_ id: UUID) {
+        continuations[id]?.finish()
+        continuations[id] = nil
+        requests[id] = nil
+    }
+
+    private func cancelRequest(_ id: UUID) {
+        continuations[id]?.finish()
+        continuations[id] = nil
+        requests[id]?.cancel()
+        // Keep the task registered until `finishRequest`. A later account close must await
+        // an already-cancelled task before it purges the disk namespace.
     }
 
     private func fetchTodos() async throws -> [Components.Schemas.Todo] {
@@ -669,7 +875,7 @@ public final class TodoService: TodoProviding {
         let response = try await client.createTodo(.init(body: .json(body)))
         switch response {
         case .created(let created):
-            await cache.invalidate(Self.listKey)   // next read repopulates
+            await cache?.invalidate(listKey)   // next read repopulates
             return try created.body.json
         case .conflict:
             throw TodoServiceError.conflict
@@ -683,10 +889,142 @@ public final class TodoService: TodoProviding {
 The view model consumes the stream with `for try await` — see §3 `TodosViewModel.load()`
 for the cancellation-safe consumer.
 
-Wire the cache into the service at the composition root — see §7 `AppDependencies`:
-`TodoService(client: apiClient.client, cache: try! ResponseCache(name: "Todos"))`.
+Wire the cache into the service at the composition root — see §7 `AppDependencies`.
+Use an optional cache: if `Storage` initialization fails, continue network-only and record a
+non-sensitive diagnostic. Namespace and key by a stable non-secret account/tenant identifier.
+On account switch or logout, cancel the old service's consumers and call `await oldService.close()`
+before publishing the next account's service. Rebuild the API client with the new credentials.
 
 > Rules recap: cache **decoded models** at the Repository layer (not `HTTPBody`);
-> key on `operationID` + params; explicit memory/disk TTLs (never `.never`);
-> invalidate affected keys after every write. Durable user-owned data → SwiftData;
+> key on account/tenant + `operationID` + params; explicit memory/disk TTLs (never `.never`);
+> invalidate affected keys after every write and purge/cancel on account switch or logout. Durable user-owned data → SwiftData;
 > secrets → Keychain. `hyperoslo/Cache` is never a system of record.
+
+---
+
+## 11. Durable storage: SwiftData (system of record)
+
+`hyperoslo/Cache` (§10) memoizes transient server-owned responses. **Durable,
+user-owned** data (drafts, offline records) lives in **SwiftData** — the Swift-native
+ORM on Core Data. Model with `@Model`, own one `ModelContainer`, and read/write
+through a repository so features never touch a `ModelContext` directly.
+
+```swift
+// Core/Models/Draft.swift
+import SwiftData
+
+/// A user-owned draft persisted across launches. `@Model` makes the class a
+/// SwiftData entity (schema inferred from stored properties).
+@Model
+final class Draft {
+    @Attribute(.unique) var id: UUID
+    var title: String
+    var body: String
+    var updatedAt: Date
+
+    init(id: UUID = UUID(), title: String, body: String, updatedAt: Date = .now) {
+        self.id = id
+        self.title = title
+        self.body = body
+        self.updatedAt = updatedAt
+    }
+}
+```
+
+```swift
+// Core/Services/DraftRepository.swift
+import Foundation
+import SwiftData
+
+/// Repository over SwiftData. Owns a `ModelContext` bound to the app's container;
+/// `@MainActor` because the default context is main-actor bound.
+@MainActor
+final class DraftRepository {
+    private let context: ModelContext
+
+    init(container: ModelContainer) {
+        self.context = container.mainContext
+    }
+
+    /// Fetch newest-first, optionally filtered by a title substring.
+    func drafts(matching query: String = "") throws -> [Draft] {
+        let predicate = query.isEmpty ? nil : #Predicate<Draft> {
+            $0.title.localizedStandardContains(query)
+        }
+        let descriptor = FetchDescriptor<Draft>(
+            predicate: predicate,
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    func upsert(_ draft: Draft) throws {
+        context.insert(draft)          // insert is idempotent on the unique id
+        try context.save()
+    }
+
+    func delete(_ draft: Draft) throws {
+        context.delete(draft)
+        try context.save()
+    }
+}
+```
+
+```swift
+// App/MyApp.swift — build one ModelContainer for the whole app.
+import SwiftUI
+import SwiftData
+
+@main
+struct MyApp: App {
+    // One container per app; SwiftUI injects it into the environment.
+    let container: ModelContainer = {
+        do { return try ModelContainer(for: Draft.self) }
+        catch { fatalError("Failed to create ModelContainer: \(error)") }
+    }()
+
+    var body: some Scene {
+        WindowGroup { RootView() }
+            .modelContainer(container)
+    }
+}
+```
+
+---
+
+## 12. UI testing: XCUITest
+
+Unit tests (§8) cover view models against protocol mocks. **XCUITest** drives the
+real app through the accessibility layer for critical user flows — launch, interact,
+assert on-screen. Give interactive views stable `.accessibilityIdentifier`s so the
+queries don't depend on visible copy.
+
+```swift
+// UITests/TodosFlowUITests.swift
+import XCTest
+
+final class TodosFlowUITests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false     // stop at the first failed assertion
+    }
+
+    func testTodosScreen_loadsAndShowsList() {
+        let app = XCUIApplication()
+        // Pass a launch argument the app reads to serve deterministic fixtures.
+        app.launchArguments += ["-uiTestMode"]
+        app.launch()
+
+        // Wait for the navigation title to appear (async load).
+        let title = app.navigationBars["Todos"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+
+        // Tap the first row and assert navigation happened.
+        let firstCell = app.cells.element(boundBy: 0)
+        XCTAssertTrue(firstCell.waitForExistence(timeout: 5))
+        firstCell.tap()
+
+        XCTAssertTrue(app.staticTexts["todoDetailTitle"].waitForExistence(timeout: 5))
+    }
+}
+```

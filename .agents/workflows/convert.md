@@ -4,10 +4,8 @@ description: Convert a file from one format to another, routed by media category
 disable-model-invocation: true
 ---
 
-# MANDATORY RULES: VIOLATION IS FORBIDDEN
-
 - **Response language follows `language` setting in `.agents/oma-config.yaml` if configured.**
-- **NEVER skip steps.** Execute from Step 1 in order.
+- Follow `.agents/skills/_shared/core/execution-policy.md` for authorization, clarification, verification, and completion. Execute required steps on the selected path in dependency order; apply documented branch and skip conditions.
 - **Default output location: same directory as input file.**
 - **Route by category, then by extension** — never run a document converter on a media file or vice versa.
 - **Never re-encode losslessly-convertible data destructively without saying so** — report quality/codec choices.
@@ -43,6 +41,8 @@ disable-model-invocation: true
    | **Audio** | `.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`, `.opus`, `.aac` | Step 2E | `ffmpeg` |
    | other | — | Stop — out of scope | route to the matching skill |
 
+   **`.gif` disambiguation** (listed in both Image and Video): route by the **target** format — still-image target (`png`, `webp`, …) → Step 2C; video target (`mp4`, `webm`, …) or no target given → Step 2D (treat as animated GIF).
+
 If user provided no file path, ask:
 ```
 Which file should I convert? Provide the path, and the target format if it's an image/video/audio file.
@@ -60,7 +60,8 @@ uvx opendataloader-pdf "{input_path}" --format markdown --output-dir "{output_di
 ```
 
 Variants: `--use-struct-tree` (Tagged PDF), `--image-output embedded` (inline images),
-`--format markdown,json` (multiple formats). Then go to **Step 3 (document normalization)**.
+`--format markdown,json` (multiple formats), `--table-method cluster` (borderless tables),
+`--pages "1-50"` (large PDFs in ranges). Then go to **Step 3 (document normalization)**.
 
 ---
 

@@ -79,21 +79,39 @@ interface StatuslineStdin {
   terminal_width?: number
 }
 
-function readStdin(): StatuslineStdin {
-  const raw = (() => {
+async function readStdin(timeoutMs = STDIN_TIMEOUT_MS): Promise<StatuslineStdin> {
+  // Some vendors (notably agy) spawn the statusline without closing the stdin
+  // pipe; a synchronous readFileSync(0) then blocks until the vendor's
+  // statusline timeout SIGKILLs the process. Read asynchronously and give up
+  // after timeoutMs, letting main() fall back to a payload-less line.
+  const read = (async () => {
+    const chunks: Buffer[] = []
+    for await (const chunk of process.stdin) {
+      chunks.push(chunk as Buffer)
+    }
+    const raw = Buffer.concat(chunks).toString("utf-8")
+    maybeDumpDebugPayload(raw)
     try {
-      return readFileSync(0, "utf-8")
+      return JSON.parse(raw) as StatuslineStdin
     } catch {
-      return ""
+      return {}
     }
   })()
-  maybeDumpDebugPayload(raw)
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("stdin timeout")), timeoutMs)
+  })
+
   try {
-    return JSON.parse(raw)
-  } catch {
-    return {}
+    return await Promise.race([read, timeout])
+  } finally {
+    clearTimeout(timer)
   }
 }
+
+/** Max time to wait for the vendor to deliver (and close) the stdin payload. */
+const STDIN_TIMEOUT_MS = 800
 
 /**
  * When `OMA_HUD_DEBUG=1`, capture the raw stdin payload to a sibling file so
@@ -142,9 +160,15 @@ export function shortModel(model?: { id?: string; display_name?: string }): stri
   // Claude: "Claude Opus 4.6 (1M context)" → "Opus 4.6"
   const claude = name.match(/(Opus|Sonnet|Haiku)[\s.]*([\d.]*)/i)
   if (claude) return `${claude[1]}${claude[2] ? ` ${claude[2]}` : ""}`
-  // Gemini / agy: "Gemini 3.5 Flash (High)" → "Gemini 3.5 Flash"
+  // Gemini / agy: "Gemini 3.6 Flash (High)" → "Gemini 3.6 Flash"
   const gemini = name.match(/(Gemini)\s+([\d.]+)\s+(Pro|Flash|Ultra|Nano|Thinking)/i)
   if (gemini) return `${gemini[1]} ${gemini[2]} ${gemini[3]}`
+  // Gemini / agy slug: "antigravity/gemini-3.6-flash" → "Gemini 3.6 Flash"
+  const geminiSlug = name.match(/gemini-([\d.]+)-(pro|flash|ultra|nano|thinking)/i)
+  if (geminiSlug) {
+    const capType = geminiSlug[2].charAt(0).toUpperCase() + geminiSlug[2].slice(1)
+    return `Gemini ${geminiSlug[1]} ${capType}`
+  }
   return name.split("/").pop()?.slice(0, 20) || ""
 }
 
@@ -262,8 +286,17 @@ export function buildClaudeStatusline(input: StatuslineStdin): string {
 
 // ── Main ──────────────────────────────────────────────────────
 
-function main() {
-  process.stdout.write(buildClaudeStatusline(readStdin()))
+async function main() {
+  let out: string
+  try {
+    out = buildClaudeStatusline(await readStdin())
+  } catch {
+    // stdin timed out — a payload-less line beats a killed statusline
+    out = buildClaudeStatusline({})
+  }
+  // Exit explicitly: after a timeout the pending stdin read would otherwise
+  // keep the event loop (and the process) alive.
+  process.stdout.write(out, () => process.exit(0))
 }
 
-main()
+void main()

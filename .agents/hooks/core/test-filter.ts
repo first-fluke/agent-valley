@@ -107,6 +107,16 @@ export async function run(input: HookInput, ctx: HandlerCtx): Promise<HandlerRes
   const command = toolInput.command as string | undefined
   if (!command) return null
 
+  // The rewrite below is Bash-only (`set -o pipefail`, subshell, pipe to
+  // bash). On Windows the host shell is PowerShell/cmd, which fails to parse
+  // it before the test runner even starts (#618). Losing the failure filter
+  // is acceptable; breaking `npm test` is not.
+  if (process.platform === "win32") return null
+
+  // Hook re-entry guard: a command already piping through the filter script
+  // must pass through unchanged, not get wrapped a second time (#618).
+  if (command.includes("filter-test-output.sh")) return null
+
   const isTestCommand = TEST_PATTERNS.some((p) => p.test(command))
   if (!isTestCommand) return null
 
