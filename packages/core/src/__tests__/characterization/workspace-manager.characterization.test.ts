@@ -13,7 +13,7 @@
  * so delivery/merge/cleanup behaviors are captured end-to-end against real git plumbing.
  */
 
-import { execSync } from "node:child_process"
+import { execFileSync, execSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -21,6 +21,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import type { Issue, RunAttempt, Workspace } from "../../domain/models"
 import { WorkspaceManager } from "../../workspace/workspace-manager"
+import { createWorkspace, isIsolatedGitWorkspace } from "../../workspace/worktree-lifecycle"
 
 // ── Shared git helper ──────────────────────────────────────────────
 
@@ -313,7 +314,15 @@ describe("WorkspaceManager.autoCommit — safety-net validation + commit", () =>
     expect(second.error).toContain("git commit failed")
   })
 
-  test("currently blocks auto-commit when truly unmerged (diff-filter=U) files exist", async () => {
+  test.each([
+    "darwin",
+    "linux",
+  ] as const)("blocks auto-commit with a real unmerged index in %s workspaces", async (platform) => {
+    const ws = await createWorkspace(
+      repoDir,
+      makeIssue({ id: `issue-unmerged-${platform}`, identifier: `CHAR-U-${platform}` }),
+      platform,
+    )
     // Create a real unmerged state by attempting to merge divergent histories of the same file.
     await writeFile(join(ws.path, "collide.ts"), "feature\n")
     git("add .", ws.path)
@@ -322,16 +331,19 @@ describe("WorkspaceManager.autoCommit — safety-net validation + commit", () =>
     // Diverge main
     git("checkout main", repoDir)
     await writeFile(join(repoDir, "collide.ts"), "main\n")
-    git("add .", repoDir)
+    git("add collide.ts", repoDir)
     git("commit -m 'main side'", repoDir)
 
-    // Attempt merge inside the worktree — produces unmerged files on conflict
+    // Isolated clones have independent refs: fetch the changed source branch
+    // explicitly before creating the same conflict in either workspace backend.
+    execFileSync("git", ["fetch", "--no-tags", repoDir, "main"], { cwd: ws.path, stdio: "pipe" })
     try {
-      execSync(`git -C ${ws.path} merge main`, { stdio: ["pipe", "pipe", "pipe"] })
+      execFileSync("git", ["merge", "FETCH_HEAD"], { cwd: ws.path, stdio: "pipe" })
     } catch {
       /* merge exits non-zero on conflict; that is what we want */
     }
 
+    expect(git("diff --name-only --diff-filter=U", ws.path)).toBe("collide.ts")
     const result = await manager.autoCommit(ws)
 
     expect(result.ok).toBe(false)
@@ -511,8 +523,11 @@ describe("WorkspaceManager.mergeAndPush — rebase-based delivery", () => {
     expect(result.ok).toBe(true)
   })
 
-  test("currently merges committed branch changes locally when no remote is configured (branch deletion skipped)", async () => {
-    const ws = await manager.create(makeIssue({ id: "issue-merge-local", identifier: "CHAR-101" }))
+  test.each([
+    "darwin",
+    "linux",
+  ] as const)("delivers %s workspace commits and cleans only unused source branches", async (platform) => {
+    const ws = await createWorkspace(repoDir, makeIssue({ id: "issue-merge-local", identifier: "CHAR-101" }), platform)
     await writeFile(join(ws.path, "feat.ts"), "const feat = 1\n")
     git("add .", ws.path)
     git("commit -m 'feat: add feat'", ws.path)
@@ -525,12 +540,17 @@ describe("WorkspaceManager.mergeAndPush — rebase-based delivery", () => {
     const log = git("log --oneline main")
     expect(log).toContain("add feat")
 
-    // Characterization: current implementation attempts `git branch -D <branch>` after merge,
-    // but because the branch is still checked out by the worktree, deletion fails silently
-    // and the branch remains visible in `git branch`. PR2 may choose to change this —
-    // lock it here so any deviation is deliberate.
-    const branches = git("branch")
-    expect(branches).toContain("feature/CHAR-101")
+    expect(git("show main:feat.ts")).toBe("const feat = 1")
+    expect(git("branch --show-current", ws.path)).toBe(ws.branch)
+    expect(git("show HEAD:feat.ts", ws.path)).toBe("const feat = 1")
+    const sourceBranch = git(`branch --list ${ws.branch}`)
+    if (isIsolatedGitWorkspace(ws)) {
+      // The imported source ref is disposable; the clone retains its own branch.
+      expect(sourceBranch).toBe("")
+    } else {
+      // Git retains refs still checked out by a linked worktree.
+      expect(sourceBranch).toContain(ws.branch)
+    }
   })
 
   test("currently detects conflict markers on the branch via git-diff-check before rebase", async () => {

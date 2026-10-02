@@ -2,6 +2,7 @@
  * Agent Runner — Manages AgentSession lifecycle for issue execution.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks"
 import type { RunAttempt } from "../domain/models"
 import { logger } from "../observability/logger"
 import type { AgentConfig, AgentEvent, AgentSession } from "../sessions/agent-session"
@@ -45,6 +46,8 @@ export class AgentRunnerService {
   private activeAgentTypes = new Map<string, string>()
   private cancelAttempts = new Map<string, () => void>()
   private pendingDisposals = new Set<Promise<void>>()
+  private pendingCallbacks = new Set<Promise<void>>()
+  private callbackContext = new AsyncLocalStorage<boolean>()
   private activeStops = new Map<string, Promise<void>>()
   private sessionsRegistered = false
 
@@ -65,7 +68,12 @@ export class AgentRunnerService {
     }
   }
 
-  async spawn(attempt: RunAttempt, options: RunOptions, callbacks: RunCallbacks): Promise<void> {
+  async spawn(attempt: RunAttempt, options: RunOptions, handlers: RunCallbacks): Promise<void> {
+    const callbacks: RunCallbacks = {
+      ...handlers,
+      onComplete: (result) => this.dispatchCallback(attempt.id, () => handlers.onComplete(result)),
+      onError: (error) => this.dispatchCallback(attempt.id, () => handlers.onError(error)),
+    }
     let cancelledBeforeStart = false
     this.cancelAttempts.set(attempt.id, () => {
       cancelledBeforeStart = true
@@ -250,6 +258,7 @@ export class AgentRunnerService {
     // Cancellation can synchronously emit complete/error. Suppress delivery and
     // retry callbacks before requesting cancellation, including during start().
     this.cancelAttempts.get(attemptId)?.()
+    this.cancelAttempts.delete(attemptId)
     if (!session) return
 
     let finish: (() => void) | undefined
@@ -298,10 +307,38 @@ export class AgentRunnerService {
     return disposal
   }
 
+  private dispatchCallback(attemptId: string, callback: () => unknown): void {
+    let finish: (() => void) | undefined
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    this.pendingCallbacks.add(pending)
+    const settle = () => {
+      this.pendingCallbacks.delete(pending)
+      finish?.()
+    }
+    const fail = (error: unknown) => {
+      logger.error("orchestrator", "Agent result handler failed", { attemptId, error: String(error) })
+      settle()
+    }
+    try {
+      Promise.resolve(this.callbackContext.run(true, callback)).then(settle, fail)
+    } catch (error) {
+      fail(error)
+    }
+  }
+
   async killAll(): Promise<void> {
-    const ids = [...new Set([...this.cancelAttempts.keys(), ...this.activeStops.keys()])]
-    await Promise.all(ids.map((id) => this.kill(id)))
-    await Promise.all(this.pendingDisposals)
+    do {
+      const ids = [...new Set([...this.cancelAttempts.keys(), ...this.activeStops.keys()])]
+      await Promise.all(ids.map((id) => this.kill(id)))
+      await Promise.all(this.pendingDisposals)
+      // A callback may itself request shutdown. Its caller must be allowed to
+      // finish; an external shutdown still waits for the complete handler chain.
+      if (this.callbackContext.getStore()) return
+      while (this.pendingCallbacks.size > 0) await Promise.all(this.pendingCallbacks)
+      // A result handler may create another session while it is being drained.
+    } while (this.cancelAttempts.size > 0 || this.activeStops.size > 0 || this.pendingDisposals.size > 0)
   }
 
   get activeCount(): number {

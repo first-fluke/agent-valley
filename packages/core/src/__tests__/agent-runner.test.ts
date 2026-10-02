@@ -8,6 +8,7 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { RunAttempt } from "../domain/models"
+import { logger } from "../observability/logger"
 import { AgentRunnerService, type RunCallbacks, type RunOptions } from "../orchestrator/agent-runner"
 import { registerSession } from "../sessions/session-factory"
 import { FakeAgentSession } from "./characterization/helpers"
@@ -59,6 +60,124 @@ beforeEach(() => {
 })
 
 describe("AgentRunnerService.spawn — pid propagation", () => {
+  test.each([
+    "complete",
+    "error",
+  ] as const)("shutdown drains an asynchronous %s handler after its session is disposed", async (event) => {
+    const runner = new AgentRunnerService()
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let persisted = false
+    const callback = async () => {
+      await gate
+      persisted = true
+    }
+    await runner.spawn(makeAttempt(), makeOptions(), makeCallbacks({ onComplete: callback, onError: callback }))
+    const session = FakeAgentSession.instances[0]
+    if (!session) throw new Error("Expected session fixture")
+    if (event === "complete") {
+      session.emit("complete", {
+        type: "complete",
+        result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+      })
+    } else {
+      session.emit("error", { type: "error", error: { code: "CRASH", message: "failed", recoverable: true } })
+    }
+    let stopped = false
+    const stopping = runner.killAll().then(() => {
+      stopped = true
+    })
+    await vi.waitFor(() => expect(session.disposeCalls).toBeGreaterThan(0))
+    expect(stopped).toBe(false)
+    expect(persisted).toBe(false)
+    release?.()
+    await stopping
+    expect(persisted).toBe(true)
+    expect(stopped).toBe(true)
+  })
+
+  test("callback-triggered shutdown does not wait recursively for itself", async () => {
+    const runner = new AgentRunnerService()
+    let finished = false
+    await runner.spawn(
+      makeAttempt(),
+      makeOptions(),
+      makeCallbacks({
+        onComplete: async () => {
+          await runner.killAll()
+          finished = true
+        },
+      }),
+    )
+    FakeAgentSession.instances[0]?.emit("complete", {
+      type: "complete",
+      result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+    })
+    await runner.killAll()
+    expect(finished).toBe(true)
+  })
+
+  test("shutdown also disposes a session started by a pending result handler", async () => {
+    const runner = new AgentRunnerService()
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await runner.spawn(
+      makeAttempt(),
+      makeOptions(),
+      makeCallbacks({
+        onComplete: async () => {
+          await gate
+          await runner.spawn({ ...makeAttempt(), id: "att-followup" }, makeOptions(), makeCallbacks())
+        },
+      }),
+    )
+    const first = FakeAgentSession.instances[0]
+    if (!first) throw new Error("Expected session fixture")
+    first.emit("complete", {
+      type: "complete",
+      result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+    })
+    const stopping = runner.killAll()
+    await vi.waitFor(() => expect(first.disposeCalls).toBeGreaterThan(0))
+    release?.()
+    await stopping
+    expect(FakeAgentSession.instances).toHaveLength(2)
+    expect(FakeAgentSession.instances[1]?.disposeCalls).toBeGreaterThan(0)
+    expect(runner.activeCount).toBe(0)
+  })
+
+  test.each(["throw", "reject"] as const)("logs handler %s and allows shutdown to finish", async (failure) => {
+    const log = vi.spyOn(logger, "error").mockImplementation(() => {})
+    try {
+      const runner = new AgentRunnerService()
+      await runner.spawn(
+        makeAttempt(),
+        makeOptions(),
+        makeCallbacks({
+          onComplete: () => {
+            if (failure === "throw") throw new Error("cannot persist result")
+            return Promise.reject(new Error("cannot persist result"))
+          },
+        }),
+      )
+      FakeAgentSession.instances[0]?.emit("complete", {
+        type: "complete",
+        result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+      })
+      await runner.killAll()
+      expect(log).toHaveBeenCalledWith("orchestrator", "Agent result handler failed", {
+        attemptId: "att-1",
+        error: "Error: cannot persist result",
+      })
+    } finally {
+      log.mockRestore()
+    }
+  })
+
   test.each([
     "complete",
     "error",
