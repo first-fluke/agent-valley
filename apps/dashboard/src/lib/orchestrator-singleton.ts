@@ -10,11 +10,7 @@ import type { InterventionBus } from "@agent-valley/core/orchestrator/interventi
 
 export interface OrchestratorInstance {
   getStatus: () => Record<string, unknown>
-  handleWebhook: (
-    payload: string,
-    signature: string,
-    deliveryId?: string,
-  ) => Promise<{ status: number; body: string }>
+  handleWebhook: (payload: string, signature: string, deliveryId?: string) => Promise<{ status: number; body: string }>
   stop: () => Promise<void>
   on: (event: string, handler: (...args: unknown[]) => void) => void
   off: (event: string, handler: (...args: unknown[]) => void) => void
@@ -27,8 +23,25 @@ export interface OrchestratorInstance {
 }
 
 declare global {
-  // biome-ignore lint: global augmentation for singleton
   var __agent_valley_orchestrator__: OrchestratorInstance | undefined
+  var __agent_valley_initialization__: Promise<void> | undefined
+}
+
+/** Serialize startup and stop the previous scheduler before starting its replacement. */
+export function initializeOrchestrator(create: () => Promise<OrchestratorInstance>): Promise<void> {
+  if (globalThis.__agent_valley_initialization__) return globalThis.__agent_valley_initialization__
+  const pending = Promise.resolve()
+    .then(async () => {
+      const previous = getOrchestrator()
+      if (previous) await previous.stop()
+      globalThis.__agent_valley_orchestrator__ = undefined
+      globalThis.__agent_valley_orchestrator__ = await create()
+    })
+    .finally(() => {
+      globalThis.__agent_valley_initialization__ = undefined
+    })
+  globalThis.__agent_valley_initialization__ = pending
+  return pending
 }
 
 export async function setOrchestrator(instance: OrchestratorInstance) {

@@ -89,6 +89,12 @@ export interface LinearIssueNode {
       relatedIssue: { id: string; identifier: string; state: { id: string; name: string; type: string } }
     }>
   }
+  inverseRelations?: {
+    nodes: Array<{
+      type: string
+      issue: { id: string; identifier: string; state: { id: string; name: string; type: string } }
+    }>
+  }
 }
 
 // ── Zod Schemas for Runtime Validation ──────────────────────────────
@@ -132,6 +138,10 @@ export const linearIssueNodeSchema = z.object({
         }),
       ),
     })
+    .optional()
+    .default({ nodes: [] }),
+  inverseRelations: z
+    .object({ nodes: z.array(z.object({ type: z.string(), issue: linearRelatedIssueSchema })) })
     .optional()
     .default({ nodes: [] }),
 })

@@ -85,7 +85,7 @@ export function checkOma(project: ProjectConfig | null, deps: DoctorDeps): Check
           message: omaPath
             ? `OMA CLI version ${version ?? "unknown"}; expected ${SUPPORTED_OMA_VERSION}`
             : "oma not found on PATH",
-          fix: `Install OMA CLI ${SUPPORTED_OMA_VERSION}, verify with oma --version, then rerun av doctor.`,
+          fix: `Run npm install -g oh-my-agent@${SUPPORTED_OMA_VERSION}, verify with oma --version, then rerun av doctor.`,
           critical: true,
         },
   )

@@ -89,6 +89,8 @@ export interface SetupContext {
   agentType?: AgentType
   maxParallel?: number
   tunnel?: TunnelSetupValues
+  task?: { kind: "code" } | { kind: "analysis"; report_path: string }
+  verifyCommand?: string
 }
 
 export type StepFn = (ctx: SetupContext, step: number, total: number) => Promise<StepResult>

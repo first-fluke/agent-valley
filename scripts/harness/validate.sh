@@ -368,6 +368,7 @@ while IFS= read -r file; do
   esac
   case "${file}" in
     */node_modules/*|*/dist/*|*/build/*|*.d.ts|*/__tests__/*|*.test.ts|*.test.tsx|*.test.js) continue ;;
+    .agents/*|.claude/*|.codex/*|.cursor/*|.qwen/*|.gemini/*|.grok/*|.kimi-code/*) continue ;; # upstream-managed harness, not application source
     apps/dashboard/src/lib/canvas/*|*/apps/dashboard/src/lib/canvas/*) continue ;;  # visual canvas code, not subject to backend SRP
   esac
 

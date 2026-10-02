@@ -7,7 +7,8 @@
 
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, buildAgentEnv } from "./base-session"
+import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
+import { readJsonLines } from "./json-lines"
 import { planSandboxedSpawn } from "./sandbox"
 
 interface JsonRpcRequest {
@@ -29,23 +30,29 @@ interface JsonRpcResponse {
 export class CodexSession extends BaseSession {
   private rpcId = 0
   private threadId: string | null = null
+  private turnId: string | null = null
+  private paused = false
+  private disposing = false
+  private tokenUsage: { input: number; output: number; model: string } | undefined
   private filesChanged: string[] = []
-  private outputChunks: string[] = []
+  private outputTail = ""
   private pendingResolvers = new Map<
     number,
     {
       resolve: (value: unknown) => void
       reject: (error: Error) => void
+      timer: ReturnType<typeof setTimeout>
     }
   >()
 
   async start(config: AgentConfig): Promise<void> {
     this.config = config
     this.startedAt = Date.now()
+    this.disposing = false
 
     const args = ["app-server", "--listen", "stdio://"]
     if (config.model) {
-      args.push("-c", `model="${config.model}"`)
+      args.push("-c", `model=${JSON.stringify(config.model)}`)
     }
 
     // Containment for the per-turn `approvalPolicy: "never"` (set in
@@ -61,6 +68,7 @@ export class CodexSession extends BaseSession {
     })
 
     this.process = spawn(plan.command, plan.args, {
+      detached: process.platform !== "win32",
       cwd: config.workspacePath,
       env: buildAgentEnv("codex", config.env) as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
@@ -71,32 +79,39 @@ export class CodexSession extends BaseSession {
     await this.rpc("initialize", {
       clientInfo: { name: "symphony-orchestrator", version: "1.0" },
     })
+    this.process.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized" })}\n`)
   }
 
   async execute(prompt: string): Promise<void> {
     if (!this.assertStarted()) return
 
     this.filesChanged = []
-    this.outputChunks = []
+    this.outputTail = ""
+    this.tokenUsage = undefined
+    this.terminalEventReceived = false
+    this.turnId = null
 
     const threadResult = (await this.rpc("thread/start", {
       cwd: this.config?.workspacePath,
       approvalPolicy: "never",
+      sandbox: "workspace-write",
       ephemeral: true,
     })) as { thread: { id: string } }
 
     this.threadId = threadResult.thread.id
 
-    await this.rpc("turn/start", {
+    const turnResult = (await this.rpc("turn/start", {
       threadId: this.threadId,
       input: [{ type: "text", text: prompt }],
-    })
+    })) as { turn?: { id: string } }
+    if (!this.terminalEventReceived && turnResult.turn) this.turnId = turnResult.turn.id
   }
 
   override async cancel(): Promise<void> {
-    if (this.threadId) {
+    if (this.paused) await this.resume()
+    if (this.threadId && this.turnId) {
       try {
-        await this.rpc("turn/interrupt", { threadId: this.threadId })
+        await this.rpc("turn/interrupt", { threadId: this.threadId, turnId: this.turnId })
       } catch {
         await super.cancel()
       }
@@ -128,6 +143,7 @@ export class CodexSession extends BaseSession {
     }
     try {
       process.kill(this.process.pid, "SIGSTOP")
+      this.paused = true
     } catch (err) {
       throw new Error(
         `CodexSession.pause: failed to SIGSTOP pid=${this.process.pid}: ${String(err)}.\n` +
@@ -152,6 +168,7 @@ export class CodexSession extends BaseSession {
     }
     try {
       process.kill(this.process.pid, "SIGCONT")
+      this.paused = false
     } catch (err) {
       throw new Error(
         `CodexSession.resume: failed to SIGCONT pid=${this.process.pid}: ${String(err)}.\n` +
@@ -166,71 +183,84 @@ export class CodexSession extends BaseSession {
    * on the active thread.
    */
   async sendUserMessage(text: string): Promise<void> {
-    if (!this.threadId) {
+    if (!this.threadId || !this.turnId) {
       throw new Error(
-        "CodexSession.sendUserMessage: no active thread.\n" +
-          "  Fix: wait for execute() to initialize the thread before appending a prompt.",
+        "CodexSession.sendUserMessage: no active turn.\n" +
+          "  Fix: wait for execute() to start a turn before appending a prompt.",
       )
     }
     if (!this.assertStarted()) return
-    await this.rpc("turn/append", {
+    if (this.paused) {
+      throw new Error("Codex is paused. Resume the agent before appending a prompt.")
+    }
+    await this.rpc("turn/steer", {
       threadId: this.threadId,
+      expectedTurnId: this.turnId,
       input: [{ type: "text", text }],
     })
   }
 
   override async dispose(): Promise<void> {
-    for (const [id, { reject }] of Array.from(this.pendingResolvers.entries())) {
-      reject(new Error(`Session disposed while waiting for RPC id=${id}`))
-    }
-    this.pendingResolvers.clear()
+    this.disposing = true
+    this.rejectPending(new Error("Codex session disposed while waiting for an RPC response."))
     await super.dispose()
+    this.threadId = null
+    this.turnId = null
+    this.paused = false
   }
 
   // ── JSON-RPC transport ──────────────────────────────────────────────────
 
-  private async rpc(method: string, params: Record<string, unknown>): Promise<unknown> {
+  private rpc(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const stdin = this.process?.stdin
+    if (!stdin || stdin.destroyed || !this.isAlive()) {
+      return Promise.reject(
+        new Error(`Codex is not running; cannot send ${method}. Run av doctor and restart the task.`),
+      )
+    }
     const id = ++this.rpcId
     const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params }
-    const line = `${JSON.stringify(request)}\n`
-    this.process?.stdin?.write(line)
-
     return new Promise((resolve, reject) => {
-      this.pendingResolvers.set(id, { resolve, reject })
-      setTimeout(() => {
-        if (this.pendingResolvers.has(id)) {
-          this.pendingResolvers.delete(id)
-          reject(new Error(`RPC timeout for ${method} (id=${id})`))
-        }
+      const timer = setTimeout(() => {
+        this.pendingResolvers.delete(id)
+        reject(new Error(`RPC timeout for ${method} (id=${id}). Check Codex authentication and process logs.`))
       }, 30_000)
+      timer.unref()
+      this.pendingResolvers.set(id, { resolve, reject, timer })
+      stdin.write(`${JSON.stringify(request)}\n`, (error) => {
+        if (!error) return
+        const pending = this.pendingResolvers.get(id)
+        if (!pending) return
+        clearTimeout(pending.timer)
+        this.pendingResolvers.delete(id)
+        pending.reject(error)
+      })
     })
   }
 
   private readStream(): void {
-    if (!this.process?.stdout) return
-
-    const decoder = new TextDecoder()
-    let buffer = ""
-
-    this.process.stdout.on("data", (chunk: Buffer) => {
-      buffer += decoder.decode(chunk, { stream: true })
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
-
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const msg: JsonRpcResponse = JSON.parse(line)
-          this.handleMessage(msg)
-        } catch {
-          this.emit({ type: "output", chunk: line })
-        }
-      }
+    const proc = this.process
+    if (!proc?.stdout) return
+    const flush = readJsonLines(proc.stdout, (message) => {
+      if (typeof message === "object" && message !== null) this.handleMessage(message as JsonRpcResponse)
     })
-
-    this.process.stdout.on("error", () => {
-      // Stream error — ignore, process close will handle cleanup
+    proc.once("error", (error) => this.rejectPending(error))
+    void waitForStreamCompletion(proc).then(({ exitCode }) => {
+      flush()
+      const error = new Error(
+        `Codex app-server exited (${proc.signalCode ?? exitCode ?? "unknown"}). Run av doctor and check Codex authentication.`,
+      )
+      this.rejectPending(error)
+      if (!this.disposing && !this.terminalEventReceived) this.emitError("CRASH", error.message, true)
     })
+  }
+
+  private rejectPending(error: Error): void {
+    for (const pending of this.pendingResolvers.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(error)
+    }
+    this.pendingResolvers.clear()
   }
 
   private handleMessage(msg: JsonRpcResponse): void {
@@ -239,6 +269,7 @@ export class CodexSession extends BaseSession {
       const resolver = this.pendingResolvers.get(msg.id)
       if (!resolver) return
       this.pendingResolvers.delete(msg.id)
+      clearTimeout(resolver.timer)
       if (msg.error) {
         resolver.reject(new Error(msg.error.message))
       } else {
@@ -247,11 +278,29 @@ export class CodexSession extends BaseSession {
       return
     }
 
-    // Server notification
+    // Notifications for other threads must not complete or steer this run.
+    if (msg.params?.threadId && this.threadId && msg.params.threadId !== this.threadId) return
+    if (this.terminalEventReceived) return
     switch (msg.method) {
+      case "turn/started": {
+        const turn = msg.params?.turn as { id?: string } | undefined
+        this.turnId = turn?.id ?? this.turnId
+        break
+      }
+      case "thread/tokenUsage/updated": {
+        const usage = msg.params?.tokenUsage as { total?: { inputTokens: number; outputTokens: number } } | undefined
+        if (usage?.total) {
+          this.tokenUsage = {
+            input: usage.total.inputTokens,
+            output: usage.total.outputTokens,
+            model: this.config?.model ?? "codex",
+          }
+        }
+        break
+      }
       case "item/agentMessage/delta": {
         const chunk = (msg.params?.delta as string | undefined) ?? ""
-        this.outputChunks.push(chunk)
+        this.outputTail = (this.outputTail + chunk).slice(-10240)
         this.emit({ type: "output", chunk })
         break
       }
@@ -273,17 +322,56 @@ export class CodexSession extends BaseSession {
         break
       }
 
+      case "item/completed": {
+        const item = msg.params?.item as
+          | {
+              type?: string
+              changes?: Array<{ path: string; kind: { type: string } }>
+            }
+          | undefined
+        if (item?.type === "fileChange") {
+          for (const change of item.changes ?? []) {
+            if (!this.filesChanged.includes(change.path)) this.filesChanged.push(change.path)
+            const kind = change.kind.type
+            this.emit({
+              type: "fileChange",
+              path: change.path,
+              changeType: kind === "add" || kind === "delete" ? kind : "modify",
+            })
+          }
+        }
+        break
+      }
+
       case "turn/completed": {
-        const result = this.buildRunResult(this.outputChunks.join(""), this.filesChanged)
+        const turn = msg.params?.turn as { id?: string; status?: string; error?: { message?: string } } | undefined
+        if (turn?.id && this.turnId && turn.id !== this.turnId) return
+        this.turnId = null
+        if (turn?.status !== "completed") {
+          this.emitError(
+            "CRASH",
+            turn?.error?.message ??
+              `Codex turn ${turn?.status ?? "has no completion status"}. Check the agent output and retry.`,
+            true,
+          )
+          break
+        }
+        const result = this.buildRunResult(this.outputTail, this.filesChanged)
         result.exitCode = 0
-        const usage = this.extractTokenUsage(msg.params)
+        const usage = this.tokenUsage ?? this.extractTokenUsage(msg.params)
         if (usage) result.tokenUsage = usage
         this.emit({ type: "complete", result })
         break
       }
 
       case "error": {
-        const errMsg = (msg.params?.message as string | undefined) ?? "Unknown codex error"
+        // The server retries transient provider errors within the same turn.
+        if (msg.params?.willRetry === true) {
+          this.emit({ type: "heartbeat", timestamp: new Date().toISOString() })
+          break
+        }
+        const error = msg.params?.error as { message?: string } | undefined
+        const errMsg = error?.message ?? (msg.params?.message as string | undefined) ?? "Unknown codex error"
         this.emitError("UNKNOWN", errMsg, true)
         break
       }

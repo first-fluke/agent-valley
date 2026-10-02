@@ -50,6 +50,9 @@ export function runCommand(cmd: string, args: string[], options: RunCommandOptio
       }
     }
 
+    proc.once("error", (error) => {
+      resolve({ exitCode: -1, stdout, stderr: `${stderr}${error.message}` })
+    })
     proc.once("close", (code) => {
       resolve({ exitCode: code ?? -1, stdout, stderr })
     })

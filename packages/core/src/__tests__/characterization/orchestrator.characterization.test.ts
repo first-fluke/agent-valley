@@ -31,6 +31,7 @@ import { FakeAgentSession, flushMicrotasks, makeConfig, makeIssue, makeWorkspace
 
 vi.mock("../../tracker/linear-client", () => {
   return {
+    fetchIssue: vi.fn(),
     fetchIssuesByState: vi.fn(async () => [] as Issue[]),
     fetchIssueLabels: vi.fn(async () => [] as string[]),
     updateIssueState: vi.fn(async () => undefined),
@@ -61,8 +62,10 @@ async function computeHmac(payload: string, secret: string): Promise<string> {
   return Buffer.from(sig).toString("hex")
 }
 
+const trackerIssues = new Map<string, Issue>()
+
 function makeIssuePayload(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
+  const payload = {
     type: "Issue",
     action: "update",
     data: {
@@ -76,7 +79,9 @@ function makeIssuePayload(overrides: Record<string, unknown> = {}): string {
     },
     updatedFrom: { stateId: "state-todo" },
     ...overrides,
-  })
+  }
+  trackerIssues.set(payload.data.id, makeIssue({ ...payload.data, status: payload.data.state }))
+  return JSON.stringify(payload)
 }
 
 // ── Global test scaffolding ────────────────────────────────────────
@@ -94,6 +99,10 @@ async function startOrchestrator(): Promise<void> {
 }
 
 beforeEach(async () => {
+  trackerIssues.clear()
+  vi.mocked(linearClient.fetchIssue)
+    .mockReset()
+    .mockImplementation(async (_key, id) => trackerIssues.get(id) ?? null)
   // Reset call history only; preserve the default async-() => [] implementations set at module mock time.
   vi.mocked(linearClient.fetchIssuesByState).mockReset().mockResolvedValue([])
   vi.mocked(linearClient.fetchIssueLabels).mockReset().mockResolvedValue([])

@@ -26,6 +26,7 @@ const DEFAULT_MAX_BACKOFF_SEC = 3600
 
 /** Capability-class failures are capped at this many queued attempts regardless of the configured maxAttempts (unless maxAttempts is already smaller). */
 const CAPABILITY_MAX_ATTEMPTS = 2
+export const CAPACITY_WAIT_REASON = "Concurrency limit reached"
 
 export class RetryQueue {
   private queue: RetryEntry[] = []

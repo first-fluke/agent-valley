@@ -29,6 +29,9 @@ export type IssueStateType = "todo" | "in_progress" | "done" | "cancelled"
  * design doc § 4.1 and why PR1 wraps losslessly.
  */
 export interface IssueTracker {
+  /** Refresh a webhook's partial issue with authoritative routing and dependency metadata. */
+  fetchIssue?(issueId: string): Promise<Issue | null>
+
   /** Return all issues currently in any of the given workflow state IDs. */
   fetchIssuesByState(stateIds: string[]): Promise<Issue[]>
 

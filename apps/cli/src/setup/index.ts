@@ -26,6 +26,7 @@ import * as p from "@clack/prompts"
 import pc from "picocolors"
 import { detectInviteFromClipboard } from "../invite"
 import { stepAgentType } from "./agent-step"
+import { stepCompletion } from "./completion-step"
 import { fastTrackSetup } from "./fast-track"
 import { stepGithubLabels, stepGithubRepo, stepGithubToken, stepGithubWebhookSecret } from "./github-step"
 import { stepApiKey, stepTeam, stepWebhook, stepWorkflowStates } from "./linear-step"
@@ -55,7 +56,7 @@ function githubSteps(): StepFn[] {
 }
 
 function commonSteps(): StepFn[] {
-  return [stepWorkspace, stepTunnel, stepAgentType, stepParallel]
+  return [stepWorkspace, stepTunnel, stepAgentType, stepParallel, stepCompletion]
 }
 
 function buildStepList(kind: SetupContext["trackerKind"]): StepFn[] {

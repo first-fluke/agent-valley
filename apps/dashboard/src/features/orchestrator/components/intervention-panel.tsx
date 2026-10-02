@@ -48,12 +48,20 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
   const panelRef = useRef<HTMLElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
+  const inFlightRef = useRef(false)
+  const attemptIdRef = useRef(attempt?.attemptId)
+  attemptIdRef.current = attempt?.attemptId
 
   const caps = useMemo(() => (attempt ? capabilitiesFor(attempt.agentType) : []), [attempt])
 
   // Focus management: move focus into the drawer on open, restore it to
   // whatever triggered the drawer (e.g. the Active Agents list item) on
   // close — required so keyboard/screen-reader users don't lose their place.
+  useEffect(() => {
+    setPromptText("")
+    setToast(null)
+  }, [attempt?.attemptId])
+
   useEffect(() => {
     if (!attempt) return
     previouslyFocusedRef.current = document.activeElement as HTMLElement | null
@@ -68,8 +76,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
       document.removeEventListener("keydown", onKeyDown)
       previouslyFocusedRef.current?.focus()
     }
-    // biome-ignore lint/correctness/useExhaustiveDependencies: onClose identity churn should not re-run focus setup
-  }, [attempt])
+  }, [attempt, onClose])
 
   useEffect(() => {
     if (!toast) return
@@ -81,7 +88,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
   const onTrapKeyDown = useCallback((e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key !== "Tab" || !panelRef.current) return
     const focusable = panelRef.current.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), textarea:not([disabled]), [href], input:not([disabled])',
+      "button:not([disabled]), textarea:not([disabled]), [href], input:not([disabled])",
     )
     if (focusable.length === 0) return
     const first = focusable[0]
@@ -97,7 +104,8 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
 
   const send = useCallback(
     async (command: unknown) => {
-      if (!attempt) return
+      if (!attempt || inFlightRef.current) return false
+      inFlightRef.current = true
       setBusy(true)
       try {
         const doPost =
@@ -105,6 +113,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
           (async (body: { attemptId: string; command: unknown }) => {
             const res = await fetch("/api/intervention", {
               method: "POST",
+              signal: AbortSignal.timeout(15_000),
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(body),
             })
@@ -112,14 +121,20 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
             return { ok: res.ok, message: json.message ?? json.error }
           })
         const result = await doPost({ attemptId: attempt.attemptId, command })
+        if (attemptIdRef.current !== attempt.attemptId) return false
         if (result.ok) {
           setToast({ kind: "ok", text: "Command dispatched" })
         } else {
           setToast({ kind: "err", text: result.message ?? "Command failed" })
         }
+        return result.ok
       } catch (err) {
-        setToast({ kind: "err", text: err instanceof Error ? err.message : "Network error" })
+        if (attemptIdRef.current === attempt.attemptId) {
+          setToast({ kind: "err", text: err instanceof Error ? err.message : "Network error" })
+        }
+        return false
       } finally {
+        inFlightRef.current = false
         setBusy(false)
       }
     },
@@ -136,8 +151,8 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
       setToast({ kind: "err", text: "Prompt text is required" })
       return
     }
-    void send({ kind: "append_prompt", text: promptText }).then(() => {
-      setPromptText("")
+    void send({ kind: "append_prompt", text: promptText }).then((ok) => {
+      if (ok) setPromptText("")
     })
   }
 
@@ -148,7 +163,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
       aria-modal="true"
       aria-label="Agent intervention"
       onKeyDown={onTrapKeyDown}
-      className="fixed top-0 right-0 h-full w-96 bg-gray-900/95 border-l border-gray-700 shadow-xl z-40 flex flex-col motion-reduce:transition-none"
+      className="fixed top-0 right-0 h-full w-96 max-w-full bg-gray-900/95 border-l border-gray-700 shadow-xl z-50 flex flex-col motion-reduce:transition-none"
     >
       <header className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
         <div>
@@ -219,9 +234,8 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
         </form>
 
         <p className="text-[10px] leading-relaxed text-gray-500">
-          Capabilities are advertised by the core per agent type. Unsupported actions are disabled.
-          Claude is stateless — append_prompt cancels the current run and re-queues with the extra
-          instruction.
+          Capabilities are advertised by the core per agent type. Unsupported actions are disabled. Claude is stateless
+          — append_prompt cancels the current run and re-queues with the extra instruction.
         </p>
       </section>
 

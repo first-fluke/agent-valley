@@ -23,6 +23,8 @@ export interface ResolvedSetupContext {
   agentType: AgentType
   maxParallel: number
   tunnel: TunnelSetupValues
+  task?: SetupContext["task"]
+  verifyCommand?: string
 }
 
 /**
@@ -91,6 +93,8 @@ export function resolveContext(
       agentType: ctx.agentType as AgentType,
       maxParallel: ctx.maxParallel as number,
       tunnel,
+      task: ctx.task,
+      verifyCommand: ctx.verifyCommand,
     },
   }
 }

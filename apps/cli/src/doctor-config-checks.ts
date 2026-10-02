@@ -14,6 +14,7 @@
 
 import { join } from "node:path"
 import type { GlobalConfig, ProjectConfig } from "@agent-valley/core/config/yaml-loader"
+import { resolveConfig } from "@agent-valley/core/config/yaml-loader"
 import {
   AGENT_TYPES,
   type AgentType,
@@ -282,6 +283,28 @@ export async function runDoctorChecks(deps: DoctorDeps, options: RunDoctorOption
 
   const { results: configResults, project, global } = checkConfig(deps)
   results.push(...configResults)
+
+  if (project && !configResults.some((result) => result.status === "fail")) {
+    try {
+      resolveConfig(global, project, deps.env)
+      results.push({
+        id: "config.runtime",
+        name: "Runtime configuration",
+        status: "pass",
+        message: "Required tracker credentials, workspace, prompt, and server settings are valid",
+        critical: false,
+      })
+    } catch (error) {
+      results.push({
+        id: "config.runtime",
+        name: "Runtime configuration",
+        status: "fail",
+        message: (error as Error).message,
+        fix: "Set the listed keys in valley.yaml or settings.yaml and export the environment variable named by github.token_env.",
+        critical: true,
+      })
+    }
+  }
 
   const trackerKind = resolveConfiguredTrackerKind(project)
   const agentType = resolveConfiguredAgentType(project, global)

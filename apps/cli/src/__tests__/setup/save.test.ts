@@ -6,7 +6,7 @@
  * the exact on-disk bytes.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -61,6 +61,8 @@ describe("saveConfig", () => {
       agentType: "claude",
       maxParallel: 2,
       tunnel: { provider: "ngrok" },
+      task: { kind: "code" },
+      verifyCommand: "bun run test",
     }
 
     await saveConfig(ctx)
@@ -71,10 +73,16 @@ describe("saveConfig", () => {
     expect(settings).toContain("api_key: lin_api_12345")
     expect(valley).toContain("kind: linear")
     expect(valley).toContain("team_id: ACR")
+    expect(valley).toContain("command: bun run test")
+    expect(statSync(join(tmpRoot, "valley.yaml")).mode & 0o777).toBe(0o600)
   })
 
   it("writes github valley.yaml with token_env only — never the token", async () => {
     const RAW_TOKEN = "ghp_DO_NOT_PERSIST_ME_0123456789"
+    writeFileSync(
+      join(tmpRoot, "agent-valley", "settings.yaml"),
+      "linear:\n  api_key: existing_linear_key\nserver:\n  port: 9900\nteam:\n  id: existing-team\n",
+    )
     const ctx: ResolvedSetupContext = {
       trackerKind: "github",
       github: {
@@ -114,8 +122,10 @@ describe("saveConfig", () => {
     const settings = readFileSync(join(tmpRoot, "agent-valley", "settings.yaml"), "utf-8")
     const valley = readFileSync(join(tmpRoot, "valley.yaml"), "utf-8")
 
-    // settings.yaml must not contain any linear block or any github token
-    expect(settings).not.toContain("linear:")
+    // A new GitHub project must preserve credentials and settings for other projects.
+    expect(settings).toContain("api_key: existing_linear_key")
+    expect(settings).toContain("port: 9900")
+    expect(settings).toContain("id: existing-team")
     expect(settings).not.toContain(RAW_TOKEN)
 
     // valley.yaml must contain token_env reference but not the token itself

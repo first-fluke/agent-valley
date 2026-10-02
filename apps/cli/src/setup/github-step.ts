@@ -109,7 +109,7 @@ export async function stepGithubWebhookSecret(ctx: SetupContext, step: number, t
 
   if (generate) {
     gh.webhookSecret = randomWebhookSecret()
-    p.log.success("Generated a 256-bit webhook secret (will be shown in preview).")
+    p.log.success("Generated a 256-bit webhook secret (saved as github.webhook_secret in valley.yaml).")
   } else {
     const secret = await p.password({
       message: "Webhook secret",
@@ -127,15 +127,16 @@ export async function stepGithubWebhookSecret(ctx: SetupContext, step: number, t
     [
       `Create a webhook in ${pc.cyan(`https://github.com/${gh.owner}/${gh.repo}/settings/hooks/new`)}:`,
       "",
-      `1. Payload URL: your ngrok/HTTPS URL + ${pc.bold("/api/webhook")}`,
+      `1. Payload URL: your tunnel/HTTPS URL + ${pc.bold("/api/webhook/github")}`,
       `2. Content type: ${pc.bold("application/json")}`,
-      `3. Secret: ${pc.bold("paste the value from the preview below")}`,
-      `4. Events: ${pc.bold("Issues, Issue comment, Pull requests")}`,
+      `3. Secret: ${pc.bold("copy github.webhook_secret from valley.yaml after saving")}`,
+      `4. Events: ${pc.bold("Issues")}`,
+      "Start the server after setup to obtain the tunnel URL in av logs.",
     ].join("\n"),
     "GitHub Webhook Setup Guide",
   )
 
-  const ready = await p.confirm({ message: "Have you saved the secret where you will create the webhook?" })
+  const ready = await p.confirm({ message: "Continue setup, then register the webhook after starting the server?" })
   if (p.isCancel(ready)) return CANCEL
   if (!ready) return BACK
   return

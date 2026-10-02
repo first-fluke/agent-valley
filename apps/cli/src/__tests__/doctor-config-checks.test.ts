@@ -264,6 +264,40 @@ describe("checkWebhookSecret", () => {
 // ── runDoctorChecks / computeExitCode / summarize ───────────────────────────
 
 describe("runDoctorChecks", () => {
+  it("fails startup diagnostics when a syntactically valid config omits required fields", async () => {
+    const results = await runDoctorChecks(makeDeps({ loadProjectConfig: () => ({ agent: { type: "codex" } }) }))
+    const runtime = results.find((result) => result.id === "config.runtime")
+    expect(runtime?.status).toBe("fail")
+    expect(runtime?.critical).toBe(true)
+    expect(runtime?.message).toContain("linear.team_uuid in valley.yaml")
+    expect(runtime?.message).toContain("workspace.root")
+  })
+
+  it("validates the named GitHub token environment variable without exiting", async () => {
+    const project = {
+      tracker: { kind: "github" as const },
+      github: {
+        token_env: "VALLEY_GITHUB_TOKEN",
+        owner: "acme",
+        repo: "project",
+        webhook_secret: "secret",
+        labels: { todo: "todo", in_progress: "wip", done: "done", cancelled: "cancelled" },
+      },
+      workspace: { root: "/workspaces" },
+      prompt: "Fix {{issue.title}}",
+      verify: { command: "bun test" },
+    }
+    const missing = await runDoctorChecks(makeDeps({ loadProjectConfig: () => project }))
+    expect(missing.find((result) => result.id === "config.runtime")?.status).toBe("fail")
+    const complete = await runDoctorChecks(
+      makeDeps({
+        loadProjectConfig: () => project,
+        env: { VALLEY_GITHUB_TOKEN: "token" },
+      }),
+    )
+    expect(complete.find((result) => result.id === "config.runtime")?.status).toBe("pass")
+  })
+
   it("checks only the configured agent by default", async () => {
     const deps = makeDeps({
       loadProjectConfig: () => ({ agent: { type: "grok" } }),

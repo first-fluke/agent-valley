@@ -1,4 +1,4 @@
-/** OMA 15.0.4 receipt adapter. Strict mode is opt-in in valley.yaml. */
+/** OMA 15.0.10 receipt adapter. Strict mode is opt-in in valley.yaml. */
 import { spawnSync } from "node:child_process"
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { getCachedTriggerTable, routeIssue } from "../config/workflow-router"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 
-export const SUPPORTED_OMA_VERSION = "15.0.4"
+export const SUPPORTED_OMA_VERSION = "15.0.10"
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HASH = /^[a-f0-9]{64}$/
 
@@ -115,11 +115,20 @@ export function buildOmaGuidance(request: Omit<OmaEvidenceRequest, "kind">): str
   const agent = shellQuote(request.agentId)
   return [
     "## Required OMA result contract",
-    `From the workspace root, start this exact run before work: oma agent begin ${agent} ${id} ${id} --root ${root} --workspace ${root}.`,
+    "From the workspace root, start this exact run before work:",
+    "```sh",
+    `oma agent begin ${agent} ${id} ${id} --project-root ${root} --workspace ${root}`,
+    "```",
     "Save the JSON runId and claimPath from that command. Commit code changes before verification.",
-    `Run the pinned check: oma agent verify <runId> --required --root ${root}.`,
-    "Write the claimPath JSON with status completed, changedFiles, unresolved: [], and artifacts.",
-    `Finish the run: oma agent finish <runId> <claimPath> --root ${root}.`,
+    "Run the pinned check, replacing RUN_ID with the returned runId:",
+    "```sh",
+    `oma agent verify RUN_ID --required --project-root ${root}`,
+    "```",
+    'Write the claimPath JSON with {"status":"completed","changedFiles":["relative/changed/file"],"unresolved":[],"artifacts":[]}. For analysis, use changedFiles: [] and put relative report paths in artifacts.',
+    "Finish the run, replacing RUN_ID and CLAIM_PATH with the returned values:",
+    "```sh",
+    `oma agent finish RUN_ID CLAIM_PATH --project-root ${root}`,
+    "```",
     request.reportPath
       ? `For analysis, include the report ${request.reportPath.replaceAll("{{attempt.id}}", request.attempt.id)} in artifacts; a promise in stdout is not completion evidence.`
       : "For analysis, include the configured current-attempt report in artifacts; a promise in stdout is not completion evidence.",
@@ -135,7 +144,9 @@ export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidence
   try {
     const version = io.runCli(["--version"], root)
     if (version.exitCode !== 0 || version.stdout.trim() !== SUPPORTED_OMA_VERSION) {
-      return fail(`OMA CLI ${SUPPORTED_OMA_VERSION} is required; run oma --version and install the supported version`)
+      return fail(
+        `OMA CLI ${SUPPORTED_OMA_VERSION} is required. Run npm install -g oh-my-agent@${SUPPORTED_OMA_VERSION}, then confirm oma --version.`,
+      )
     }
   } catch (err) {
     return fail(`OMA CLI unavailable: ${String(err)}`)
@@ -256,7 +267,7 @@ export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidence
     return fail("Required OMA verification did not pass on current inputs")
   }
   try {
-    const status = io.runCli(["agent", "status", request.attempt.id, request.agentId, "--root", root], root)
+    const status = io.runCli(["agent", "status", request.attempt.id, request.agentId, "--project-root", root], root)
     if (status.exitCode !== 0 || status.stdout.trim() !== `${request.agentId}:completed`) {
       return fail("OMA CLI did not confirm current completed evidence")
     }

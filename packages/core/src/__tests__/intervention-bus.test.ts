@@ -166,8 +166,9 @@ describe("InterventionBus — append_prompt", () => {
     const cancel = vi.fn(async () => undefined)
     const session = makeSession({ cancel })
     const requestRetry = vi.fn(async () => undefined)
+    const runner = makeRunner(session, "claude")
     const bus = new InterventionBus({
-      runner: makeRunner(session, "claude") as never,
+      runner: runner as never,
       port: makePort({ claude: ["append_prompt", "abort"] }) as never,
       logger: makeLogger(),
     })
@@ -179,7 +180,8 @@ describe("InterventionBus — append_prompt", () => {
     })
     const result = await bus.send("a1", { kind: "append_prompt", text: "please rename vars" })
     expect(result.ok).toBe(true)
-    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(runner.kill).toHaveBeenCalledWith("a1")
+    expect(cancel).not.toHaveBeenCalled()
     expect(requestRetry).toHaveBeenCalledWith("please rename vars")
   })
 

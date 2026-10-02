@@ -46,6 +46,16 @@ function buildCore(
 }
 
 describe("OrchestratorCore — slot admission", () => {
+  test("capacity deferral preserves the existing retry budget and failure reason", () => {
+    const { core } = buildCore({ maxParallel: 0 })
+    core.tryAcceptOrQueue("failed", { attemptCount: 1, lastError: "verify failed", category: "verification" })
+    expect(core.retryQueue.entries[0]).toMatchObject({
+      attemptCount: 1,
+      lastError: "verify failed",
+      category: "verification",
+    })
+  })
+
   test("canAcceptIssue returns ok when idle and no duplicates", () => {
     const { core } = buildCore()
     expect(core.canAcceptIssue("i1").ok).toBe(true)
@@ -183,6 +193,18 @@ describe("OrchestratorCore — runtime state mutators", () => {
 })
 
 describe("OrchestratorCore — buildCompletionDeps", () => {
+  test("completion retries survive restart with their failure category", async () => {
+    const store = new FakeRunStatePersistence()
+    const { core } = buildCore({}, { runStatePersistence: store })
+    core.buildCompletionDeps().addRetry("failed", 1, "verification failed", "verification")
+    expect(store.current().retryQueue).toEqual([
+      expect.objectContaining({ issueId: "failed", attemptCount: 1, category: "verification" }),
+    ])
+    const restarted = buildCore({}, { runStatePersistence: store }).core
+    await restarted.recoverFromPersistedState()
+    expect(restarted.retryQueue.entries[0]).toMatchObject({ issueId: "failed", category: "verification" })
+  })
+
   test("cleanupState removes workspace entry and attempt tracking", () => {
     const { core } = buildCore()
     const ws = makeWorkspace(makeIssue({ id: "x" }))
@@ -206,6 +228,22 @@ describe("OrchestratorCore — buildCompletionDeps", () => {
 })
 
 describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
+  test("shutdown before the delayed startup sync prevents dispatch", async () => {
+    vi.useFakeTimers()
+    try {
+      const { core, tracker } = buildCore()
+      tracker.seedIssue(makeIssue({ id: "stopped" }))
+      const todo = vi.fn(async () => {})
+      core.attachLifecycle({ handleIssueTodo: todo, handleIssueInProgress: todo }, async () => {})
+      await core.start()
+      await core.stop()
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(todo).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   let dispatcher: {
     todoCalls: Issue[]
     ipCalls: Issue[]
@@ -341,7 +379,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
   })
 
   test("fillVacantSlots skips already-active issues but still dispatches unblocked ones", async () => {
-    const { core, tracker } = buildCore({ maxParallel: 1 })
+    const { core, tracker } = buildCore({ maxParallel: 2 })
     core.attachLifecycle(dispatcher, async () => {
       reevaluateCalls++
     })
@@ -404,10 +442,11 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
     expect(dispatcher.ipCalls.map((i) => i.id)).toContain("p")
   })
 
-  test("buildCompletionDeps.triggerUnblocked drops waiting entries and calls reevaluate", async () => {
+  test("buildCompletionDeps.triggerUnblocked keeps waiting entries available to reevaluate", async () => {
     const { core } = buildCore()
     let called = 0
     core.attachLifecycle(dispatcher, async () => {
+      expect(core.hasWaitingIssue("w")).toBe(true)
       called++
     })
     core.addWaitingIssue("w", { issueId: "w", identifier: "PROJ-9", blockedBy: ["b"], enqueuedAt: "t" })
@@ -415,7 +454,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
     const deps = core.buildCompletionDeps()
     await deps.triggerUnblocked(["w"])
 
-    expect(core.hasWaitingIssue("w")).toBe(false)
+    expect(core.hasWaitingIssue("w")).toBe(true)
     expect(called).toBe(1)
   })
 

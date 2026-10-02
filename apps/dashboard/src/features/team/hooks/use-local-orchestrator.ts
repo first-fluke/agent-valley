@@ -1,14 +1,15 @@
 "use client"
 
 import { useMemo } from "react"
-import type { TeamState, TeamNode, ConnectionStatus } from "../types/team"
 import type { OrchestratorState } from "@/features/office/types/agent"
+import type { ConnectionStatus, TeamNode, TeamState } from "../types/team"
 
 type SSEConnectionStatus = "connecting" | "open" | "closed" | "error"
 
 function mapConnectionStatus(status: SSEConnectionStatus): ConnectionStatus {
   if (status === "open") return "connected"
   if (status === "error") return "error"
+  if (status === "closed") return "disconnected"
   return "connecting"
 }
 
@@ -16,10 +17,7 @@ function mapConnectionStatus(status: SSEConnectionStatus): ConnectionStatus {
  * Derives TeamState from an already-open SSE OrchestratorState,
  * instead of opening a second EventSource connection.
  */
-export function useLocalOrchestrator(
-  data: OrchestratorState | null,
-  sseStatus: SSEConnectionStatus,
-) {
+export function useLocalOrchestrator(data: OrchestratorState | null, sseStatus: SSEConnectionStatus) {
   const teamState = useMemo<TeamState | null>(() => {
     if (!data) return null
 
@@ -28,18 +26,20 @@ export function useLocalOrchestrator(
       displayName: "Local",
       defaultAgentType: data.config.agentType,
       maxParallel: data.config.maxParallel,
-      online: data.isRunning,
+      online: data.isRunning && sseStatus === "open",
       joinedAt: "",
-      activeIssues: data.activeWorkspaces.map((ws: { key: string; issueId: string; startedAt: string }) => ({
-        issueKey: ws.key,
-        issueId: ws.issueId,
-        agentType: data.config.agentType,
-        startedAt: ws.startedAt,
-      })),
+      activeIssues: data.activeWorkspaces
+        .filter((ws) => ws.status === "running")
+        .map((ws) => ({
+          issueKey: ws.key,
+          issueId: ws.issueId,
+          agentType: ws.agentType ?? data.config.agentType,
+          startedAt: ws.startedAt,
+        })),
     }
 
     return { nodes: [node], lastSeq: 0 }
-  }, [data])
+  }, [data, sseStatus])
 
   const status = mapConnectionStatus(sseStatus)
 

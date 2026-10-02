@@ -84,6 +84,28 @@ describe("OrchestratorCore — persistence on mutation", () => {
 })
 
 describe("OrchestratorCore — recoverFromPersistedState", () => {
+  test("monitors a recovered live worker and queues retained work once it exits", async () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true)
+    const runState = new FakeRunStatePersistence({
+      activeAttempts: [
+        { issueId: "i1", attemptId: "att-1", workspacePath: "/ws/i1", pid: 111, startedAt: "2026-07-16T00:00:00.000Z" },
+      ],
+    })
+    const { core } = buildCore(runState)
+    await core.recoverFromPersistedState()
+    await core.processRetryQueue()
+    expect(core.canAcceptIssue("i1").ok).toBe(false)
+    expect(runState.current().retryQueue).toHaveLength(0)
+    kill.mockImplementation(() => {
+      throw Object.assign(new Error("gone"), { code: "ESRCH" })
+    })
+    await core.processRetryQueue()
+    expect(core.getAttempt("i1")).toBeUndefined()
+    expect(core.canAcceptIssue("i1").ok).toBe(true)
+    expect(runState.current().retryQueue).toEqual([expect.objectContaining({ issueId: "i1" })])
+    expect(runState.current().activeAttempts).toHaveLength(0)
+  })
+
   test("reaps an attempt with no recorded pid — liveness unverifiable — and leaves the slot free", async () => {
     const runState = new FakeRunStatePersistence({
       activeAttempts: [

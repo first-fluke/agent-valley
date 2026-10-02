@@ -14,6 +14,7 @@ import type { IssueTracker } from "../../domain/ports/tracker"
 import {
   addIssueComment as addIssueCommentFn,
   addIssueLabel as addIssueLabelFn,
+  fetchIssue as fetchIssueFn,
   fetchIssueLabels as fetchIssueLabelsFn,
   fetchIssuesByState as fetchIssuesByStateFn,
   updateIssueState as updateIssueStateFn,
@@ -54,6 +55,10 @@ export class LinearTrackerAdapter implements IssueTracker {
 
   fetchIssuesByState(stateIds: string[]): Promise<Issue[]> {
     return fetchIssuesByStateFn(this.config.apiKey, this.config.teamUuid, stateIds)
+  }
+
+  fetchIssue(issueId: string): Promise<Issue | null> {
+    return fetchIssueFn(this.config.apiKey, issueId)
   }
 
   fetchIssueLabels(issueId: string): Promise<string[]> {

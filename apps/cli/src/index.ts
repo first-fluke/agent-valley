@@ -11,13 +11,22 @@
  */
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process"
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, unlinkSync } from "node:fs"
 import { resolve } from "node:path"
-import { loadConfig } from "@agent-valley/core/config/yaml-loader"
+import { loadConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
 import { program } from "commander"
 import pc from "picocolors"
 import { registerDoctorCommand } from "./doctor"
 import { registerLinearWebhook } from "./linear-webhook-register"
+import {
+  assertPortAvailable,
+  isProcessAlive,
+  readPids,
+  resolveRuntimePaths,
+  resolveServerPort,
+  waitForDashboard,
+  writePids,
+} from "./runtime"
 import { readStatus } from "./status-client"
 import { spawnTunnel, type TunnelHandle, type TunnelLogger } from "./tunnel"
 import { dashboardHost, startWebhookProxy, webhookPort } from "./webhook-proxy"
@@ -26,39 +35,6 @@ import { dashboardHost, startWebhookProxy, webhookPort } from "./webhook-proxy"
 const ROOT = process.cwd()
 const PID_FILE = resolve(ROOT, ".av.pid")
 const LOG_FILE = resolve(ROOT, ".av.log")
-
-// ── PID file helpers ─────────────────────────────────────────────────────────
-
-interface PidState {
-  dashboard: number
-  /** Tunnel process pid (null when no tunnel was spawned). Name kept as
-   * `ngrok` for backwards compatibility with .av.pid files from v0.2. */
-  ngrok?: number
-  port: number
-  startedAt: string
-}
-
-function writePids(state: PidState): void {
-  writeFileSync(PID_FILE, JSON.stringify(state, null, 2))
-}
-
-function readPids(): PidState | null {
-  if (!existsSync(PID_FILE)) return null
-  try {
-    return JSON.parse(readFileSync(PID_FILE, "utf-8"))
-  } catch {
-    return null
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
 
 function ensureConfig(): void {
   if (!existsSync(resolve(ROOT, "valley.yaml"))) {
@@ -80,25 +56,13 @@ const tunnelLogger: TunnelLogger = {
   dim: (msg: string) => console.log(pc.dim(msg)),
 }
 
-/**
- * Read the merged tunnel config and spawn the selected provider. Falls
- * back to the ngrok default (backwards compat) when config loading
- * fails for any reason — we never want tunnel configuration to block
- * the dashboard from starting.
- */
+/** Read the configured provider before starting a public tunnel. */
 function startTunnel(port: string): TunnelHandle {
-  try {
-    const cfg = loadConfig(ROOT)
-    return spawnTunnel(cfg.tunnel, { port, logger: tunnelLogger })
-  } catch {
-    // loadConfig calls process.exit on fatal validation errors; any
-    // thrown error here is unexpected — fall back to legacy ngrok
-    // behaviour to preserve v0.2 semantics.
-    return spawnTunnel({ provider: "ngrok", cloudflare: { mode: "quick" } }, { port, logger: tunnelLogger })
-  }
+  const cfg = loadConfig(ROOT)
+  return spawnTunnel(cfg.tunnel, { port, logger: tunnelLogger })
 }
 
-program.name("av").description("Agent Valley — AI agent orchestrator").version("0.1.0")
+program.name("av").description("Agent Valley — AI agent orchestrator").version("0.3.0")
 
 // ── setup ────────────────────────────────────────────────────────────────────
 program
@@ -127,31 +91,35 @@ program
 // ── up ───────────────────────────────────────────────────────────────────────
 program
   .command("up")
-  .description("Start dashboard + orchestrator + ngrok (background daemon)")
-  .action(async () => {
+  .description("Start dashboard + orchestrator + configured tunnel (background daemon)")
+  .option("--dev", "Run the background daemon in development mode without a production build")
+  .action(async (opts: { dev?: boolean }) => {
     ensureConfig()
     dashboardHost()
+    loadConfig(ROOT)
 
     // Check if already running
-    const existing = readPids()
+    const existing = readPids(PID_FILE)
     if (existing && isProcessAlive(existing.dashboard)) {
       console.log(pc.yellow(`Already running (dashboard pid: ${existing.dashboard}, port: ${existing.port})`))
       console.log(pc.dim(`  Stop with: av down`))
       return
     }
 
-    const port = process.env.SERVER_PORT ?? "9741"
-    const publicPort = webhookPort(port)
-    const dashboardCwd = resolve(ROOT, "apps/dashboard")
-    const supervisorScript = resolve(import.meta.dirname, "supervisor.js")
+    const port = resolveServerPort(ROOT)
+    webhookPort(port)
+    const { dashboardCwd, supervisorScript } = resolveRuntimePaths(ROOT, import.meta.dirname)
+    await assertPortAvailable(port)
+    await assertPortAvailable(webhookPort(port), "127.0.0.1")
 
     // Build first, then run in production mode (Turbopack dev eats 100% CPU)
-    console.log(pc.dim("  Building dashboard..."))
-    const build = spawnSync("bun", ["run", "build"], { cwd: dashboardCwd, stdio: "inherit" })
-    if (build.status !== 0) {
-      console.log(pc.red("Build failed. Falling back to dev mode."))
+    let mode = "dev"
+    if (!opts.dev) {
+      console.log(pc.dim("  Building dashboard..."))
+      const build = spawnSync("bun", ["run", "build"], { cwd: dashboardCwd, stdio: "inherit" })
+      if (build.status !== 0) console.log(pc.red("Build failed. Falling back to dev mode."))
+      else mode = "start"
     }
-    const mode = build.status === 0 ? "start" : "dev"
 
     // Start supervisor as detached background process (handles auto-restart)
     const dashProc = spawn("bun", [supervisorScript, dashboardCwd, port, mode], {
@@ -159,16 +127,28 @@ program
       stdio: "ignore",
       detached: true,
     })
+    let spawnError: Error | undefined
+    dashProc.once("error", (error) => {
+      spawnError = error
+    })
+    try {
+      await waitForDashboard(port, {
+        isAlive: () => !spawnError && dashProc.exitCode === null && dashProc.signalCode === null && !!dashProc.pid,
+      })
+    } catch (error) {
+      if (dashProc.pid) {
+        try {
+          process.kill(-dashProc.pid, "SIGTERM")
+        } catch {
+          dashProc.kill()
+        }
+      }
+      throw spawnError ?? error
+    }
     dashProc.unref()
 
-    // Start tunnel (ngrok / cloudflared / none — from valley.yaml)
-    const tunnel = startTunnel(publicPort)
-    tunnel.child?.unref()
-
-    // Write PID file
-    writePids({
-      dashboard: dashProc.pid ?? 0,
-      ngrok: tunnel.child?.pid,
+    writePids(PID_FILE, {
+      dashboard: dashProc.pid as number,
       port: Number(port),
       startedAt: new Date().toISOString(),
     })
@@ -177,23 +157,15 @@ program
     console.log(pc.dim(`  Logs: tail -f ${LOG_FILE}`))
     console.log(pc.dim(`  Stop: av down`))
 
-    // Wait (bounded) for the tunnel URL to register the Linear webhook,
-    // same 5s budget the original fixed sleep used for URL detection.
-    const tunnelUrl = await Promise.race<string | null>([
-      tunnel.ready,
-      new Promise((r) => setTimeout(() => r(null), 5_000)),
-    ])
-    if (tunnelUrl) {
-      await registerLinearWebhook(ROOT, tunnelUrl)
-    }
+    console.log(pc.dim("  Tunnel startup and webhook registration: av logs"))
   })
 
 // ── down ─────────────────────────────────────────────────────────────────────
 program
   .command("down")
-  .description("Stop background dashboard + ngrok")
+  .description("Stop background dashboard + tunnel")
   .action(() => {
-    const state = readPids()
+    const state = readPids(PID_FILE)
     if (!state) {
       console.log(pc.yellow("Not running (no .av.pid found)"))
       return
@@ -238,29 +210,46 @@ program
   .action(async () => {
     ensureConfig()
     const listenHost = dashboardHost()
+    loadConfig(ROOT)
+    const { dashboardCwd } = resolveRuntimePaths(ROOT, import.meta.dirname)
 
-    const port = process.env.SERVER_PORT ?? "9741"
+    const port = resolveServerPort(ROOT)
     const publicPort = webhookPort(port)
+    await assertPortAvailable(port)
     let dashProc: ChildProcess | null = null
     let shuttingDown = false
+    let restartTimer: ReturnType<typeof setTimeout> | undefined
+    let restartRequested = false
 
     const startDashboard = () => {
-      dashProc = spawn("bun", ["next", "dev", "--turbopack", "-p", port, "-H", listenHost], {
-        cwd: resolve(ROOT, "apps/dashboard"),
+      if (shuttingDown) return
+      const child = spawn("bun", ["next", "dev", "--turbopack", "-p", port, "-H", listenHost], {
+        cwd: dashboardCwd,
         stdio: "inherit",
         env: { ...process.env, HOSTNAME: listenHost },
       })
+      dashProc = child
       console.log(pc.green(`▶ Dashboard started (pid: ${dashProc.pid}) → http://localhost:${port}`))
 
-      dashProc.on("exit", (code) => {
+      child.on("error", (error) => {
+        console.error(pc.red(`Cannot start dashboard: ${error.message}. Install Bun and run bun install.`))
+        shutdown(1)
+      })
+      child.on("exit", (code) => {
+        if (dashProc !== child) return
+        dashProc = null
         if (shuttingDown) return
+        if (restartRequested) {
+          restartRequested = false
+          startDashboard()
+          return
+        }
         console.log(pc.red(`✗ Dashboard exited (code ${code}). Restarting in 3s...`))
-        setTimeout(startDashboard, 3_000)
+        restartTimer = setTimeout(startDashboard, 3_000)
       })
     }
 
     const webhookProxy = await startWebhookProxy(port, publicPort)
-    startDashboard()
 
     // tunnel (ngrok / cloudflared / none — from valley.yaml)
     const tunnel = startTunnel(publicPort)
@@ -270,36 +259,39 @@ program
 
     // Watch config files
     const chokidar = await import("chokidar")
-    const watcher = chokidar.watch([resolve(ROOT, "valley.yaml")], {
+    const watcher = chokidar.watch([resolve(ROOT, "valley.yaml"), resolveGlobalConfigPath()], {
       ignoreInitial: true,
     })
 
     watcher.on("change", (path: string) => {
       console.log(pc.dim(`  changed: ${path}`))
-      shuttingDown = true
-      dashProc?.kill()
       console.log(pc.yellow("↻ Restarting dashboard..."))
-      shuttingDown = false
-      startDashboard()
+      clearTimeout(restartTimer)
+      if (dashProc) {
+        restartRequested = true
+        dashProc.kill()
+      } else startDashboard()
     })
 
-    const shutdown = () => {
+    const shutdown = (code = 0) => {
       shuttingDown = true
+      clearTimeout(restartTimer)
       watcher.close()
       dashProc?.kill()
       tunnel.kill()
       webhookProxy.close()
-      process.exit(0)
+      process.exit(code)
     }
 
-    process.on("SIGINT", shutdown)
-    process.on("SIGTERM", shutdown)
+    process.on("SIGINT", () => shutdown())
+    process.on("SIGTERM", () => shutdown())
+    startDashboard()
   })
 
 // ── issue ────────────────────────────────────────────────────────────────────
 program
   .command("issue [description]")
-  .description("Create a Linear issue (triggers agent automatically)")
+  .description("Create an issue in the configured Linear or GitHub tracker")
   .option("-y, --yes", "Skip confirmation prompt")
   .option("--raw", "Skip Claude CLI expansion, use input as-is")
   .option("--parent <identifier>", "Create as sub-issue of the given parent (e.g. ACR-10)")
@@ -328,8 +320,8 @@ program
   .command("status")
   .description("Show orchestrator status")
   .action(async () => {
-    const port = process.env.SERVER_PORT ?? "9741"
-    const pids = readPids()
+    const pids = readPids(PID_FILE)
+    const port = resolveServerPort(ROOT, pids?.port)
 
     // Daemon status
     if (pids) {
@@ -346,6 +338,7 @@ program
       console.log(JSON.stringify(data, null, 2))
     } catch (error) {
       console.log(pc.red(error instanceof Error ? error.message : `Server is not responding on port ${port}`))
+      process.exitCode = 1
     }
   })
 
@@ -376,7 +369,7 @@ program
   .description("Live agent status monitor")
   .option("-i, --interval <seconds>", "Refresh interval", "2")
   .action(async (opts: { interval: string }) => {
-    const port = process.env.SERVER_PORT ?? "9741"
+    const port = resolveServerPort(ROOT, readPids(PID_FILE)?.port)
     const interval = Number(opts.interval) * 1000
 
     const render = async () => {
@@ -397,7 +390,7 @@ program
         // Summary bar
         const active = workspaces.length
         const max = (config.maxParallel as number) ?? 5
-        const bar = "█".repeat(active) + "░".repeat(max - active)
+        const bar = "█".repeat(active) + "░".repeat(Math.max(0, max - active))
         console.log(`  Agents  [${active >= max ? pc.red(bar) : pc.green(bar)}] ${active}/${max}`)
         console.log(
           `  Waiting ${pc.yellow(String(waiting))}  Retry ${retry > 0 ? pc.red(String(retry)) : pc.dim(String(retry))}`,
@@ -478,4 +471,7 @@ program.action(() => {
 
 registerDoctorCommand(program)
 
-program.parse()
+program.parseAsync().catch((error: unknown) => {
+  console.error(pc.red(error instanceof Error ? error.message : String(error)))
+  process.exitCode = 1
+})

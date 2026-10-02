@@ -9,6 +9,7 @@ import {
   type OmaEvidenceIO,
   type OmaEvidenceRequest,
   prepareOmaAttempt,
+  SUPPORTED_OMA_VERSION,
   validateOmaEvidence,
 } from "./receipt-adapter"
 
@@ -75,7 +76,9 @@ function fakeIO(run: Record<string, unknown> | null, status = "codex:completed")
     listRunFiles: () => (run ? [`${RUN_ID}.json`] : []),
     readReceipt: () => JSON.stringify(run),
     runCli: (args) =>
-      args[0] === "--version" ? { exitCode: 0, stdout: "15.0.4\n" } : { exitCode: 0, stdout: `${status}\n` },
+      args[0] === "--version"
+        ? { exitCode: 0, stdout: `${SUPPORTED_OMA_VERSION}\n` }
+        : { exitCode: 0, stdout: `${status}\n` },
   }
 }
 
@@ -86,7 +89,15 @@ describe("OMA receipt adapter", () => {
   })
   test("accepts current code evidence bound to the exact attempt", () => {
     const req = request()
-    expect(validateOmaEvidence(req, fakeIO(receipt(req)))).toEqual({ ok: true, runId: RUN_ID })
+    const io = fakeIO(receipt(req))
+    const calls: string[][] = []
+    const original = io.runCli
+    io.runCli = (args, cwd) => {
+      calls.push(args)
+      return original(args, cwd)
+    }
+    expect(validateOmaEvidence(req, io)).toEqual({ ok: true, runId: RUN_ID })
+    expect(calls.at(-1)).toEqual(["agent", "status", ATTEMPT_ID, "codex", "--project-root", req.workspace.path])
   })
 
   test("accepts analysis only with a bound report artifact", () => {
@@ -197,6 +208,8 @@ describe("OMA receipt adapter", () => {
       }
       expect(plan.tasks[0]?.required_checks[0]?.command).toEqual(["sh", "-c", "npm test"])
       expect(buildOmaGuidance(req)).toContain(ATTEMPT_ID)
+      expect(buildOmaGuidance(req)).toContain("--project-root")
+      expect(buildOmaGuidance(req)).not.toContain("--root ")
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

@@ -76,6 +76,19 @@ export class WebhookRouter {
       }
 
       case "issue.transitioned": {
+        if ((event.to === "todo" || event.to === "in_progress") && core.tracker.fetchIssue) {
+          try {
+            const latest = await core.tracker.fetchIssue(event.issueId)
+            const expectedState =
+              event.to === "todo" ? core.config.workflowStates.todo : core.config.workflowStates.inProgress
+            if (!latest || latest.status.id !== expectedState) return
+            event = { ...event, issue: latest }
+          } catch (err) {
+            core.enqueueRetry(event.issueId, 0, `Issue metadata refresh failed: ${String(err)}`)
+            return
+          }
+        }
+        core.dagScheduler.addNode(event.issue)
         logger.debug("orchestrator", `Webhook transition ${event.from ?? "∅"} -> ${event.to}`, {
           issueId: event.issueId,
           identifier: event.issue.identifier,
@@ -83,8 +96,10 @@ export class WebhookRouter {
         if (event.to === "cancelled") await core.cancelPendingFinalization(event.issueId)
 
         // Left-InProgress: stop the active agent (Done/Cancelled/Todo/…).
-        if (event.from === "in_progress" && event.to !== "in_progress") {
-          await lifecycle.handleIssueLeftInProgress(event.issueId)
+        if (event.to === "done" || event.to === "cancelled" || (event.from === "in_progress" && event.to === "todo")) {
+          await lifecycle.handleIssueLeftInProgress(event.issueId, event.to === "todo" ? "waiting" : event.to)
+          await lifecycle.reevaluateWaitingIssues()
+          await core.fillVacantSlots()
           // Fall-through only for to === "todo"; otherwise return.
           if (event.to !== "todo") return
         }

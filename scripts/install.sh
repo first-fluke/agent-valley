@@ -24,6 +24,19 @@ err()     { echo -e "${RED}[agent-valley]${RESET} $*" >&2; }
 
 REPO_URL="https://github.com/first-fluke/agent-valley.git"
 TARGET_DIR="${PWD}"
+ASSUME_YES=false
+INSTALL_WORKFLOWS=true
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y) ASSUME_YES=true ;;
+    --no-workflows) INSTALL_WORKFLOWS=false ;;
+    --help|-h)
+      echo "Usage: bash install.sh [--yes] [--no-workflows]"
+      echo "Installs agent instructions into the current project. To run the agent farm, clone Agent Valley and run bun install, bun av setup, bun av doctor, bun av dev."
+      exit 0 ;;
+    *) err "Unknown option: $arg. Run with --help for supported options."; exit 1 ;;
+  esac
+done
 
 # Detect whether we're running from inside the cloned repo
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
@@ -32,7 +45,13 @@ SOURCE_DIR=""
 
 if [[ -d "${SCRIPT_DIR}/../.agents" && -f "${SCRIPT_DIR}/../AGENTS.md" ]]; then
   IS_LOCAL=true
-  SOURCE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  SOURCE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
+fi
+
+if [[ "$IS_LOCAL" == true && "$SOURCE_DIR" == "$(pwd -P)" ]]; then
+  info "Agent Valley is already cloned here; the harness files are present."
+  info "Run: bun install && bun av setup && bun av doctor && bun av dev"
+  exit 0
 fi
 
 # ── Detect project type ───────────────────────────────────────────────────────
@@ -91,7 +110,7 @@ append_if_missing() {
   while IFS= read -r line; do
     # skip blank/comment lines for duplicate detection
     if [[ -z "${line//[[:space:]]/}" ]] || [[ "$line" == "#"* ]]; then continue; fi
-    if ! grep -qF "$line" "$dst"; then
+    if ! grep -qxF -- "$line" "$dst"; then
       echo "$line" >> "$dst"
       added=$((added + 1))
     fi
@@ -111,7 +130,12 @@ ask() {
   local hint
   [[ "$default" == "Y" ]] && hint="[Y/n]" || hint="[y/N]"
   local answer
-  read -r -p "  ${prompt} ${hint} " answer
+  if [[ "$ASSUME_YES" == true ]]; then return 0; fi
+  # stdin may contain this script (curl | bash). Never read answers from it.
+  if ! { read -r -p "  ${prompt} ${hint} " answer < /dev/tty; } 2>/dev/null; then
+    err "No interactive terminal. Run bash install.sh --yes (optionally --no-workflows)."
+    exit 1
+  fi
   answer="${answer:-$default}"
   [[ "$answer" =~ ^[Yy]$ ]]
 }
@@ -197,7 +221,9 @@ if [[ "$MODE" == "existing" ]]; then
   echo ""
 
   # AGENTS.md ─ append Symphony section if file already exists
-  if [[ -f "${TARGET_DIR}/AGENTS.md" ]]; then
+  if [[ -f "${TARGET_DIR}/AGENTS.md" ]] && grep -qxF '## Symphony Harness' "${TARGET_DIR}/AGENTS.md"; then
+    info "Skipped AGENTS.md (Symphony Harness section already present)"
+  elif [[ -f "${TARGET_DIR}/AGENTS.md" ]]; then
     warn "AGENTS.md exists — appending Symphony Harness section"
     {
       echo ""
@@ -206,7 +232,7 @@ if [[ "$MODE" == "existing" ]]; then
       echo "## Symphony Harness"
       echo ""
       echo "This project uses the [Agent Valley harness](https://github.com/first-fluke/agent-valley)."
-      echo "See \`WORKFLOW.md\` and \`docs/specs/\` for Symphony component specifications."
+      echo "See \`valley.example.yaml\` and \`docs/specs/\` for configuration and component specifications."
       echo "Run \`./scripts/harness/validate.sh\` to check architecture conformance."
     } >> "${TARGET_DIR}/AGENTS.md"
     success "Updated AGENTS.md (appended Symphony Harness section)"
@@ -256,7 +282,7 @@ echo ""
 info "Includes: ci.yml, harness-gc.yml (weekly GC cron), PR template, pre-commit config"
 echo ""
 
-if ask "Add .github/ workflows and PR template?" Y; then
+if [[ "$INSTALL_WORKFLOWS" == true ]] && ask "Add .github/ workflows and PR template?" N; then
   copy_dir ".github"
 else
   info "Skipped .github/"
@@ -270,19 +296,12 @@ echo -e "${GREEN}${BOLD}  ✓ Agent Valley harness installed successfully${RESET
 echo ""
 echo "  Next steps:"
 echo ""
-if [[ ! -f "${TARGET_DIR}/valley.yaml" ]]; then
-  echo "  1. Run 'av setup' to create valley.yaml and ~/.config/agent-valley/settings.yaml"
-  echo "     → Or copy valley.example.yaml to valley.yaml and fill in values"
-  echo ""
-  echo "  2. ./scripts/harness/validate.sh"
-  echo "     → Verify architecture constraints and environment"
-else
-  echo "  1. ./scripts/harness/validate.sh"
-  echo "     → Verify architecture constraints and environment"
-fi
+echo "  1. Review AGENTS.md and the copied docs for your project's conventions."
+echo "  2. This installs instructions only; it does not install the agent farm CLI/dashboard."
 echo ""
-echo "  3. Ask your agent to set up the implementation:"
-echo "     Read AGENT_SETUP.md and scaffold a Symphony implementation using [TypeScript/Python/Go]."
+echo "  To operate the agent farm, clone https://github.com/first-fluke/agent-valley"
+echo "  and run: bun install && bun av setup && bun av doctor && bun av dev"
+echo "  Set workspace.root to the repository you want the agents to work on."
 echo ""
 echo "  Docs: https://github.com/first-fluke/agent-valley"
 echo ""

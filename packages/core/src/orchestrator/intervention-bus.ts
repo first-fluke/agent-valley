@@ -58,6 +58,7 @@ export interface InterventionAttemptMeta {
   agentType: string
   /** Optional hook invoked for append_prompt on stateless agents (claude / gemini-CLI). */
   requestRetry?: (text: string) => Promise<void>
+  onAborted?: (reason: string) => Promise<void>
 }
 
 export interface InterventionBusDeps {
@@ -266,7 +267,7 @@ export class InterventionBus {
             "  Fix: pass requestRetry on InterventionBus.registerAttempt() so the orchestrator can re-queue the issue.",
         }
       }
-      await session.cancel()
+      await this.runner.kill(meta.attemptId)
       await meta.requestRetry(sanitized)
       this.logger.info("intervention", `Appended prompt via cancel+retry for ${meta.attemptId}`, {
         agentType: meta.agentType,
@@ -278,6 +279,7 @@ export class InterventionBus {
     if (cmd.kind === "abort") {
       const reason = typeof cmd.reason === "string" ? cmd.reason : "operator_requested"
       await this.runner.kill(meta.attemptId)
+      await meta.onAborted?.(reason)
       this.logger.info("intervention", `Aborted attempt ${meta.attemptId}`, {
         agentType: meta.agentType,
         reason,

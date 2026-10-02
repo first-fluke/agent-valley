@@ -8,6 +8,9 @@
 import { spawn } from "node:child_process"
 import { appendFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { loadConfig } from "@agent-valley/core/config/yaml-loader"
+import { registerLinearWebhook } from "./linear-webhook-register"
+import { spawnTunnel, type TunnelHandle } from "./tunnel"
 import { dashboardHost, startWebhookProxy, webhookPort } from "./webhook-proxy"
 
 const dashboardCwd = process.argv[2] ?? "."
@@ -20,6 +23,10 @@ const MAX_RESTARTS = 20
 const RESTART_DELAY = 3_000
 
 let restarts = 0
+let shuttingDown = false
+let restartTimer: ReturnType<typeof setTimeout> | undefined
+let tunnel: TunnelHandle | undefined
+let proxy: Awaited<ReturnType<typeof startWebhookProxy>> | undefined
 
 function log(msg: string): void {
   const line = `[${new Date().toISOString()}] [supervisor] ${msg}\n`
@@ -40,6 +47,7 @@ function killCurrentProc(): void {
 }
 
 function startDashboard(): void {
+  if (shuttingDown) return
   // Ensure previous process is dead before starting a new one
   killCurrentProc()
 
@@ -66,28 +74,72 @@ function startDashboard(): void {
   proc.stdout?.on("data", (chunk: Buffer) => appendFileSync(logFile, chunk))
   proc.stderr?.on("data", (chunk: Buffer) => appendFileSync(logFile, chunk))
 
+  proc.on("error", (error) => {
+    log(`Cannot start dashboard: ${error.message}. Install Bun and run bun install.`)
+    shutdown(1)
+  })
+
   proc.on("exit", (code, signal) => {
     currentProc = null
     log(`Dashboard exited (code: ${code}, signal: ${signal})`)
+    if (shuttingDown) return
     restarts++
 
     if (restarts > MAX_RESTARTS) {
       log(`Max restarts (${MAX_RESTARTS}) exceeded. Giving up.`)
-      process.exit(1)
+      shutdown(1)
+      return
     }
 
     log(`Restarting in ${RESTART_DELAY / 1000}s... (restart ${restarts}/${MAX_RESTARTS})`)
-    setTimeout(startDashboard, RESTART_DELAY)
+    restartTimer = setTimeout(startDashboard, RESTART_DELAY)
   })
 }
 
+function shutdown(code = 0): void {
+  if (shuttingDown) return
+  shuttingDown = true
+  clearTimeout(restartTimer)
+  tunnel?.kill()
+  proxy?.close()
+  if (!currentProc || currentProc.exitCode !== null) process.exit(code)
+  const child = currentProc
+  child.once("exit", () => process.exit(code))
+  child.kill("SIGTERM")
+  setTimeout(() => {
+    killCurrentProc()
+    process.exit(code)
+  }, 5_000).unref()
+}
+
+process.on("SIGINT", () => shutdown())
+process.on("SIGTERM", () => shutdown())
+
 log(`Supervisor started — port ${port}, mode ${mode}, cwd ${dashboardCwd}`)
 startWebhookProxy(port, webhookPort(port))
-  .then(() => {
+  .then((server) => {
+    proxy = server
     log(`Webhook-only proxy listening on 127.0.0.1:${webhookPort(port)}`)
+    const config = loadConfig(process.cwd())
     startDashboard()
+    tunnel = spawnTunnel(config.tunnel, {
+      port: webhookPort(port),
+      logger: { info: log, warn: log, dim: log },
+    })
+    tunnel.ready
+      .then(async (url) => {
+        if (!url || shuttingDown) return
+        if (config.trackerKind === "github") {
+          log(
+            `Register GitHub webhook ${url}/api/webhook/github for ${config.github?.owner}/${config.github?.repo}; select Issues events and the github.webhook_secret from valley.yaml.`,
+          )
+        } else {
+          await registerLinearWebhook(process.cwd(), url)
+        }
+      })
+      .catch((error: unknown) => log(`Webhook registration failed: ${String(error)}`))
   })
   .catch((error: unknown) => {
     log(`Webhook proxy failed: ${String(error)}. Set SYMPHONY_WEBHOOK_PORT to an unused port.`)
-    process.exit(1)
+    shutdown(1)
   })

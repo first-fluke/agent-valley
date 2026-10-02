@@ -69,10 +69,20 @@ describe("API Route Handlers", () => {
     expect(body.status).toBe("degraded")
   })
 
+  test("GET /health returns 503 when the initialized orchestrator has stopped", async () => {
+    if (mockOrchestrator) mockOrchestrator.getStatus = () => ({ isRunning: false, activeAgents: 0 })
+    const response = healthGET()
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({
+      status: "degraded",
+      isRunning: false,
+      reason: expect.stringContaining("av up"),
+    })
+  })
+
   // ── /api/status ──────────────────────────────────────────────────
 
-  const localStatusRequest = () =>
-    new Request("http://localhost/api/status", { headers: { host: "localhost" } })
+  const localStatusRequest = () => new Request("http://localhost/api/status", { headers: { host: "localhost" } })
 
   test("GET /status returns handler result", async () => {
     if (mockOrchestrator) mockOrchestrator.getStatus = () => ({ running: true, activeCount: 5 })

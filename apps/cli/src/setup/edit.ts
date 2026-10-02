@@ -16,12 +16,15 @@ import {
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 import { stringify as yamlStringify } from "yaml"
+import { stepCompletion } from "./completion-step"
+import { CANCEL, type SetupContext } from "./types"
 
 const EDITABLE_FIELDS: { value: string; label: string; scope: "global" | "project" }[] = [
   { value: "apiKey", label: "Linear API Key", scope: "global" },
-  { value: "webhookSecret", label: "Linear Webhook Secret", scope: "project" },
+  { value: "webhookSecret", label: "Tracker Webhook Secret", scope: "project" },
   { value: "workspaceRoot", label: "Workspace Path", scope: "project" },
   { value: "agentType", label: "Agent Type", scope: "global" },
+  { value: "completion", label: "Task output and verification", scope: "project" },
 ]
 
 export async function setupEdit(): Promise<void> {
@@ -29,6 +32,7 @@ export async function setupEdit(): Promise<void> {
 
   const globalConfig = loadGlobalConfig()
   const projectConfig = loadProjectConfig()
+  const isGithub = projectConfig?.tracker?.kind === "github" || (!projectConfig?.linear && !!projectConfig?.github)
 
   if (!globalConfig && !projectConfig) {
     p.log.error("No config files found. Run `bun av setup` first.")
@@ -37,7 +41,10 @@ export async function setupEdit(): Promise<void> {
 
   const fields = await p.multiselect({
     message: "Select fields to change",
-    options: EDITABLE_FIELDS.map((f) => ({ value: f.value, label: `${f.label} ${pc.dim(`(${f.scope})`)}` })),
+    options: EDITABLE_FIELDS.filter((field) => !isGithub || field.value !== "apiKey").map((f) => ({
+      value: f.value,
+      label: `${f.label} ${pc.dim(`(${f.scope})`)}`,
+    })),
     required: true,
   })
   if (p.isCancel(fields)) {
@@ -75,7 +82,7 @@ export async function setupEdit(): Promise<void> {
     const secret = await p.text({
       message: "Webhook Signing Secret",
       placeholder: "lin_wh_xxx",
-      initialValue: pConfig.linear?.webhook_secret,
+      initialValue: isGithub ? pConfig.github?.webhook_secret : pConfig.linear?.webhook_secret,
       validate: (v) => {
         if (!v) return "Required"
       },
@@ -84,8 +91,13 @@ export async function setupEdit(): Promise<void> {
       p.cancel("Cancelled")
       process.exit(0)
     }
-    if (!pConfig.linear) pConfig.linear = {}
-    pConfig.linear.webhook_secret = secret
+    if (isGithub) {
+      if (!pConfig.github) pConfig.github = {}
+      pConfig.github.webhook_secret = secret
+    } else {
+      if (!pConfig.linear) pConfig.linear = {}
+      pConfig.linear.webhook_secret = secret
+    }
     projectChanged = true
   }
 
@@ -127,6 +139,17 @@ export async function setupEdit(): Promise<void> {
     if (!gConfig.agent) gConfig.agent = {}
     gConfig.agent.type = agent as "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
     globalChanged = true
+  }
+
+  if (selectedFields.includes("completion")) {
+    const context: SetupContext = { task: pConfig.task, verifyCommand: pConfig.verify?.command }
+    if ((await stepCompletion(context, 1, 1)) === CANCEL) {
+      p.cancel("Cancelled")
+      process.exit(0)
+    }
+    pConfig.task = context.task
+    pConfig.verify = context.verifyCommand ? { ...pConfig.verify, command: context.verifyCommand } : undefined
+    projectChanged = true
   }
 
   const confirmed = await p.confirm({ message: "Save changes?" })

@@ -161,6 +161,7 @@ export class AgySession extends BaseSession {
     }
 
     this.process = spawn(plan.command, plan.args, {
+      detached: process.platform !== "win32",
       cwd: config.workspacePath,
       env: buildAgentEnv("antigravity", config.env) as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
@@ -179,7 +180,7 @@ export class AgySession extends BaseSession {
 
   override isAlive(): boolean {
     if (!this.process) return this.started
-    return this.process.exitCode === null
+    return super.isAlive()
   }
 
   // ── Args builder ─────────────────────────────────────────────────────────

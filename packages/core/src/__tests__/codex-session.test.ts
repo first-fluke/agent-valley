@@ -51,7 +51,7 @@ while IFS= read -r line; do
       echo '{"jsonrpc":"2.0","id":'$id',"result":{}}'
       sleep 0.05
       echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Hello from Codex"}}'
-      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{}}'
+      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}'
       ;;
   esac
 done
@@ -100,7 +100,7 @@ while IFS= read -r line; do
       echo '{"jsonrpc":"2.0","method":"item/fileChange/outputDelta","params":{"path":"src/utils.ts","changeType":"modify"}}'
       echo '{"jsonrpc":"2.0","method":"item/fileChange/outputDelta","params":{"path":"src/index.ts","changeType":"add"}}'
       echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Done editing"}}'
-      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{}}'
+      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}'
       ;;
   esac
 done
@@ -136,7 +136,7 @@ while IFS= read -r line; do
       echo '{"jsonrpc":"2.0","id":'$id',"result":{}}'
       sleep 0.05
       echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"Hello"}}'
-      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"usage":{"prompt_tokens":800,"completion_tokens":200,"model":"gpt-5.3-codex"}}}'
+      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"},"usage":{"prompt_tokens":800,"completion_tokens":200,"model":"gpt-5.3-codex"}}}'
       ;;
   esac
 done

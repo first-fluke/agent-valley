@@ -13,11 +13,13 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 5.3 (PR3).
  */
 
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import type { Issue } from "../domain/models"
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
+import { InterventionBus } from "../orchestrator/intervention-bus"
 import { IssueLifecycle } from "../orchestrator/issue-lifecycle"
 import { OrchestratorCore } from "../orchestrator/orchestrator-core"
+import { WebhookRouter } from "../orchestrator/webhook-router"
 import { registerSession } from "../sessions/session-factory"
 import { FakeAgentSession, makeConfig, makeIssue } from "./characterization/helpers"
 import { FakeIssueTracker } from "./fakes/fake-tracker"
@@ -59,7 +61,7 @@ function buildLifecycle(overrides: { config?: ReturnType<typeof makeConfig> } = 
     () => lifecycle.reevaluateWaitingIssues(),
   )
 
-  return { core, lifecycle, tracker, workspace, events, config }
+  return { core, lifecycle, tracker, workspace, webhook, events, config }
 }
 
 describe("IssueLifecycle.handleIssueTodo", () => {
@@ -120,8 +122,7 @@ describe("IssueLifecycle.handleIssueTodo", () => {
     const a = makeIssue({ id: "a", identifier: "PROJ-101" })
     const b = makeIssue({ id: "b", identifier: "PROJ-102" })
 
-    await h.lifecycle.handleIssueTodo(a)
-    await h.lifecycle.handleIssueTodo(b)
+    await Promise.all([h.lifecycle.handleIssueTodo(a), h.lifecycle.handleIssueTodo(b)])
 
     expect(FakeAgentSession.instances).toHaveLength(1)
     const status = h.core.getStatus() as { retryQueueSize: number }
@@ -130,6 +131,24 @@ describe("IssueLifecycle.handleIssueTodo", () => {
 })
 
 describe("IssueLifecycle.handleIssueInProgress", () => {
+  test("workspace preparation failures consume the retry budget and eventually cancel", async () => {
+    const h = buildLifecycle({ config: makeConfig({ agentMaxRetries: 2 }) })
+    h.workspace.create = vi.fn(async () => {
+      throw new Error("disk full")
+    })
+    const issue = makeIssue({ id: "ws-fail", identifier: "PROJ-50" })
+    await h.lifecycle.handleIssueInProgress(issue)
+    expect(h.core.retryQueue.entries[0]?.attemptCount).toBe(1)
+    h.core.removeRetry(issue.id)
+    await h.lifecycle.handleIssueInProgress(issue, { attemptCount: 1, lastError: "disk full" })
+    expect(h.core.retryQueue.size).toBe(0)
+    expect(h.tracker.calls).toContainEqual({
+      method: "updateIssueState",
+      args: [issue.id, h.config.workflowStates.cancelled],
+    })
+    expect(h.core.processingIssues.has(issue.id)).toBe(false)
+  })
+
   test("spawns agent directly without updateIssueState", async () => {
     const h = buildLifecycle()
     const issue = makeIssue({
@@ -161,6 +180,67 @@ describe("IssueLifecycle.handleIssueInProgress", () => {
 })
 
 describe("IssueLifecycle.handleIssueLeftInProgress", () => {
+  test.each([
+    "abort",
+    "append_prompt",
+  ] as const)("operator %s releases the old attempt and preserves the requested outcome", async (kind) => {
+    const h = buildLifecycle()
+    const bus = new InterventionBus({
+      runner: h.core.agentRunner,
+      port: h.core.agentRunnerPort,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    h.core.attachIntervention(bus)
+    const issue = makeIssue({ id: "intervened", identifier: "PROJ-60" })
+    await h.lifecycle.handleIssueInProgress(issue)
+    const attempt = h.core.getAttempt(issue.id)
+    expect(attempt).toBeDefined()
+    if (!attempt) return
+    const result = await bus.send(
+      attempt,
+      kind === "abort" ? { kind, reason: "operator stopped" } : { kind, text: "include regression tests" },
+    )
+    expect(result.ok).toBe(true)
+    expect(h.core.getActiveWorkspace(issue.id)).toBeUndefined()
+    expect(h.core.getAttempt(issue.id)).toBeUndefined()
+    expect(h.core.agentRunner.activeCount).toBe(0)
+    if (kind === "abort") {
+      expect(h.core.retryQueue.size).toBe(0)
+      expect(h.tracker.calls).toContainEqual({
+        method: "updateIssueState",
+        args: [issue.id, h.config.workflowStates.cancelled],
+      })
+    } else {
+      expect(h.core.retryQueue.entries[0]?.lastError).toContain("include regression tests")
+    }
+  })
+
+  test("cancellation during workspace creation prevents a late spawn", async () => {
+    const h = buildLifecycle()
+    const originalCreate = h.workspace.create.bind(h.workspace)
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let entered: (() => void) | undefined
+    const creating = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    h.workspace.create = async (issue, root) => {
+      entered?.()
+      await gate
+      return originalCreate(issue, root)
+    }
+    const issue = makeIssue({ id: "cancel-before-spawn", identifier: "PROJ-60" })
+    const preparation = h.lifecycle.handleIssueInProgress(issue)
+    await creating
+    await h.lifecycle.handleIssueLeftInProgress(issue.id)
+    release?.()
+    await preparation
+    expect(FakeAgentSession.instances).toHaveLength(0)
+    expect(h.core.getActiveWorkspace(issue.id)).toBeUndefined()
+  })
+
   test("kills active agent, removes workspace, and marks DAG node cancelled", async () => {
     const h = buildLifecycle()
     const issue = makeIssue({ id: "live1", identifier: "PROJ-60" })
@@ -186,6 +266,52 @@ describe("IssueLifecycle.handleIssueLeftInProgress", () => {
 })
 
 describe("IssueLifecycle.reevaluateWaitingIssues", () => {
+  test("a free slot immediately takes a task queued only for capacity", async () => {
+    const h = buildLifecycle({ config: makeConfig({ maxParallel: 1 }) })
+    const running = makeIssue({ id: "running", identifier: "PROJ-1" })
+    const queued = makeIssue({ id: "queued", identifier: "PROJ-2" })
+    h.tracker.seedIssue(queued)
+    await h.lifecycle.handleIssueInProgress(running)
+    await h.lifecycle.handleIssueTodo(queued)
+    expect(h.core.retryQueue.size).toBe(1)
+    await h.lifecycle.handleIssueLeftInProgress(running.id)
+    await h.core.fillVacantSlots()
+    expect(h.core.retryQueue.size).toBe(0)
+    expect(h.core.getActiveWorkspace(queued.id)).toBeDefined()
+  })
+
+  test("a new webhook task waits for its blocker and starts after an operator marks the blocker Done", async () => {
+    const h = buildLifecycle({ config: makeConfig({ maxParallel: 1 }) })
+    const router = new WebhookRouter(h.core, h.lifecycle)
+    const blocker = makeIssue({ id: "blocker", identifier: "PROJ-1" })
+    const task = makeIssue({
+      id: "task",
+      identifier: "PROJ-2",
+      relations: [{ type: "blocked_by", relatedIssueId: blocker.id, relatedIdentifier: blocker.identifier }],
+    })
+    h.core.dagScheduler.buildFromIssues([blocker])
+    h.tracker.seedIssue(task)
+    const refresh = vi.fn(async () => task)
+    Object.assign(h.tracker, { fetchIssue: refresh })
+    h.webhook.nextEvent = {
+      kind: "issue.transitioned",
+      issueId: task.id,
+      from: null,
+      to: "todo",
+      issue: { ...task, relations: [] },
+    }
+    await router.handleWebhook("{}", "valid")
+    expect(refresh).toHaveBeenCalledWith(task.id)
+    expect(FakeAgentSession.instances).toHaveLength(0)
+    expect(h.core.hasWaitingIssue(task.id)).toBe(true)
+    h.webhook.nextEvent = { kind: "issue.transitioned", issueId: blocker.id, from: "todo", to: "done", issue: blocker }
+    await router.handleWebhook("{}", "valid")
+    expect(h.core.dagScheduler.getNode(blocker.id)?.status).toBe("done")
+    expect(h.core.hasWaitingIssue(task.id)).toBe(false)
+    expect(h.workspace.events).toContain("create:task")
+    expect(FakeAgentSession.instances).toHaveLength(1)
+  })
+
   test("dispatches waiting issue once its blockers are resolved", async () => {
     const h = buildLifecycle()
     const blocker = makeIssue({ id: "b1", identifier: "PROJ-70" })
@@ -206,10 +332,37 @@ describe("IssueLifecycle.reevaluateWaitingIssues", () => {
     h.core.dagScheduler.updateNodeStatus("b1", "done")
     h.core.dagScheduler.removeRelation("w1", "b1")
 
-    await h.lifecycle.reevaluateWaitingIssues()
+    await h.core.buildCompletionDeps().triggerUnblocked([blocked.id])
     await new Promise((r) => setTimeout(r, 0))
 
     expect(h.core.hasWaitingIssue("w1")).toBe(false)
+    expect(h.workspace.events).toContain("create:w1")
+    expect(FakeAgentSession.instances).toHaveLength(1)
+  })
+
+  test("retains waiting issues if the tracker refresh fails", async () => {
+    const h = buildLifecycle()
+    h.core.addWaitingIssue("w1", { issueId: "w1", identifier: "PROJ-71", blockedBy: [], enqueuedAt: "t" })
+    h.tracker.throwOn.set("fetchIssuesByState", new Error("tracker unavailable"))
+    await h.lifecycle.reevaluateWaitingIssues()
+    expect(h.core.hasWaitingIssue("w1")).toBe(true)
+  })
+
+  test("fills a slot even when the first Todo issue is blocked", async () => {
+    const h = buildLifecycle({ config: makeConfig({ maxParallel: 1 }) })
+    const blocker = makeIssue({ id: "blocker", identifier: "PROJ-3" })
+    const blocked = makeIssue({
+      id: "blocked",
+      identifier: "PROJ-1",
+      relations: [{ type: "blocked_by", relatedIssueId: blocker.id, relatedIdentifier: blocker.identifier }],
+    })
+    const ready = makeIssue({ id: "ready", identifier: "PROJ-2" })
+    h.core.dagScheduler.buildFromIssues([blocker, blocked, ready])
+    h.tracker.seedIssue(blocked)
+    h.tracker.seedIssue(ready)
+    await h.core.fillVacantSlots()
+    expect(h.core.hasWaitingIssue(blocked.id)).toBe(true)
+    expect(h.workspace.events).toContain("create:ready")
   })
 
   test("is a no-op when nothing is waiting", async () => {

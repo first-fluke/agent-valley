@@ -1,146 +1,97 @@
-# Environment Setup
+# Install and operate Agent Valley
 
-## Step 0: Install the Harness
+## Install the runtime
 
-**New project** (cloned this repo directly):
-
-Everything is already in place. Just reset the git history and start your own:
+Use a source checkout with Bun, Git, and an authenticated supported agent CLI on PATH:
 
 ```bash
-rm -rf .git
-git init
-git add -A
-git commit -m "chore: init from agent-valley"
+git clone https://github.com/first-fluke/agent-valley.git
+cd agent-valley
+bun install --frozen-lockfile
+bun av setup
+bun av doctor
+bun av up --dev
+bun av status
 ```
 
-No need to run `install.sh` — the full scaffold is already present.
+Run these commands from the Agent Valley checkout. The CLI needs the dashboard source in `apps/dashboard`; a standalone CLI package does not include a dashboard runtime. Keep this checkout separate from the target repository when possible. Set `workspace.root` to an existing absolute Git repository path with at least one commit. It is not an empty scratch directory. Each issue gets a worktree under that repository.
 
-**Existing project** (adding the harness to a project you already have):
+Use `bun av dev` for foreground logs and configuration watching, or `bun av up --dev` for a background process without a production build. Plain `bun av up` attempts a production dashboard build before starting.
+
+Supported agent values are `claude`, `codex`, `antigravity`, `cursor`, `grok`, `kimi`, and `opencode`. Antigravity uses the `agy` executable. Install and authenticate the selected CLI. For a goal that does not need a tracker or dashboard, follow [chief orders](./chief-missions.md); explicit `--workspace` and `--verify` options can supply its configuration.
+
+The setup wizard selects Linear or GitHub, the agent, workspace, tunnel, and completion checks. It writes project configuration to `valley.yaml` and user defaults/credentials to `~/.config/agent-valley/settings.yaml`. Project values override global values; existing unrelated global settings are preserved. The example YAML is a reference, not a ready-to-run configuration. OMA is optional in the target repository.
+
+For a first run, use `agent.max_parallel: 1` and `delivery.mode: pr`. Authenticate the chosen CLI before starting Agent Valley. PR delivery requires authenticated `gh`; the target repository needs a usable remote. Increase concurrency after one small task passes verification and creates its PR.
+
+## Completion checks
+
+Code tasks require `verify.command` in `valley.yaml`. Use the target repository's deterministic test/typecheck commands, including dependency installation when a new worktree needs it. For example, for this repository:
+
+```yaml
+verify:
+  command: bun install --frozen-lockfile && bun run typecheck && bun run test
+  timeout_sec: 600
+```
+
+The check runs in the issue worktree before delivery. A failed check retries with its output attached; exhausted retries cancel the issue. A zero agent exit code alone does not mark a code task Done. If the work is a report, select analysis and an attempt-specific report path instead:
+
+```yaml
+task:
+  kind: analysis
+  report_path: .agents/results/analysis-{{attempt.id}}.md
+```
+
+## Connect a tracker
+
+`bun av dev` prints the local dashboard URL and the tunnel URL. The dashboard uses `server.port` from YAML (default 9741); `SERVER_PORT` overrides it. The public tunnel forwards webhook endpoints only.
+
+| Tracker | Webhook path | Configuration |
+|---|---|---|
+| Linear | `/api/webhook` | Team/API key and Todo/In Progress/Done/Cancelled state IDs. The CLI attempts webhook registration after tunnel startup. Resolve a registration error before relying on incoming issues. |
+| GitHub | `/api/webhook/github` | Owner, repository, `github.token_env`, signing secret and state labels. Export the named token environment variable. Register an Issues webhook with JSON payloads; use `github.webhook_secret` from `valley.yaml`. |
+
+The default tunnel provider is ngrok. The wizard can select Cloudflare or `none`; install the selected tunnel executable. With `none`, provide your own webhook ingress. Existing runnable issues are reconciled at startup, but new changes still need webhook delivery while the runtime is running.
+
+## First task and daily operation
+
+1. Start with `bun av dev` and open the printed local dashboard URL. Check `bun av status`; `/api/health` returns 503 if initialization failed or the runtime stopped.
+2. Create a small task with an observable expected result: `bun av issue "Add a unit test for the parser's empty input" --raw --yes`. `--raw` avoids using Claude to expand the description.
+3. Confirm the task moves through queued/running, verification, and delivery. Use the operations panel for dependency blockers and retry reasons/times; use `bun av logs` for daemon logs.
+4. Inspect the delivered branch/PR and the tracker completion comment before adding more work.
+5. For background operation, stop the foreground runtime, then run `bun av up --dev`. It waits for dashboard health before reporting success. `bun av down` stops the daemon; `bun av dev` stops with Ctrl-C.
+6. After configuration or CLI authentication changes, restart and run `bun av doctor` again.
+
+`--parent`, `--blocked-by`, and `--breakdown` are Linear features. GitHub issue creation supports plain issues and labels, and rejects unsupported dependency/decomposition flags. Linear decomposition stages tasks in Backlog, attaches dependencies, then publishes the leaves. Do not manually move an incomplete draft batch to Todo until its relationships are correct.
+
+## Troubleshooting
+
+| Symptom | Check and action |
+|---|---|
+| `av up` exits or never becomes healthy | Read `.av.log` in the Agent Valley checkout. Run `bun av doctor`; check dashboard dependencies, port conflicts, and required configuration. |
+| Agent never starts | Check operations-panel blockers/retry time, concurrency, budget limits, selected agent executable/authentication, and webhook delivery in the tracker. |
+| Task retries after producing code | Read the verification/delivery error. Run the configured check in the retained worktree; check Git remote and `gh` authentication. |
+| Process exits without a result | Run the agent interactively once to authenticate and confirm its installed version. Update incompatible CLIs. The task fails promptly instead of waiting for the full task timeout. |
+| Dashboard says unavailable | Run `bun av doctor` and inspect `.av.log` or the foreground output for the initialization failure. Fix it and restart. A connected SSE socket does not imply a healthy scheduler. |
+| Runtime restarted while an agent was alive | Recovery reserves that task until the old process exits, then retries retained work. Inspect a stuck process before terminating it. |
+| Read-only user cannot control agents | Sign in separately for controls with the intervention token. Viewing status does not require that token. |
+
+Run `bun run test`, `bun run typecheck`, `bun run lint`, and `./scripts/harness/validate.sh` for repository checks. `validate.sh` checks source safety, architecture and coverage; `av doctor` checks runtime configuration and prerequisites. Use `bun run test` for the Vitest suite; bare `bun test` selects Bun's different test runner.
+
+## Optional instruction harness
+
+`scripts/install.sh` copies agent instructions and documentation into another project. It does not install the CLI/dashboard. It is optional for running the farm. Review copied conventions for the target project, especially before accepting the optional repository-specific CI workflows.
 
 ```bash
 cd your-existing-project
 curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
+# Without an interactive terminal:
+# curl ... | bash -s -- --yes --no-workflows
 ```
 
-The installer auto-detects existing project files (`package.json`, `pyproject.toml`, `go.mod`) and installs only the harness layer:
+Running the installer inside its own checkout leaves existing files intact. Repeated installs deduplicate the Symphony section and ignore entries.
 
-| Item | Action |
-|---|---|
-| `.agents/`, `.claude/`, `docs/` | Copied |
-| `scripts/harness/gc.sh`, `validate.sh` | Copied |
-| `WORKFLOW.md`, `.env.example` | Copied |
-| `AGENTS.md` | Appended (Symphony section added) |
-| `CLAUDE.md` | `@AGENTS.md` line injected if missing |
-| `.gitignore` | Missing entries appended |
-| `src/`, `scripts/dev.sh` | **Skipped** |
-| `.github/` workflows | **Optional** — asked interactively |
-
-The installer is idempotent — safe to run multiple times.
-
----
-
-## Step 1: Copy and Fill `.env`
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with real values:
-
-```bash
-# Linear issue tracker
-LINEAR_API_KEY=lin_api_YOUR_KEY_HERE    # Linear Personal API Key
-LINEAR_TEAM_ID=ACR                                          # Your team identifier
-LINEAR_TEAM_UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx      # Team UUID
-LINEAR_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxx                # Webhook signing secret
-LINEAR_WORKFLOW_STATE_TODO=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-LINEAR_WORKFLOW_STATE_IN_PROGRESS=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-LINEAR_WORKFLOW_STATE_DONE=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-LINEAR_WORKFLOW_STATE_CANCELLED=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-
-# Symphony orchestrator
-WORKSPACE_ROOT=/absolute/path/to/workspaces    # MUST be an absolute path
-LOG_LEVEL=info                                  # debug | info | warn | error
-LOG_FORMAT=json                                 # json | text
-
-# Agent selection
-AGENT_TYPE=claude                                 # claude | gemini | codex
-# CLAUDE_MODEL=sonnet                             # optional model override
-# GEMINI_MODEL=gemini-2.0-flash
-# CODEX_MODEL=gpt-5.3-codex
-
-# Optional
-# OTEL_ENDPOINT=http://localhost:4317
-```
-
-**Important:** `.env` is gitignored. Never commit it.
-
----
-
-## Step 2: Find Linear UUIDs
-
-```bash
-# Team UUID
-curl -s -X POST https://api.linear.app/graphql \
-  -H "Content-Type: application/json" \
-  -H "Authorization: $LINEAR_API_KEY" \
-  -d '{"query":"{ teams { nodes { id key name } } }"}' | jq .
-
-# Workflow state UUIDs
-curl -s -X POST https://api.linear.app/graphql \
-  -H "Content-Type: application/json" \
-  -H "Authorization: $LINEAR_API_KEY" \
-  -d '{"query":"{ workflowStates { nodes { id name type } } }"}' | jq .
-```
-
-Look for states with `type: "unstarted"` (Todo), `type: "started"` (In Progress), `type: "completed"` (Done), `type: "cancelled"` (Cancelled).
-
----
-
-## Step 3: Set Up Linear Webhook
-
-1. Go to Linear → Settings → API → Webhooks
-2. Create a new webhook:
-   - **URL:** `https://your-orchestrator-host:9741/webhook`
-   - **Events:** Issue updates
-3. Copy the **signing secret** → set as `LINEAR_WEBHOOK_SECRET` in `.env`
-
-For local development, expose your local server via tunnel:
-```bash
-npx localtunnel --port 9741
-# or
-cloudflared tunnel --url http://localhost:9741
-```
-
----
-
-## Step 4: Validate Environment
-
-```bash
-./scripts/harness/validate.sh
-```
-
-This script:
-- Checks all required environment variables are set
-- Validates `WORKSPACE_ROOT` is an absolute path
-- Scans for hardcoded secrets and architecture violations
-- Confirms harness scripts are executable
-
-For new projects, you can also run the full bootstrap (lint + tests):
-```bash
-./scripts/dev.sh
-```
-
-**If validation fails:** Each error includes the exact fix instruction. For example:
-```
-FAIL: WORKSPACE_ROOT is not set.
-  → Add WORKSPACE_ROOT=/absolute/path to .env
-  → Copy from .env.example if unsure
-```
-
----
-
-## Step 5: Dashboard and webhook access
+## Dashboard and webhook access
 
 `av up`, `av dev`, and the dashboard's direct `dev`/`start` scripts bind
 the dashboard to `127.0.0.1` by default. The tunnel points to a separate
@@ -148,20 +99,23 @@ loopback listener (port `SERVER_PORT + 1`) that forwards only POST
 `/api/webhook` and POST `/api/webhook/github`. Control routes and the UI
 are unavailable through that tunnel.
 
-If you only open the dashboard at `http://localhost:PORT`, you need nothing —
-it works out of the box. Remote access requires one of:
+Without configured access tokens, local dashboard requests are accepted.
+If a token is configured, its scope requires authentication even on localhost.
+Remote dashboard access also needs a reachable bind address and these settings:
 
 | Env var | Effect |
 |---|---|
-| `SYMPHONY_DASHBOARD_TOKEN=<token>` | Browser sign-in for `/api/status` and `/api/events`; CLI status/top send this token as Bearer when present in their environment. |
+| `SYMPHONY_DASHBOARD_TOKEN=<token>` | Require a bearer token or browser sign-in for status, events, metrics and team data, including local requests. CLI status/top send the token from their environment. |
 | `SYMPHONY_ALLOW_REMOTE_STATUS=1` | Requires `SYMPHONY_DASHBOARD_TOKEN` even for local requests; without it, every request is rejected. |
-| `SYMPHONY_INTERVENTION_TOKEN=<token>` | Browser sign-in for intervention. Use a separate token from the status token. |
+| `SYMPHONY_INTERVENTION_TOKEN=<token>` | Require a bearer token or browser session for all intervention requests. A valid token authorizes local or remote requests without a remote flag. Use a separate token from the status token. |
+| `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | Requires a configured intervention token; without it, every intervention request is rejected. This flag alone does not grant access. |
 | `SYMPHONY_DASHBOARD_HOST=<host>` | CLI-managed dashboard bind address. Non-loopback values require both dashboard and intervention tokens. |
 | `SYMPHONY_WEBHOOK_PORT=<port>` | Override the webhook-only listener port; default is `SERVER_PORT + 1`. Point any named tunnel at this port. |
 
-`/api/intervention` (pause/resume/append_prompt/abort a live agent run) is
-gated by `SYMPHONY_INTERVENTION_TOKEN` and
-`SYMPHONY_ALLOW_REMOTE_INTERVENTION=1`. The browser signs in with configured
+`/api/intervention` controls pause/resume/append_prompt/abort on a live run.
+With `SYMPHONY_INTERVENTION_TOKEN` set, matching credentials authorize requests
+without requiring `SYMPHONY_ALLOW_REMOTE_INTERVENTION`. With neither set,
+only local requests are accepted. The browser signs in with configured
 tokens at the dashboard and receives short-lived HttpOnly, SameSite cookies.
 Browser mutation requests must include a matching `Origin` header. Do not
 place shared secrets in `NEXT_PUBLIC_*` variables.

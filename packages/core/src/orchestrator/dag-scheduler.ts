@@ -52,6 +52,7 @@ export class DagScheduler {
       }
     }
 
+    for (const issue of issues) this.includeRelatedNodes(issue, nodes)
     // Build edges from relations
     for (const issue of issues) {
       const issueNode = nodes[issue.id]
@@ -103,7 +104,25 @@ export class DagScheduler {
     this.cache = { version: 1, updatedAt: new Date().toISOString(), nodes }
   }
 
-  private mapIssueStatus(issue: Issue): DagNodeStatus {
+  private includeRelatedNodes(issue: Issue, nodes: Record<string, DagNode>): void {
+    for (const relation of issue.relations) {
+      if (!relation.relatedStatus || nodes[relation.relatedIssueId]) continue
+      nodes[relation.relatedIssueId] = {
+        issueId: relation.relatedIssueId,
+        identifier: relation.relatedIdentifier,
+        status: this.mapIssueStatus({ status: relation.relatedStatus }),
+        parentId: null,
+        children: [],
+        blockedBy: [],
+        blocks: [],
+      }
+    }
+  }
+
+  private mapIssueStatus(issue: Pick<Issue, "status">): DagNodeStatus {
+    if (issue.status.type === "completed") return "done"
+    if (issue.status.type === "canceled") return "cancelled"
+    if (issue.status.type === "started") return "running"
     const name = issue.status.name.toLowerCase()
     if (name.includes("done") || name.includes("completed")) return "done"
     if (name.includes("cancel")) return "cancelled"
@@ -167,7 +186,7 @@ export class DagScheduler {
     if (type === "blocks") {
       if (!issueNode.blocks.includes(relatedId)) issueNode.blocks.push(relatedId)
       if (!relatedNode.blockedBy.includes(issueId)) relatedNode.blockedBy.push(issueId)
-    } else if (type === "blocked-by") {
+    } else if (type === "blocked-by" || type === "blocked_by") {
       if (!issueNode.blockedBy.includes(relatedId)) issueNode.blockedBy.push(relatedId)
       if (!relatedNode.blocks.includes(issueId)) relatedNode.blocks.push(issueId)
     }
@@ -190,16 +209,19 @@ export class DagScheduler {
   }
 
   addNode(issue: Issue): void {
-    if (this.cache.nodes[issue.id]) return
-    this.cache.nodes[issue.id] = {
-      issueId: issue.id,
-      identifier: issue.identifier,
-      status: this.mapIssueStatus(issue),
-      parentId: issue.parentId,
-      children: issue.children,
-      blockedBy: [],
-      blocks: [],
+    if (!this.cache.nodes[issue.id]) {
+      this.cache.nodes[issue.id] = {
+        issueId: issue.id,
+        identifier: issue.identifier,
+        status: this.mapIssueStatus(issue),
+        parentId: issue.parentId,
+        children: issue.children,
+        blockedBy: [],
+        blocks: [],
+      }
     }
+    this.includeRelatedNodes(issue, this.cache.nodes)
+    for (const relation of issue.relations) this.addRelation(issue.id, relation.relatedIssueId, relation.type)
     this.persistAsync()
   }
 

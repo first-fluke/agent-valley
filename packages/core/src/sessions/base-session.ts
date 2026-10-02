@@ -12,6 +12,7 @@ import type {
   AgentSession,
   RunResult,
 } from "./agent-session"
+import { signalProcessTree } from "./process-tree"
 
 /** Env vars safe to pass to agent subprocesses */
 const SAFE_ENV_KEYS = [
@@ -78,7 +79,7 @@ export function buildAgentEnv(agentType: string, extra: Record<string, string> =
 /** Returns a promise that resolves when the child process exits. */
 export function waitForExit(proc: ChildProcess): Promise<void> {
   return new Promise((resolve) => {
-    if (proc.exitCode !== null) {
+    if (proc.exitCode !== null || proc.signalCode != null) {
       resolve()
       return
     }
@@ -155,6 +156,8 @@ export abstract class BaseSession implements AgentSession {
   protected config: AgentConfig | null = null
   protected startedAt: number = 0
   private _process: ChildProcess | null = null
+  protected terminalEventReceived = false
+  private processFailed = false
 
   /**
    * Backed by `_process` so every subclass's `this.process = spawn(...)`
@@ -170,6 +173,21 @@ export abstract class BaseSession implements AgentSession {
   protected set process(proc: ChildProcess | null) {
     this._process = proc
     if (proc) {
+      this.processFailed = false
+      this.terminalEventReceived = false
+      // Unread stderr can fill the OS pipe and deadlock a healthy agent.
+      proc.stderr?.on("data", () => {})
+      proc.stderr?.on("error", () => {})
+      proc.stdin?.on("error", () => {})
+      proc.on("error", (error) => {
+        if (this._process !== proc) return
+        this.processFailed = true
+        this.emitError(
+          "CRASH",
+          `Agent process failed: ${error.message}. Run av doctor and check the agent executable and workspace.`,
+          false,
+        )
+      })
       this.emit({ type: "spawned", pid: proc.pid })
     }
   }
@@ -208,6 +226,7 @@ export abstract class BaseSession implements AgentSession {
   }
 
   protected emit(event: AgentEvent): void {
+    if (event.type === "complete" || event.type === "error") this.terminalEventReceived = true
     const handlers = this.listeners.get(event.type)
     if (handlers) {
       for (const handler of handlers) {
@@ -219,26 +238,23 @@ export abstract class BaseSession implements AgentSession {
   // ── Process management ────────────────────────────────────────────────────
 
   async cancel(): Promise<void> {
-    if (this.process && this.isAlive()) {
-      this.process.kill("SIGTERM")
-    }
+    if (this.process) signalProcessTree(this.process, "SIGTERM")
   }
 
   async kill(): Promise<void> {
-    if (this.process && this.isAlive()) {
-      this.process.kill("SIGKILL")
-    }
+    if (this.process) signalProcessTree(this.process, "SIGKILL")
   }
 
   isAlive(): boolean {
     if (!this.process) return false
-    return this.process.exitCode === null
+    return !this.processFailed && this.process.exitCode === null && this.process.signalCode == null
   }
 
   async dispose(): Promise<void> {
-    if (this.process && this.isAlive()) {
-      this.process.kill("SIGKILL")
-      await waitForExit(this.process)
+    if (this.process) {
+      const wasAlive = this.isAlive()
+      signalProcessTree(this.process, "SIGKILL")
+      if (wasAlive) await waitForExit(this.process)
     }
     this.listeners.clear()
     this.process = null

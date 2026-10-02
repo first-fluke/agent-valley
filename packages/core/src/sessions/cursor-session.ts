@@ -55,6 +55,7 @@
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
+import { readJsonLines } from "./json-lines"
 import { planSandboxedSpawn } from "./sandbox"
 
 export const CURSOR_COMMAND = "cursor-agent"
@@ -139,6 +140,7 @@ export class CursorSession extends BaseSession {
     if (apiKey) extraEnv.CURSOR_API_KEY = apiKey
 
     this.process = spawn(plan.command, plan.args, {
+      detached: process.platform !== "win32",
       cwd: this.config.workspacePath,
       env: buildAgentEnv("cursor", extraEnv) as NodeJS.ProcessEnv,
       stdio: ["ignore", "pipe", "pipe"],
@@ -149,7 +151,7 @@ export class CursorSession extends BaseSession {
 
   override isAlive(): boolean {
     if (!this.process) return this.started
-    return this.process.exitCode === null
+    return super.isAlive()
   }
 
   // ── Stream parser ───────────────────────────────────────────────────────
@@ -157,42 +159,18 @@ export class CursorSession extends BaseSession {
   private async readStream(): Promise<void> {
     const proc = this.process
     if (!proc?.stdout) return
-
-    const decoder = new TextDecoder()
-    let buffer = ""
-
-    proc.stdout.on("data", (chunk: Buffer) => {
-      buffer += decoder.decode(chunk, { stream: true })
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
-
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const event: unknown = JSON.parse(line)
-          this.handleEvent(event)
-        } catch {
-          // Non-JSON stderr noise
-        }
-      }
-    })
-
-    proc.stdout.on("error", () => {
-      // Stream error — proceed to close
-    })
-
-    // Gated on BOTH stdout 'end' and process 'close' — see
-    // waitForStreamCompletion() doc comment in base-session.ts for why
-    // 'close' alone races the final buffered 'data' chunk on a
-    // fast-exiting process (this is the fix for the intermittent
-    // truncated-output flakiness observed under heavy host load while
-    // stress-testing this adapter).
+    const flush = readJsonLines(proc.stdout, (event) => this.handleEvent(event))
     const { exitCode: code } = await waitForStreamCompletion(proc)
+    flush()
+    if (this.terminalEventReceived) return
     const exitCode = code ?? -1
-
-    if (exitCode !== 0) {
-      this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `cursor-agent exited with code ${exitCode}`, exitCode !== 1)
-    }
+    this.emitError(
+      exitCode === -1 ? "TIMEOUT" : "CRASH",
+      exitCode === 0
+        ? "cursor-agent exited without a result event. Check CLI authentication and update Cursor, then retry."
+        : `cursor-agent exited with code ${exitCode}. Run av doctor and check Cursor authentication.`,
+      exitCode !== 1,
+    )
   }
 
   /**

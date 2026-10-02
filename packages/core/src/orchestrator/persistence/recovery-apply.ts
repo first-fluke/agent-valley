@@ -10,6 +10,7 @@ import type { OrchestratorRuntimeState, Workspace } from "../../domain/models"
 import type { ObservabilityHooks } from "../../observability/hooks"
 import { logger } from "../../observability/logger"
 import type { RetryQueue } from "../retry-queue"
+import { isProcessAlive } from "./liveness"
 import type { RecoveryDecision } from "./recovery"
 import type { PersistedAttempt, RunStatePort } from "./run-state-store"
 
@@ -105,6 +106,29 @@ export function cleanupAttemptState(
   deps.attemptStartedAt.delete(issueId)
   deps.attemptPid.delete(issueId)
   if (attemptId && deps.interventionBus) deps.interventionBus.unregisterAttempt(attemptId)
+}
+
+/** Keep recovered workers reserved until their process exits; there is no live session to emit completion. */
+export function reconcileRecoveredAttempts(
+  attempts: PersistedAttempt[],
+  deps: RecoveryApplyDeps & { interventionBus: AttemptUnregisterPort | null },
+  probe: (pid: number) => boolean = isProcessAlive,
+): PersistedAttempt[] {
+  return attempts.filter((attempt) => {
+    if (attempt.pid != null && probe(attempt.pid)) return true
+    if (deps.activeAttempts.get(attempt.issueId) !== attempt.attemptId) return false
+    cleanupAttemptState(deps, attempt.issueId, "failed")
+    deps.retryQueue.add(
+      attempt.issueId,
+      0,
+      "Recovered agent exited after restart; inspect retained work and resume the task.",
+    )
+    deps.observability.onRetryQueueChanged(deps.retryQueue.size)
+    logger.info("orchestrator", "Recovered agent exited; queued reconciliation of retained work", {
+      issueId: attempt.issueId,
+    })
+    return false
+  })
 }
 
 /** Synthetic Workspace entry for a reattached attempt — only issueId/path/status are known. */

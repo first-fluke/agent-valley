@@ -108,6 +108,7 @@
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
+import { readJsonLines } from "./json-lines"
 import { planSandboxedSpawn } from "./sandbox"
 
 export const OPENCODE_COMMAND = "opencode"
@@ -207,6 +208,7 @@ export class OpencodeSession extends BaseSession {
     }
 
     this.process = spawn(plan.command, plan.args, {
+      detached: process.platform !== "win32",
       cwd: this.config.workspacePath,
       env: buildAgentEnv("opencode", this.config.env) as NodeJS.ProcessEnv,
       stdio: ["ignore", "pipe", "pipe"],
@@ -217,7 +219,7 @@ export class OpencodeSession extends BaseSession {
 
   override isAlive(): boolean {
     if (!this.process) return this.started
-    return this.process.exitCode === null
+    return super.isAlive()
   }
 
   // ── Stream parser ───────────────────────────────────────────────────────
@@ -225,52 +227,23 @@ export class OpencodeSession extends BaseSession {
   private async readStream(): Promise<void> {
     const proc = this.process
     if (!proc?.stdout) return
-
-    const decoder = new TextDecoder()
-    let buffer = ""
-
-    proc.stdout.on("data", (chunk: Buffer) => {
-      const text = decoder.decode(chunk, { stream: true })
-      this.appendRawTail(text)
-      buffer += text
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
-
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const event: unknown = JSON.parse(line)
-          this.handleEvent(event)
-        } catch {
-          // Non-JSON stdout noise, or a partial line — still captured in
-          // rawTail for the unauth-detection check below.
-        }
-      }
-    })
-
-    proc.stdout.on("error", () => {
-      // Stream error — proceed to close
-    })
-
+    const flush = readJsonLines(
+      proc.stdout,
+      (event) => this.handleEvent(event),
+      (text) => this.appendRawTail(text),
+    )
     const stderrDecoder = new TextDecoder()
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      this.appendRawTail(stderrDecoder.decode(chunk, { stream: true }))
-    })
-
-    // Gated on BOTH stdout 'end' and process 'close' — see
-    // waitForStreamCompletion() doc comment (base-session.ts) for why
-    // 'close' alone races the final buffered 'data' chunk on a
-    // fast-exiting process.
+    proc.stderr?.on("data", (chunk: Buffer) => this.appendRawTail(stderrDecoder.decode(chunk, { stream: true })))
     const { exitCode: code } = await waitForStreamCompletion(proc)
+    flush()
+    if (this.terminalEventReceived) return
     const exitCode = code ?? -1
-
     if (exitCode !== 0) {
       if (AUTH_FAILURE_PATTERN.test(this.rawTail)) {
         this.emitError(
           "AUTH_FAILED",
           "opencode is not authenticated (no configured provider/credentials detected).\n" +
-            "  Fix: run `opencode auth` to configure a provider, or set the relevant provider\n" +
-            "  API key env var (e.g. ANTHROPIC_API_KEY) before Symphony runs opencode.\n" +
+            "  Fix: run `opencode auth` to configure a provider, or set the provider API key before starting Agent Valley.\n" +
             "  Location: ~/.local/share/opencode/auth.json, or the orchestrator process environment.",
           false,
         )
@@ -279,7 +252,6 @@ export class OpencodeSession extends BaseSession {
       this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `opencode exited with code ${exitCode}`, exitCode !== 1)
       return
     }
-
     this.emit({
       type: "complete",
       result: {
@@ -315,6 +287,16 @@ export class OpencodeSession extends BaseSession {
     if (typeof event !== "object" || event === null) return
     const e = event as Record<string, unknown>
     const type = typeof e.type === "string" ? e.type : undefined
+    if (type === "error" || e.is_error === true || e.isError === true) {
+      const error = e.error as { message?: string; data?: { message?: string } } | string | undefined
+      const detail = typeof error === "string" ? error : (error?.message ?? error?.data?.message)
+      this.emitError(
+        "CRASH",
+        detail ?? String(e.result ?? "OpenCode reported an error. Check the provider credentials and retry."),
+        true,
+      )
+      return
+    }
 
     switch (type) {
       case "step-start":

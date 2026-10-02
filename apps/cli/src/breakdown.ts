@@ -4,8 +4,10 @@
  */
 
 import { spawn } from "node:child_process"
+import { loadConfig } from "@agent-valley/core/config/yaml-loader"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
+import { publishBreakdown, validateBreakdown } from "./breakdown-publish"
 
 const BREAKDOWN_PROMPT = `You are a technical project decomposer. Given a feature description, break it down into concrete sub-issues with dependency relationships.
 
@@ -70,12 +72,7 @@ export function parseBreakdownOutput(output: string): BreakdownResult {
 
     if (titleMatch) {
       const blockedByStr = blockedMatch?.[1]?.trim() ?? ""
-      const blockedByIndices = blockedByStr
-        ? blockedByStr
-            .split(",")
-            .map((s) => Number.parseInt(s.trim(), 10))
-            .filter((n) => !Number.isNaN(n))
-        : []
+      const blockedByIndices = blockedByStr ? blockedByStr.split(",").map((s) => Number(s.trim())) : []
 
       subIssues.push({
         title: titleMatch[1]?.trim() ?? "",
@@ -135,15 +132,10 @@ async function expandBreakdownWithClaude(rawInput: string): Promise<BreakdownRes
   return parseBreakdownOutput(output)
 }
 
-export async function executeBreakdown(input: string, opts: { yes?: boolean }): Promise<void> {
-  const apiKey = process.env.LINEAR_API_KEY
-  const teamUuid = process.env.LINEAR_TEAM_UUID
-  const todoStateId = process.env.LINEAR_WORKFLOW_STATE_TODO
-
-  if (!apiKey || !teamUuid || !todoStateId) {
-    console.log(pc.red("Setup required. Run `bun av setup` first."))
-    process.exit(1)
-  }
+export async function executeBreakdown(input: string, opts: { yes?: boolean; scope?: string }): Promise<void> {
+  const config = loadConfig()
+  if (config.trackerKind !== "linear")
+    throw new Error("Issue breakdown currently requires tracker.kind: linear in valley.yaml.")
 
   p.intro(pc.bgMagenta(pc.black(" Issue Breakdown ")))
   const s = p.spinner()
@@ -165,6 +157,8 @@ export async function executeBreakdown(input: string, opts: { yes?: boolean }): 
     process.exit(0)
   }
 
+  validateBreakdown(result)
+
   // Step 2: Preview
   p.note(renderDagPreview(result), "Breakdown Result")
 
@@ -176,78 +170,16 @@ export async function executeBreakdown(input: string, opts: { yes?: boolean }): 
     }
   }
 
-  // Step 3: Create parent issue
-  s.start("Creating parent issue...")
-  const { createSubIssue, createIssueRelation } = await import("@agent-valley/core/tracker/linear-client")
-
-  let parentIssue: { id: string; identifier: string; title: string; url: string }
+  s.start("Preparing issues and dependencies in Backlog...")
+  let published: Awaited<ReturnType<typeof publishBreakdown>>
   try {
-    const res = await fetch("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: { Authorization: apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: `mutation($teamId:String!,$title:String!,$description:String!,$stateId:String!){issueCreate(input:{teamId:$teamId,title:$title,description:$description,stateId:$stateId}){success issue{id identifier title url}}}`,
-        variables: {
-          teamId: teamUuid,
-          title: result.parentTitle,
-          description: result.parentDescription,
-          stateId: todoStateId,
-        },
-      }),
-    })
-    const json = (await res.json()) as {
-      data?: { issueCreate?: { success: boolean; issue?: typeof parentIssue } }
-      errors?: { message: string }[]
-    }
-    if (json.errors) throw new Error(json.errors[0]?.message ?? "Unknown error")
-    if (!json.data?.issueCreate?.success || !json.data.issueCreate.issue)
-      throw new Error("Parent issue creation failed")
-    parentIssue = json.data.issueCreate.issue
-    s.stop(pc.green(`Parent issue: ${parentIssue.identifier}`))
-  } catch (e) {
-    s.stop(pc.red("Failed to create parent issue"))
-    console.log(pc.red((e as Error).message))
-    process.exit(1)
+    published = await publishBreakdown(config, result, opts.scope)
+    s.stop(pc.green(`Published ${published.children.length} sub-issues with dependencies`))
+  } catch (error) {
+    s.stop(pc.red("Breakdown could not be published"))
+    throw error
   }
-
-  // Step 4: Create sub-issues
-  const createdIds: Array<{ id: string; identifier: string; index: number }> = []
-  s.start(`Creating sub-issues (0/${result.subIssues.length})...`)
-
-  for (let i = 0; i < result.subIssues.length; i++) {
-    const sub = result.subIssues[i]
-    if (!sub) continue
-    try {
-      const created = await createSubIssue(apiKey, teamUuid, parentIssue.id, sub.title, sub.description, todoStateId)
-      createdIds.push({ id: created.id, identifier: created.identifier, index: i + 1 })
-      s.message(`Creating sub-issues (${i + 1}/${result.subIssues.length})...`)
-    } catch (e) {
-      s.stop(pc.yellow(`Failed to create sub-issue ${i + 1}`))
-      console.log(pc.yellow(`Warning: ${(e as Error).message}`))
-      console.log(pc.dim(`Already created: ${createdIds.map((c) => c.identifier).join(", ") || "none"}`))
-      // Continue with remaining sub-issues
-    }
-  }
-  s.stop(pc.green(`Created ${createdIds.length} sub-issues`))
-
-  // Step 5: Create relations
-  let relationsCreated = 0
-  for (const created of createdIds) {
-    const sub = result.subIssues[created.index - 1]
-    if (!sub) continue
-    for (const blockerIdx of sub.blockedByIndices) {
-      const blocker = createdIds.find((c) => c.index === blockerIdx)
-      if (blocker) {
-        try {
-          // "created blocked-by blocker" → Linear API: "blocker blocks created"
-          await createIssueRelation(apiKey, blocker.id, created.id, "blocks")
-          relationsCreated++
-        } catch {
-          // Non-critical: relation creation failure doesn't block
-        }
-      }
-    }
-  }
+  const { parent: parentIssue, children: createdIds, relationsCreated } = published
 
   // Step 6: Summary
   const summaryLines = [

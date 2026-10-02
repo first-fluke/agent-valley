@@ -7,6 +7,7 @@ export interface IssueRelation {
   type: "blocks" | "blocked_by" | "related" | "duplicate"
   relatedIssueId: string
   relatedIdentifier: string
+  relatedStatus?: Issue["status"]
 }
 
 export interface Issue {

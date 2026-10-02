@@ -7,20 +7,6 @@ import { spawn } from "node:child_process"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 
-const CREATE_ISSUE_MUTATION = `
-mutation CreateIssue($teamId: String!, $title: String!, $description: String!, $stateId: String!, $parentId: String) {
-  issueCreate(input: { teamId: $teamId, title: $title, description: $description, stateId: $stateId, parentId: $parentId }) {
-    success
-    issue {
-      id
-      identifier
-      title
-      url
-    }
-  }
-}
-`
-
 const EXPAND_PROMPT = `You are a technical issue writer and complexity analyst. Given a rough idea, produce a structured Linear issue AND analyze its complexity using ISO/IEC 14143 Function Point Analysis.
 
 Output format (no markdown fences, just raw text):
@@ -139,10 +125,20 @@ export async function createIssue(
   }
   const apiKey = config.linearApiKey
   const teamUuid = config.linearTeamUuid
-  const todoStateId = config.workflowStates.todo
+
+  if (config.trackerKind === "github" && (options?.parent || options?.blockedBy || options?.breakdown)) {
+    throw new Error(
+      "GitHub issue creation supports --raw, --yes, and --scope. --parent, --blocked-by, and --breakdown currently require tracker.kind: linear in valley.yaml.",
+    )
+  }
 
   // --breakdown mode: delegate to breakdown handler
   if (options?.breakdown) {
+    if (options.parent || options.blockedBy) {
+      throw new Error(
+        "--breakdown creates its own parent and dependency graph. Use --parent/--blocked-by when creating individual issues.",
+      )
+    }
     if (!input) {
       const t = await p.text({ message: "Describe the feature to break down", placeholder: "Build auth system" })
       if (p.isCancel(t)) {
@@ -152,7 +148,7 @@ export async function createIssue(
       input = t
     }
     const { executeBreakdown } = await import("./breakdown")
-    await executeBreakdown(input, { yes: autoConfirm })
+    await executeBreakdown(input, { yes: autoConfirm, scope: options.scope })
     return
   }
 
@@ -203,6 +199,8 @@ export async function createIssue(
     }
   }
 
+  if (!title.trim()) throw new Error("Issue title is empty. Pass a description or enter a non-empty title.")
+
   // Resolve --parent identifier to UUID
   let parentId: string | null = null
   if (options?.parent) {
@@ -210,7 +208,8 @@ export async function createIssue(
     try {
       const { fetchIssueByIdentifier } = await import("@agent-valley/core/tracker/linear-client")
       const found = await fetchIssueByIdentifier(apiKey, teamUuid, options.parent)
-      if (!found) throw new Error(`Issue not found: ${options.parent}`)
+      if (!found || found.identifier !== options.parent)
+        throw new Error(`Issue not found in the configured team: ${options.parent}`)
       parentId = found.id
       s.stop(pc.green(`Parent issue: ${found.identifier}`))
     } catch (e) {
@@ -246,68 +245,37 @@ export async function createIssue(
     }
   }
 
+  if (config.trackerKind === "github") {
+    if (!config.github) throw new Error("Set github configuration in valley.yaml before creating an issue.")
+    s.start("Creating GitHub issue...")
+    try {
+      const { createGithubIssue } = await import("./github-issue")
+      const issue = await createGithubIssue(config.github, { title, description, scope: options?.scope, score })
+      s.stop(pc.green(`Issue created: ${issue.identifier}`))
+      p.note(
+        `${pc.bold(issue.identifier)}: ${issue.title}\n\n${issue.url}\n\nLabel: ${config.github.labels.todo} — the running server receives this issue through its GitHub webhook.`,
+        "Created",
+      )
+    } catch (error) {
+      s.stop(pc.red("Failed to create GitHub issue"))
+      throw error
+    }
+    return
+  }
+
   // Create in Linear
   s.start("Creating Linear issue...")
 
   try {
-    const res = await fetch("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: { Authorization: apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: CREATE_ISSUE_MUTATION,
-        variables: { teamId: teamUuid, title, description, stateId: todoStateId, parentId },
-      }),
+    const { createLinearIssue } = await import("./linear-issue")
+    const issue = await createLinearIssue(config, {
+      title,
+      description,
+      parentId,
+      scope: options?.scope,
+      score,
+      blockedBy: options?.blockedBy,
     })
-
-    if (!res.ok) throw new Error(`Linear API HTTP ${res.status}`)
-
-    const result = (await res.json()) as {
-      data?: {
-        issueCreate?: { success: boolean; issue?: { id: string; identifier: string; title: string; url: string } }
-      }
-      errors?: { message: string }[]
-    }
-
-    if (result.errors) throw new Error(result.errors[0]?.message)
-    if (!result.data?.issueCreate?.success || !result.data.issueCreate.issue) throw new Error("Issue creation failed")
-
-    const issue = result.data.issueCreate.issue
-
-    // Attach score label if available (best-effort, non-blocking)
-    if (score !== null && teamUuid) {
-      try {
-        const { addIssueLabel } = await import("@agent-valley/core/tracker/linear-client")
-        const teamId = teamUuid
-        await addIssueLabel(apiKey, teamId, issue.id, `score:${score}`)
-      } catch {
-        // Non-critical: label attachment failure doesn't block issue creation
-      }
-    }
-
-    // Attach scope label for routing (best-effort, non-blocking)
-    if (options?.scope && teamUuid) {
-      try {
-        const { addIssueLabel } = await import("@agent-valley/core/tracker/linear-client")
-        const scopeLabel = options.scope.startsWith("scope:") ? options.scope : `scope:${options.scope}`
-        await addIssueLabel(apiKey, teamUuid, issue.id, scopeLabel)
-      } catch {
-        // Non-critical: scope label attachment failure doesn't block issue creation
-      }
-    }
-
-    // Create blocked-by relation if specified
-    // "issue blocked-by blocker" → Linear API: "blocker blocks issue"
-    if (options?.blockedBy) {
-      try {
-        const { fetchIssueByIdentifier, createIssueRelation } = await import("@agent-valley/core/tracker/linear-client")
-        const blocker = await fetchIssueByIdentifier(apiKey, teamUuid, options.blockedBy)
-        if (blocker) {
-          await createIssueRelation(apiKey, blocker.id, issue.id, "blocks")
-        }
-      } catch {
-        // Non-critical: relation creation failure logged but doesn't block
-      }
-    }
 
     s.stop(pc.green(`Issue created: ${issue.identifier}`))
 

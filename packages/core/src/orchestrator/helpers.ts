@@ -145,7 +145,9 @@ export function buildOrchestratorStatus(
     activeWorkspaces: workspaces,
     activeAgents: agentRunner.activeCount,
     waitingIssues: state.waitingIssues.size,
+    waitingIssueDetails: Array.from(state.waitingIssues.values()),
     retryQueueSize: retryQueue.size,
+    retryQueue: retryQueue.entries,
     config: {
       agentType: config.agentType,
       maxParallel: config.maxParallel,

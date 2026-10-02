@@ -7,6 +7,7 @@
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 import type { InviteData } from "../invite"
+import { stepCompletion } from "./completion-step"
 import { stepApiKey } from "./linear-step"
 import { stepParallel } from "./parallel-step"
 import { renderPreview } from "./preview"
@@ -32,7 +33,7 @@ export async function fastTrackSetup(invite: InviteData): Promise<void> {
     agentType: (invite.agentType as SetupContext["agentType"]) ?? "claude",
   }
 
-  const fastSteps = [stepApiKey, stepWorkspace, stepParallel]
+  const fastSteps = [stepApiKey, stepWorkspace, stepParallel, stepCompletion]
   const totalSteps = fastSteps.length
   let i = 0
   while (i < fastSteps.length) {

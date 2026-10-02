@@ -11,7 +11,7 @@
 
 import { resolveRouteWithScore } from "../config/routing"
 import { renderPrompt } from "../config/workflow-loader"
-import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import type { Issue, RetryCategory, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 import { buildOmaGuidance, prepareOmaAttempt } from "../oma/receipt-adapter"
 import { formatBudgetBlockComment } from "./budget-service"
@@ -23,6 +23,7 @@ import { resolveVerifyCommand } from "./verification-gate"
 export interface RetryContext {
   attemptCount: number
   lastError: string
+  category?: RetryCategory
 }
 
 export class IssueLifecycle {
@@ -30,6 +31,8 @@ export class IssueLifecycle {
 
   async handleIssueTodo(issue: Issue, retryContext?: RetryContext): Promise<void> {
     const { core } = this
+    core.dagScheduler.addNode(issue)
+    core.dagScheduler.updateNodeStatus(issue.id, "waiting")
 
     // DAG: check if issue has unresolved blockers
     const blockers = core.dagScheduler.getUnresolvedBlockers(issue.id)
@@ -53,7 +56,7 @@ export class IssueLifecycle {
     }
     if (blockers.length > 0) return
 
-    if (!core.tryAcceptOrQueue(issue.id)) return
+    if (!core.tryAcceptOrQueue(issue.id, retryContext)) return
 
     // Lock: mark as processing to prevent TOCTOU races
     core.markProcessing(issue.id)
@@ -68,7 +71,7 @@ export class IssueLifecycle {
         issueId: issue.id,
         error: String(err),
       })
-      core.enqueueRetry(issue.id, 0, `State transition failed: ${err}`)
+      await this.retryPreparation(issue, retryContext, `State transition failed: ${err}`)
       return
     }
 
@@ -78,13 +81,45 @@ export class IssueLifecycle {
   }
 
   async handleIssueInProgress(issue: Issue, retryContext?: RetryContext): Promise<void> {
-    if (!this.core.tryAcceptOrQueue(issue.id)) return
+    if (!retryContext && this.core.retryQueue.entries.some((entry) => entry.issueId === issue.id)) return
+    this.core.dagScheduler.addNode(issue)
+    this.core.dagScheduler.updateNodeStatus(issue.id, "running")
+    if (!this.core.tryAcceptOrQueue(issue.id, retryContext)) return
     this.core.markProcessing(issue.id)
     await this.handleIssueInProgressInternal(issue, retryContext)
   }
 
   private async handleIssueInProgressInternal(issue: Issue, retryContext?: RetryContext): Promise<void> {
+    try {
+      await this.prepareAndSpawnIssue(issue, retryContext)
+    } catch (err) {
+      this.core.releaseProcessing(issue.id)
+      this.core.buildCompletionDeps().cleanupState(issue.id, "failed")
+      await this.retryPreparation(issue, retryContext, `Agent preparation failed: ${String(err)}`)
+    }
+  }
+
+  private async retryPreparation(issue: Issue, retryContext: RetryContext | undefined, error: string): Promise<void> {
     const { core } = this
+    if (core.enqueueRetry(issue.id, (retryContext?.attemptCount ?? 0) + 1, error, "infra")) return
+    try {
+      await core.tracker.addIssueComment(
+        issue.id,
+        `Symphony: Agent preparation failed after the configured retry limit.\n\n${error}`,
+      )
+      await core.tracker.updateIssueState(issue.id, core.config.workflowStates.cancelled)
+      core.dagScheduler.updateNodeStatus(issue.id, "cancelled")
+    } catch (err) {
+      logger.error("orchestrator", "Failed to report exhausted preparation retries", {
+        issueId: issue.id,
+        error: String(err),
+      })
+    }
+  }
+
+  private async prepareAndSpawnIssue(issue: Issue, retryContext?: RetryContext): Promise<void> {
+    const { core } = this
+    if (core.isStopping || !core.processingIssues.has(issue.id)) return
 
     // Fallback: if webhook didn't include labels and routing rules exist, fetch from API
     if ((!issue.labels || issue.labels.length === 0) && core.config.routingRules.length > 0) {
@@ -129,16 +164,18 @@ export class IssueLifecycle {
     }
 
     // Create workspace in the resolved repo root
+    if (core.isStopping || !core.processingIssues.has(issue.id)) return
     let workspace: Workspace
     try {
       workspace = await core.workspace.create(issue, route.workspaceRoot)
     } catch (err) {
       core.releaseProcessing(issue.id)
       logger.error("orchestrator", "Failed to create workspace", { issueId: issue.id, error: String(err) })
-      core.enqueueRetry(issue.id, 0, `Workspace creation failed: ${err}`)
+      await this.retryPreparation(issue, retryContext, `Workspace creation failed: ${err}`)
       return
     }
 
+    if (core.isStopping || !core.processingIssues.has(issue.id)) return
     workspace.status = "running"
     core.addActiveWorkspace(issue.id, workspace)
 
@@ -167,11 +204,18 @@ export class IssueLifecycle {
         issueKey: issue.identifier,
         agentType: route.agentType,
         requestRetry: async (extraText: string) => {
+          core.buildCompletionDeps().cleanupState(issue.id, "failed")
           const previousError = retryContext?.lastError ?? ""
           const mergedReason = previousError
             ? `${previousError}\n\nOperator append_prompt:\n${extraText}`
             : `Operator append_prompt:\n${extraText}`
           core.enqueueRetry(issue.id, retryContext?.attemptCount ?? 0, mergedReason)
+          await core.fillVacantSlots()
+        },
+        onAborted: async () => {
+          await this.handleIssueLeftInProgress(issue.id)
+          await core.tracker.updateIssueState(issue.id, core.config.workflowStates.cancelled)
+          await core.fillVacantSlots()
         },
       })
     }
@@ -242,6 +286,7 @@ export class IssueLifecycle {
     // can persist a real, probeable pid instead of null.
     callbacks.onSpawned = (pid) => core.registerAttempt(issue.id, attempt.id, pid)
 
+    if (core.isStopping || core.getAttempt(issue.id) !== attempt.id) return
     await core.agentRunner.spawn(
       attempt,
       {
@@ -303,8 +348,15 @@ export class IssueLifecycle {
     })
   }
 
-  async handleIssueLeftInProgress(issueId: string): Promise<void> {
+  async handleIssueLeftInProgress(
+    issueId: string,
+    status: "done" | "cancelled" | "waiting" = "cancelled",
+  ): Promise<void> {
     const { core } = this
+    core.releaseProcessing(issueId)
+    core.removeRetry(issueId)
+    core.deleteWaitingIssue(issueId)
+    core.dagScheduler.updateNodeStatus(issueId, status)
     const workspace = core.getActiveWorkspace(issueId)
     if (!workspace) return
 
@@ -324,13 +376,11 @@ export class IssueLifecycle {
     })
 
     core.removeActiveWorkspace(issueId)
-    core.removeRetry(issueId)
-
-    // DAG: mark as cancelled and notify blocked issues
-    core.dagScheduler.updateNodeStatus(issueId, "cancelled")
+    if (status !== "cancelled") return
+    const blockerName = core.dagScheduler.getNode(issueId)?.identifier ?? issueId
     for (const b of core.dagScheduler.getBlockedIssues(issueId)) {
       core.tracker
-        .addIssueComment(b.issueId, `Symphony: Blocker ${b.identifier} was cancelled. Manual review needed.`)
+        .addIssueComment(b.issueId, `Symphony: Blocker ${blockerName} was cancelled. Manual review needed.`)
         .catch((err) => {
           logger.debug("orchestrator", "Failed to post blocker-cancelled comment", { error: String(err) })
         })
@@ -343,7 +393,15 @@ export class IssueLifecycle {
     const unblockedIds = core.waitingIssueIds().filter((id) => core.dagScheduler.getUnresolvedBlockers(id).length === 0)
     if (unblockedIds.length === 0) return
 
-    const issues = await core.tracker.fetchIssuesByState([core.config.workflowStates.todo]).catch(() => [] as Issue[])
+    let issues: Issue[]
+    try {
+      issues = await core.tracker.fetchIssuesByState([core.config.workflowStates.todo])
+    } catch (err) {
+      logger.warn("orchestrator", "Waiting issue refresh failed; retaining queue for the next retry", {
+        error: String(err),
+      })
+      return
+    }
 
     for (const id of unblockedIds) {
       const entry = core.getWaitingEntry(id)

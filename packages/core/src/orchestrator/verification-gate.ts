@@ -17,6 +17,7 @@ import type { ResolvedRoute } from "../config/routing"
 import type { Config } from "../config/yaml-loader"
 import type { Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
+import { signalProcessTree } from "../sessions/process-tree"
 
 /** Bound captured verify output to the last 10KB — same tail-truncation pattern as sessions/claude-session.ts. */
 const MAX_OUTPUT_LENGTH = 10_240
@@ -26,46 +27,106 @@ export interface VerifyExecResult {
   exitCode: number
   output: string
   timedOut: boolean
+  aborted?: boolean
 }
 
 /** Injectable command runner so `runVerificationGate` is testable without spawning real processes. */
-export type VerifyExecFn = (command: string, cwd: string, timeoutMs: number) => Promise<VerifyExecResult>
+export type VerifyExecFn = (
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+  onSpawned?: (pid: number | undefined) => void,
+) => Promise<VerifyExecResult>
 
 /** Real implementation: runs `command` through the shell in `cwd`, killing it if it exceeds `timeoutMs`. */
-export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs) =>
+export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal, onSpawned) =>
   new Promise((resolve) => {
-    const proc = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"] })
+    if (signal?.aborted) {
+      resolve({ exitCode: -1, output: "Verification cancelled.", timedOut: false, aborted: true })
+      return
+    }
+    const proc = spawn(command, {
+      cwd,
+      shell: true,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
 
     let output = ""
     let timedOut = false
     let settled = false
+    let aborted = false
+    let registrationFailed = false
+    let forceTimer: ReturnType<typeof setTimeout> | undefined
+
+    const finish = (code: number | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      clearTimeout(forceTimer)
+      signal?.removeEventListener("abort", onAbort)
+      resolve({
+        exitCode: timedOut || aborted || registrationFailed ? -1 : (code ?? -1),
+        output,
+        timedOut,
+        ...(aborted ? { aborted: true } : {}),
+      })
+    }
+    const stopProcess = () => {
+      clearTimeout(timer)
+      clearTimeout(forceTimer)
+      try {
+        signalProcessTree(proc, "SIGKILL")
+      } catch {
+        proc.kill("SIGKILL")
+      }
+      // An escaped descendant may still hold a pipe. Never wait indefinitely
+      // for close after termination has already been requested.
+      forceTimer = setTimeout(() => {
+        proc.stdout?.destroy()
+        proc.stderr?.destroy()
+        finish(-1)
+      }, 1_000)
+    }
+    const onAbort = () => {
+      aborted = true
+      output = boundOutput(`${output}\nVerification cancelled.`)
+      stopProcess()
+    }
 
     const timer = setTimeout(() => {
       timedOut = true
-      proc.kill("SIGKILL")
+      stopProcess()
     }, timeoutMs)
+    signal?.addEventListener("abort", onAbort, { once: true })
+    if (signal?.aborted) onAbort()
 
     proc.stdout?.on("data", (chunk: Buffer) => {
-      output += chunk.toString()
+      output = boundOutput(output + chunk.toString())
     })
     proc.stderr?.on("data", (chunk: Buffer) => {
-      output += chunk.toString()
+      output = boundOutput(output + chunk.toString())
     })
 
     proc.once("error", (err) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      output += `\n${String(err)}`
-      resolve({ exitCode: -1, output, timedOut })
+      output = boundOutput(`${output}\n${String(err)}`)
+      finish(-1)
     })
 
     proc.once("close", (code) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve({ exitCode: timedOut ? -1 : (code ?? -1), output, timedOut })
+      finish(code)
     })
+    // A successful shell can leave background children, including ones that
+    // redirected their pipes. Stop the group before reporting completion.
+    proc.once("exit", stopProcess)
+    try {
+      onSpawned?.(proc.pid)
+    } catch (error) {
+      registrationFailed = true
+      output = boundOutput(`${output}\nFailed to record verification process: ${String(error)}`)
+      stopProcess()
+    }
   })
 
 function boundOutput(output: string): string {
@@ -81,11 +142,14 @@ export interface VerificationGateResult {
   /** Captured stdout+stderr, bounded to the last 10KB. */
   output?: string
   timedOut?: boolean
+  aborted?: boolean
 }
 
 export interface VerificationGateOptions {
   timeoutSec?: number
   exec?: VerifyExecFn
+  signal?: AbortSignal
+  onSpawned?: (pid: number | undefined) => void
 }
 
 /**
@@ -124,9 +188,13 @@ export async function runVerificationGate(
 
   logger.info("verification-gate", "Running verify_command", { workspacePath: workspace.path, command, timeoutSec })
 
-  const result = await exec(command, workspace.path, timeoutMs)
+  const result = opts.onSpawned
+    ? await exec(command, workspace.path, timeoutMs, opts.signal, opts.onSpawned)
+    : opts.signal
+      ? await exec(command, workspace.path, timeoutMs, opts.signal)
+      : await exec(command, workspace.path, timeoutMs)
   const output = boundOutput(result.output)
-  const ok = !result.timedOut && result.exitCode === 0
+  const ok = !result.timedOut && !result.aborted && !opts.signal?.aborted && result.exitCode === 0
 
   if (ok) {
     logger.info("verification-gate", "verify_command passed", { workspacePath: workspace.path, command })
@@ -139,7 +207,7 @@ export async function runVerificationGate(
     })
   }
 
-  return { ran: true, ok, command, output, timedOut: result.timedOut }
+  return { ran: true, ok, command, output, timedOut: result.timedOut, ...(result.aborted ? { aborted: true } : {}) }
 }
 
 /** Build the retry-prompt fed back to the agent via the existing retry queue when the gate fails. */

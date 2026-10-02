@@ -33,8 +33,7 @@ vi.mock("@/lib/env", () => ({
 
 const { GET: eventsGET } = await import("@/app/api/events/route")
 
-const localRequest = () =>
-  new Request("http://localhost:3000/api/events", { headers: { host: "localhost:3000" } })
+const localRequest = () => new Request("http://localhost:3000/api/events", { headers: { host: "localhost:3000" } })
 
 describe("SSE /api/events — interval cleanup", () => {
   beforeEach(() => {
@@ -120,5 +119,66 @@ describe("SSE /api/events — interval cleanup", () => {
 
     // No more calls after both are cancelled
     expect(getStatusCallCount).toBe(countBefore + 1)
+  })
+
+  test("startup failure reports unavailable instead of sending invalid configuration as state", async () => {
+    mockOrchestrator = null
+    const response = await eventsGET(localRequest())
+    const reader = response.body!.getReader()
+    const first = new TextDecoder().decode((await reader.read()).value)
+    expect(first).toContain("event: unavailable")
+    expect(first).toContain("av doctor")
+    expect(first).not.toContain("event: state")
+    expect(first).not.toContain('"config":{}')
+    await reader.cancel()
+  })
+
+  test("a connection opened before startup observes a runtime that appears later", async () => {
+    mockOrchestrator = null
+    const response = await eventsGET(localRequest())
+    const reader = response.body!.getReader()
+    await reader.read()
+    await reader.read()
+    mockOrchestrator = { getStatus: () => ({ isRunning: true, activeAgents: 2 }), on: vi.fn(), off: vi.fn() }
+    vi.advanceTimersByTime(5_000)
+    const next = new TextDecoder().decode((await reader.read()).value)
+    expect(next).toContain("event: state")
+    expect(next).toContain('"activeAgents":2')
+    expect(mockOrchestrator.on).toHaveBeenCalledTimes(7)
+    await reader.cancel()
+  })
+
+  test("hot reload detaches the previous instance and subscribes to its replacement", async () => {
+    const previous = { getStatus: () => ({ isRunning: false }), on: vi.fn(), off: vi.fn() }
+    mockOrchestrator = previous
+    const response = await eventsGET(localRequest())
+    const reader = response.body!.getReader()
+    await reader.read()
+    await reader.read()
+    const replacement = { getStatus: () => ({ isRunning: true, activeAgents: 3 }), on: vi.fn(), off: vi.fn() }
+    mockOrchestrator = replacement
+    vi.advanceTimersByTime(5_000)
+    const next = new TextDecoder().decode((await reader.read()).value)
+    expect(next).toContain('"activeAgents":3')
+    expect(previous.off).toHaveBeenCalledTimes(7)
+    expect(replacement.on).toHaveBeenCalledTimes(7)
+    await reader.cancel()
+    expect(replacement.off).toHaveBeenCalledTimes(7)
+  })
+
+  test("aborting the request releases event listeners and timers without waiting for stream cancellation", async () => {
+    const controller = new AbortController()
+    const off = vi.fn()
+    mockOrchestrator = { getStatus: () => ({ isRunning: true }), on: vi.fn(), off }
+    const response = await eventsGET(
+      new Request("http://localhost/api/events", { headers: { host: "localhost" }, signal: controller.signal }),
+    )
+    const reader = response.body!.getReader()
+    await reader.read()
+    await reader.read()
+    controller.abort()
+    expect(off).toHaveBeenCalledTimes(7)
+    expect(vi.getTimerCount()).toBe(0)
+    expect((await reader.read()).done).toBe(true)
   })
 })

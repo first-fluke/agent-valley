@@ -3,11 +3,11 @@
  */
 
 import { request as httpsRequest } from "node:https"
-import type { Issue, IssueRelation } from "../domain/models"
-import { parseScoreFromLabels } from "../domain/models"
+import type { Issue } from "../domain/models"
 import { logger } from "../observability/logger"
-import type { LinearGraphQLResponse, LinearIssueNode, LinearMutationData, LinearTeamIssuesData } from "./types"
-import { linearTeamIssuesDataSchema } from "./types"
+import { LINEAR_ISSUE_FIELDS, nodeToIssue } from "./linear-issue-mapper"
+import type { LinearGraphQLResponse, LinearMutationData, LinearTeamIssuesData } from "./types"
+import { linearIssueNodeSchema, linearTeamIssuesDataSchema } from "./types"
 
 const LINEAR_API_URL = "https://api.linear.app/graphql"
 
@@ -136,13 +136,7 @@ query GetIssuesByState($teamId: String!, $stateIds: [ID!]!, $cursor: String) {
       after: $cursor
     ) {
       nodes {
-        id identifier title description url
-        state { id name type }
-        team { id key }
-        labels { nodes { name } }
-        parent { id identifier }
-        children { nodes { id identifier state { id name type } } }
-        relations { nodes { type relatedIssue { id identifier state { id name type } } } }
+        ${LINEAR_ISSUE_FIELDS}
       }
       pageInfo {
         hasNextPage
@@ -152,6 +146,18 @@ query GetIssuesByState($teamId: String!, $stateIds: [ID!]!, $cursor: String) {
   }
 }
 `
+
+export async function fetchIssue(apiKey: string, issueId: string): Promise<Issue | null> {
+  const data = await linearGraphQL<{ issue: unknown }>(
+    apiKey,
+    `query GetIssue($id: String!) { issue(id: $id) { ${LINEAR_ISSUE_FIELDS} } }`,
+    { id: issueId },
+  )
+  if (data.issue == null) return null
+  const parsed = linearIssueNodeSchema.safeParse(data.issue)
+  if (!parsed.success) throw new Error(`Linear issue response validation failed: ${parsed.error.message}`)
+  return nodeToIssue(parsed.data)
+}
 
 export async function fetchIssuesByState(apiKey: string, teamUuid: string, stateIds: string[]): Promise<Issue[]> {
   const allIssues: Issue[] = []
@@ -269,29 +275,11 @@ mutation AddLabelToIssue($issueId: String!, $labelIds: [String!]!) {
 
 /**
  * Add a label to an issue by name. Creates the label on-demand if it doesn't exist.
- * Failures are logged but not thrown — label attachment is non-critical for routing.
+ * Failures are logged; task creation must use ensureIssueLabelId before publishing.
  */
 export async function addIssueLabel(apiKey: string, teamId: string, issueId: string, labelName: string): Promise<void> {
   try {
-    // Find existing label
-    const findData = await linearGraphQL<{
-      issueLabels?: { nodes: Array<{ id: string; name: string }> }
-    }>(apiKey, FIND_LABEL_QUERY, { teamId, name: labelName })
-
-    let labelId = findData?.issueLabels?.nodes?.[0]?.id
-
-    // Create label if not found
-    if (!labelId) {
-      const createData = await linearGraphQL<{
-        issueLabelCreate?: { success: boolean; issueLabel?: { id: string } }
-      }>(apiKey, CREATE_LABEL_MUTATION, { teamId, name: labelName })
-
-      labelId = createData?.issueLabelCreate?.issueLabel?.id
-      if (!labelId) {
-        logger.warn("tracker-client", `Failed to create label "${labelName}" for issue ${issueId}`)
-        return
-      }
-    }
+    const labelId = await ensureIssueLabelId(apiKey, teamId, labelName)
 
     // Fetch current labels to preserve them
     const currentLabels = await fetchIssueLabelsById(apiKey, issueId)
@@ -304,6 +292,27 @@ export async function addIssueLabel(apiKey: string, teamId: string, issueId: str
   } catch (err) {
     logger.warn("tracker-client", `Failed to add label "${labelName}" to issue ${issueId}: ${(err as Error).message}`)
   }
+}
+
+export async function ensureIssueLabelId(apiKey: string, teamId: string, labelName: string): Promise<string> {
+  const existing = await linearGraphQL<{ issueLabels?: { nodes: Array<{ id: string }> } }>(apiKey, FIND_LABEL_QUERY, {
+    teamId,
+    name: labelName,
+  })
+  const found = existing?.issueLabels?.nodes?.[0]?.id
+  if (found) return found
+  const created = await linearGraphQL<{ issueLabelCreate?: { success: boolean; issueLabel?: { id: string } } }>(
+    apiKey,
+    CREATE_LABEL_MUTATION,
+    { teamId, name: labelName },
+  )
+  const id = created?.issueLabelCreate?.issueLabel?.id
+  if (!created?.issueLabelCreate?.success || !id) {
+    throw new Error(
+      `Failed to create label "${labelName}". Create the label in Linear or grant label creation permission before retrying.`,
+    )
+  }
+  return id
 }
 
 const ISSUE_LABEL_IDS_QUERY = `
@@ -376,11 +385,20 @@ export async function createIssueRelation(
   relatedIssueId: string,
   type: LinearRelationType,
 ): Promise<void> {
-  await linearGraphQL<LinearMutationData>(apiKey, CREATE_RELATION_MUTATION, {
-    issueId,
-    relatedIssueId,
-    type,
-  })
+  const data = await linearGraphQL<{ issueRelationCreate?: { issueRelation?: { id: string } } }>(
+    apiKey,
+    CREATE_RELATION_MUTATION,
+    {
+      issueId,
+      relatedIssueId,
+      type,
+    },
+  )
+  if (!data?.issueRelationCreate?.issueRelation?.id) {
+    throw new Error(
+      `Failed to create ${type} relation from ${issueId} to ${relatedIssueId}. Check Linear permissions before publishing the dependent issue.`,
+    )
+  }
 }
 
 const ISSUE_BY_IDENTIFIER_QUERY = `
@@ -418,36 +436,3 @@ export async function fetchIssueByIdentifier(
 export { upsertWebhook, WEBHOOK_LABEL } from "./linear-webhook-client"
 
 // ── Helpers ─────────────────────────────────────────────────────────
-
-function mapRelationType(type: string): IssueRelation["type"] {
-  const map: Record<string, IssueRelation["type"]> = {
-    blocks: "blocks",
-    "blocked-by": "blocked_by",
-    related: "related",
-    duplicate: "duplicate",
-  }
-  return map[type] ?? "related"
-}
-
-function nodeToIssue(node: LinearIssueNode): Issue {
-  const labels = node.labels?.nodes?.map((l) => l.name) ?? []
-  return {
-    id: node.id,
-    identifier: node.identifier,
-    title: node.title,
-    description: node.description ?? "",
-    url: node.url,
-    status: node.state,
-    team: node.team,
-    labels,
-    score: parseScoreFromLabels(labels),
-    parentId: node.parent?.id ?? null,
-    children: node.children?.nodes?.map((c) => c.id) ?? [],
-    relations:
-      node.relations?.nodes?.map((r) => ({
-        type: mapRelationType(r.type),
-        relatedIssueId: r.relatedIssue.id,
-        relatedIdentifier: r.relatedIssue.identifier,
-      })) ?? [],
-  }
-}

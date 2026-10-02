@@ -42,6 +42,31 @@ afterEach(async () => {
 // ── buildFromIssues ─────────────────────────────────────────────────
 
 describe("buildFromIssues", () => {
+  test("retains blockers outside the active state query using their tracker status", () => {
+    scheduler.buildFromIssues([
+      makeIssue({
+        id: "task",
+        identifier: "PROJ-2",
+        relations: [
+          {
+            type: "blocked_by",
+            relatedIssueId: "backlog",
+            relatedIdentifier: "PROJ-1",
+            relatedStatus: { id: "backlog", name: "대기", type: "backlog" },
+          },
+          {
+            type: "blocked_by",
+            relatedIssueId: "done",
+            relatedIdentifier: "PROJ-0",
+            relatedStatus: { id: "done", name: "완료", type: "completed" },
+          },
+        ],
+      }),
+    ])
+    expect(scheduler.getUnresolvedBlockers("task")).toEqual(["backlog"])
+    expect(scheduler.getNode("done")?.status).toBe("done")
+  })
+
   test("creates nodes from issues", () => {
     scheduler.buildFromIssues([makeIssue({ id: "A", identifier: "T-1" }), makeIssue({ id: "B", identifier: "T-2" })])
     expect(scheduler.hasNode("A")).toBe(true)

@@ -7,6 +7,7 @@ interface ActiveAgentsPanelProps {
   workspaces: RunningWorkspace[]
   selectedAttemptId: string | null
   onSelect: (attempt: ActiveAttempt) => void
+  canIntervene?: boolean
 }
 
 /**
@@ -14,14 +15,24 @@ interface ActiveAgentsPanelProps {
  * the InterventionPanel drawer. Only workspaces with a live `attemptId`
  * are selectable (a workspace can be queued/idle without an attempt yet).
  */
-export function ActiveAgentsPanel({ workspaces, selectedAttemptId, onSelect }: ActiveAgentsPanelProps) {
+export function ActiveAgentsPanel({
+  workspaces,
+  selectedAttemptId,
+  onSelect,
+  canIntervene = true,
+}: ActiveAgentsPanelProps) {
   const running = workspaces.filter((ws): ws is RunningWorkspace & { attemptId: string } => Boolean(ws.attemptId))
 
   if (running.length === 0) return null
 
   return (
-    <div className="absolute bottom-4 left-4 bg-gray-800/90 rounded-lg p-4 min-w-64 border border-gray-700">
+    <div className="bg-gray-800/90 rounded-lg p-4 border border-gray-700">
       <h2 className="text-sm font-bold text-gray-300 mb-3">Active Agents</h2>
+      {!canIntervene && (
+        <p className="mb-2 text-xs text-gray-400">
+          Read-only access. Sign in with an intervention token to control agents.
+        </p>
+      )}
       <ul className="space-y-1">
         {running.map((ws) => {
           const isSelected = ws.attemptId === selectedAttemptId
@@ -29,6 +40,7 @@ export function ActiveAgentsPanel({ workspaces, selectedAttemptId, onSelect }: A
             <li key={ws.attemptId}>
               <button
                 type="button"
+                disabled={!canIntervene}
                 aria-pressed={isSelected}
                 aria-haspopup="dialog"
                 onClick={() =>
@@ -39,9 +51,7 @@ export function ActiveAgentsPanel({ workspaces, selectedAttemptId, onSelect }: A
                   })
                 }
                 className={`w-full flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 ${
-                  isSelected
-                    ? "bg-blue-700/40 text-blue-100"
-                    : "bg-gray-900/60 text-gray-200 hover:bg-gray-700/60"
+                  isSelected ? "bg-blue-700/40 text-blue-100" : "bg-gray-900/60 text-gray-200 hover:bg-gray-700/60"
                 }`}
               >
                 <span className="flex items-center gap-2 min-w-0">

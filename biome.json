@@ -38,8 +38,14 @@
       "!**/dist",
       "!**/bun.lock",
       "!**/apps/dashboard",
-      "!.claude/skills",
-      "!.agents/skills"
+      "!.agents",
+      "!.claude",
+      "!.codex",
+      "!.cursor",
+      "!.qwen",
+      "!.gemini",
+      "!.grok",
+      "!.kimi-code"
     ]
   }
 }

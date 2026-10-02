@@ -1,3 +1,4 @@
+import { SUPPORTED_OMA_VERSION } from "@agent-valley/core/oma/receipt-adapter"
 import { describe, expect, test } from "vitest"
 import type { DoctorDeps } from "../doctor-checks"
 import { checkOma } from "../doctor-oma-checks"
@@ -23,7 +24,7 @@ function deps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
     resolveGlobalConfigPath: () => "",
     loadGlobalConfig: () => null,
     loadProjectConfig: () => null,
-    getOmaVersion: () => "15.0.4",
+    getOmaVersion: () => SUPPORTED_OMA_VERSION,
     ...overrides,
   }
 }
@@ -74,5 +75,17 @@ describe("checkOma", () => {
     )
     expect(results.find((result) => result.id === "oma.cli")?.status).toBe("fail")
     expect(results.find((result) => result.id === "oma.triggers")?.status).toBe("fail")
+  })
+
+  test("rejects the older CLI contract with an explicit upgrade instruction", () => {
+    const results = checkOma(
+      { oma: { mode: "strict" }, verify: { command: "npm test" } },
+      deps({ getOmaVersion: () => "15.0.4" }),
+    )
+    expect(results.find((result) => result.id === "oma.cli")).toMatchObject({
+      status: "fail",
+      critical: true,
+      fix: expect.stringContaining(SUPPORTED_OMA_VERSION),
+    })
   })
 })

@@ -12,7 +12,13 @@
 
 import { describe, expect, test } from "vitest"
 import type { Workspace } from "../domain/models"
-import { deriveBranchName, deriveKey, repoRootOf } from "../workspace/worktree-lifecycle"
+import { deriveBranchName, deriveKey, repoRootOf, runCommand } from "../workspace/worktree-lifecycle"
+
+test("runCommand reports an unavailable executable without an unhandled spawn error", async () => {
+  const result = await runCommand("/nonexistent-agent-valley-test-command", [])
+  expect(result.exitCode).toBe(-1)
+  expect(result.stderr).toContain("ENOENT")
+})
 
 describe("deriveKey — identifier sanitization", () => {
   test("passes through alphanumerics, dots, dashes, and underscores unchanged", () => {

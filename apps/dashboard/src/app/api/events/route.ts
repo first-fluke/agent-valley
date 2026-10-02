@@ -1,6 +1,5 @@
 import { authorizeStatusRequest } from "@/lib/dashboard-auth"
-import { toOrchestratorConfig } from "@/lib/env"
-import { getOrchestrator } from "@/lib/orchestrator-singleton"
+import { getOrchestrator, type OrchestratorInstance } from "@/lib/orchestrator-singleton"
 
 export const dynamic = "force-dynamic"
 
@@ -8,23 +7,28 @@ export async function GET(request: Request) {
   const unauthorized = authorizeStatusRequest(request)
   if (unauthorized) return unauthorized
 
-  const orchestrator = getOrchestrator()
+  let orchestrator: OrchestratorInstance | null = null
 
   let closed = false
   let intervalId: ReturnType<typeof setInterval> | null = null
-  const onAgentEvent = (_payload: unknown) => {
-    if (orchestrator) {
-      send("state", orchestrator.getStatus())
-    }
-  }
+  const onAgentEvent = () => refresh()
   const onInterventionEvent = (eventName: string) => (payload: unknown) => {
     send(eventName, payload)
-    if (orchestrator) send("state", orchestrator.getStatus())
+    refresh()
   }
   const onPaused = onInterventionEvent("agent.paused")
   const onResumed = onInterventionEvent("agent.resumed")
   const onPromptAppended = onInterventionEvent("agent.prompt_appended")
   const onAborted = onInterventionEvent("agent.aborted")
+  const listeners = [
+    ["agent.start", onAgentEvent],
+    ["agent.done", onAgentEvent],
+    ["agent.failed", onAgentEvent],
+    ["agent.paused", onPaused],
+    ["agent.resumed", onResumed],
+    ["agent.prompt_appended", onPromptAppended],
+    ["agent.aborted", onAborted],
+  ] as const
 
   const encoder = new TextEncoder()
   let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
@@ -45,14 +49,30 @@ export async function GET(request: Request) {
       clearInterval(intervalId)
       intervalId = null
     }
+    for (const [event, handler] of listeners) orchestrator?.off(event, handler)
+    request.signal.removeEventListener("abort", onAbort)
+  }
+
+  const onAbort = () => {
+    cleanup()
+    controllerRef?.close()
+  }
+
+  function refresh() {
+    if (closed) return
+    const current = getOrchestrator()
+    if (current !== orchestrator) {
+      for (const [event, handler] of listeners) orchestrator?.off(event, handler)
+      orchestrator = current
+      for (const [event, handler] of listeners) orchestrator?.on(event, handler)
+    }
     if (orchestrator) {
-      orchestrator.off("agent.start", onAgentEvent)
-      orchestrator.off("agent.done", onAgentEvent)
-      orchestrator.off("agent.failed", onAgentEvent)
-      orchestrator.off("agent.paused", onPaused)
-      orchestrator.off("agent.resumed", onResumed)
-      orchestrator.off("agent.prompt_appended", onPromptAppended)
-      orchestrator.off("agent.aborted", onAborted)
+      send("state", orchestrator.getStatus())
+    } else {
+      send("unavailable", {
+        message:
+          "Orchestrator is unavailable. Run av doctor in the project directory, fix the reported settings.yaml or valley.yaml errors, and restart av up. Check the server log for the startup error.",
+      })
     }
   }
 
@@ -60,44 +80,16 @@ export async function GET(request: Request) {
     start(controller) {
       controllerRef = controller
 
-      if (orchestrator) {
-        send("state", orchestrator.getStatus())
-        orchestrator.on("agent.start", onAgentEvent)
-        orchestrator.on("agent.done", onAgentEvent)
-        orchestrator.on("agent.failed", onAgentEvent)
-        orchestrator.on("agent.paused", onPaused)
-        orchestrator.on("agent.resumed", onResumed)
-        orchestrator.on("agent.prompt_appended", onPromptAppended)
-        orchestrator.on("agent.aborted", onAborted)
-      } else {
-        send("state", {
-          isRunning: false,
-          lastEventAt: null,
-          activeWorkspaces: [],
-          activeAgents: 0,
-          retryQueueSize: 0,
-          config: (() => {
-            try {
-              const c = toOrchestratorConfig()
-              return { agentType: c.agentType, maxParallel: c.maxParallel, serverPort: c.serverPort }
-            } catch {
-              return {}
-            }
-          })(),
-        })
+      if (request.signal.aborted) {
+        onAbort()
+        return
       }
+      request.signal.addEventListener("abort", onAbort, { once: true })
+      refresh()
 
       send("keepalive", null)
 
-      intervalId = setInterval(() => {
-        if (closed) {
-          cleanup()
-          return
-        }
-        if (orchestrator) {
-          send("state", orchestrator.getStatus())
-        }
-      }, 5000)
+      if (!closed) intervalId = setInterval(refresh, 5000)
     },
     cancel() {
       cleanup()

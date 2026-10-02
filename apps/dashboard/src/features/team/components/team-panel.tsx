@@ -11,7 +11,7 @@ export function TeamPanel({ teamState }: TeamPanelProps) {
   if (nodes.length === 0) return null
 
   return (
-    <div className="absolute top-4 left-4 bg-gray-800/90 rounded-lg p-4 min-w-64 border border-gray-700">
+    <div className="bg-gray-800/90 rounded-lg p-4 border border-gray-700">
       <h2 className="text-sm font-bold text-gray-300 mb-3">Team Members</h2>
 
       <div className="space-y-3">
@@ -38,13 +38,9 @@ export function TeamPanel({ teamState }: TeamPanelProps) {
               </div>
             )}
 
-            {node.online && node.activeIssues.length === 0 && (
-              <div className="ml-4 text-gray-500 italic">idle</div>
-            )}
+            {node.online && node.activeIssues.length === 0 && <div className="ml-4 text-gray-500 italic">idle</div>}
 
-            {!node.online && (
-              <div className="ml-4 text-gray-600 italic">offline</div>
-            )}
+            {!node.online && <div className="ml-4 text-gray-600 italic">offline</div>}
           </div>
         ))}
       </div>

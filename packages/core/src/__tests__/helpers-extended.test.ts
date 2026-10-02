@@ -147,7 +147,7 @@ describe("buildOrchestratorStatus", () => {
   }
 
   function mockRetryQueue(size = 0) {
-    return { size } as RetryQueue
+    return { size, entries: [] } as unknown as RetryQueue
   }
 
   test("builds status with active workspaces", () => {
@@ -188,6 +188,31 @@ describe("buildOrchestratorStatus", () => {
     const workspaces = status.activeWorkspaces as Array<Record<string, unknown>>
     expect(workspaces[0]?.lastOutput).toBeUndefined()
     expect(status.retryQueueSize).toBe(2)
+  })
+
+  test("exposes dependency blockers and retry reasons to operators", () => {
+    const state = makeState()
+    const waiting = {
+      issueId: "issue-2",
+      identifier: "PROJ-2",
+      blockedBy: ["PROJ-1"],
+      enqueuedAt: "2026-03-22T00:00:00.000Z",
+    }
+    state.waitingIssues.set(waiting.issueId, waiting)
+    const retry = {
+      issueId: "issue-3",
+      attemptCount: 2,
+      nextRetryAt: "2026-03-22T00:05:00.000Z",
+      lastError: "Agent authentication expired",
+      category: "infra",
+    }
+    const queue = { size: 1, entries: [retry] } as unknown as RetryQueue
+    const status = buildOrchestratorStatus(state, new Map(), mockRunner(), queue, makeConfig())
+    expect(status.waitingIssues).toBe(1)
+    expect(status.waitingIssueDetails).toEqual([waiting])
+    expect(status.retryQueueSize).toBe(1)
+    expect(status.retryQueue).toEqual([retry])
+    expect(status.config).not.toHaveProperty("linearApiKey")
   })
 
   test("system metrics include expected fields", () => {

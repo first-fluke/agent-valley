@@ -27,18 +27,23 @@ linear:
 # states — see packages/core/src/tracker/adapters/github-adapter.ts for
 # the label ↔ state mapping.
 # github:
-#   token: ghp_xxx                  # GitHub PAT or fine-grained token
+#   token_env: GITHUB_TOKEN         # Export this variable with a GitHub token; never put the token here
 #   owner: my-org
 #   repo: my-repo
 #   webhook_secret: whsec_xxx       # HMAC-SHA256 signing secret (X-Hub-Signature-256)
+#   labels:
+#     todo: valley:todo
+#     in_progress: valley:wip
+#     done: valley:done
+#     cancelled: valley:cancelled
 
 # ── Workspace ─────────────────────────────────────────────────────────
 workspace:
-  # root: /absolute/path/to/workspaces  # Where agents create git worktrees
+  # root: /absolute/path/to/target-repo # Existing Git repository; worktrees are created inside it
 
 # ── Agent ─────────────────────────────────────────────────────────────
 # agent:
-#   type: claude                    # claude | codex | gemini (overrides global default)
+#   type: claude                    # claude | codex | antigravity | cursor | grok | kimi | opencode
 #   max_parallel: 3                 # Max concurrent agent runs. Default: hardware-detected
 #                                    # recommendation. An explicit value above the recommendation
 #                                    # is honored (never silently clamped) but logged as a WARN.
@@ -60,13 +65,10 @@ prompt: |
   Path: {{workspace_path}}
 
   ## Instructions
-  1. Read AGENTS.md first — this repo ships an oma harness (workflows + skills).
-  2. This runs non-interactively (agent CLIs use --print / headless mode), so
-     keyword-triggered hooks may not auto-activate. Explicitly follow the
-     relevant oma workflow for non-trivial work (e.g. `work` for step-by-step,
-     `ultrawork` for gated multi-phase) and invoke the matching domain skills.
-  3. Implement the requested changes.
-  4. Run tests before finishing.
+  1. Read AGENTS.md if present and follow the target repository's conventions.
+  2. Implement the requested changes in this worktree.
+  3. Run the project's relevant tests and report their results.
+  4. Leave the changes in this worktree for Agent Valley to verify and deliver.
 
 # ── Multi-Repo Routing (optional) ────────────────────────────────────
 # routing:
@@ -85,9 +87,9 @@ prompt: |
 # On failure, the agent gets another attempt through the retry queue; once
 # retries are exhausted, the issue is cancelled rather than delivered.
 # Replace this example with commands that exist in the target repository.
-# verify:
-#   command: "bun run typecheck && bun test"  # any shell command; non-zero exit = fail
-#   timeout_sec: 600                          # kill the command after N seconds (default 600)
+verify:
+  command: "bun run typecheck && bun run test" # use commands from the target repository
+  timeout_sec: 600                          # kill the command after N seconds (default 600)
 
 # For report-only work, choose analysis instead of the default code task.
 # The report path must be inside the worktree and include {{attempt.id}}.
@@ -102,7 +104,7 @@ prompt: |
 #     easy:
 #       min: 1
 #       max: 3
-#       agent: gemini
+#       agent: antigravity
 #     medium:
 #       min: 4
 #       max: 7

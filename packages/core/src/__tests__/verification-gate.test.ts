@@ -2,6 +2,10 @@
  * Verification Gate tests — runVerificationGate, resolveVerifyCommand,
  * buildVerificationFailurePrompt, and the real (non-injected) exec path.
  */
+import { existsSync } from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, test } from "vitest"
 import type { ResolvedRoute } from "../config/routing"
 import type { Config } from "../config/yaml-loader"
@@ -147,6 +151,50 @@ describe("runVerificationGate", () => {
 })
 
 describe("defaultVerifyExec (real subprocess)", () => {
+  test("stops a verifier when recording its PID fails", async () => {
+    let pid: number | undefined
+    const result = await defaultVerifyExec("sleep 5", process.cwd(), 10_000, undefined, (spawnedPid) => {
+      pid = spawnedPid
+      throw new Error("mission record is not writable")
+    })
+    expect(pid).toBeGreaterThan(1)
+    expect(result.exitCode).toBe(-1)
+    expect(result.timedOut).toBe(false)
+    expect(result.output).toContain("mission record is not writable")
+  })
+
+  test.each(["timeout", "abort"] as const)("%s stops shell descendants as well as the parent", async (mode) => {
+    const root = await mkdtemp(join(tmpdir(), "av-verify-descendants-"))
+    const marker = join(root, "survived")
+    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+    const child = `sleep 1; printf survived > ${quote(marker)}`
+    const controller = new AbortController()
+    const timer = mode === "abort" ? setTimeout(() => controller.abort(), 100) : undefined
+    try {
+      const result = await defaultVerifyExec(
+        `sh -c ${quote(child)} & wait`,
+        root,
+        mode === "timeout" ? 100 : 5_000,
+        controller.signal,
+      )
+      expect(result.exitCode).toBe(-1)
+      if (mode === "timeout") expect(result.timedOut).toBe(true)
+      else expect(result.aborted).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 1_100))
+      expect(existsSync(marker)).toBe(false)
+    } finally {
+      clearTimeout(timer)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("bounds captured output during execution", async () => {
+    const result = await defaultVerifyExec("head -c 100000 /dev/zero; printf TAIL", process.cwd(), 5_000)
+    expect(result.exitCode).toBe(0)
+    expect(result.output.length).toBeLessThanOrEqual(10_240)
+    expect(result.output.endsWith("TAIL")).toBe(true)
+  })
+
   test("resolves ok on a passing shell command", async () => {
     const result = await defaultVerifyExec("exit 0", process.cwd(), 5_000)
     expect(result.exitCode).toBe(0)

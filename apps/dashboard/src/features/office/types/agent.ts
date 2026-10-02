@@ -1,4 +1,6 @@
 import type { AgentType } from "@agent-valley/core/domain/ledger"
+import type { RetryEntry, WaitingEntry } from "@agent-valley/core/domain/models"
+
 export type { AgentType } from "@agent-valley/core/domain/ledger"
 
 export type WorkspaceStatus = "idle" | "running" | "done" | "failed"
@@ -9,6 +11,8 @@ export interface ActiveWorkspace {
   status: WorkspaceStatus
   startedAt: string
   lastOutput?: string
+  attemptId?: string
+  agentType?: AgentType
 }
 
 export interface SystemMetrics {
@@ -24,6 +28,9 @@ export interface OrchestratorState {
   activeWorkspaces: ActiveWorkspace[]
   activeAgents: number
   retryQueueSize: number
+  waitingIssues?: number
+  waitingIssueDetails?: WaitingEntry[]
+  retryQueue?: RetryEntry[]
   config: {
     agentType: AgentType
     maxParallel: number

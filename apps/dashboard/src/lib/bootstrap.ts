@@ -3,15 +3,11 @@
  * Separated from instrumentation.ts to avoid Edge Runtime static analysis warnings.
  */
 
-import { toOrchestratorConfig } from "@/lib/env"
-import {
-  createInMemoryBudgetService,
-  createNoopBudgetService,
-} from "@agent-valley/core/orchestrator/budget-service"
 import { createObservabilityHooks } from "@agent-valley/core/observability/hooks"
 import { configureLogger, logger } from "@agent-valley/core/observability/logger"
 import { createOtelExporter } from "@agent-valley/core/observability/otel-exporter"
 import { createPromMetrics } from "@agent-valley/core/observability/prom-metrics"
+import { createInMemoryBudgetService, createNoopBudgetService } from "@agent-valley/core/orchestrator/budget-service"
 import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
 import type { LedgerBridge } from "@agent-valley/core/relay/ledger-bridge"
 import { wireLedgerRelay } from "@agent-valley/core/relay/ledger-wiring"
@@ -21,22 +17,19 @@ import { LinearTrackerAdapter } from "@agent-valley/core/tracker/adapters/linear
 import { LinearWebhookReceiver } from "@agent-valley/core/tracker/adapters/linear-webhook-receiver"
 import { FileSystemWorkspaceGateway } from "@agent-valley/core/workspace/adapters/fs-workspace-gateway"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
+import { toOrchestratorConfig } from "@/lib/env"
 import { setMetricsEndpoint } from "@/lib/metrics-singleton"
-import { setOrchestrator } from "@/lib/orchestrator-singleton"
+import { initializeOrchestrator, type OrchestratorInstance } from "@/lib/orchestrator-singleton"
 import { resolveProjectRoot } from "@/lib/project-root"
 
-export async function bootstrap() {
+export function bootstrap(): Promise<void> {
+  return initializeOrchestrator(startOrchestrator)
+}
+
+async function startOrchestrator(): Promise<OrchestratorInstance> {
   // Resolve project root: walk up until we find valley.yaml
   const projectRoot = await resolveProjectRoot(process.cwd())
   process.chdir(projectRoot)
-
-  // Prevent orchestrator errors from crashing the Next.js process
-  process.on("uncaughtException", (err) => {
-    logger.error("process", `Uncaught exception (non-fatal): ${err.message}`, { stack: err.stack })
-  })
-  process.on("unhandledRejection", (reason) => {
-    logger.error("process", `Unhandled rejection (non-fatal): ${reason}`)
-  })
 
   const config = toOrchestratorConfig(projectRoot)
   configureLogger(config.logLevel, config.logFormat)
@@ -108,28 +101,44 @@ export async function bootstrap() {
   // not missed.
   const ledgerBridge: LedgerBridge | null = wireLedgerRelay(orchestrator, config)
 
-  await orchestrator.start()
-
-  const handlers = orchestrator.getHandlers()
-  await setOrchestrator({
-    getStatus: handlers.getStatus,
-    handleWebhook: handlers.onWebhook,
-    stop: () => orchestrator.stop(),
-    on: (event: string, handler: (...args: unknown[]) => void) => orchestrator.on(event, handler),
-    off: (event: string, handler: (...args: unknown[]) => void) => orchestrator.off(event, handler),
-    intervention: orchestrator.intervention,
-  })
+  const stop = async () => {
+    process.off("SIGTERM", shutdown)
+    process.off("SIGINT", shutdown)
+    try {
+      await orchestrator.stop()
+    } finally {
+      try {
+        if (ledgerBridge) await ledgerBridge.dispose()
+      } finally {
+        await otel.shutdown()
+      }
+    }
+  }
 
   // Graceful shutdown: stop orchestrator and kill agent processes on exit
   const shutdown = async () => {
     logger.info("process", "Received shutdown signal, stopping orchestrator...")
-    await orchestrator.stop()
-    if (ledgerBridge) await ledgerBridge.dispose()
-    await otel.shutdown()
+    await stop()
     process.exit(0)
+  }
+
+  try {
+    await orchestrator.start()
+  } catch (error) {
+    await stop()
+    throw error
   }
   process.on("SIGTERM", shutdown)
   process.on("SIGINT", shutdown)
 
   logger.info("instrumentation", "Symphony Orchestrator initialized")
+  const handlers = orchestrator.getHandlers()
+  return {
+    getStatus: handlers.getStatus,
+    handleWebhook: handlers.onWebhook,
+    stop,
+    on: (event, handler) => orchestrator.on(event, handler),
+    off: (event, handler) => orchestrator.off(event, handler),
+    intervention: orchestrator.intervention,
+  }
 }

@@ -45,6 +45,9 @@ export function renderPreview(ctx: ResolvedSetupContext): string {
 
   lines.push(`  workspace.root         = ${ctx.workspaceRoot}`)
   lines.push(`  delivery.mode          = merge`)
+  lines.push(`  task.kind              = ${ctx.task?.kind ?? "code"}`)
+  if (ctx.task?.kind === "analysis") lines.push(`  task.report_path       = ${ctx.task.report_path}`)
+  if (ctx.verifyCommand) lines.push(`  verify.command         = ${ctx.verifyCommand}`)
   lines.push(`  tunnel.provider        = ${pc.cyan(ctx.tunnel.provider)}`)
   if (ctx.tunnel.provider === "cloudflare") {
     const cf = ctx.tunnel.cloudflare

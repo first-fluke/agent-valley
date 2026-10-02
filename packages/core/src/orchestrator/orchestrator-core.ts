@@ -1,5 +1,5 @@
 import type { Config } from "../config/yaml-loader"
-import type { Issue, OrchestratorRuntimeState, Workspace } from "../domain/models"
+import type { Issue, OrchestratorRuntimeState, RetryCategory, Workspace } from "../domain/models"
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
@@ -14,14 +14,21 @@ import type { CompletionDeps } from "./completion-handler"
 import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
 import type { InterventionBus } from "./intervention-bus"
+import type { RetryContext } from "./issue-lifecycle"
 import { PendingFinalizationManager } from "./pending-finalization"
 import { decideRecovery } from "./persistence/recovery"
-import { applyRecoveryDecision, buildPersistedAttempts, cleanupAttemptState } from "./persistence/recovery-apply"
-import type { RunStatePort } from "./persistence/run-state-store"
+import {
+  applyRecoveryDecision,
+  buildPersistedAttempts,
+  cleanupAttemptState,
+  reconcileRecoveredAttempts,
+} from "./persistence/recovery-apply"
+import type { PersistedAttempt, RunStatePort } from "./persistence/run-state-store"
 import { RunStatePersistence } from "./persistence/run-state-store"
-import { RetryQueue } from "./retry-queue"
+import { CAPACITY_WAIT_REASON, RetryQueue } from "./retry-queue"
+import { fillVacantSlots } from "./slot-filler"
 
-export type SlotDecision = { ok: true } | { ok: false; reason: "already_active" | "concurrency" }
+export type SlotDecision = { ok: true } | { ok: false; reason: "already_active" | "concurrency" | "stopping" }
 
 export type CoreEventEmit = (event: string, payload: Record<string, unknown>) => void
 
@@ -69,12 +76,14 @@ export class OrchestratorCore {
   }
 
   readonly processingIssues = new Set<string>()
+  isStopping = false
   readonly activeAttempts = new Map<string, string>()
   private readonly attemptStartedAt = new Map<string, string>()
   private readonly attemptPid = new Map<string, number>()
   private readonly runStatePersistence: RunStatePort
   private readonly pendingFinalizations: PendingFinalizationManager
   private recoveryCompleted = false
+  private recoveredAttempts: PersistedAttempt[] = []
   private readonly emit: CoreEventEmit
   private retryTimer: ReturnType<typeof setInterval> | null = null
   private promptTemplate = ""
@@ -113,8 +122,7 @@ export class OrchestratorCore {
         cleanupAttemptState(this.recoveryApplyDeps(), id, status)
         this.persistActiveAttempts()
       },
-      triggerUnblocked: async (ids) => {
-        for (const id of ids) this.state.waitingIssues.delete(id)
+      triggerUnblocked: async () => {
         if (this.reevaluateWaiting) await this.reevaluateWaiting()
       },
       fillVacantSlots: () => this.fillVacantSlots(),
@@ -145,11 +153,10 @@ export class OrchestratorCore {
         this.persistActiveAttempts()
       },
       saveAttempt: (ws, att) => this.workspace.saveAttempt(ws, att),
-      addRetry: (issueId, count, error, category) => this.retryQueue.add(issueId, count, error, category),
+      addRetry: (issueId, count, error, category) => this.enqueueRetry(issueId, count, error, category),
       emitEvent: (event, payload) => this.emit(event, payload),
       fillVacantSlots: () => this.fillVacantSlots(),
-      triggerUnblocked: async (issueIds) => {
-        for (const id of issueIds) this.state.waitingIssues.delete(id)
+      triggerUnblocked: async () => {
         if (this.reevaluateWaiting) await this.reevaluateWaiting()
       },
       observability: this.observability,
@@ -166,22 +173,34 @@ export class OrchestratorCore {
     if (
       this.processingIssues.has(issueId) ||
       this.state.activeWorkspaces.has(issueId) ||
+      this.recoveredAttempts.some((attempt) => attempt.issueId === issueId) ||
       this.pendingFinalizations.has(issueId)
     ) {
       return { ok: false, reason: "already_active" }
     }
-    if (this.agentRunner.activeCount >= this.config.maxParallel) {
+    if (this.isStopping) return { ok: false, reason: "stopping" }
+    const reserved = new Set([
+      ...this.processingIssues,
+      ...this.state.activeWorkspaces.keys(),
+      ...this.recoveredAttempts.map((attempt) => attempt.issueId),
+    ]).size
+    if (Math.max(reserved, this.agentRunner.activeCount) >= this.config.maxParallel) {
       return { ok: false, reason: "concurrency" }
     }
     return { ok: true }
   }
 
   /** Try to accept an issue; queue for retry if at concurrency limit. */
-  tryAcceptOrQueue(issueId: string): boolean {
+  tryAcceptOrQueue(issueId: string, retryContext?: RetryContext): boolean {
     const guard = this.canAcceptIssue(issueId)
     if (guard.ok) return true
     if (guard.reason === "concurrency") {
-      this.retryQueue.add(issueId, 0, "Concurrency limit reached")
+      this.retryQueue.add(
+        issueId,
+        retryContext?.attemptCount ?? 0,
+        retryContext?.lastError ?? CAPACITY_WAIT_REASON,
+        retryContext?.category,
+      )
       this.observability.onRetryQueueChanged(this.retryQueue.size)
       this.persistRetryQueue()
     }
@@ -227,8 +246,8 @@ export class OrchestratorCore {
     this.persistActiveAttempts()
   }
 
-  enqueueRetry(issueId: string, attemptCount: number, lastError: string): boolean {
-    const added = this.retryQueue.add(issueId, attemptCount, lastError)
+  enqueueRetry(issueId: string, attemptCount: number, lastError: string, category?: RetryCategory): boolean {
+    const added = this.retryQueue.add(issueId, attemptCount, lastError, category)
     this.observability.onRetryQueueChanged(this.retryQueue.size)
     this.persistRetryQueue()
     return added
@@ -275,7 +294,9 @@ export class OrchestratorCore {
       retryQueue: snapshot.retryQueue.filter((entry) => !this.pendingFinalizations.has(entry.issueId)),
     }
 
-    const summary = applyRecoveryDecision(decideRecovery(recoverable), this.recoveryApplyDeps())
+    const decision = decideRecovery(recoverable)
+    this.recoveredAttempts = decision.reattach
+    const summary = applyRecoveryDecision(decision, this.recoveryApplyDeps())
 
     this.persistActiveAttempts()
     this.persistRetryQueue()
@@ -318,6 +339,7 @@ export class OrchestratorCore {
   }
 
   async start(): Promise<void> {
+    this.isStopping = false
     // Recover before startup sync fetches Todo/InProgress issues, so a still-alive attempt isn't re-dispatched.
     await this.recoverFromPersistedState()
     void this.pendingFinalizations.reconcile()
@@ -328,7 +350,7 @@ export class OrchestratorCore {
     // Startup sync runs in background so server starts immediately
     const runStartupSync = async () => {
       await new Promise((r) => setTimeout(r, 2_000))
-      await this.ensureStartupSync()
+      if (this.state.isRunning) await this.ensureStartupSync()
     }
     void runStartupSync()
 
@@ -353,6 +375,8 @@ export class OrchestratorCore {
   }
 
   async stop(): Promise<void> {
+    this.isStopping = true
+    this.processingIssues.clear()
     logger.info("orchestrator", "Shutting down gracefully...")
     this.emit("node.leave", { reason: "graceful" })
     this.state.isRunning = false
@@ -412,47 +436,28 @@ export class OrchestratorCore {
     sortByIssueNumber(issues)
     logger.info("orchestrator", `Startup sync completed, found ${issues.length} issues`)
     for (const issue of issues) {
+      if (this.retryQueue.entries.some((entry) => entry.issueId === issue.id)) continue
       if (issue.status.id === this.config.workflowStates.todo) await this.dispatcher.handleIssueTodo(issue)
       else await this.dispatcher.handleIssueInProgress(issue)
     }
   }
 
   async fillVacantSlots(): Promise<void> {
-    const available = this.config.maxParallel - this.agentRunner.activeCount
-    if (available <= 0) return
-    if (!this.dispatcher) return
-
-    try {
-      const issues = await this.tracker.fetchIssuesByState([this.config.workflowStates.todo])
-
-      sortByIssueNumber(issues)
-
-      let filled = 0
-      for (const issue of issues) {
-        if (filled >= available) break
-        const guard = this.canAcceptIssue(issue.id)
-        if (!guard.ok) continue
-        await this.dispatcher.handleIssueTodo(issue)
-        filled++
-      }
-
-      if (filled > 0) {
-        logger.info("orchestrator", `Filled ${filled} vacant slot(s)`, {
-          activeCount: String(this.agentRunner.activeCount),
-          maxParallel: String(this.config.maxParallel),
-        })
-      }
-    } catch (err) {
-      logger.error("orchestrator", "Failed to fill vacant slots", { error: String(err) })
-    }
+    await fillVacantSlots(this, this.dispatcher)
   }
 
   async processRetryQueue(): Promise<void> {
+    if (this.recoveredAttempts.length > 0) {
+      this.recoveredAttempts = reconcileRecoveredAttempts(this.recoveredAttempts, this.recoveryApplyDeps())
+      this.persistActiveAttempts()
+      this.persistRetryQueue()
+    }
     await this.pendingFinalizations.reconcile()
+    if (this.reevaluateWaiting && this.state.waitingIssues.size > 0) await this.reevaluateWaiting()
+    if (!this.dispatcher) return
     const ready = this.retryQueue.drain()
     if (ready.length === 0) return
     this.persistRetryQueue()
-    if (!this.dispatcher) return
 
     let issues: Issue[] = []
     try {
@@ -474,6 +479,7 @@ export class OrchestratorCore {
         const retryContext = {
           attemptCount: entry.attemptCount,
           lastError: entry.lastError,
+          category: entry.category,
         }
         if (issue.status.id === this.config.workflowStates.todo)
           await this.dispatcher.handleIssueTodo(issue, retryContext)

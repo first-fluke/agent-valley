@@ -5,16 +5,25 @@ export function GET() {
 
   if (!orchestrator) {
     return Response.json(
-      { status: "degraded", reason: "Orchestrator not initialized (UI-only mode)" },
+      {
+        status: "degraded",
+        isRunning: false,
+        reason: "Orchestrator not initialized. Run av doctor and inspect the server startup log.",
+      },
       { status: 503 },
     )
   }
 
   const state = orchestrator.getStatus() as Record<string, unknown>
-  return Response.json({
-    status: "ok",
-    isRunning: state.isRunning ?? false,
-    activeAgents: state.activeAgents ?? 0,
-    uptime: process.uptime(),
-  })
+  const running = state.isRunning === true
+  return Response.json(
+    {
+      status: running ? "ok" : "degraded",
+      ...(running ? {} : { reason: "Orchestrator is stopped. Restart av up to resume processing issues." }),
+      isRunning: state.isRunning ?? false,
+      activeAgents: state.activeAgents ?? 0,
+      uptime: process.uptime(),
+    },
+    { status: running ? 200 : 503 },
+  )
 }

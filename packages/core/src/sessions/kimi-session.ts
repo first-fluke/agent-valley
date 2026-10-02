@@ -67,6 +67,7 @@
 import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
+import { readJsonLines } from "./json-lines"
 import { planSandboxedSpawn } from "./sandbox"
 
 export const KIMI_COMMAND = "kimi"
@@ -124,6 +125,7 @@ export class KimiSession extends BaseSession {
     }
 
     this.process = spawn(plan.command, plan.args, {
+      detached: process.platform !== "win32",
       cwd: this.config.workspacePath,
       env: buildAgentEnv("kimi", this.config.env) as NodeJS.ProcessEnv,
       stdio: ["ignore", "pipe", "pipe"],
@@ -134,7 +136,7 @@ export class KimiSession extends BaseSession {
 
   override isAlive(): boolean {
     if (!this.process) return this.started
-    return this.process.exitCode === null
+    return super.isAlive()
   }
 
   // ── Stream parser ───────────────────────────────────────────────────────
@@ -142,58 +144,32 @@ export class KimiSession extends BaseSession {
   private async readStream(): Promise<void> {
     const proc = this.process
     if (!proc?.stdout) return
-
-    const decoder = new TextDecoder()
-    let buffer = ""
-
-    proc.stdout.on("data", (chunk: Buffer) => {
-      const text = decoder.decode(chunk, { stream: true })
-      this.appendRawTail(text)
-      buffer += text
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
-
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const event: unknown = JSON.parse(line)
-          this.handleEvent(event)
-        } catch {
-          // Non-JSON stdout noise (e.g. a plain-text auth error) — still
-          // captured in rawTail for the unauth-detection check below.
-        }
-      }
-    })
-
-    proc.stdout.on("error", () => {
-      // Stream error — proceed to close
-    })
-
+    const flush = readJsonLines(
+      proc.stdout,
+      (event) => this.handleEvent(event),
+      (text) => this.appendRawTail(text),
+    )
     const stderrDecoder = new TextDecoder()
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      this.appendRawTail(stderrDecoder.decode(chunk, { stream: true }))
-    })
-
-    // Gated on BOTH stdout 'end' and process 'close' — see
-    // waitForStreamCompletion() doc comment (base-session.ts) for why
-    // 'close' alone races the final buffered 'data' chunk on a
-    // fast-exiting process.
+    proc.stderr?.on("data", (chunk: Buffer) => this.appendRawTail(stderrDecoder.decode(chunk, { stream: true })))
     const { exitCode: code } = await waitForStreamCompletion(proc)
+    flush()
+    if (this.terminalEventReceived) return
     const exitCode = code ?? -1
-
-    if (exitCode !== 0) {
-      if (/no model configured/i.test(this.rawTail)) {
-        this.emitError(
-          "AUTH_FAILED",
-          'kimi is not authenticated ("No model configured").\n' +
-            "  Fix: run `kimi` then `/login` (device-code auth) to set a default_model in ~/.kimi-code/config.toml.\n" +
-            "  This must be done once per host before Symphony can run kimi non-interactively.",
-          false,
-        )
-        return
-      }
-      this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `kimi exited with code ${exitCode}`, exitCode !== 1)
+    if (/no model configured/i.test(this.rawTail)) {
+      this.emitError(
+        "AUTH_FAILED",
+        'kimi is not authenticated ("No model configured"). Run `kimi` then `/login` to set a default_model in ~/.kimi-code/config.toml.',
+        false,
+      )
+      return
     }
+    this.emitError(
+      exitCode === -1 ? "TIMEOUT" : "CRASH",
+      exitCode === 0
+        ? "kimi exited without a result event. Check CLI authentication and update Kimi, then retry."
+        : `kimi exited with code ${exitCode}. Run av doctor and check Kimi authentication.`,
+      exitCode !== 1,
+    )
   }
 
   private appendRawTail(chunk: string): void {

@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { parse as parseYaml } from "yaml"
 import { z } from "zod"
 import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
 import { detectHardware } from "./hardware"
@@ -10,6 +8,7 @@ import { buildObservabilityConfig, observabilityMergedSchema, observabilityProje
 import { resolvedTaskSchema, taskSchema } from "./task-schema"
 import { buildTunnelConfig, tunnelMergedSchema, tunnelProjectSchema } from "./tunnel-schema"
 import { buildVerifyConfig, verifyMergedSchema, verifyProjectSchema } from "./verify-schema"
+import { readYamlFile } from "./yaml-file"
 
 const routingRuleSchema = z.object({
   label: z.string().min(1, "Each routing rule must have a non-empty label"),
@@ -67,7 +66,7 @@ export const globalConfigSchema = z
       .optional(),
     server: z
       .object({
-        port: z.number().min(1).optional(),
+        port: z.number().int().min(1).max(65535).optional(),
       })
       .optional(),
     team: z
@@ -151,7 +150,7 @@ export const projectConfigSchema = z
       .optional(),
     server: z
       .object({
-        port: z.number().min(1).optional(),
+        port: z.number().int().min(1).max(65535).optional(),
       })
       .optional(),
     prompt: z.string().optional(),
@@ -229,7 +228,7 @@ const mergedConfigSchema = z
     agentMaxRetries: z.number().min(1),
     agentRetryDelay: z.number().min(1),
     maxParallel: z.number().min(1),
-    serverPort: z.number().min(1),
+    serverPort: z.number().int().min(1).max(65535),
     logLevel: z.enum(["debug", "info", "warn", "error"]),
     logFormat: z.enum(["json", "text"]),
     deliveryMode: z.enum(["merge", "pr"]),
@@ -318,18 +317,6 @@ export function resolveGlobalConfigPath(): string {
   return join(resolveGlobalConfigDir(), "settings.yaml")
 }
 
-function readYamlFile(path: string): Record<string, unknown> | null {
-  try {
-    const content = readFileSync(path, "utf-8")
-    if (!content.trim()) return null
-    const parsed = parseYaml(content)
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
-    throw new Error(`Failed to parse ${path}: ${(err as Error).message}`)
-  }
-}
-
 export function loadGlobalConfig(configPath?: string): GlobalConfig | null {
   const path = configPath ?? resolveGlobalConfigPath()
   const raw = readYamlFile(path)
@@ -365,7 +352,11 @@ export function loadProjectConfig(projectRoot?: string): ProjectConfig | null {
  * concurrency is honored (never silently clamped) but logged as a WARN so
  * the operator can see the risk of resource exhaustion.
  */
-function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null): Record<string, unknown> {
+function mergeConfigs(
+  global: GlobalConfig | null,
+  project: ProjectConfig | null,
+  env: NodeJS.ProcessEnv,
+): Record<string, unknown> {
   const hw = detectHardware()
 
   // Defaults
@@ -391,9 +382,9 @@ function mergeConfigs(global: GlobalConfig | null, project: ProjectConfig | null
   // GitHub: resolve token from named env var. Empty string fails validation
   // later via the trackerKind=github refinement.
   let githubMerged: Record<string, unknown> | undefined
-  if (project?.github) {
+  if (trackerKind === "github" && project?.github) {
     const envName = project.github.token_env ?? "GITHUB_TOKEN"
-    const token = process.env[envName] ?? ""
+    const token = env[envName] ?? ""
     githubMerged = {
       token,
       owner: project.github.owner ?? "",
@@ -464,6 +455,20 @@ export function isTeamMode(config: Config): boolean {
   return !!(config.supabaseUrl && config.supabaseAnonKey && config.teamId)
 }
 
+/** Validate the effective configuration without terminating the caller. */
+export function resolveConfig(
+  global: GlobalConfig | null,
+  project: ProjectConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): Config {
+  const result = mergedConfigSchema.safeParse(mergeConfigs(global, project, env))
+  if (!result.success) {
+    const issues = result.error.issues.map((e, i) => `  [${i + 1}] ${e.path.join(".")}: ${e.message}`).join("\n")
+    throw new Error(`Config validation failed. Fix the following issues and restart:\n\n${issues}`)
+  }
+  return result.data
+}
+
 /**
  * Load configuration from settings.yaml (global) + valley.yaml (project).
  * Merges with project winning, validates with Zod, returns typed Config.
@@ -483,17 +488,10 @@ export function loadConfig(projectRoot?: string, globalConfigPath?: string): Con
     process.exit(1)
   }
 
-  const merged = mergeConfigs(global, project)
-  const result = mergedConfigSchema.safeParse(merged)
-
-  if (!result.success) {
-    const issues = result.error.issues.map((e, i) => `  [${i + 1}] ${e.path.join(".")}: ${e.message}`).join("\n")
-    console.error(
-      `Config validation failed. Fix the following issues and restart:\n\n${issues}\n\n` +
-        "Symphony cannot start until all config errors are resolved.",
-    )
+  try {
+    return resolveConfig(global, project)
+  } catch (error) {
+    console.error(`${(error as Error).message}\n\nSymphony cannot start until all config errors are resolved.`)
     process.exit(1)
   }
-
-  return result.data
 }

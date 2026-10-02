@@ -20,9 +20,10 @@ export const DEFAULT_PROMPT = `You are working on {{issue.identifier}}: {{issue.
 Path: {{workspace_path}}
 
 ## Instructions
-1. Read AGENTS.md first
+1. Read AGENTS.md if present and follow the target project's conventions
 2. Implement the requested changes
-3. Run tests before finishing
+3. Run the project's tests or verification command before finishing
+4. Leave the completed changes in this workspace for Agent Valley to deliver
 `
 
 export function buildGlobalYaml(config: { apiKey: string; agentType: string; maxParallel: number }): string {
@@ -81,6 +82,8 @@ export function buildProjectYaml(config: {
   workspaceRoot: string
   prompt?: string
   tunnel?: TunnelSetupValues
+  task?: ProjectConfig["task"]
+  verifyCommand?: string
 }): string {
   const obj: ProjectConfig = {
     tracker: { kind: "linear" },
@@ -98,6 +101,8 @@ export function buildProjectYaml(config: {
     workspace: { root: config.workspaceRoot },
     delivery: { mode: "merge" },
     prompt: config.prompt ?? DEFAULT_PROMPT,
+    task: config.task,
+    verify: config.verifyCommand ? { command: config.verifyCommand } : undefined,
   }
   const tunnel = buildTunnelBlock(config.tunnel)
   if (tunnel) obj.tunnel = tunnel
@@ -117,6 +122,8 @@ export function buildProjectYamlGithub(config: {
   workspaceRoot: string
   prompt?: string
   tunnel?: TunnelSetupValues
+  task?: ProjectConfig["task"]
+  verifyCommand?: string
 }): string {
   const obj: ProjectConfig = {
     tracker: { kind: "github" },
@@ -135,6 +142,8 @@ export function buildProjectYamlGithub(config: {
     workspace: { root: config.workspaceRoot },
     delivery: { mode: "merge" },
     prompt: config.prompt ?? DEFAULT_PROMPT,
+    task: config.task,
+    verify: config.verifyCommand ? { command: config.verifyCommand } : undefined,
   }
   const tunnel = buildTunnelBlock(config.tunnel)
   if (tunnel) obj.tunnel = tunnel
