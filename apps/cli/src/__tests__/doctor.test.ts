@@ -6,6 +6,7 @@
  * filesystem, PATH, or a real agent CLI.
  */
 
+import { stripVTControlCharacters } from "node:util"
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -77,7 +78,7 @@ describe("doctor()", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
     const exitCode = await doctor({}, fakeDeps)
 
-    const lines = logSpy.mock.calls.map((c) => String(c[0]))
+    const lines = logSpy.mock.calls.map((c) => stripVTControlCharacters(String(c[0])))
     expect(lines.some((l) => l.includes("Config A") && l.includes("all good"))).toBe(true)
     expect(lines.some((l) => l.includes("Sandbox B") && l.includes("missing binary"))).toBe(true)
     expect(lines.some((l) => l.includes("Fix:") && l.includes("install the thing"))).toBe(true)

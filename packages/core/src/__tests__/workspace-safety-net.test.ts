@@ -159,12 +159,7 @@ describe("create", () => {
 
     const routedManager = new WorkspaceManager(join(repoDir, "unrelated-root"))
     const routedPath = join(repoDir, "TEST-3")
-    git(`worktree add ${routedPath} -b fix/TEST-3`, repoDir)
-    await mkdir(join(routedPath, ".agent-valley", "attempts"), { recursive: true })
-    await writeFile(
-      join(routedPath, ".agent-valley", "issue.json"),
-      JSON.stringify({ issueId: issue.id, identifier: issue.identifier, branch: "fix/TEST-3" }),
-    )
+    await manager.create(issue)
 
     const workspace = await routedManager.create(issue, repoDir)
 

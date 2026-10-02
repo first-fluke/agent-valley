@@ -167,6 +167,16 @@ async function createIsolatedGitWorkspace(root: string, path: string, branch: st
   })
   if (clone.exitCode !== 0) return clone
 
+  // A clone does not inherit repository-local author settings. Preserve the
+  // operator's identity without copying credentials, hooks, or other config.
+  for (const key of ["user.name", "user.email"]) {
+    const identity = await runCommand("git", ["config", "--local", "--get", key], { cwd: root })
+    if (identity.exitCode === 1) continue
+    if (identity.exitCode !== 0) return identity
+    const copied = await runCommand("git", ["config", "--local", key, identity.stdout.trim()], { cwd: path })
+    if (copied.exitCode !== 0) return copied
+  }
+
   const checkout = await runCommand("git", ["checkout", "-qb", branch], { cwd: path })
   if (checkout.exitCode !== 0) return checkout
 

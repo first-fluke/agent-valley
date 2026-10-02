@@ -59,10 +59,18 @@ describe("GrokSession — streaming output", () => {
     originalPath = process.env.PATH ?? ""
     // Prepend mock dir to PATH so "grok" resolves to our mock
     process.env.PATH = `${MOCK_DIR}:${originalPath}`
+    vi.spyOn(sandboxModule, "planSandboxedSpawn").mockImplementation(async (request) => ({
+      command: request.command,
+      args: request.args,
+      sandboxed: false,
+      platform: process.platform,
+      networkAllowlist: [],
+    }))
   })
 
   afterEach(() => {
     process.env.PATH = originalPath
+    vi.restoreAllMocks()
     try {
       unlinkSync(MOCK_SCRIPT)
     } catch {

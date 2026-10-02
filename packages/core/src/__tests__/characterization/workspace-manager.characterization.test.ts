@@ -134,7 +134,7 @@ describe("WorkspaceManager.create — worktree + metadata bootstrap", () => {
       const mgr = new WorkspaceManager(nonRepoRoot)
       const issue = makeIssue({ id: "issue-create-err", identifier: "CHAR-12" })
 
-      await expect(mgr.create(issue)).rejects.toThrow(/git worktree add failed/)
+      await expect(mgr.create(issue)).rejects.toThrow(/git (?:worktree add|isolated clone) failed/)
       await expect(mgr.create(issue)).rejects.toThrow(/Fix: Ensure/)
     } finally {
       await rm(nonRepoRoot, { recursive: true, force: true })

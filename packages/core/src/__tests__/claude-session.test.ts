@@ -8,8 +8,9 @@
 import { chmodSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { AgentEvent } from "../sessions/agent-session"
+import * as sandboxModule from "../sessions/sandbox"
 
 // We need to override the spawn command. ClaudeSession spawns "claude" —
 // we'll use PATH manipulation to make it run our mock script instead.
@@ -41,10 +42,18 @@ describe("ClaudeSession — streaming output", () => {
     originalPath = process.env.PATH ?? ""
     // Prepend mock dir to PATH so "claude" resolves to our mock
     process.env.PATH = `${MOCK_DIR}:${originalPath}`
+    vi.spyOn(sandboxModule, "planSandboxedSpawn").mockImplementation(async (request) => ({
+      command: request.command,
+      args: request.args,
+      sandboxed: false,
+      platform: process.platform,
+      networkAllowlist: [],
+    }))
   })
 
   afterEach(() => {
     process.env.PATH = originalPath
+    vi.restoreAllMocks()
     try {
       unlinkSync(MOCK_SCRIPT)
     } catch {

@@ -10,8 +10,9 @@
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { AgentEvent } from "../sessions/agent-session"
+import * as sandboxModule from "../sessions/sandbox"
 
 const MOCK_DIR = resolve(tmpdir(), "av-test-agy-mock")
 const MOCK_SCRIPT = resolve(MOCK_DIR, "agy")
@@ -77,10 +78,18 @@ describe("AgySession", () => {
   beforeEach(() => {
     originalPath = process.env.PATH ?? ""
     process.env.PATH = `${MOCK_DIR}:${originalPath}`
+    vi.spyOn(sandboxModule, "planSandboxedSpawn").mockImplementation(async (request) => ({
+      command: request.command,
+      args: request.args,
+      sandboxed: false,
+      platform: process.platform,
+      networkAllowlist: [],
+    }))
   })
 
   afterEach(() => {
     process.env.PATH = originalPath
+    vi.restoreAllMocks()
     try {
       unlinkSync(MOCK_SCRIPT)
     } catch {

@@ -20,6 +20,7 @@ GUI 부재가 핵심 원인은 아니었다. 대시보드는 이미 있었지만
 
 ## 수정한 실행 결함
 
+- Linux 격리 clone은 원본 저장소의 로컬 Git 작성자 설정을 잃어 커밋과 rebase가 실패했다. `user.name`과 `user.email`만 복사하고 자격 증명·훅 설정은 복사하지 않는다. 전역 Git 설정 없이 clone→commit→rebase→merge 회귀를 검사했다.
 - Codex app-server에 현재 계약에 없는 `turn/append`를 보내고 있었다. 설치된 Codex 0.160.0의 생성 스키마와 대조하여 초기화, `turn/steer`, turn ID, 중단, 실패 상태, 사용량·파일 변경 이벤트를 정리했다.
 - NDJSON 마지막 줄에 개행이 없으면 완료 이벤트를 잃었다. 공통 디코더로 처리하고, 결과 없이 종료한 프로세스는 즉시 오류로 보고한다. stderr 파이프를 비워 대량 출력에서 멈추는 문제도 막았다.
 - OpenCode의 오류 이벤트를 정상 종료 코드 때문에 성공으로 오인할 수 있었다. 명시적 오류를 완료보다 우선한다.
@@ -65,7 +66,7 @@ flowchart LR
 
 ## 검증 범위와 남은 차이
 
-최종 로컬 검사: 135개 테스트 파일의 1,625개 테스트 통과. 커버리지는 statements 90.22%, branches 81.20%, functions 91.59%, lines 93.27%다. `./scripts/harness/validate.sh`의 5개 검사, `bun run typecheck`, `bun run lint`가 통과했다. 수정 문서의 로컬 링크 18개도 확인했다. 린트의 기존 경고는 남아 있으며 오류는 없다.
+최종 로컬 검사: 136개 테스트 파일의 1,626개 테스트 통과. 커버리지는 statements 90.10%, branches 81.03%, functions 91.40%, lines 93.19%다. `./scripts/harness/validate.sh`의 5개 검사, `bun run typecheck`, `bun run lint`가 통과했다. 수정 문서의 로컬 링크 18개도 확인했다. 린트의 기존 경고는 남아 있으며 오류는 없다. 추가로 전역·시스템 Git 설정을 비우고 CI 색상 출력을 켠 환경에서도 전체 커버리지 검사를 통과했다. Linux CI에서 드러난 OS 샌드박스 의존 fixture와 ANSI 출력 비교도 수정했다.
 
 회귀 테스트에는 임시 Git 저장소, 실제 자식 프로세스, 가짜 에이전트 프로토콜, 실제 검증 셸, 잘못된 종료·누락된 개행·중단·재개가 포함된다. OMA receipt 검사는 설치된 CLI를 사용하며, 모델 호출과 스킬 실행은 하지 않는다. 새 치프는 `runOrder`부터 worktree 생성·계획·작업·독립 검토·실제 검사·최종 승인·재개까지 같은 경로로 실행한다.
 

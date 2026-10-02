@@ -355,6 +355,8 @@ describe("buildLinuxSandboxCommand", () => {
     try {
       mkdirSync(repo)
       git(repo, "init", "-qb", "main")
+      git(repo, "config", "--local", "user.name", "Test")
+      git(repo, "config", "--local", "user.email", "test@example.invalid")
       writeFileSync(join(repo, "base.txt"), "base\n")
       git(repo, "add", "base.txt")
       git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
