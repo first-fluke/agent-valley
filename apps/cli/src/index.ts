@@ -16,6 +16,7 @@ import { resolve } from "node:path"
 import { loadConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
 import { program } from "commander"
 import pc from "picocolors"
+import { registerChiefCommands } from "./chief"
 import { registerDoctorCommand } from "./doctor"
 import { registerLinearWebhook } from "./linear-webhook-register"
 import {
@@ -470,6 +471,7 @@ program.action(() => {
 })
 
 registerDoctorCommand(program)
+registerChiefCommands(program)
 
 program.parseAsync().catch((error: unknown) => {
   console.error(pc.red(error instanceof Error ? error.message : String(error)))

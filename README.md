@@ -1,6 +1,6 @@
 # Agent Valley
 
-Linear- or GitHub-driven agent orchestration platform. Register an issue in your tracker, and AI agents (Claude, Codex, Gemini) automatically develop it in isolated git worktrees — in parallel.
+Run AI agents in isolated Git worktrees. Use Linear/GitHub issues for queued, parallel work, or give a local chief a goal to plan, delegate, review, and verify.
 
 > Read this in: [한국어](./README.ko.md)
 
@@ -10,25 +10,27 @@ Linear Issue (Todo)
   → Completion → Merge/PR → Done
 ```
 
-**Key principle:** Agent Valley is a scheduler/runner. It manages lifecycle state transitions (Todo → In Progress → Done/Cancelled) and posts work summaries. Agents focus on business logic (code writing, PR creation).
+Tracker mode manages lifecycle transitions (Todo → In Progress → Done/Cancelled) and delivers verified changes. Chief orders keep a local plan, task reviews, and verification results for a goal.
 
-Built with **TypeScript + Bun**. Supports **Claude Code, Codex, and Gemini CLI** out of the box via the AgentSession plugin system — add custom agents by implementing a single interface.
+Built with **TypeScript + Bun**. Supports **Claude Code, Codex, Antigravity, Cursor, Grok, Kimi, and OpenCode** through the AgentSession interface.
+
+See the [operability audit](./docs/reports/operability-audit-2026-10-03.md) for tested user journeys, fixes, and remaining limits.
 
 ---
 
 ## How It Works
 
-1. Create an issue on Linear (or `bun av issue "description"`)
-2. Linear sends a webhook to the dashboard
+1. Create an issue on Linear or GitHub (or `bun av issue "description"`)
+2. The tracker sends a webhook to the dashboard
 3. Orchestrator verifies HMAC signature, transitions the issue to In Progress
 4. DAG scheduler checks dependencies — blocked issues wait until blockers complete
-5. WorkspaceManager creates an isolated git worktree in `WORKSPACE_ROOT`
-6. AgentRunnerService spawns the agent (Claude / Codex / Gemini)
-7. On completion: auto-merge to main (or create PR), post summary to Linear, transition to Done
+5. WorkspaceManager creates an isolated git worktree under `workspace.root`
+6. AgentRunnerService starts the configured agent CLI
+7. After verification: merge and push or create a PR, post a tracker summary, transition to Done
 8. On failure: exponential backoff retry (60s × 2^n, max 3 attempts), then cancel with error comment
 9. Slot refill: completed agents free up capacity, next waiting issue starts automatically
 
-Multiple issues run in parallel up to `MAX_PARALLEL` (auto-detected from hardware).
+Multiple issues run in parallel up to `agent.max_parallel` (auto-detected from hardware).
 
 ---
 
@@ -38,19 +40,22 @@ Multiple issues run in parallel up to `MAX_PARALLEL` (auto-detected from hardwar
 # Clone
 git clone https://github.com/first-fluke/agent-valley.git
 cd agent-valley
-bun install
+bun install --frozen-lockfile
 
 # Interactive setup wizard
 bun av setup
+bun av doctor
 
-# Or copy template and fill in manually
-cp valley.example.yaml valley.yaml
-
-# Start (dashboard + orchestrator + tunnel — ngrok by default, or Cloudflare Tunnel)
-bun av dev
+# Start dashboard + orchestrator + tunnel in the background without a production build
+bun av up --dev
+bun av status
 ```
 
-Copy the tunnel URL printed to the console into Linear webhook settings → `{url}/api/webhook`.
+Run from this checkout and set `workspace.root` to the existing Git repository you want agents to work on. Configure a code verification command or an analysis report path in the wizard. See the [installation, first-task and recovery guide](./docs/guides/environment-setup.md).
+
+For a goal without a tracker, use `bun av order "Fix the login failure" --workspace /absolute/path/to/repo --verify "bun run test" --agent codex`. See [chief orders and named personas](./docs/guides/chief-missions.md) for OMA integration, research reports, and resume behavior.
+
+The CLI attempts automatic Linear webhook registration. For manual registration use `{url}/api/webhook`; GitHub uses `{url}/api/webhook/github`.
 The default tunnel provider is ngrok; set `tunnel.provider: cloudflare` in `valley.yaml` to use Cloudflare Tunnel (see Configuration below).
 
 ---
@@ -59,8 +64,10 @@ The default tunnel provider is ngrok; set `tunnel.provider: cloudflare` in `vall
 
 ```bash
 bun av setup              # Interactive setup wizard
+bun av doctor             # Validate configuration and runtime prerequisites
 bun av dev                # Start in foreground (file watching + auto-restart)
-bun av up                 # Start as background daemon
+bun av up --dev           # Start background daemon without a production build
+bun av up                 # Build dashboard, then start background daemon
 bun av down               # Stop background daemon
 bun av status             # Query orchestrator status
 bun av top                # Live agent status monitor
@@ -68,6 +75,8 @@ bun av logs               # Tail dashboard logs (-n for line count)
 bun av login              # Login to team (Supabase auth)
 bun av logout             # Logout from team
 bun av invite             # Copy team config to clipboard
+bun av order --help       # Give a chief a goal with a required acceptance check
+bun av missions           # List saved local chief orders
 ```
 
 ### Creating Issues
@@ -80,6 +89,8 @@ bun av issue "add tests" --parent ACR-10           # Create as sub-issue
 bun av issue "migrate db" --blocked-by ACR-5       # Set dependency
 bun av issue "refactor auth" --breakdown           # Auto-decompose into sub-tasks
 ```
+
+`--parent`, `--blocked-by`, and `--breakdown` require Linear. GitHub supports plain issue creation and `--scope`; `--raw` works with either tracker without Claude expansion.
 
 ---
 
@@ -103,7 +114,7 @@ linear:
   api_key: lin_api_xxx
 
 agent:
-  type: claude          # Default agent: claude / codex / gemini
+  type: claude          # Default agent: claude / codex / antigravity / cursor / grok / kimi / opencode
   timeout: 3600
   max_retries: 3
   max_parallel: 3       # Max concurrent agent runs (default: hardware-detected recommendation)
@@ -142,10 +153,15 @@ linear:
 
 # GitHub tracker (v0.2+) — used when tracker.kind = github.
 # github:
-#   token: ghp_xxx
+#   token_env: GITHUB_TOKEN
 #   owner: my-org
 #   repo: my-repo
 #   webhook_secret: whsec_xxx
+#   labels:
+#     todo: valley:todo
+#     in_progress: valley:wip
+#     done: valley:done
+#     cancelled: valley:cancelled
 
 workspace:
   root: /absolute/path/to/target-repo
@@ -169,18 +185,18 @@ routing:
       delivery_mode: pr
       verify_command: "pytest && mypy ."   # overrides verify.command below for this route
 
-# Verification Gate (optional, v0.2+). Runs before delivery and before the
+# Verification Gate (required for code tasks). Runs before delivery and before the
 # issue transitions to Done; on failure the agent retries with the captured
-# output as context (existing retry queue). Omit to disable (pre-gate behavior).
-# verify:
-#   command: "bun run typecheck && bun test"
-#   timeout_sec: 600
+# output as context. Set this to commands available in the target repository.
+verify:
+  command: "bun run typecheck && bun run test"
+  timeout_sec: 600
 
 # Score-Based Routing (optional)
 scoring:
   model: haiku
   routes:
-    easy:  { min: 1, max: 3, agent: gemini }
+    easy:  { min: 1, max: 3, agent: antigravity }
     medium: { min: 4, max: 7, agent: codex }
     hard:  { min: 8, max: 10, agent: claude }
 
@@ -231,7 +247,7 @@ agent-valley/
 │           ├── config/         YAML config loader (settings.yaml + valley.yaml)
 │           ├── domain/         Pure types: Issue, Workspace, RunAttempt, DAG
 │           ├── orchestrator/   State machine, agent runner, retry queue, DAG scheduler
-│           ├── sessions/       Agent plugins: Claude, Codex, Gemini
+│           ├── sessions/       Agent plugins: Claude, Codex, Antigravity
 │           ├── tracker/        Linear GraphQL client + webhook HMAC verification
 │           ├── workspace/      Git worktree lifecycle + merge/PR
 │           └── observability/  Structured JSON/text logger
@@ -292,13 +308,17 @@ domain ports so adapters can be swapped without touching the orchestrator:
 
 ### Agent Session Plugins
 
-| Agent | Protocol | Mode |
+| Agent | Config value | Executable |
 |---|---|---|
-| **Claude** | NDJSON streaming (`claude --print --output-format stream-json`) | Stateless — new process per execute |
-| **Codex** | JSON-RPC 2.0 over stdio (`codex app-server --listen stdio://`) | Persistent connection |
-| **Gemini** | ACP persistent / one-shot JSON fallback | Dual-mode with feature detection |
+| Claude Code | `claude` | `claude` |
+| Codex | `codex` | `codex` |
+| Antigravity | `antigravity` | `agy` |
+| Cursor | `cursor` | `cursor-agent` |
+| Grok | `grok` | `grok` |
+| Kimi | `kimi` | `kimi` |
+| OpenCode | `opencode` | `opencode` |
 
-Extensible via `SessionFactory.registerSession()` — implement the `AgentSession` interface to add custom agents.
+Extensible via `registerSession()` — implement the `AgentSession` interface to add custom agents.
 
 ---
 
@@ -307,7 +327,8 @@ Extensible via `SessionFactory.registerSession()` — implement the `AgentSessio
 PixiJS-rendered office scene showing real-time agent status:
 
 - **Agent characters** at desks with issue identifier bubbles
-- **Office visualization** — desks scale to `MAX_PARALLEL`, coffee machine, server rack, etc.
+- **Office visualization** — desks scale to `agent.max_parallel`, coffee machine, server rack, etc.
+- **Operations panel** — dependency blockers, retry reasons and next retry times
 - **System metrics** — CPU, memory, uptime
 - **SSE real-time events** — instant updates on agent.start, agent.done, agent.failed
 - **Team HUD** — multi-node view (requires Supabase config)
@@ -320,8 +341,8 @@ PixiJS-rendered office scene showing real-time agent status:
 | `/api/webhook/github` | POST | GitHub webhook receiver (HMAC-SHA256 verified) |
 | `/api/events` | GET | SSE stream for real-time dashboard updates |
 | `/api/status` | GET | JSON orchestrator status snapshot |
-| `/api/health` | GET | Health check (503 if orchestrator not initialized) |
-| `/api/intervention` | POST | Live agent intervention (pause / resume / append_prompt / abort). Localhost-only in v0.2 |
+| `/api/health` | GET | Health check (503 if the orchestrator is unavailable or stopped) |
+| `/api/intervention` | POST | Live agent intervention; local by default, token-authenticated when configured |
 | `/api/metrics` | GET | Prometheus-format metrics (enabled via `observability.prometheus.enabled`) |
 
 ---
@@ -348,10 +369,10 @@ Per-issue and per-day token / cost caps prevent runaway agents. Budgets are eval
 Mid-run control from the dashboard via `POST /api/intervention`:
 
 - `pause` / `resume` — Codex native (JSON-RPC)
-- `append_prompt` — native on Codex / Gemini ACP; cancel + respawn on stateless Claude
+- `append_prompt` — native on Codex / Antigravity ACP; cancel + respawn on stateless Claude
 - `abort` — force-kill the session
 
-Commands flow through `InterventionBus` (FIFO per attempt, last-writer-wins). The HTTP surface is localhost-only in v0.2; remote access lands in v0.3 behind a signed session token.
+Commands flow through `InterventionBus`. Without a configured intervention token, only local requests are accepted. Setting `SYMPHONY_INTERVENTION_TOKEN` requires a matching bearer token or browser session on every request, including local requests. The remote flag is not needed when a token is configured; setting `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` without a token rejects all requests. See [dashboard access](./docs/guides/environment-setup.md#dashboard-and-webhook-access).
 
 ### DAG Dependency Scheduling
 
@@ -377,7 +398,7 @@ On boot, the orchestrator fetches all Todo + In Progress issues from the configu
 ## Development
 
 ```bash
-bun test                        # Run tests (vitest, 283 tests)
+bun run test                    # Run the Vitest suite
 bun run lint                    # Lint (biome)
 bun run lint:fix                # Auto-fix lint issues
 ./scripts/harness/validate.sh   # Architecture validation
@@ -408,7 +429,7 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 - **Least privilege** — agents operate only within their assigned worktree
 - **Secret management** — secrets in `valley.yaml` and `settings.yaml` (gitignored), pre-commit secret detection
 - **Fetch timeout** — 30s timeout on all tracker API calls
-- **Intervention surface** — `POST /api/intervention` is localhost-only (best-effort `Host` header check) unless `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` is set together with `SYMPHONY_INTERVENTION_TOKEN` (a bearer token is required for every non-local request; the flag alone without a token rejects everything)
+- **Intervention access** — local by default. A configured `SYMPHONY_INTERVENTION_TOKEN` requires authentication for local and remote requests. Browser mutations require a matching Origin; a valid bearer token also authorizes API clients. The remote flag without a token rejects all requests.
 - **Sandbox execution** — every spawned agent CLI runs inside an OS-level sandbox (`sandbox-exec` on macOS, `bwrap` on Linux); spawns fail closed if no sandbox is available unless `SYMPHONY_ALLOW_UNSANDBOXED=1` is explicitly set
 - **Audit logging** — all agent actions logged in structured JSON
 

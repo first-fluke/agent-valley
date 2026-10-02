@@ -1,6 +1,6 @@
 # Agent Valley
 
-Linear / GitHub 이슈 기반 에이전트 오케스트레이션 플랫폼. 트래커에 이슈를 등록하면 AI 에이전트(Claude, Codex, Gemini)가 격리된 git worktree에서 자동으로 개발을 수행합니다 — 병렬로.
+격리된 Git worktree에서 AI 에이전트를 실행합니다. Linear/GitHub 이슈를 병렬로 처리하거나, 로컬 chief에게 목표를 주고 계획·분담·검토·검증을 맡길 수 있습니다.
 
 > Read in: [English](./README.md)
 
@@ -10,25 +10,27 @@ Linear Issue (Todo)
   → Completion → Merge/PR → Done
 ```
 
-**핵심 원칙:** Agent Valley는 스케줄러/러너입니다. 생명주기 상태 전환(Todo → In Progress → Done/Cancelled)을 관리하고 작업 요약을 게시합니다. 에이전트는 비즈니스 로직(코드 작성, PR 생성)에 집중합니다.
+트래커 모드는 상태 전환(Todo → In Progress → Done/Cancelled)을 관리하고 검증된 변경을 전달합니다. Chief 명령은 목표에 대한 계획, 작업별 검토, 검증 결과를 로컬에 저장합니다.
 
-**TypeScript + Bun**으로 구축되었습니다. AgentSession 플러그인 시스템을 통해 **Claude Code, Codex, Gemini CLI**를 기본 지원하며 — 단일 인터페이스를 구현하여 커스텀 에이전트를 추가할 수 있습니다.
+**TypeScript + Bun**으로 구축되었습니다. AgentSession 인터페이스로 **Claude Code, Codex, Antigravity, Cursor, Grok, Kimi, OpenCode**를 지원합니다.
+
+사용자별 운용 과정, 수정 사항, 검증 범위와 남은 제약은 [운용 점검 보고서](./docs/reports/operability-audit-2026-10-03.md)에 있습니다.
 
 ---
 
 ## 작동 방식
 
-1. Linear에서 이슈를 생성합니다 (또는 `bun av issue "description"`)
-2. Linear이 대시보드로 웹훅을 전송합니다
+1. Linear 또는 GitHub에서 이슈를 생성합니다 (또는 `bun av issue "description"`)
+2. 트래커가 대시보드로 웹훅을 전송합니다
 3. Orchestrator가 HMAC 서명을 검증하고 이슈를 In Progress로 전환합니다
 4. DAG 스케줄러가 의존성을 확인합니다 — 차단된 이슈는 차단 이슈가 완료될 때까지 대기합니다
-5. WorkspaceManager가 `WORKSPACE_ROOT`에 격리된 git worktree를 생성합니다
-6. AgentRunnerService가 에이전트(Claude / Codex / Gemini)를 실행합니다
-7. 완료 시: main에 자동 병합(또는 PR 생성), Linear에 요약 게시, Done으로 전환
+5. WorkspaceManager가 `workspace.root` 아래에 격리된 git worktree를 생성합니다
+6. AgentRunnerService가 설정된 에이전트 CLI를 실행합니다
+7. 검증 통과 후: 병합·푸시 또는 PR 생성, 트래커에 요약 게시, Done으로 전환
 8. 실패 시: 지수 백오프 재시도(60s × 2^n, 최대 3회), 이후 에러 코멘트와 함께 취소
 9. 슬롯 보충: 완료된 에이전트가 용량을 반환하면 대기 중인 다음 이슈가 자동으로 시작됩니다
 
-`MAX_PARALLEL`(하드웨어에서 자동 감지)까지 여러 이슈가 병렬로 실행됩니다.
+`agent.max_parallel`(하드웨어에서 자동 감지)까지 여러 이슈가 병렬로 실행됩니다.
 
 ---
 
@@ -38,19 +40,22 @@ Linear Issue (Todo)
 # 클론
 git clone https://github.com/first-fluke/agent-valley.git
 cd agent-valley
-bun install
+bun install --frozen-lockfile
 
 # 대화형 설정 마법사
 bun av setup
+bun av doctor
 
-# 또는 템플릿 복사 후 수동 설정
-cp valley.example.yaml valley.yaml
-
-# 시작 (dashboard + orchestrator + 터널 — 기본 ngrok, Cloudflare Tunnel 선택 가능)
-bun av dev
+# 프로덕션 빌드 없이 dashboard + orchestrator + 터널을 백그라운드로 시작
+bun av up --dev
+bun av status
 ```
 
-콘솔에 출력된 터널 URL을 Linear 웹훅 설정에 복사합니다 → `{url}/api/webhook`.
+Agent Valley 체크아웃에서 실행하고, `workspace.root`에는 작업할 기존 Git 레포의 절대 경로를 지정합니다. 설정 마법사에서 코드 검증 명령 또는 분석 보고서 경로까지 설정하세요. [설치·첫 작업·복구 가이드](./docs/guides/environment-setup.md)를 참고하세요.
+
+트래커 없이 목표를 맡기려면 `bun av order "로그인 오류를 고쳐줘" --workspace /absolute/path/to/repo --verify "bun run test" --agent codex`를 실행합니다. OMA 연동, 이름이 있는 페르소나, 리서치 보고서, 재개 방법은 [chief 명령 가이드](./docs/guides/chief-missions.md)에 있습니다.
+
+Linear 웹훅은 CLI가 자동 등록을 시도합니다. 수동 등록 주소는 `{url}/api/webhook`, GitHub는 `{url}/api/webhook/github`입니다.
 터널 프로바이더 기본값은 ngrok 이며, `valley.yaml` 의 `tunnel.provider: cloudflare` 로 Cloudflare Tunnel 을 선택할 수 있습니다 (아래 설정 섹션 참조).
 
 ---
@@ -59,8 +64,10 @@ bun av dev
 
 ```bash
 bun av setup              # 대화형 설정 마법사
+bun av doctor             # 설정·실행 전제조건 진단
 bun av dev                # 포그라운드로 시작 (파일 감시 + 자동 재시작)
-bun av up                 # 백그라운드 데몬으로 시작
+bun av up --dev           # 프로덕션 빌드 없이 백그라운드 데몬으로 시작
+bun av up                 # 대시보드 빌드 후 백그라운드 데몬으로 시작
 bun av down               # 백그라운드 데몬 중지
 bun av status             # Orchestrator 상태 조회
 bun av top                # 실시간 에이전트 상태 모니터
@@ -68,6 +75,8 @@ bun av logs               # 대시보드 로그 조회 (-n으로 라인 수 지�
 bun av login              # 팀 로그인 (Supabase 인증)
 bun av logout             # 팀 로그아웃
 bun av invite             # 팀 설정을 클립보드에 복사
+bun av order --help       # chief에게 목표와 필수 검증 명령 전달
+bun av missions           # 저장된 로컬 chief 작업 목록
 ```
 
 ### 이슈 생성
@@ -80,6 +89,8 @@ bun av issue "add tests" --parent ACR-10           # 하위 이슈로 생성
 bun av issue "migrate db" --blocked-by ACR-5       # 의존성 설정
 bun av issue "refactor auth" --breakdown           # 하위 작업으로 자동 분해
 ```
+
+`--parent`, `--blocked-by`, `--breakdown`은 Linear 전용입니다. GitHub는 일반 이슈와 `--scope`를 지원합니다. 두 트래커 모두 `--raw`로 Claude의 설명 확장 없이 생성할 수 있습니다.
 
 ---
 
@@ -103,7 +114,7 @@ linear:
   api_key: lin_api_xxx
 
 agent:
-  type: claude          # 기본 에이전트: claude / codex / gemini
+  type: claude          # 기본 에이전트: claude / codex / antigravity / cursor / grok / kimi / opencode
   timeout: 3600
   max_retries: 3
   max_parallel: 3       # 동시 실행 가능한 에이전트 수 (기본값: 하드웨어 감지 기반 권장치)
@@ -142,10 +153,15 @@ linear:
 
 # GitHub 트래커 (v0.2+) — tracker.kind = github 일 때 사용합니다.
 # github:
-#   token: ghp_xxx
+#   token_env: GITHUB_TOKEN
 #   owner: my-org
 #   repo: my-repo
 #   webhook_secret: whsec_xxx
+#   labels:
+#     todo: valley:todo
+#     in_progress: valley:wip
+#     done: valley:done
+#     cancelled: valley:cancelled
 
 workspace:
   root: /absolute/path/to/target-repo
@@ -169,18 +185,18 @@ routing:
       delivery_mode: pr
       verify_command: "pytest && mypy ."   # 이 라우트에 한해 아래 verify.command 를 덮어씁니다
 
-# 검증 게이트 (선택 사항, v0.2+). 배포/PR 생성과 Done 전환 전에 실행되며,
+# 검증 게이트 (코드 작업에 필수). 배포/PR 생성과 Done 전환 전에 실행되며,
 # 실패 시 캡처된 출력을 컨텍스트로 기존 재시도 큐를 통해 다시 시도합니다.
-# 생략 시 게이트 이전 동작(비활성)을 유지합니다.
-# verify:
-#   command: "bun run typecheck && bun test"
-#   timeout_sec: 600
+# 대상 레포에 실제로 있는 검증 명령을 지정하세요.
+verify:
+  command: "bun run typecheck && bun run test"
+  timeout_sec: 600
 
 # 점수 기반 라우팅 (선택 사항)
 scoring:
   model: haiku
   routes:
-    easy:  { min: 1, max: 3, agent: gemini }
+    easy:  { min: 1, max: 3, agent: antigravity }
     medium: { min: 4, max: 7, agent: codex }
     hard:  { min: 8, max: 10, agent: claude }
 
@@ -231,7 +247,7 @@ agent-valley/
 │           ├── config/         YAML 설정 로더 (settings.yaml + valley.yaml)
 │           ├── domain/         순수 타입: Issue, Workspace, RunAttempt, DAG
 │           ├── orchestrator/   상태 머신, 에이전트 러너, 재시도 큐, DAG 스케줄러
-│           ├── sessions/       에이전트 플러그인: Claude, Codex, Gemini
+│           ├── sessions/       에이전트 플러그인: Claude, Codex, Antigravity
 │           ├── tracker/        Linear GraphQL 클라이언트 + 웹훅 HMAC 검증
 │           ├── workspace/      Git worktree 생명주기 + 병합/PR
 │           └── observability/  구조화된 JSON/텍스트 로거
@@ -291,13 +307,17 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 
 ### Agent Session 플러그인
 
-| 에이전트 | 프로토콜 | 모드 |
+| 에이전트 | 설정 값 | 실행 파일 |
 |---|---|---|
-| **Claude** | NDJSON 스트리밍 (`claude --print --output-format stream-json`) | Stateless — 실행마다 새 프로세스 |
-| **Codex** | JSON-RPC 2.0 over stdio (`codex app-server --listen stdio://`) | Persistent 연결 |
-| **Gemini** | ACP persistent / one-shot JSON 폴백 | 기능 감지를 통한 듀얼 모드 |
+| Claude Code | `claude` | `claude` |
+| Codex | `codex` | `codex` |
+| Antigravity | `antigravity` | `agy` |
+| Cursor | `cursor` | `cursor-agent` |
+| Grok | `grok` | `grok` |
+| Kimi | `kimi` | `kimi` |
+| OpenCode | `opencode` | `opencode` |
 
-`SessionFactory.registerSession()`을 통해 확장 가능 — `AgentSession` 인터페이스를 구현하여 커스텀 에이전트를 추가하세요.
+`registerSession()`을 통해 확장 가능 — `AgentSession` 인터페이스를 구현하여 커스텀 에이전트를 추가하세요.
 
 ---
 
@@ -306,7 +326,8 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 실시간 에이전트 상태를 보여주는 PixiJS 렌더링 오피스 장면:
 
 - **에이전트 캐릭터** — 이슈 식별자 말풍선이 있는 책상의 에이전트
-- **오피스 시각화** — 책상이 `MAX_PARALLEL`에 맞게 조정, 커피 머신, 서버 랙 등
+- **오피스 시각화** — 책상이 `agent.max_parallel`에 맞게 조정, 커피 머신, 서버 랙 등
+- **운용 패널** — 의존성 차단 사유, 재시도 이유와 예정 시각
 - **시스템 메트릭** — CPU, 메모리, 가동 시간
 - **SSE 실시간 이벤트** — agent.start, agent.done, agent.failed 즉시 업데이트
 - **팀 HUD** — 멀티 노드 뷰 (Supabase 설정 필요)
@@ -319,8 +340,8 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 | `/api/webhook/github` | POST | GitHub 웹훅 수신기 (HMAC-SHA256 검증) |
 | `/api/events` | GET | 실시간 대시보드 업데이트를 위한 SSE 스트림 |
 | `/api/status` | GET | Orchestrator 상태 JSON 스냅샷 |
-| `/api/health` | GET | 헬스 체크 (Orchestrator 미초기화 시 503) |
-| `/api/intervention` | POST | 라이브 에이전트 인터벤션 (pause / resume / append_prompt / abort). v0.2는 로컬호스트 전용 |
+| `/api/health` | GET | 헬스 체크 (Orchestrator 초기화 실패 또는 중지 시 503) |
+| `/api/intervention` | POST | 라이브 에이전트 제어. 기본은 로컬 접근, 토큰 설정 시 인증 필요 |
 | `/api/metrics` | GET | Prometheus 메트릭 (`observability.prometheus.enabled` 시 활성화) |
 
 ---
@@ -347,10 +368,10 @@ OpenTelemetry OTLP HTTP 트레이스와 Prometheus 메트릭이 내장돼 있으
 대시보드에서 실행 중인 에이전트를 제어할 수 있습니다 (`POST /api/intervention`):
 
 - `pause` / `resume` — Codex 네이티브 (JSON-RPC)
-- `append_prompt` — Codex / Gemini ACP 는 네이티브, stateless Claude 는 cancel + 재스폰
+- `append_prompt` — Codex / Antigravity ACP 는 네이티브, stateless Claude 는 cancel + 재스폰
 - `abort` — 세션 강제 종료
 
-모든 커맨드는 `InterventionBus` 를 통과합니다 (attempt 별 FIFO, last-writer-wins). HTTP 표면은 v0.2 에서 로컬호스트 전용이며, 원격 접근은 v0.3 에서 서명 세션 토큰과 함께 도입될 예정입니다.
+제어 명령은 `InterventionBus`를 통과합니다. 인터벤션 토큰이 없으면 로컬 요청만 허용합니다. `SYMPHONY_INTERVENTION_TOKEN`을 설정하면 로컬·원격 요청 모두 일치하는 bearer 토큰 또는 브라우저 세션이 필요합니다. 토큰 설정 시 원격 플래그는 필요하지 않으며, 토큰 없이 `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1`만 설정하면 모든 요청을 거부합니다. [대시보드 접근 설정](./docs/guides/environment-setup.md#dashboard-and-webhook-access)을 참고하세요.
 
 ### DAG 의존성 스케줄링
 
@@ -376,7 +397,7 @@ OpenTelemetry OTLP HTTP 트레이스와 Prometheus 메트릭이 내장돼 있으
 ## 개발
 
 ```bash
-bun test                        # 테스트 실행 (vitest, 283개 테스트)
+bun run test                    # Vitest 테스트 실행
 bun run lint                    # 린트 (biome)
 bun run lint:fix                # 린트 이슈 자동 수정
 ./scripts/harness/validate.sh   # 아키텍처 검증
@@ -407,7 +428,7 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 - **최소 권한** — 에이전트는 할당된 worktree 내에서만 작동
 - **시크릿 관리** — 시크릿은 `valley.yaml`과 `settings.yaml`에만 저장 (gitignore 처리), pre-commit 시크릿 탐지
 - **Fetch 타임아웃** — 모든 트래커 API 호출에 30초 타임아웃
-- **인터벤션 표면** — `POST /api/intervention` 은 `Host` 헤더 기준(베스트 에포트) 로컬호스트 전용이며, `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` 과 `SYMPHONY_INTERVENTION_TOKEN` 을 함께 설정해야 외부 접근이 허용됩니다 (토큰 없이 플래그만 켜면 모든 요청이 거부됩니다)
+- **인터벤션 접근** — 기본은 로컬 전용입니다. `SYMPHONY_INTERVENTION_TOKEN` 설정 시 로컬·원격 모두 인증을 요구합니다. 브라우저 제어 요청에는 일치하는 Origin이 필요하며 API 클라이언트는 유효한 bearer 토큰을 사용합니다. 토큰 없이 원격 플래그만 설정하면 모든 요청을 거부합니다.
 - **샌드박스 실행** — 스폰되는 모든 에이전트 CLI는 OS 수준 샌드박스(macOS는 `sandbox-exec`, Linux는 `bwrap`) 안에서 실행되며, 샌드박스를 사용할 수 없으면 `SYMPHONY_ALLOW_UNSANDBOXED=1` 을 명시적으로 설정하지 않는 한 스폰이 거부됩니다(fail-closed)
 - **감사 로깅** — 모든 에이전트 작업을 구조화된 JSON으로 기록
 
