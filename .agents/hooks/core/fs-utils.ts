@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs"
-import { dirname, join, sep } from "node:path"
+import { existsSync } from "node:fs";
+import { dirname, join, sep } from "node:path";
 
 /**
  * Normalize a filesystem path to POSIX (forward-slash) form so output
@@ -7,7 +7,7 @@ import { dirname, join, sep } from "node:path"
  * on Windows. Mirrors `cli/utils/fs-utils.ts#toPosixPath`.
  */
 export function toPosixPath(p: string): string {
-  return sep === "/" ? p : p.split(sep).join("/")
+  return sep === "/" ? p : p.split(sep).join("/");
 }
 
 /**
@@ -16,15 +16,15 @@ export function toPosixPath(p: string): string {
  * (e.g. packages/i18n during a build) from creating state files
  * in the wrong location.
  */
-const MAX_DEPTH = 20
+const MAX_DEPTH = 20;
 
 export function resolveGitRoot(startDir: string): string {
-  let dir = startDir
+  let dir = startDir;
   for (let i = 0; i < MAX_DEPTH; i++) {
-    if (existsSync(join(dir, ".git"))) return dir
-    const parent = dirname(dir)
-    if (parent === dir) return startDir
-    dir = parent
+    if (existsSync(join(dir, ".git"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return startDir;
+    dir = parent;
   }
-  return startDir
+  return startDir;
 }

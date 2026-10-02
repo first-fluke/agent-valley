@@ -13,4 +13,4 @@ export {
   setActiveSession,
   setLastSession,
   updateIndex,
-} from "./state-core.ts"
+} from "./state-core.ts";

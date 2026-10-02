@@ -32,22 +32,22 @@
 //       max_lines: 500     # line budget (default 500)
 // Defaults apply when the file or keys are absent.
 
-import { spawn } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
-import { isAbsolute, join, relative, resolve } from "node:path"
-import { agyConversationId, agyProjectDir, isAgyInput } from "./agy-input.ts"
-import { toPosixPath } from "./fs-utils.ts"
-import { makeBlockOutput } from "./hook-output.ts"
-import { atomicWriteJson } from "./state-marker.ts"
-import type { HandlerCtx, HandlerResult, HookInput, Vendor } from "./types.ts"
-import { getProjectDir } from "./vendor-detect.ts"
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { agyConversationId, agyProjectDir, isAgyInput } from "./agy-input.ts";
+import { toPosixPath } from "./fs-utils.ts";
+import { makeBlockOutput } from "./hook-output.ts";
+import { atomicWriteJson } from "./state-marker.ts";
+import type { HandlerCtx, HandlerResult, HookInput, Vendor } from "./types.ts";
+import { getProjectDir } from "./vendor-detect.ts";
 
 // --- Defaults ---
 
-export const DEFAULT_MAX_LINES = 500
+export const DEFAULT_MAX_LINES = 500;
 
 /** Stop blocks emitted per file before giving up (termination guarantee). */
-export const MAX_STOP_BLOCKS = 2
+export const MAX_STOP_BLOCKS = 2;
 
 /**
  * Vendors whose Stop hook output cannot block the stop (kiro: hook output is
@@ -56,10 +56,10 @@ export const MAX_STOP_BLOCKS = 2
  * DIRECTLY via a detached `oma agent spawn refactor-engineer` on the first
  * block of each offending file.
  */
-const DIRECT_DISPATCH_VENDORS = new Set<string>(["kiro"])
+const DIRECT_DISPATCH_VENDORS = new Set<string>(["kiro"]);
 
-const MAIN_CONFIG_RELPATH = join(".agents", "oma-config.yaml")
-const STATE_RELDIR = join(".agents", "state", "refactor-guard")
+const MAIN_CONFIG_RELPATH = join(".agents", "oma-config.yaml");
+const STATE_RELDIR = join(".agents", "state", "refactor-guard");
 
 /**
  * File-editing tool names across vendor dialects, lowercase (matched
@@ -85,7 +85,7 @@ const EDIT_TOOLS = new Set([
   "create_file", // grok
   "str_replace", // grok
   "fs_write", // kiro
-])
+]);
 
 /** Extensions the guard treats as refactorable source code. */
 const CODE_EXTENSIONS = new Set([
@@ -116,7 +116,7 @@ const CODE_EXTENSIONS = new Set([
   "svelte",
   "m",
   "mm",
-])
+]);
 
 /** Path segments that mark generated / dependency / artifact trees. */
 const EXCLUDED_SEGMENTS = [
@@ -130,13 +130,13 @@ const EXCLUDED_SEGMENTS = [
   ".next",
   ".agents/results",
   ".agents/state",
-]
+];
 
 // --- Config loading (regex-based, consistent with scm-guard's yaml handling) ---
 
 export interface GuardConfig {
-  enabled: boolean
-  maxLines: number
+  enabled: boolean;
+  maxLines: number;
 }
 
 /**
@@ -149,7 +149,7 @@ function scalarValue(raw: string): string {
   return raw
     .replace(/\s+#.*$/, "")
     .trim()
-    .replace(/^["']|["']$/g, "")
+    .replace(/^["']|["']$/g, "");
 }
 
 /**
@@ -159,82 +159,87 @@ function scalarValue(raw: string): string {
 export function loadGuardConfig(projectDir: string): GuardConfig {
   // Forced refactoring is opt-in: enabled stays false until the project sets
   // `refactor_guard.enabled: true` in oma-config.yaml.
-  const defaults: GuardConfig = { enabled: false, maxLines: DEFAULT_MAX_LINES }
-  const configPath = join(projectDir, MAIN_CONFIG_RELPATH)
-  if (!existsSync(configPath)) return defaults
+  const defaults: GuardConfig = { enabled: false, maxLines: DEFAULT_MAX_LINES };
+  const configPath = join(projectDir, MAIN_CONFIG_RELPATH);
+  if (!existsSync(configPath)) return defaults;
   try {
-    const content = readFileSync(configPath, "utf-8")
-    const lines = content.split(/\r?\n/)
-    const start = lines.findIndex((l) => /^refactor_guard:\s*(#.*)?$/.test(l))
-    if (start === -1) return defaults
-    const config = { ...defaults }
+    const content = readFileSync(configPath, "utf-8");
+    const lines = content.split(/\r?\n/);
+    const start = lines.findIndex((l) => /^refactor_guard:\s*(#.*)?$/.test(l));
+    if (start === -1) return defaults;
+    const config = { ...defaults };
     for (let i = start + 1; i < lines.length; i++) {
-      const line = lines[i] ?? ""
-      if (/^\s*(#|$)/.test(line)) continue // comments / blanks inside block
-      if (!/^\s/.test(line)) break // end of the indented block
-      const enabled = line.match(/^\s+enabled:\s*(\S.*)$/)?.[1]
+      const line = lines[i] ?? "";
+      if (/^\s*(#|$)/.test(line)) continue; // comments / blanks inside block
+      if (!/^\s/.test(line)) break; // end of the indented block
+      const enabled = line.match(/^\s+enabled:\s*(\S.*)$/)?.[1];
       if (enabled) {
         // YAML 1.1 booleans, since that is what the surrounding config uses.
-        const value = scalarValue(enabled).toLowerCase()
-        if (/^(true|yes|on)$/.test(value)) config.enabled = true
-        else if (/^(false|no|off)$/.test(value)) config.enabled = false
+        const value = scalarValue(enabled).toLowerCase();
+        if (/^(true|yes|on)$/.test(value)) config.enabled = true;
+        else if (/^(false|no|off)$/.test(value)) config.enabled = false;
       }
-      const maxLines = line.match(/^\s+max_lines:\s*(\S.*)$/)?.[1]
+      const maxLines = line.match(/^\s+max_lines:\s*(\S.*)$/)?.[1];
       if (maxLines) {
-        const value = scalarValue(maxLines)
-        if (/^\d+$/.test(value)) config.maxLines = Number.parseInt(value, 10)
+        const value = scalarValue(maxLines);
+        if (/^\d+$/.test(value)) config.maxLines = Number.parseInt(value, 10);
       }
     }
-    return config
+    return config;
   } catch {
-    return defaults
+    return defaults;
   }
 }
 
 // --- File classification ---
 
 export function isRefactorableFile(relPath: string): boolean {
-  const posix = toPosixPath(relPath)
-  if (posix.startsWith("..")) return false // outside the project
-  const ext = posix.match(/\.([^./]+)$/)?.[1]?.toLowerCase()
-  if (!ext || !CODE_EXTENSIONS.has(ext)) return false
-  if (posix.endsWith(".d.ts")) return false // generated declarations
-  return !EXCLUDED_SEGMENTS.some((seg) => posix === seg || posix.startsWith(`${seg}/`) || posix.includes(`/${seg}/`))
+  const posix = toPosixPath(relPath);
+  if (posix.startsWith("..")) return false; // outside the project
+  const ext = posix.match(/\.([^./]+)$/)?.[1]?.toLowerCase();
+  if (!ext || !CODE_EXTENSIONS.has(ext)) return false;
+  if (posix.endsWith(".d.ts")) return false; // generated declarations
+  return !EXCLUDED_SEGMENTS.some(
+    (seg) =>
+      posix === seg ||
+      posix.startsWith(`${seg}/`) ||
+      posix.includes(`/${seg}/`),
+  );
 }
 
 export function countLines(content: string): number {
-  if (content.length === 0) return 0
-  const parts = content.split(/\r?\n/)
+  if (content.length === 0) return 0;
+  const parts = content.split(/\r?\n/);
   // A trailing newline yields one empty final element — not a line.
-  return parts[parts.length - 1] === "" ? parts.length - 1 : parts.length
+  return parts[parts.length - 1] === "" ? parts.length - 1 : parts.length;
 }
 
 // --- Session state (touched files + per-file stop-block counts) ---
 
 interface GuardState {
   /** Project-relative POSIX paths of code files edited this session. */
-  touched: Record<string, { lines: number; ts: string }>
+  touched: Record<string, { lines: number; ts: string }>;
   /** Stop blocks already emitted per file (capped at MAX_STOP_BLOCKS). */
-  stopBlocks: Record<string, number>
+  stopBlocks: Record<string, number>;
 }
 
 function statePath(projectDir: string, sid: string): string {
   // sid comes from the vendor payload; sanitize for filesystem use.
-  const safeSid = sid.replace(/[^A-Za-z0-9._-]/g, "_") || "unknown"
-  return join(projectDir, STATE_RELDIR, `${safeSid}.json`)
+  const safeSid = sid.replace(/[^A-Za-z0-9._-]/g, "_") || "unknown";
+  return join(projectDir, STATE_RELDIR, `${safeSid}.json`);
 }
 
 function readState(projectDir: string, sid: string): GuardState {
-  const path = statePath(projectDir, sid)
-  if (!existsSync(path)) return { touched: {}, stopBlocks: {} }
+  const path = statePath(projectDir, sid);
+  if (!existsSync(path)) return { touched: {}, stopBlocks: {} };
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf-8")) as GuardState
+    const parsed = JSON.parse(readFileSync(path, "utf-8")) as GuardState;
     return {
       touched: parsed.touched ?? {},
       stopBlocks: parsed.stopBlocks ?? {},
-    }
+    };
   } catch {
-    return { touched: {}, stopBlocks: {} }
+    return { touched: {}, stopBlocks: {} };
   }
 }
 
@@ -245,14 +250,17 @@ function readState(projectDir: string, sid: string): GuardState {
  * Most tools carry a single path field; codex's `apply_patch` embeds paths
  * in the patch body (`*** Add File:` / `*** Update File:` markers).
  */
-export function resolveEditedPaths(toolName: string, toolInput: Record<string, unknown>): string[] {
+export function resolveEditedPaths(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+): string[] {
   if (toolName.toLowerCase() === "apply_patch") {
     for (const value of Object.values(toolInput)) {
-      if (typeof value !== "string" || !value.includes("*** ")) continue
-      const paths = extractPatchPaths(value)
-      if (paths.length > 0) return paths
+      if (typeof value !== "string" || !value.includes("*** ")) continue;
+      const paths = extractPatchPaths(value);
+      if (paths.length > 0) return paths;
     }
-    return []
+    return [];
   }
   const cand =
     toolInput.file_path ??
@@ -261,18 +269,18 @@ export function resolveEditedPaths(toolName: string, toolInput: Record<string, u
     toolInput.path ??
     // antigravity tool args use PascalCase (write_to_file /
     // replace_file_content carry TargetFile — verified from the agy binary).
-    toolInput.TargetFile
-  return typeof cand === "string" && cand.length > 0 ? [cand] : []
+    toolInput.TargetFile;
+  return typeof cand === "string" && cand.length > 0 ? [cand] : [];
 }
 
 /** Extract Add/Update file paths from an apply_patch body (deletes ignored). */
 export function extractPatchPaths(patch: string): string[] {
-  const paths: string[] = []
+  const paths: string[] = [];
   for (const line of patch.split(/\r?\n/)) {
-    const m = line.match(/^\*{3} (?:Add|Update) File: (.+)$/)
-    if (m?.[1]) paths.push(m[1].trim())
+    const m = line.match(/^\*{3} (?:Add|Update) File: (.+)$/);
+    if (m?.[1]) paths.push(m[1].trim());
   }
-  return paths
+  return paths;
 }
 
 // ── Pure handler (canonical ABI) ─────────────────────────────
@@ -282,126 +290,141 @@ export function extractPatchPaths(patch: string): string[] {
  * stop      → block the stop while a recorded file is over budget
  *             (null once everything fits or MAX_STOP_BLOCKS is exhausted).
  */
-export async function run(input: HookInput, ctx: HandlerCtx): Promise<HandlerResult | null> {
-  if (input.kind === "post_tool") return recordTouched(input, ctx)
-  if (input.kind === "stop") return enforceOnStop(input, ctx)
-  return null
+export async function run(
+  input: HookInput,
+  ctx: HandlerCtx,
+): Promise<HandlerResult | null> {
+  if (input.kind === "post_tool") return recordTouched(input, ctx);
+  if (input.kind === "stop") return enforceOnStop(input, ctx);
+  return null;
 }
 
-function recordTouched(input: HookInput & { kind: "post_tool" }, ctx: HandlerCtx): null {
-  const { toolName, toolInput, cwd: projectDir } = input
-  if (!projectDir) return null
-  if (!EDIT_TOOLS.has(toolName.toLowerCase())) return null
+function recordTouched(
+  input: HookInput & { kind: "post_tool" },
+  ctx: HandlerCtx,
+): null {
+  const { toolName, toolInput, cwd: projectDir } = input;
+  if (!projectDir) return null;
+  if (!EDIT_TOOLS.has(toolName.toLowerCase())) return null;
 
   // Opt-in gate — with the default (disabled) config nothing below runs.
-  const config = loadGuardConfig(projectDir)
-  if (!config.enabled) return null
+  const config = loadGuardConfig(projectDir);
+  if (!config.enabled) return null;
 
-  const sid = ctx.sid ?? "unknown"
-  let state: GuardState | null = null
+  const sid = ctx.sid ?? "unknown";
+  let state: GuardState | null = null;
   for (const rawPath of resolveEditedPaths(toolName, toolInput)) {
-    const absPath = isAbsolute(rawPath) ? rawPath : resolve(projectDir, rawPath)
-    const relPath = toPosixPath(relative(projectDir, absPath))
-    if (!isRefactorableFile(relPath)) continue
-    if (!existsSync(absPath)) continue
+    const absPath = isAbsolute(rawPath)
+      ? rawPath
+      : resolve(projectDir, rawPath);
+    const relPath = toPosixPath(relative(projectDir, absPath));
+    if (!isRefactorableFile(relPath)) continue;
+    if (!existsSync(absPath)) continue;
 
-    let lineCount: number
+    let lineCount: number;
     try {
-      lineCount = countLines(readFileSync(absPath, "utf-8"))
+      lineCount = countLines(readFileSync(absPath, "utf-8"));
     } catch {
-      continue
+      continue;
     }
-    state ??= readState(projectDir, sid)
-    state.touched[relPath] = { lines: lineCount, ts: new Date().toISOString() }
+    state ??= readState(projectDir, sid);
+    state.touched[relPath] = { lines: lineCount, ts: new Date().toISOString() };
   }
   if (state) {
     try {
-      atomicWriteJson(statePath(projectDir, sid), state)
+      atomicWriteJson(statePath(projectDir, sid), state);
     } catch {
       // Recorder is best-effort; never fail the tool result.
     }
   }
-  return null
+  return null;
 }
 
-function enforceOnStop(input: HookInput & { kind: "stop" }, ctx: HandlerCtx): HandlerResult | null {
-  const projectDir = input.cwd
-  if (!projectDir) return null
+function enforceOnStop(
+  input: HookInput & { kind: "stop" },
+  ctx: HandlerCtx,
+): HandlerResult | null {
+  const projectDir = input.cwd;
+  if (!projectDir) return null;
 
-  const config = loadGuardConfig(projectDir)
-  if (!config.enabled) return null
+  const config = loadGuardConfig(projectDir);
+  if (!config.enabled) return null;
 
-  const sid = ctx.sid ?? "unknown"
-  const state = readState(projectDir, sid)
+  const sid = ctx.sid ?? "unknown";
+  const state = readState(projectDir, sid);
   // Cursor's documented stop payload carries no session id while its
   // afterFileEdit payload may — merge the "unknown" bucket so a recorder/
   // enforcer sid mismatch cannot silently skip enforcement. The merge is
   // PER FILE and only for files the sid bucket does not know: pulling
   // unknown's stop-block counts wholesale would let one session's exhausted
   // budget suppress enforcement for every later session in the project.
-  const overflow = sid !== "unknown" ? readState(projectDir, "unknown") : null
-  const overflowFiles = new Set<string>()
+  const overflow = sid !== "unknown" ? readState(projectDir, "unknown") : null;
+  const overflowFiles = new Set<string>();
   if (overflow) {
     for (const [k, v] of Object.entries(overflow.touched)) {
-      if (k in state.touched) continue
-      state.touched[k] = v
-      state.stopBlocks[k] = overflow.stopBlocks[k] ?? 0
-      overflowFiles.add(k)
+      if (k in state.touched) continue;
+      state.touched[k] = v;
+      state.stopBlocks[k] = overflow.stopBlocks[k] ?? 0;
+      overflowFiles.add(k);
     }
   }
-  const touched = Object.keys(state.touched)
-  if (touched.length === 0) return null
+  const touched = Object.keys(state.touched);
+  if (touched.length === 0) return null;
 
-  const offenders: Array<{ relPath: string; lines: number }> = []
+  const offenders: Array<{ relPath: string; lines: number }> = [];
   for (const relPath of touched) {
-    const absPath = join(projectDir, relPath)
-    if (!existsSync(absPath)) continue
-    let lineCount: number
+    const absPath = join(projectDir, relPath);
+    if (!existsSync(absPath)) continue;
+    let lineCount: number;
     try {
-      lineCount = countLines(readFileSync(absPath, "utf-8"))
+      lineCount = countLines(readFileSync(absPath, "utf-8"));
     } catch {
-      continue
+      continue;
     }
     // Re-count at stop time — the recorder's snapshot may be stale (the file
     // may have been split back under budget later in the turn).
-    state.touched[relPath] = { lines: lineCount, ts: new Date().toISOString() }
-    if (lineCount <= config.maxLines) continue
-    if ((state.stopBlocks[relPath] ?? 0) >= MAX_STOP_BLOCKS) continue
-    offenders.push({ relPath, lines: lineCount })
+    state.touched[relPath] = { lines: lineCount, ts: new Date().toISOString() };
+    if (lineCount <= config.maxLines) continue;
+    if ((state.stopBlocks[relPath] ?? 0) >= MAX_STOP_BLOCKS) continue;
+    offenders.push({ relPath, lines: lineCount });
   }
 
   if (offenders.length > 0) {
     for (const { relPath } of offenders) {
-      state.stopBlocks[relPath] = (state.stopBlocks[relPath] ?? 0) + 1
+      state.stopBlocks[relPath] = (state.stopBlocks[relPath] ?? 0) + 1;
     }
     // Non-blocking-stop vendors: the returned block below is ignored by the
     // host, so force the refactor out-of-band. Only on each file's FIRST
     // block (count just became 1) to avoid duplicate spawns.
     if (DIRECT_DISPATCH_VENDORS.has(ctx.vendor)) {
-      const firstTimers = offenders.filter((o) => state.stopBlocks[o.relPath] === 1)
+      const firstTimers = offenders.filter(
+        (o) => state.stopBlocks[o.relPath] === 1,
+      );
       if (firstTimers.length > 0) {
-        spawnRefactorAgent(projectDir, sid, firstTimers, config.maxLines)
+        spawnRefactorAgent(projectDir, sid, firstTimers, config.maxLines);
       }
     }
   }
   try {
-    atomicWriteJson(statePath(projectDir, sid), state)
+    atomicWriteJson(statePath(projectDir, sid), state);
     // Reflect updated counts for unknown-origin files back into the unknown
     // bucket so a later id-less stop keeps a consistent (bounded) count.
     if (overflow && overflowFiles.size > 0) {
       for (const k of overflowFiles) {
-        const touchedEntry = state.touched[k]
-        if (touchedEntry) overflow.touched[k] = touchedEntry
-        overflow.stopBlocks[k] = state.stopBlocks[k] ?? 0
+        const touchedEntry = state.touched[k];
+        if (touchedEntry) overflow.touched[k] = touchedEntry;
+        overflow.stopBlocks[k] = state.stopBlocks[k] ?? 0;
       }
-      atomicWriteJson(statePath(projectDir, "unknown"), overflow)
+      atomicWriteJson(statePath(projectDir, "unknown"), overflow);
     }
   } catch {
     // State write failure must not swallow the block itself.
   }
-  if (offenders.length === 0) return null
+  if (offenders.length === 0) return null;
 
-  const fileList = offenders.map((o) => `${o.relPath} (${o.lines} lines)`).join(", ")
+  const fileList = offenders
+    .map((o) => `${o.relPath} (${o.lines} lines)`)
+    .join(", ");
   return {
     type: "block",
     reason:
@@ -413,7 +436,7 @@ function enforceOnStop(input: HookInput & { kind: "stop" }, ctx: HandlerCtx): Ha
       `behavior-preserving and land as refactor-only changes. Adjust via ` +
       `\`refactor_guard.max_lines\` / \`refactor_guard.enabled\` in ` +
       `.agents/oma-config.yaml.`,
-  }
+  };
 }
 
 /**
@@ -429,19 +452,30 @@ function spawnRefactorAgent(
   maxLines: number,
 ): void {
   try {
-    const files = offenders.map((o) => `${o.relPath} (${o.lines} lines)`).join(", ")
+    const files = offenders
+      .map((o) => `${o.relPath} (${o.lines} lines)`)
+      .join(", ");
     const prompt =
       `Refactor the following file(s) so each is at most ${maxLines} lines, ` +
       `splitting them into smaller cohesive modules. The refactor must be ` +
-      `behavior-preserving and land as refactor-only changes: ${files}`
-    const child = spawn("oma", ["agent", "spawn", "refactor-engineer", prompt, sid, "--workspace", projectDir], {
-      detached: true,
-      stdio: "ignore",
-    })
+      `behavior-preserving and land as refactor-only changes: ${files}`;
+    const child = spawn(
+      "oma",
+      [
+        "agent",
+        "spawn",
+        "refactor-engineer",
+        prompt,
+        sid,
+        "--workspace",
+        projectDir,
+      ],
+      { detached: true, stdio: "ignore" },
+    );
     // ENOENT (oma not on PATH) surfaces as an async 'error' event, not a
     // synchronous throw — swallow it or it crashes the hook process.
-    child.on("error", () => {})
-    child.unref()
+    child.on("error", () => {});
+    child.unref();
   } catch {
     // Synchronous spawn failure — fail-open.
   }
@@ -450,30 +484,35 @@ function spawnRefactorAgent(
 // ── Standalone entry (pi subprocess / direct bun invocation) ──
 
 interface StandaloneInput {
-  hook_event_name?: string
-  tool_name?: string
-  tool_input?: Record<string, unknown>
-  tool_response?: Record<string, unknown>
-  session_id?: string
-  sessionId?: string
-  [key: string]: unknown
+  hook_event_name?: string;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  tool_response?: Record<string, unknown>;
+  session_id?: string;
+  sessionId?: string;
+  [key: string]: unknown;
 }
 
 function main() {
-  const inputFile = process.env.OMA_HOOK_INPUT_FILE
-  const raw = inputFile ? readFileSync(inputFile, "utf-8") : readFileSync(0, "utf-8")
-  if (!raw.trim()) process.exit(0)
+  const inputFile = process.env.OMA_HOOK_INPUT_FILE;
+  const raw = inputFile
+    ? readFileSync(inputFile, "utf-8")
+    : readFileSync(0, "utf-8");
+  if (!raw.trim()) process.exit(0);
 
-  const parsed: StandaloneInput = JSON.parse(raw)
+  const parsed: StandaloneInput = JSON.parse(raw);
 
   // agy runs core hooks standalone (no `oma hook run` router): its envelope is
   // camelCase with a nested toolCall (verified against the agy 1.1.13 binary).
-  const toolCall = parsed.toolCall as { name?: unknown; args?: unknown } | undefined
+  const toolCall = parsed.toolCall as
+    | { name?: unknown; args?: unknown }
+    | undefined;
   if (isAgyInput(parsed) || (toolCall && typeof toolCall.name === "string")) {
-    const vendor: Vendor = "antigravity"
-    const projectDir = agyProjectDir(parsed) || ((parsed.cwd as string | undefined) ?? "")
-    const sid = agyConversationId(parsed) ?? undefined
-    const isPostTool = typeof toolCall?.name === "string"
+    const vendor: Vendor = "antigravity";
+    const projectDir =
+      agyProjectDir(parsed) || ((parsed.cwd as string | undefined) ?? "");
+    const sid = agyConversationId(parsed) ?? undefined;
+    const isPostTool = typeof toolCall?.name === "string";
     const hookInput: HookInput = isPostTool
       ? {
           kind: "post_tool",
@@ -481,28 +520,28 @@ function main() {
           toolInput: (toolCall?.args as Record<string, unknown>) ?? {},
           cwd: projectDir,
         }
-      : { kind: "stop", cwd: projectDir }
+      : { kind: "stop", cwd: projectDir };
 
     run(hookInput, { vendor, cwd: projectDir, sid })
       .then((result) => {
         // agy PostToolUse contract: print a literal `{}` (recorder is silent).
-        if (isPostTool) console.log("{}")
+        if (isPostTool) console.log("{}");
         else if (result && result.type === "block") {
-          console.log(makeBlockOutput(vendor, result.reason))
+          console.log(makeBlockOutput(vendor, result.reason));
         }
-        process.exit(0)
+        process.exit(0);
       })
       .catch(() => {
-        if (isPostTool) console.log("{}")
-        process.exit(0)
-      })
-    return
+        if (isPostTool) console.log("{}");
+        process.exit(0);
+      });
+    return;
   }
 
   // Standalone path is vendor-agnostic here; claude covers the common dialect.
-  const vendor: Vendor = "claude"
-  const projectDir = getProjectDir(vendor, parsed)
-  const sid = parsed.session_id ?? parsed.sessionId
+  const vendor: Vendor = "claude";
+  const projectDir = getProjectDir(vendor, parsed);
+  const sid = parsed.session_id ?? parsed.sessionId;
 
   // Stop payloads carry no tool_name; anything with one is the recorder path.
   const hookInput: HookInput = parsed.tool_name
@@ -513,18 +552,18 @@ function main() {
         toolResponse: parsed.tool_response,
         cwd: projectDir,
       }
-    : { kind: "stop", cwd: projectDir }
+    : { kind: "stop", cwd: projectDir };
 
   run(hookInput, { vendor, cwd: projectDir, sid })
     .then((result) => {
       if (result && result.type === "block") {
-        console.log(makeBlockOutput(vendor, result.reason))
+        console.log(makeBlockOutput(vendor, result.reason));
       }
-      process.exit(0)
+      process.exit(0);
     })
-    .catch(() => process.exit(0))
+    .catch(() => process.exit(0));
 }
 
 if (import.meta.main) {
-  main()
+  main();
 }

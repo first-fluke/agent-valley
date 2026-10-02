@@ -14,11 +14,11 @@
 //    guard, mirroring SKILL.md Guardrail 0 (explicit user override — surface
 //    once, then proceed).
 
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
-import { makePreToolDenyOutput } from "./hook-output.ts"
-import type { HandlerCtx, HandlerResult, HookInput, Vendor } from "./types.ts"
-import { getProjectDir } from "./vendor-detect.ts"
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { makePreToolDenyOutput } from "./hook-output.ts";
+import type { HandlerCtx, HandlerResult, HookInput, Vendor } from "./types.ts";
+import { getProjectDir } from "./vendor-detect.ts";
 
 // --- Defaults (mirror .agents/skills/oma-scm/config/commit-config.yaml) ---
 // Used when the config file is absent (global installs without project config,
@@ -45,14 +45,20 @@ const DEFAULT_FORBIDDEN_PATTERNS = [
   "*.tfstate.*",
   ".netrc",
   ".pypirc",
-]
+];
 
-const DEFAULT_ALLOWED_EXCEPTIONS = ["*.example", "*.sample", "*.template"]
+const DEFAULT_ALLOWED_EXCEPTIONS = ["*.example", "*.sample", "*.template"];
 
-const BYPASS_TOKEN = "OMA_SCM_ALLOW_SECRETS=1"
+const BYPASS_TOKEN = "OMA_SCM_ALLOW_SECRETS=1";
 
-const MAIN_CONFIG_RELPATH = join(".agents", "oma-config.yaml")
-const SKILL_CONFIG_RELPATH = join(".agents", "skills", "oma-scm", "config", "commit-config.yaml")
+const MAIN_CONFIG_RELPATH = join(".agents", "oma-config.yaml");
+const SKILL_CONFIG_RELPATH = join(
+  ".agents",
+  "skills",
+  "oma-scm",
+  "config",
+  "commit-config.yaml",
+);
 
 // --- Config loading (regex-based, consistent with core's yaml handling) ---
 
@@ -61,38 +67,43 @@ const SKILL_CONFIG_RELPATH = join(".agents", "skills", "oma-scm", "config", "com
  * lines) without a yaml dependency — core handlers must stay standalone.
  */
 export function extractYamlList(content: string, key: string): string[] | null {
-  const lines = content.split(/\r?\n/)
-  const start = lines.findIndex((l) => new RegExp(`^\\s*${key}:\\s*$`).test(l))
-  if (start === -1) return null
-  const items: string[] = []
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex((l) => new RegExp(`^\\s*${key}:\\s*$`).test(l));
+  if (start === -1) return null;
+  const items: string[] = [];
   for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i] ?? ""
-    if (/^\s*(#|$)/.test(line)) continue // comments / blanks inside the list
-    const item = line.match(/^\s+-\s+["']?([^"']+)["']?\s*$/)?.[1]
-    if (!item) break // end of the list block
-    items.push(item)
+    const line = lines[i] ?? "";
+    if (/^\s*(#|$)/.test(line)) continue; // comments / blanks inside the list
+    const item = line.match(/^\s+-\s+["']?([^"']+)["']?\s*$/)?.[1];
+    if (!item) break; // end of the list block
+    items.push(item);
   }
-  return items
+  return items;
 }
 
 interface GuardConfig {
-  forbidden: string[]
-  exceptions: string[]
+  forbidden: string[];
+  exceptions: string[];
 }
 
 function loadGuardConfig(projectDir: string): GuardConfig {
-  const pathsToTry = [join(projectDir, MAIN_CONFIG_RELPATH), join(projectDir, SKILL_CONFIG_RELPATH)]
+  const pathsToTry = [
+    join(projectDir, MAIN_CONFIG_RELPATH),
+    join(projectDir, SKILL_CONFIG_RELPATH),
+  ];
 
   for (const configPath of pathsToTry) {
-    if (!existsSync(configPath)) continue
+    if (!existsSync(configPath)) continue;
     try {
-      const content = readFileSync(configPath, "utf-8")
-      const forbidden = extractYamlList(content, "forbidden_patterns")
+      const content = readFileSync(configPath, "utf-8");
+      const forbidden = extractYamlList(content, "forbidden_patterns");
       if (forbidden && forbidden.length > 0) {
         return {
           forbidden,
-          exceptions: extractYamlList(content, "allowed_exceptions") ?? DEFAULT_ALLOWED_EXCEPTIONS,
-        }
+          exceptions:
+            extractYamlList(content, "allowed_exceptions") ??
+            DEFAULT_ALLOWED_EXCEPTIONS,
+        };
       }
     } catch {
       // Continue to next path or default
@@ -102,7 +113,7 @@ function loadGuardConfig(projectDir: string): GuardConfig {
   return {
     forbidden: DEFAULT_FORBIDDEN_PATTERNS,
     exceptions: DEFAULT_ALLOWED_EXCEPTIONS,
-  }
+  };
 }
 
 // --- Glob matching (basename semantics, like .gitignore basename patterns) ---
@@ -111,21 +122,21 @@ function globToRegExp(pattern: string): RegExp {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*/g, "[^/]*")
-    .replace(/\?/g, "[^/]")
-  return new RegExp(`^${escaped}$`)
+    .replace(/\?/g, "[^/]");
+  return new RegExp(`^${escaped}$`);
 }
 
 function basename(path: string): string {
-  const trimmed = path.replace(/\/+$/, "")
-  const idx = trimmed.lastIndexOf("/")
-  return idx === -1 ? trimmed : trimmed.slice(idx + 1)
+  const trimmed = path.replace(/\/+$/, "");
+  const idx = trimmed.lastIndexOf("/");
+  return idx === -1 ? trimmed : trimmed.slice(idx + 1);
 }
 
 export function matchesForbidden(path: string, config: GuardConfig): boolean {
-  const name = basename(path)
-  if (!name) return false
-  if (config.exceptions.some((p) => globToRegExp(p).test(name))) return false
-  return config.forbidden.some((p) => globToRegExp(p).test(name))
+  const name = basename(path);
+  if (!name) return false;
+  if (config.exceptions.some((p) => globToRegExp(p).test(name))) return false;
+  return config.forbidden.some((p) => globToRegExp(p).test(name));
 }
 
 // --- Command parsing ---
@@ -136,22 +147,22 @@ export function matchesForbidden(path: string, config: GuardConfig): boolean {
  * operators; option tokens (`-…`) and the `--` separator are skipped.
  */
 export function extractGitAddPaths(command: string): string[] {
-  const paths: string[] = []
-  const segments = command.split(/&&|\|\||;|\||\n/)
+  const paths: string[] = [];
+  const segments = command.split(/&&|\|\||;|\||\n/);
   for (const segment of segments) {
-    const m = segment.match(/\bgit\s+(?:[-\w]+=\S+\s+)*add\b(.*)$/)
-    if (!m) continue
-    const rest = m[1] ?? ""
+    const m = segment.match(/\bgit\s+(?:[-\w]+=\S+\s+)*add\b(.*)$/);
+    if (!m) continue;
+    const rest = m[1] ?? "";
     // Tokenize, honoring simple single/double quotes.
-    const tokens = rest.match(/"[^"]*"|'[^']*'|\S+/g) ?? []
+    const tokens = rest.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
     for (const raw of tokens) {
-      const token = raw.replace(/^["']|["']$/g, "")
-      if (token === "--") continue
-      if (token.startsWith("-")) continue // options (incl. -A/--all; see header)
-      paths.push(token)
+      const token = raw.replace(/^["']|["']$/g, "");
+      if (token === "--") continue;
+      if (token.startsWith("-")) continue; // options (incl. -A/--all; see header)
+      paths.push(token);
     }
   }
-  return paths
+  return paths;
 }
 
 // ── Pure handler (canonical ABI) ─────────────────────────────
@@ -161,25 +172,33 @@ export function extractGitAddPaths(command: string): string[] {
  * Returns a `block` HandlerResult when a staged path matches
  * `forbidden_patterns` (minus `allowed_exceptions`), else `null` (fail-open).
  */
-export async function run(input: HookInput, _ctx: HandlerCtx): Promise<HandlerResult | null> {
-  if (input.kind !== "pre_tool") return null
+export async function run(
+  input: HookInput,
+  _ctx: HandlerCtx,
+): Promise<HandlerResult | null> {
+  if (input.kind !== "pre_tool") return null;
 
-  const { toolName, toolInput, cwd: projectDir } = input
+  const { toolName, toolInput, cwd: projectDir } = input;
 
-  if (toolName !== "Bash" && toolName !== "run_shell_command" && toolName !== "Shell" && toolName !== "execute_bash")
-    return null
+  if (
+    toolName !== "Bash" &&
+    toolName !== "run_shell_command" &&
+    toolName !== "Shell" &&
+    toolName !== "execute_bash"
+  )
+    return null;
 
-  const command = toolInput.command as string | undefined
-  if (!command) return null
-  if (!/\bgit\b/.test(command)) return null
-  if (command.includes(BYPASS_TOKEN)) return null
+  const command = toolInput.command as string | undefined;
+  if (!command) return null;
+  if (!/\bgit\b/.test(command)) return null;
+  if (command.includes(BYPASS_TOKEN)) return null;
 
-  const candidates = extractGitAddPaths(command)
-  if (candidates.length === 0) return null
+  const candidates = extractGitAddPaths(command);
+  if (candidates.length === 0) return null;
 
-  const config = loadGuardConfig(projectDir)
-  const flagged = candidates.filter((p) => matchesForbidden(p, config))
-  if (flagged.length === 0) return null
+  const config = loadGuardConfig(projectDir);
+  const flagged = candidates.filter((p) => matchesForbidden(p, config));
+  if (flagged.length === 0) return null;
 
   return {
     type: "block",
@@ -188,47 +207,49 @@ export async function run(input: HookInput, _ctx: HandlerCtx): Promise<HandlerRe
       `(matched forbidden_patterns in ${MAIN_CONFIG_RELPATH}). ` +
       `Surface this to the user; if they explicitly approve committing these files, ` +
       `re-run the command prefixed with ${BYPASS_TOKEN}.`,
-  }
+  };
 }
 
 // ── Standalone entry (pi subprocess / direct bun invocation) ──
 
 interface PreToolUseInput {
-  tool_name: string
+  tool_name: string;
   tool_input: {
-    command?: string
-    [key: string]: unknown
-  }
-  [key: string]: unknown
+    command?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }
 
 function main() {
-  const inputFile = process.env.OMA_HOOK_INPUT_FILE
-  const raw = inputFile ? readFileSync(inputFile, "utf-8") : readFileSync(0, "utf-8")
-  if (!raw.trim()) process.exit(0)
+  const inputFile = process.env.OMA_HOOK_INPUT_FILE;
+  const raw = inputFile
+    ? readFileSync(inputFile, "utf-8")
+    : readFileSync(0, "utf-8");
+  if (!raw.trim()) process.exit(0);
 
-  const parsed: PreToolUseInput = JSON.parse(raw)
+  const parsed: PreToolUseInput = JSON.parse(raw);
   // Standalone path is vendor-agnostic here; claude covers the common dialect.
-  const vendor: Vendor = "claude"
-  const projectDir = getProjectDir(vendor, parsed)
+  const vendor: Vendor = "claude";
+  const projectDir = getProjectDir(vendor, parsed);
 
   const hookInput: HookInput = {
     kind: "pre_tool",
     toolName: parsed.tool_name,
     toolInput: { ...(parsed.tool_input ?? {}) },
     cwd: projectDir,
-  }
+  };
 
   run(hookInput, { vendor, cwd: projectDir })
     .then((result) => {
       if (result && result.type === "block") {
-        console.log(makePreToolDenyOutput(vendor, result.reason))
+        console.log(makePreToolDenyOutput(vendor, result.reason));
       }
-      process.exit(0)
+      process.exit(0);
     })
-    .catch(() => process.exit(0))
+    .catch(() => process.exit(0));
 }
 
 if (import.meta.main) {
-  main()
+  main();
 }

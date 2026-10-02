@@ -110,8 +110,8 @@ Keep the appendix ≤15 lines.
 
 ## Minimal example
 
-**Contradiction:** fresher metrics vs DB load/cost
-**IFR:** readers see near-real-time metrics without per-user DB polling
-**Seeds:** taking out (read path leaves DB), preliminary (pre-aggregate), periodic (shared worker snapshot), intermediary (read model)
-**Approaches:** (A) event → aggregator → read model; (B) shared poller + short cache + invalidation; (C) tighter poll only — non-recommended tactical
+**Contradiction:** fresher metrics vs DB load/cost  
+**IFR:** readers see near-real-time metrics without per-user DB polling  
+**Seeds:** taking out (read path leaves DB), preliminary (pre-aggregate), periodic (shared worker snapshot), intermediary (read model)  
+**Approaches:** (A) event → aggregator → read model; (B) shared poller + short cache + invalidation; (C) tighter poll only — non-recommended tactical  
 **Recommend:** A

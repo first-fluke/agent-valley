@@ -5,14 +5,20 @@
     },
     "serena": {
       "command": "oma",
-      "args": ["bridge", "--context", "oma"],
+      "args": [
+        "bridge",
+        "--context",
+        "oma"
+      ],
       "env": {
         "SERENA_LOG_LEVEL": "info"
       }
     },
     "aside": {
       "command": "aside",
-      "args": ["mcp"]
+      "args": [
+        "mcp"
+      ]
     }
   }
 }

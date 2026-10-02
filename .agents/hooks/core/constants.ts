@@ -40,7 +40,7 @@ export const VENDORS = [
   "kiro",
   "pi",
   "qwen",
-] as const
+] as const;
 
 /**
  * Fallback session id used when no vendor session id can be resolved from the
@@ -53,4 +53,4 @@ export const VENDORS = [
  * positive). Both hooks therefore refuse to write — and refuse to act on —
  * persistent state under this id.
  */
-export const UNKNOWN_SESSION_ID = "unknown"
+export const UNKNOWN_SESSION_ID = "unknown";

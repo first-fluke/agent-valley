@@ -3,7 +3,7 @@
 // expects a slightly different stdout JSON shape; centralize the dialect
 // translation here so individual hooks can stay vendor-agnostic.
 
-import type { Vendor } from "./types.ts"
+import type { Vendor } from "./types.ts";
 
 export function makePromptOutput(
   vendor: Vendor,
@@ -22,7 +22,7 @@ export function makePromptOutput(
       // transient system-message step prepended before the model is called.
       return JSON.stringify({
         injectSteps: [{ ephemeralMessage: additionalContext }],
-      })
+      });
     case "claude":
     case "commandcode": {
       // Official Claude Code docs (code.claude.com/docs/en/hooks) specify
@@ -35,16 +35,16 @@ export function makePromptOutput(
       const hookSpecificOutput: Record<string, unknown> = {
         hookEventName,
         additionalContext,
-      }
+      };
       // Claude Code re-scans skill/command directories after SessionStart hooks
       // complete when the output sets `reloadSkills` (docs: SessionStart
       // hookSpecificOutput.reloadSkills). It is Claude-only and only meaningful
       // for SessionStart; this builder is called solely when context was
       // actually injected, so the "only when injecting" condition is inherent.
       if (vendor === "claude" && hookEventName === "SessionStart") {
-        hookSpecificOutput.reloadSkills = true
+        hookSpecificOutput.reloadSkills = true;
       }
-      return JSON.stringify({ additionalContext, hookSpecificOutput })
+      return JSON.stringify({ additionalContext, hookSpecificOutput });
     }
     case "codex":
       return JSON.stringify({
@@ -52,7 +52,7 @@ export function makePromptOutput(
           hookEventName,
           additionalContext,
         },
-      })
+      });
     case "cursor":
       // Cursor reads the top-level `additional_context` (sessionStart) /
       // `additionalContext`; the hookSpecificOutput block is informational.
@@ -63,24 +63,24 @@ export function makePromptOutput(
           hookEventName,
           additionalContext,
         },
-      })
+      });
     case "grok":
       // Grok hook context injection: return additionalContext; Grok may surface
       // it via hook annotations or ignore for prompt events. State side-effects
       // (mode activation, L1 events) are the primary mechanism.
-      return JSON.stringify({ additionalContext })
+      return JSON.stringify({ additionalContext });
     case "kiro":
       // Kiro CLI adds stdout directly to the agent context for prompt hooks.
-      return additionalContext
+      return additionalContext;
     case "kimi":
       // Kimi Code CLI: a blockable hook that exits 0 has its stdout appended to
       // the model context (kimi.com/code/docs hooks). Plain text injects directly.
-      return additionalContext
+      return additionalContext;
     case "pi":
       // pi (Earendil) reads this via the in-process bridge in
       // `.pi/extensions/oma/index.ts`, which lifts `additionalContext` into the
       // `before_agent_start` return as `{ systemPrompt: <prev> + context }`.
-      return JSON.stringify({ additionalContext })
+      return JSON.stringify({ additionalContext });
     case "qwen":
       // Qwen Code fork uses hookSpecificOutput (same as Codex)
       return JSON.stringify({
@@ -88,7 +88,7 @@ export function makePromptOutput(
           hookEventName,
           additionalContext,
         },
-      })
+      });
   }
 }
 
@@ -99,7 +99,7 @@ export function makeBlockOutput(vendor: Vendor, reason: string): string {
     case "commandcode":
     case "kiro":
     case "qwen":
-      return JSON.stringify({ decision: "block", reason })
+      return JSON.stringify({ decision: "block", reason });
     case "cursor":
       // Cursor's `stop` hook ignores Claude-style `{decision:"block"}`. It
       // re-enters the loop via `{followup_message}`, which is auto-submitted as
@@ -107,22 +107,22 @@ export function makeBlockOutput(vendor: Vendor, reason: string): string {
       // block-producing chain is `stop` — its sole preToolUse handler
       // (test-filter) never blocks, only mutates — so followup_message is
       // always the correct dialect here.
-      return JSON.stringify({ followup_message: reason })
+      return JSON.stringify({ followup_message: reason });
     case "antigravity":
       // agy Stop: `decision:"continue"` re-enters the loop (= block the stop);
       // `reason` is injected as a system message. (Any other value allows stop.)
-      return JSON.stringify({ decision: "continue", reason })
+      return JSON.stringify({ decision: "continue", reason });
     case "pi":
       // pi's bridge implements persistent-mode via agent_settled +
       // pi.sendUserMessage: it runs the persistent-mode subprocess (which
       // resolves to the Claude dialect `{decision:"block", reason}`) and also
       // accepts this `{block:true, reason}` shape, re-submitting `reason` as the
       // next turn so the workflow continues.
-      return JSON.stringify({ block: true, reason })
+      return JSON.stringify({ block: true, reason });
     case "grok":
       // Grok Stop hooks are generally advisory. Emit block decision + rich
       // stderr message (persistent-mode already prints the reason to stderr).
-      return JSON.stringify({ decision: "block", reason })
+      return JSON.stringify({ decision: "block", reason });
     case "kimi":
       // Kimi documents two blocking mechanisms: exit 2 + stderr, and a JSON
       // `hookSpecificOutput.permissionDecision: "deny"` response. The oma hook
@@ -136,7 +136,7 @@ export function makeBlockOutput(vendor: Vendor, reason: string): string {
           permissionDecision: "deny",
           permissionDecisionReason: reason,
         },
-      })
+      });
   }
 }
 
@@ -155,7 +155,10 @@ export function makeBlockOutput(vendor: Vendor, reason: string): string {
  * processed; antigravity: audit-only `{}`) fall through to the closest
  * best-effort shape — they are not wired for post_tool events.
  */
-export function makePostToolBlockOutput(vendor: Vendor, reason: string): string {
+export function makePostToolBlockOutput(
+  vendor: Vendor,
+  reason: string,
+): string {
   switch (vendor) {
     case "claude":
     case "codex":
@@ -168,7 +171,7 @@ export function makePostToolBlockOutput(vendor: Vendor, reason: string): string 
           hookEventName: "PostToolUse",
           additionalContext: reason,
         },
-      })
+      });
     case "cursor":
       // Cursor's postToolUse feedback channel is `additional_context` only
       // (no block). Include the snake_case field its dialect documents.
@@ -178,14 +181,14 @@ export function makePostToolBlockOutput(vendor: Vendor, reason: string): string 
           hookEventName: "PostToolUse",
           additionalContext: reason,
         },
-      })
+      });
     case "kimi":
     case "kiro":
     case "grok":
     case "antigravity":
     case "pi":
       // Best-effort — no documented post-tool feedback channel (or disputed).
-      return makeBlockOutput(vendor, reason)
+      return makeBlockOutput(vendor, reason);
   }
 }
 
@@ -210,7 +213,7 @@ export function makePreToolDenyOutput(vendor: Vendor, reason: string): string {
           permissionDecision: "deny",
           permissionDecisionReason: reason,
         },
-      })
+      });
     case "kimi":
       // Kimi honours both the Claude-style decision keys and the
       // hookSpecificOutput deny form (same rationale as makeBlockOutput).
@@ -222,15 +225,15 @@ export function makePreToolDenyOutput(vendor: Vendor, reason: string): string {
           permissionDecision: "deny",
           permissionDecisionReason: reason,
         },
-      })
+      });
     case "kiro":
-      return JSON.stringify({ decision: "block", reason })
+      return JSON.stringify({ decision: "block", reason });
     case "grok":
       // Grok PreToolUse output is a gate decision (see makePreToolOutput).
-      return JSON.stringify({ decision: "deny", reason })
+      return JSON.stringify({ decision: "deny", reason });
     case "antigravity":
       // agy PreToolUse output is a gate decision; deny analog of the allow gate.
-      return JSON.stringify({ decision: "deny", reason })
+      return JSON.stringify({ decision: "deny", reason });
     case "cursor":
       // Documented preToolUse output (cursor.com/docs/hooks): permission
       // allow|deny, user_message shown in the client, agent_message sent to
@@ -240,14 +243,17 @@ export function makePreToolDenyOutput(vendor: Vendor, reason: string): string {
         permission: "deny",
         user_message: reason,
         agent_message: reason,
-      })
+      });
     case "pi":
       // pi's bridge accepts {block:true, reason} on tool_call interception.
-      return JSON.stringify({ block: true, reason })
+      return JSON.stringify({ block: true, reason });
   }
 }
 
-export function makePreToolOutput(vendor: Vendor, updatedInput: Record<string, unknown>): string {
+export function makePreToolOutput(
+  vendor: Vendor,
+  updatedInput: Record<string, unknown>,
+): string {
   switch (vendor) {
     case "cursor":
       return JSON.stringify({
@@ -256,7 +262,7 @@ export function makePreToolOutput(vendor: Vendor, updatedInput: Record<string, u
           hookEventName: "PreToolUse",
           updatedInput,
         },
-      })
+      });
     case "claude":
     case "codex":
     case "commandcode":
@@ -272,21 +278,21 @@ export function makePreToolOutput(vendor: Vendor, updatedInput: Record<string, u
           permissionDecision: "allow",
           updatedInput,
         },
-      })
+      });
     case "pi":
       // pi's bridge reads `updatedInput.command` and mutates the live
       // `tool_call` event input in place (pi exposes event.input as mutable).
-      return JSON.stringify({ updatedInput })
+      return JSON.stringify({ updatedInput });
     case "antigravity":
       // agy PreToolUse output is a gate decision; it cannot rewrite tool input.
       // Allow execution (test-filter is advisory on agy). updatedInput unused.
-      void updatedInput
-      return JSON.stringify({ decision: "allow" })
+      void updatedInput;
+      return JSON.stringify({ decision: "allow" });
     case "grok":
       // Grok PreToolUse uses decision + possibly updated tool input
       return JSON.stringify({
         decision: "allow",
         toolInput: updatedInput,
-      })
+      });
   }
 }

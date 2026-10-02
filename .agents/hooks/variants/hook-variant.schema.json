@@ -14,7 +14,17 @@
     "vendor": {
       "type": "string",
       "description": "Vendor identifier matching VendorType in cli/types.",
-      "enum": ["antigravity", "claude", "codex", "commandcode", "cursor", "grok", "kimi", "kiro", "qwen"]
+      "enum": [
+        "antigravity",
+        "claude",
+        "codex",
+        "commandcode",
+        "cursor",
+        "grok",
+        "kimi",
+        "kiro",
+        "qwen"
+      ]
     },
     "hookDir": {
       "type": "string",

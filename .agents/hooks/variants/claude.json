@@ -74,7 +74,14 @@
   },
   "extra": {
     "permissions": {
-      "allow": ["Bash(bun run:*)", "Bash(bunx tsx:*)", "Bash(git add:*)", "Bash(ls *)", "Bash(oma *)", "mcp__serena__*"]
+      "allow": [
+        "Bash(bun run:*)",
+        "Bash(bunx tsx:*)",
+        "Bash(git add:*)",
+        "Bash(ls *)",
+        "Bash(oma *)",
+        "mcp__serena__*"
+      ]
     }
   }
 }
