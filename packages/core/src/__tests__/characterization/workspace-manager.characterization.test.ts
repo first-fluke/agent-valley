@@ -314,42 +314,42 @@ describe("WorkspaceManager.autoCommit — safety-net validation + commit", () =>
     expect(second.error).toContain("git commit failed")
   })
 
-  test.each([
-    "darwin",
-    "linux",
-  ] as const)("blocks auto-commit with a real unmerged index in %s workspaces", async (platform) => {
-    const ws = await createWorkspace(
-      repoDir,
-      makeIssue({ id: `issue-unmerged-${platform}`, identifier: `CHAR-U-${platform}` }),
-      platform,
-    )
-    // Create a real unmerged state by attempting to merge divergent histories of the same file.
-    await writeFile(join(ws.path, "collide.ts"), "feature\n")
-    git("add .", ws.path)
-    git("commit -m 'feat side'", ws.path)
+  test.each(["darwin", "linux"] as const)(
+    "blocks auto-commit with a real unmerged index in %s workspaces",
+    async (platform) => {
+      const ws = await createWorkspace(
+        repoDir,
+        makeIssue({ id: `issue-unmerged-${platform}`, identifier: `CHAR-U-${platform}` }),
+        platform,
+      )
+      // Create a real unmerged state by attempting to merge divergent histories of the same file.
+      await writeFile(join(ws.path, "collide.ts"), "feature\n")
+      git("add .", ws.path)
+      git("commit -m 'feat side'", ws.path)
 
-    // Diverge main
-    git("checkout main", repoDir)
-    await writeFile(join(repoDir, "collide.ts"), "main\n")
-    git("add collide.ts", repoDir)
-    git("commit -m 'main side'", repoDir)
+      // Diverge main
+      git("checkout main", repoDir)
+      await writeFile(join(repoDir, "collide.ts"), "main\n")
+      git("add collide.ts", repoDir)
+      git("commit -m 'main side'", repoDir)
 
-    // Isolated clones have independent refs: fetch the changed source branch
-    // explicitly before creating the same conflict in either workspace backend.
-    execFileSync("git", ["fetch", "--no-tags", repoDir, "main"], { cwd: ws.path, stdio: "pipe" })
-    try {
-      execFileSync("git", ["merge", "FETCH_HEAD"], { cwd: ws.path, stdio: "pipe" })
-    } catch {
-      /* merge exits non-zero on conflict; that is what we want */
-    }
+      // Isolated clones have independent refs: fetch the changed source branch
+      // explicitly before creating the same conflict in either workspace backend.
+      execFileSync("git", ["fetch", "--no-tags", repoDir, "main"], { cwd: ws.path, stdio: "pipe" })
+      try {
+        execFileSync("git", ["merge", "FETCH_HEAD"], { cwd: ws.path, stdio: "pipe" })
+      } catch {
+        /* merge exits non-zero on conflict; that is what we want */
+      }
 
-    expect(git("diff --name-only --diff-filter=U", ws.path)).toBe("collide.ts")
-    const result = await manager.autoCommit(ws)
+      expect(git("diff --name-only --diff-filter=U", ws.path)).toBe("collide.ts")
+      const result = await manager.autoCommit(ws)
 
-    expect(result.ok).toBe(false)
-    // Current behavior: "Unmerged files present" is emitted before the conflict-marker path.
-    expect(result.error).toContain("Unmerged files present")
-  })
+      expect(result.ok).toBe(false)
+      // Current behavior: "Unmerged files present" is emitted before the conflict-marker path.
+      expect(result.error).toContain("Unmerged files present")
+    },
+  )
 
   test("currently returns retryable=true for regeneratable lockfile conflict markers", async () => {
     await writeFile(
@@ -523,35 +523,39 @@ describe("WorkspaceManager.mergeAndPush — rebase-based delivery", () => {
     expect(result.ok).toBe(true)
   })
 
-  test.each([
-    "darwin",
-    "linux",
-  ] as const)("delivers %s workspace commits and cleans only unused source branches", async (platform) => {
-    const ws = await createWorkspace(repoDir, makeIssue({ id: "issue-merge-local", identifier: "CHAR-101" }), platform)
-    await writeFile(join(ws.path, "feat.ts"), "const feat = 1\n")
-    git("add .", ws.path)
-    git("commit -m 'feat: add feat'", ws.path)
+  test.each(["darwin", "linux"] as const)(
+    "delivers %s workspace commits and cleans only unused source branches",
+    async (platform) => {
+      const ws = await createWorkspace(
+        repoDir,
+        makeIssue({ id: "issue-merge-local", identifier: "CHAR-101" }),
+        platform,
+      )
+      await writeFile(join(ws.path, "feat.ts"), "const feat = 1\n")
+      git("add .", ws.path)
+      git("commit -m 'feat: add feat'", ws.path)
 
-    const result = await manager.mergeAndPush(ws)
+      const result = await manager.mergeAndPush(ws)
 
-    expect(result.ok).toBe(true)
+      expect(result.ok).toBe(true)
 
-    // main should now contain the feature commit
-    const log = git("log --oneline main")
-    expect(log).toContain("add feat")
+      // main should now contain the feature commit
+      const log = git("log --oneline main")
+      expect(log).toContain("add feat")
 
-    expect(git("show main:feat.ts")).toBe("const feat = 1")
-    expect(git("branch --show-current", ws.path)).toBe(ws.branch)
-    expect(git("show HEAD:feat.ts", ws.path)).toBe("const feat = 1")
-    const sourceBranch = git(`branch --list ${ws.branch}`)
-    if (isIsolatedGitWorkspace(ws)) {
-      // The imported source ref is disposable; the clone retains its own branch.
-      expect(sourceBranch).toBe("")
-    } else {
-      // Git retains refs still checked out by a linked worktree.
-      expect(sourceBranch).toContain(ws.branch)
-    }
-  })
+      expect(git("show main:feat.ts")).toBe("const feat = 1")
+      expect(git("branch --show-current", ws.path)).toBe(ws.branch)
+      expect(git("show HEAD:feat.ts", ws.path)).toBe("const feat = 1")
+      const sourceBranch = git(`branch --list ${ws.branch}`)
+      if (isIsolatedGitWorkspace(ws)) {
+        // The imported source ref is disposable; the clone retains its own branch.
+        expect(sourceBranch).toBe("")
+      } else {
+        // Git retains refs still checked out by a linked worktree.
+        expect(sourceBranch).toContain(ws.branch)
+      }
+    },
+  )
 
   test("currently detects conflict markers on the branch via git-diff-check before rebase", async () => {
     const ws = await manager.create(makeIssue({ id: "issue-merge-conflict", identifier: "CHAR-102" }))

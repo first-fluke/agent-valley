@@ -36,6 +36,8 @@ Multiple issues run in parallel up to `agent.max_parallel` (auto-detected from h
 
 ## Quick Start
 
+Use Node.js 26.10.0 and Bun 1.4.2 or later, with Git and an authenticated supported agent CLI on PATH.
+
 ```bash
 # Clone
 git clone https://github.com/first-fluke/agent-valley.git

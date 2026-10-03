@@ -15,6 +15,7 @@
  *     credential file all resolve to null instead of throwing.
  */
 
+import { ok } from "node:assert/strict"
 import { mkdir, unlink, writeFile } from "node:fs/promises"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import type { Config } from "../config/yaml-loader"
@@ -191,7 +192,9 @@ describe("wireLedgerRelay — factory", () => {
 
     orchestrator.publish("agent.start", { agentType: "claude", issueKey: "PROJ-1", issueId: "i1" })
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
-    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string) as {
+    const init = fetchMock.mock.calls[0]?.[1]
+    ok(init, "Expected relay publish request options")
+    const body = JSON.parse(init.body as string) as {
       node_id: string
       user_id: string
     }

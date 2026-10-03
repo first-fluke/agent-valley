@@ -23,11 +23,10 @@ describe("task configuration", () => {
     ).toBe("analysis")
   })
 
-  test.each([
-    "reports/result.md",
-    "/outside/{{attempt.id}}.md",
-    "../escape/{{attempt.id}}.md",
-  ])("rejects an unbound report path: %s", (report_path) => {
-    expect(projectConfigSchema.safeParse({ task: { kind: "analysis", report_path } }).success).toBe(false)
-  })
+  test.each(["reports/result.md", "/outside/{{attempt.id}}.md", "../escape/{{attempt.id}}.md"])(
+    "rejects an unbound report path: %s",
+    (report_path) => {
+      expect(projectConfigSchema.safeParse({ task: { kind: "analysis", report_path } }).success).toBe(false)
+    },
+  )
 })

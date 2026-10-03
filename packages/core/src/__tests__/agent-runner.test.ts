@@ -60,43 +60,43 @@ beforeEach(() => {
 })
 
 describe("AgentRunnerService.spawn — pid propagation", () => {
-  test.each([
-    "complete",
-    "error",
-  ] as const)("shutdown drains an asynchronous %s handler after its session is disposed", async (event) => {
-    const runner = new AgentRunnerService()
-    let release: (() => void) | undefined
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    let persisted = false
-    const callback = async () => {
-      await gate
-      persisted = true
-    }
-    await runner.spawn(makeAttempt(), makeOptions(), makeCallbacks({ onComplete: callback, onError: callback }))
-    const session = FakeAgentSession.instances[0]
-    if (!session) throw new Error("Expected session fixture")
-    if (event === "complete") {
-      session.emit("complete", {
-        type: "complete",
-        result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+  test.each(["complete", "error"] as const)(
+    "shutdown drains an asynchronous %s handler after its session is disposed",
+    async (event) => {
+      const runner = new AgentRunnerService()
+      let release: (() => void) | undefined
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
       })
-    } else {
-      session.emit("error", { type: "error", error: { code: "CRASH", message: "failed", recoverable: true } })
-    }
-    let stopped = false
-    const stopping = runner.killAll().then(() => {
-      stopped = true
-    })
-    await vi.waitFor(() => expect(session.disposeCalls).toBeGreaterThan(0))
-    expect(stopped).toBe(false)
-    expect(persisted).toBe(false)
-    release?.()
-    await stopping
-    expect(persisted).toBe(true)
-    expect(stopped).toBe(true)
-  })
+      let persisted = false
+      const callback = async () => {
+        await gate
+        persisted = true
+      }
+      await runner.spawn(makeAttempt(), makeOptions(), makeCallbacks({ onComplete: callback, onError: callback }))
+      const session = FakeAgentSession.instances[0]
+      if (!session) throw new Error("Expected session fixture")
+      if (event === "complete") {
+        session.emit("complete", {
+          type: "complete",
+          result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+        })
+      } else {
+        session.emit("error", { type: "error", error: { code: "CRASH", message: "failed", recoverable: true } })
+      }
+      let stopped = false
+      const stopping = runner.killAll().then(() => {
+        stopped = true
+      })
+      await vi.waitFor(() => expect(session.disposeCalls).toBeGreaterThan(0))
+      expect(stopped).toBe(false)
+      expect(persisted).toBe(false)
+      release?.()
+      await stopping
+      expect(persisted).toBe(true)
+      expect(stopped).toBe(true)
+    },
+  )
 
   test("callback-triggered shutdown does not wait recursively for itself", async () => {
     const runner = new AgentRunnerService()
@@ -178,32 +178,30 @@ describe("AgentRunnerService.spawn — pid propagation", () => {
     }
   })
 
-  test.each([
-    "complete",
-    "error",
-    "start",
-    "execute",
-  ] as const)("disposes the session after %s terminates the run", async (path) => {
-    const session = new FakeAgentSession()
-    registerSession("claude", () => session)
-    if (path === "start" || path === "execute") {
-      session[path] = async () => {
-        throw new Error(`${path} failed`)
+  test.each(["complete", "error", "start", "execute"] as const)(
+    "disposes the session after %s terminates the run",
+    async (path) => {
+      const session = new FakeAgentSession()
+      registerSession("claude", () => session)
+      if (path === "start" || path === "execute") {
+        session[path] = async () => {
+          throw new Error(`${path} failed`)
+        }
       }
-    }
-    const runner = new AgentRunnerService()
-    await runner.spawn(makeAttempt(), makeOptions(), makeCallbacks())
-    if (path === "complete")
-      session.emit("complete", {
-        type: "complete",
-        result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
-      })
-    if (path === "error")
-      session.emit("error", { type: "error", error: { code: "CRASH", message: "crashed", recoverable: true } })
-    await runner.killAll()
-    expect(session.disposeCalls).toBeGreaterThanOrEqual(1)
-    expect(runner.activeCount).toBe(0)
-  })
+      const runner = new AgentRunnerService()
+      await runner.spawn(makeAttempt(), makeOptions(), makeCallbacks())
+      if (path === "complete")
+        session.emit("complete", {
+          type: "complete",
+          result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+        })
+      if (path === "error")
+        session.emit("error", { type: "error", error: { code: "CRASH", message: "crashed", recoverable: true } })
+      await runner.killAll()
+      expect(session.disposeCalls).toBeGreaterThanOrEqual(1)
+      expect(runner.activeCount).toBe(0)
+    },
+  )
 
   test("disposes a process that starts after cancellation finished", async () => {
     const runner = new AgentRunnerService()

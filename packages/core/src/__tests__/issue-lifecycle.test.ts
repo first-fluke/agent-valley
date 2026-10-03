@@ -13,7 +13,11 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 5.3 (PR3).
  */
 
-import { describe, expect, test, vi } from "vitest"
+import { mkdtempSync } from "node:fs"
+import { rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, describe, expect, test, vi } from "vitest"
 import type { Issue } from "../domain/models"
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import { InterventionBus } from "../orchestrator/intervention-bus"
@@ -35,6 +39,15 @@ vi.mock("../sessions/session-factory", async (importOriginal) => {
   }
 })
 
+const fixtures: Array<{ core: OrchestratorCore; workspaceRoot: string }> = []
+
+afterEach(async () => {
+  for (const { core, workspaceRoot } of fixtures.splice(0)) {
+    await core.stop()
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
 function buildLifecycle(overrides: { config?: ReturnType<typeof makeConfig> } = {}) {
   FakeAgentSession.resetRegistry()
   registerSession("claude", () => new FakeAgentSession())
@@ -42,7 +55,8 @@ function buildLifecycle(overrides: { config?: ReturnType<typeof makeConfig> } = 
   const tracker = new FakeIssueTracker()
   const webhook = new FakeWebhookReceiver<ParsedWebhookEvent>()
   const workspace = new FakeWorkspaceGateway()
-  const config = overrides.config ?? makeConfig()
+  const workspaceRoot = mkdtempSync(join(tmpdir(), "agent-valley-issue-lifecycle-"))
+  const config = { ...(overrides.config ?? makeConfig()), workspaceRoot }
   const events: Array<{ event: string; payload: Record<string, unknown> }> = []
 
   const core = new OrchestratorCore({
@@ -52,6 +66,7 @@ function buildLifecycle(overrides: { config?: ReturnType<typeof makeConfig> } = 
     workspace,
     emit: (event, payload) => events.push({ event, payload }),
   })
+  fixtures.push({ core, workspaceRoot })
   const lifecycle = new IssueLifecycle(core)
   core.attachLifecycle(
     {
@@ -180,40 +195,40 @@ describe("IssueLifecycle.handleIssueInProgress", () => {
 })
 
 describe("IssueLifecycle.handleIssueLeftInProgress", () => {
-  test.each([
-    "abort",
-    "append_prompt",
-  ] as const)("operator %s releases the old attempt and preserves the requested outcome", async (kind) => {
-    const h = buildLifecycle()
-    const bus = new InterventionBus({
-      runner: h.core.agentRunner,
-      port: h.core.agentRunnerPort,
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })
-    h.core.attachIntervention(bus)
-    const issue = makeIssue({ id: "intervened", identifier: "PROJ-60" })
-    await h.lifecycle.handleIssueInProgress(issue)
-    const attempt = h.core.getAttempt(issue.id)
-    expect(attempt).toBeDefined()
-    if (!attempt) return
-    const result = await bus.send(
-      attempt,
-      kind === "abort" ? { kind, reason: "operator stopped" } : { kind, text: "include regression tests" },
-    )
-    expect(result.ok).toBe(true)
-    expect(h.core.getActiveWorkspace(issue.id)).toBeUndefined()
-    expect(h.core.getAttempt(issue.id)).toBeUndefined()
-    expect(h.core.agentRunner.activeCount).toBe(0)
-    if (kind === "abort") {
-      expect(h.core.retryQueue.size).toBe(0)
-      expect(h.tracker.calls).toContainEqual({
-        method: "updateIssueState",
-        args: [issue.id, h.config.workflowStates.cancelled],
+  test.each(["abort", "append_prompt"] as const)(
+    "operator %s releases the old attempt and preserves the requested outcome",
+    async (kind) => {
+      const h = buildLifecycle()
+      const bus = new InterventionBus({
+        runner: h.core.agentRunner,
+        port: h.core.agentRunnerPort,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       })
-    } else {
-      expect(h.core.retryQueue.entries[0]?.lastError).toContain("include regression tests")
-    }
-  })
+      h.core.attachIntervention(bus)
+      const issue = makeIssue({ id: "intervened", identifier: "PROJ-60" })
+      await h.lifecycle.handleIssueInProgress(issue)
+      const attempt = h.core.getAttempt(issue.id)
+      expect(attempt).toBeDefined()
+      if (!attempt) return
+      const result = await bus.send(
+        attempt,
+        kind === "abort" ? { kind, reason: "operator stopped" } : { kind, text: "include regression tests" },
+      )
+      expect(result.ok).toBe(true)
+      expect(h.core.getActiveWorkspace(issue.id)).toBeUndefined()
+      expect(h.core.getAttempt(issue.id)).toBeUndefined()
+      expect(h.core.agentRunner.activeCount).toBe(0)
+      if (kind === "abort") {
+        expect(h.core.retryQueue.size).toBe(0)
+        expect(h.tracker.calls).toContainEqual({
+          method: "updateIssueState",
+          args: [issue.id, h.config.workflowStates.cancelled],
+        })
+      } else {
+        expect(h.core.retryQueue.entries[0]?.lastError).toContain("include regression tests")
+      }
+    },
+  )
 
   test("cancellation during workspace creation prevents a late spawn", async () => {
     const h = buildLifecycle()

@@ -24,90 +24,94 @@ function run(command: string, args: string[], cwd: string): string {
 
 /** Uses only native receipt commands and local git; never invokes an agent or skill. */
 describe.skipIf(!available)(`OMA ${SUPPORTED_OMA_VERSION} native receipt contract`, () => {
-  test.each(["code", "analysis"] as const)("validates real %s receipts and rejects modified evidence", async (kind) => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "av-oma-contract-")))
-    const attemptId = randomUUID()
-    const report = `.agents/results/report-${attemptId}.md`
-    const request: OmaEvidenceRequest = {
-      issue: { id: "fixture-issue", identifier: "FIX-1", title: "Fixture" } as Issue,
-      workspace: { path: root, issueId: "fixture-issue" } as Workspace,
-      attempt: { id: attemptId, issueId: "fixture-issue", startedAt: new Date().toISOString() } as RunAttempt,
-      agentId: "fixture",
-      verifyCommand: `test -s ${kind === "code" ? "input.txt" : report}`,
-      kind,
-      reportPath: kind === "analysis" ? ".agents/results/report-{{attempt.id}}.md" : undefined,
-    }
-    try {
-      mkdirSync(join(root, ".agents/hooks/core"), { recursive: true })
-      writeFileSync(
-        join(root, ".agents/hooks/core/triggers.json"),
-        JSON.stringify({
-          workflows: {},
-          skills: {},
-          informationalPatterns: {},
-          excludedWorkflows: [],
-        }),
-      )
-      writeFileSync(join(root, ".gitignore"), ".agents/state/\n.agents/results/\n")
-      writeFileSync(join(root, "input.txt"), "before\n")
-      run("git", ["init", "-q"], root)
-      run("git", ["config", "user.name", "OMA Fixture"], root)
-      run("git", ["config", "user.email", "fixture@example.invalid"], root)
-      run("git", ["add", "."], root)
-      run(
-        "git",
-        ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"],
-        root,
-      )
-      await prepareOmaAttempt(request)
-      const begin = JSON.parse(
-        run(
-          "oma",
-          ["agent", "begin", request.agentId, attemptId, attemptId, "--project-root", root, "--workspace", root],
-          root,
-        ),
-      ) as { runId: string; claimPath: string; schemaVersion: number }
-      expect(begin.schemaVersion).toBe(1)
-      if (kind === "code") {
-        writeFileSync(join(root, "input.txt"), "after\n")
-        run("git", ["add", "input.txt"], root)
+  test.each(["code", "analysis"] as const)(
+    "validates real %s receipts and rejects modified evidence",
+    async (kind) => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "av-oma-contract-")))
+      const attemptId = randomUUID()
+      const report = `.agents/results/report-${attemptId}.md`
+      const request: OmaEvidenceRequest = {
+        issue: { id: "fixture-issue", identifier: "FIX-1", title: "Fixture" } as Issue,
+        workspace: { path: root, issueId: "fixture-issue" } as Workspace,
+        attempt: { id: attemptId, issueId: "fixture-issue", startedAt: new Date().toISOString() } as RunAttempt,
+        agentId: "fixture",
+        verifyCommand: `test -s ${kind === "code" ? "input.txt" : report}`,
+        kind,
+        reportPath: kind === "analysis" ? ".agents/results/report-{{attempt.id}}.md" : undefined,
+      }
+      try {
+        mkdirSync(join(root, ".agents/hooks/core"), { recursive: true })
+        writeFileSync(
+          join(root, ".agents/hooks/core/triggers.json"),
+          JSON.stringify({
+            workflows: {},
+            skills: {},
+            informationalPatterns: {},
+            excludedWorkflows: [],
+          }),
+        )
+        writeFileSync(join(root, ".gitignore"), ".agents/state/\n.agents/results/\n")
+        writeFileSync(join(root, "input.txt"), "before\n")
+        run("git", ["init", "-q"], root)
+        run("git", ["config", "user.name", "OMA Fixture"], root)
+        run("git", ["config", "user.email", "fixture@example.invalid"], root)
+        run("git", ["add", "."], root)
         run(
           "git",
-          ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-qm", "Update fixture"],
+          ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"],
           root,
         )
-      } else {
-        writeFileSync(join(root, report), "Current attempt analysis\n")
+        await prepareOmaAttempt(request)
+        const begin = JSON.parse(
+          run(
+            "oma",
+            ["agent", "begin", request.agentId, attemptId, attemptId, "--project-root", root, "--workspace", root],
+            root,
+          ),
+        ) as { runId: string; claimPath: string; schemaVersion: number }
+        expect(begin.schemaVersion).toBe(1)
+        if (kind === "code") {
+          writeFileSync(join(root, "input.txt"), "after\n")
+          run("git", ["add", "input.txt"], root)
+          run(
+            "git",
+            ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-qm", "Update fixture"],
+            root,
+          )
+        } else {
+          writeFileSync(join(root, report), "Current attempt analysis\n")
+        }
+        const checks = JSON.parse(
+          run("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root),
+        )
+        expect(checks).toMatchObject([{ checkId: "valley-verify", exitCode: 0 }])
+        writeFileSync(
+          begin.claimPath,
+          JSON.stringify({
+            status: "completed",
+            changedFiles: kind === "code" ? ["input.txt"] : [],
+            unresolved: [],
+            artifacts: kind === "analysis" ? [report] : [],
+          }),
+        )
+        const receipt = JSON.parse(
+          run("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root),
+        )
+        expect(receipt).toMatchObject({ schemaVersion: 1, status: "completed", exitCode: 0 })
+        request.attempt.finishedAt = new Date().toISOString()
+        expect(run("oma", ["agent", "status", attemptId, request.agentId, "--project-root", root], root).trim()).toBe(
+          "fixture:completed",
+        )
+        expect(validateOmaEvidence(request)).toEqual({ ok: true, runId: begin.runId })
+        writeFileSync(join(root, kind === "code" ? "input.txt" : report), "Changed after verification\n")
+        expect(validateOmaEvidence(request)).toMatchObject({
+          ok: false,
+          reason: "OMA CLI did not confirm current completed evidence",
+        })
+      } finally {
+        rmSync(root, { recursive: true, force: true })
       }
-      const checks = JSON.parse(
-        run("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root),
-      )
-      expect(checks).toMatchObject([{ checkId: "valley-verify", exitCode: 0 }])
-      writeFileSync(
-        begin.claimPath,
-        JSON.stringify({
-          status: "completed",
-          changedFiles: kind === "code" ? ["input.txt"] : [],
-          unresolved: [],
-          artifacts: kind === "analysis" ? [report] : [],
-        }),
-      )
-      const receipt = JSON.parse(
-        run("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root),
-      )
-      expect(receipt).toMatchObject({ schemaVersion: 1, status: "completed", exitCode: 0 })
-      request.attempt.finishedAt = new Date().toISOString()
-      expect(run("oma", ["agent", "status", attemptId, request.agentId, "--project-root", root], root).trim()).toBe(
-        "fixture:completed",
-      )
-      expect(validateOmaEvidence(request)).toEqual({ ok: true, runId: begin.runId })
-      writeFileSync(join(root, kind === "code" ? "input.txt" : report), "Changed after verification\n")
-      expect(validateOmaEvidence(request)).toMatchObject({
-        ok: false,
-        reason: "OMA CLI did not confirm current completed evidence",
-      })
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  }, 25_000)
+    },
+    25_000,
+  )
 })

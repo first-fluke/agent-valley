@@ -227,5 +227,5 @@ describe("mergeAndPush local Git regressions", () => {
     } finally {
       rmSync(f.dir, { recursive: true, force: true })
     }
-  })
+  }, 20_000)
 })

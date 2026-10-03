@@ -9,8 +9,8 @@
 
 | Role | Choice |
 |---|---|
-| Runtime | Node.js 20+ |
-| Language | TypeScript 5+ |
+| Runtime | Node.js 26.10.0 |
+| Language | TypeScript 7+ |
 | HTTP Server | Express or Hono |
 | ORM | Prisma |
 | Schema Validation | Zod |

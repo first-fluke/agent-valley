@@ -2,7 +2,7 @@
 
 ## Install the runtime
 
-Use a source checkout with Bun, Git, and an authenticated supported agent CLI on PATH:
+Use a source checkout with Node.js 26.10.0, Bun 1.4.2 or later, Git, and an authenticated supported agent CLI on PATH:
 
 ```bash
 git clone https://github.com/first-fluke/agent-valley.git

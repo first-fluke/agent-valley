@@ -1,3 +1,4 @@
+import { ok } from "node:assert/strict"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { WorkflowState } from "../setup/index"
 import { buildGlobalYaml, buildProjectYaml, findWorkflowState, linearQuery, maskApiKey } from "../setup/index"
@@ -151,11 +152,12 @@ describe("linearQuery", () => {
 
     await linearQuery("lin_api_key123", "{ teams { nodes { id } } }")
 
-    expect(capturedInit?.method).toBe("POST")
-    expect((capturedInit?.headers as Record<string, string>).Authorization).toBe("lin_api_key123")
-    expect((capturedInit?.headers as Record<string, string>)["Content-Type"]).toBe("application/json")
+    ok(capturedInit, "Expected Linear request options")
+    expect(capturedInit.method).toBe("POST")
+    expect((capturedInit.headers as Record<string, string>).Authorization).toBe("lin_api_key123")
+    expect((capturedInit.headers as Record<string, string>)["Content-Type"]).toBe("application/json")
 
-    const body = JSON.parse(capturedInit?.body as string)
+    const body = JSON.parse(capturedInit.body as string)
     expect(body.query).toBe("{ teams { nodes { id } } }")
   })
 
@@ -171,7 +173,7 @@ describe("linearQuery", () => {
   it("throws on HTTP error", async () => {
     globalThis.fetch = vi.fn(async () => new Response("Unauthorized", { status: 401 })) as unknown as typeof fetch
 
-    expect(linearQuery("bad_key", "{ viewer { id } }")).rejects.toThrow("Linear API HTTP 401")
+    await expect(linearQuery("bad_key", "{ viewer { id } }")).rejects.toThrow("Linear API HTTP 401")
   })
 
   it("throws on GraphQL error", async () => {
@@ -179,6 +181,6 @@ describe("linearQuery", () => {
       async () => new Response(JSON.stringify({ errors: [{ message: "Invalid query" }] }), { status: 200 }),
     ) as unknown as typeof fetch
 
-    expect(linearQuery("key", "{ bad }")).rejects.toThrow("Invalid query")
+    await expect(linearQuery("key", "{ bad }")).rejects.toThrow("Invalid query")
   })
 })

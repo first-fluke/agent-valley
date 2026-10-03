@@ -6,6 +6,7 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 5.8, § 6.6 E23.
  */
 
+import { ok } from "node:assert/strict"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { createNoopOtelExporter, createOtelExporter } from "../observability/otel-exporter"
 import { createPromMetrics } from "../observability/prom-metrics"
@@ -87,8 +88,8 @@ describe("createOtelExporter (enabled)", () => {
       const urls = fetchSpy.mock.calls.map((c) => c[0] as string)
       expect(urls).toContain("http://localhost:4318/v1/metrics")
       const metricsCall = fetchSpy.mock.calls.find((c) => c[0] === "http://localhost:4318/v1/metrics")
-      expect(metricsCall).toBeDefined()
-      const body = JSON.parse((metricsCall?.[1] as RequestInit).body as string)
+      ok(metricsCall, "Expected OTLP metrics request")
+      const body = JSON.parse((metricsCall[1] as RequestInit).body as string)
       expect(body.resourceMetrics[0].scopeMetrics[0].metrics[0].name).toBe("av_agent_runs_total")
     } finally {
       await exp.shutdown()
@@ -291,7 +292,8 @@ describe("createOtelExporter — OTLP wire-shape validity", () => {
       await exp.flush()
 
       const call = fetchSpy.mock.calls.find((c) => c[0] === "http://localhost:4318/v1/traces")
-      const body = JSON.parse((call?.[1] as RequestInit).body as string)
+      ok(call, "Expected OTLP traces request")
+      const body = JSON.parse((call[1] as RequestInit).body as string)
       const span = body.resourceSpans[0].scopeSpans[0].spans[0]
 
       // 16-byte traceId -> 32 hex chars; 8-byte spanId -> 16 hex chars.
@@ -320,7 +322,8 @@ describe("createOtelExporter — OTLP wire-shape validity", () => {
       await exp.flush()
 
       const call = fetchSpy.mock.calls.find((c) => c[0] === "http://localhost:4318/v1/traces")
-      const body = JSON.parse((call?.[1] as RequestInit).body as string)
+      ok(call, "Expected OTLP traces request")
+      const body = JSON.parse((call[1] as RequestInit).body as string)
       const attrs: Array<{ key: string; value: Record<string, unknown> }> =
         body.resourceSpans[0].scopeSpans[0].spans[0].attributes
 
@@ -344,7 +347,8 @@ describe("createOtelExporter — OTLP wire-shape validity", () => {
       await exp.flush()
 
       const call = fetchSpy.mock.calls.find((c) => c[0] === "http://localhost:4318/v1/traces")
-      const body = JSON.parse((call?.[1] as RequestInit).body as string)
+      ok(call, "Expected OTLP traces request")
+      const body = JSON.parse((call[1] as RequestInit).body as string)
       expect(body.resourceSpans[0].resource.attributes).toContainEqual({
         key: "service.name",
         value: { stringValue: "agent-valley-test" },
@@ -378,8 +382,8 @@ describe("createOtelExporter — GenAI token-usage histogram", () => {
       await exp.flush()
 
       const call = fetchSpy.mock.calls.find((c) => c[0] === "http://localhost:4318/v1/metrics")
-      expect(call).toBeDefined()
-      const body = JSON.parse((call?.[1] as RequestInit).body as string)
+      ok(call, "Expected OTLP metrics request")
+      const body = JSON.parse((call[1] as RequestInit).body as string)
       const metric = body.resourceMetrics[0].scopeMetrics[0].metrics.find(
         (m: { name: string }) => m.name === "gen_ai.client.token.usage",
       )
@@ -405,7 +409,8 @@ describe("createOtelExporter — GenAI token-usage histogram", () => {
       await exp.flush()
 
       const call = fetchSpy.mock.calls.find((c) => c[0] === "http://localhost:4318/v1/metrics")
-      const body = JSON.parse((call?.[1] as RequestInit).body as string)
+      ok(call, "Expected OTLP metrics request")
+      const body = JSON.parse((call[1] as RequestInit).body as string)
       const names = body.resourceMetrics[0].scopeMetrics[0].metrics.map((m: { name: string }) => m.name)
       expect(names).toContain("av_agent_runs_total")
       expect(names).toContain("gen_ai.client.token.usage")
@@ -468,7 +473,8 @@ describe("createOtelExporter — env var fallback", () => {
       exp.recordSpan({ name: "invoke_agent", startTimeMs: 1, endTimeMs: 2 })
       await exp.flush()
       const call = fetchSpy.mock.calls.find((c) => c[0] === "http://localhost:4318/v1/traces")
-      const body = JSON.parse((call?.[1] as RequestInit).body as string)
+      ok(call, "Expected OTLP traces request")
+      const body = JSON.parse((call[1] as RequestInit).body as string)
       expect(body.resourceSpans[0].resource.attributes).toContainEqual({
         key: "service.name",
         value: { stringValue: "agent-valley" },

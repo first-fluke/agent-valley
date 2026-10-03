@@ -27,6 +27,8 @@ This repository is a **stack-agnostic AI coding agent orchestration harness** ba
 
 ## Quick Start
 
+Use Node.js 26.10.0 and Bun 1.4.2 or later.
+
 ```bash
 # 1. Install dependencies
 bun install

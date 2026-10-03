@@ -36,6 +36,8 @@ Linear Issue (Todo)
 
 ## 빠른 시작
 
+Node.js 26.10.0과 Bun 1.4.2 이상을 사용합니다. Git과 인증된 지원 에이전트 CLI가 PATH에 있어야 합니다.
+
 ```bash
 # 클론
 git clone https://github.com/first-fluke/agent-valley.git

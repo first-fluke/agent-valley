@@ -18,8 +18,9 @@ describe("setup completion requirements", () => {
     await stepCompletion(context, 5, 5)
     expect(context).toEqual({ task: { kind: "code" }, verifyCommand: "bun run test" })
     const validate = vi.mocked(p.text).mock.calls[0]?.[0].validate
-    expect(validate?.(" ")).toContain("existing test")
-    expect(validate?.("bun run test")).toBeUndefined()
+    if (typeof validate !== "function") throw new Error("Expected a validation function")
+    expect(validate(" ")).toContain("existing test")
+    expect(validate("bun run test")).toBeUndefined()
   })
 
   it("collects a current-attempt report path and clears stale code verification", async () => {
@@ -30,15 +31,16 @@ describe("setup completion requirements", () => {
     expect(context.task).toEqual({ kind: "analysis", report_path: "reports/{{attempt.id}}.md" })
     expect(context.verifyCommand).toBeUndefined()
     const validate = vi.mocked(p.text).mock.calls[0]?.[0].validate
-    expect(validate?.("report.md")).toContain("{{attempt.id}}")
-    expect(validate?.("../{{attempt.id}}.md")).toContain("relative")
-    expect(validate?.("/{{attempt.id}}.md")).toContain("relative")
-    expect(validate?.("reports/{{attempt.id}}.md")).toBeUndefined()
+    if (typeof validate !== "function") throw new Error("Expected a validation function")
+    expect(validate("report.md")).toContain("{{attempt.id}}")
+    expect(validate("../{{attempt.id}}.md")).toContain("relative")
+    expect(validate("/{{attempt.id}}.md")).toContain("relative")
+    expect(validate("reports/{{attempt.id}}.md")).toBeUndefined()
   })
 
   it.each(["select", "text"])("cancels without saving when %s is cancelled", async (stage) => {
     vi.mocked(p.select).mockResolvedValue(stage === "select" ? Symbol("cancel") : "code")
-    vi.mocked(p.text).mockResolvedValue(Symbol("cancel"))
+    vi.mocked(p.text).mockResolvedValue(Symbol("cancel") as Awaited<ReturnType<typeof p.text>>)
     expect(await stepCompletion({}, 5, 5)).toBe(CANCEL)
   })
 })

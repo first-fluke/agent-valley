@@ -38,55 +38,55 @@ function setup(store = new FakeRunStatePersistence(), tracker = new FakeIssueTra
 }
 
 describe("pending tracker finalization", () => {
-  test.each([
-    "phase flush",
-    "workspace cleanup",
-  ])("cancellation during %s suppresses the success event and DAG transition", async (pausedStep) => {
-    const { core, tracker, workspace, store, events, record } = setup()
-    const issue = tracker.issues.get(record.issueId)
-    if (!issue) throw new Error("seed issue missing")
-    core.dagScheduler.buildFromIssues([issue])
+  test.each(["phase flush", "workspace cleanup"])(
+    "cancellation during %s suppresses the success event and DAG transition",
+    async (pausedStep) => {
+      const { core, tracker, workspace, store, events, record } = setup()
+      const issue = tracker.issues.get(record.issueId)
+      if (!issue) throw new Error("seed issue missing")
+      core.dagScheduler.buildFromIssues([issue])
 
-    let release = () => {}
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    let entered = () => {}
-    const paused = new Promise<void>((resolve) => {
-      entered = resolve
-    })
+      let release = () => {}
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let entered = () => {}
+      const paused = new Promise<void>((resolve) => {
+        entered = resolve
+      })
 
-    if (pausedStep === "phase flush") {
-      const originalFlush = store.flushOrThrow.bind(store)
-      let flushCalls = 0
-      store.flushOrThrow = async () => {
-        flushCalls++
-        if (flushCalls === 2) {
+      if (pausedStep === "phase flush") {
+        const originalFlush = store.flushOrThrow.bind(store)
+        let flushCalls = 0
+        store.flushOrThrow = async () => {
+          flushCalls++
+          if (flushCalls === 2) {
+            entered()
+            await gate
+          }
+          await originalFlush()
+        }
+      } else {
+        const originalCleanup = workspace.cleanup.bind(workspace)
+        workspace.cleanup = async (target) => {
           entered()
           await gate
+          await originalCleanup(target)
         }
-        await originalFlush()
       }
-    } else {
-      const originalCleanup = workspace.cleanup.bind(workspace)
-      workspace.cleanup = async (target) => {
-        entered()
-        await gate
-        await originalCleanup(target)
-      }
-    }
 
-    const finalizing = core.buildCompletionDeps().finalizeDelivered(record)
-    await paused
-    issue.status.id = "state-cancelled"
-    await core.cancelPendingFinalization(record.issueId)
-    release()
-    await finalizing
+      const finalizing = core.buildCompletionDeps().finalizeDelivered(record)
+      await paused
+      issue.status.id = "state-cancelled"
+      await core.cancelPendingFinalization(record.issueId)
+      release()
+      await finalizing
 
-    expect(events).not.toContain("agent.done")
-    expect(core.dagScheduler.getNode(record.issueId)?.status).toBe("cancelled")
-    expect(store.current().pendingFinalizations).toEqual([])
-  })
+      expect(events).not.toContain("agent.done")
+      expect(core.dagScheduler.getNode(record.issueId)?.status).toBe("cancelled")
+      expect(store.current().pendingFinalizations).toEqual([])
+    },
+  )
 
   test("an older finalization cannot delete a newer pending attempt", async () => {
     const { core, workspace, store, events, record } = setup()

@@ -20,7 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
       # validate.sh Check 5/5 runs `bun run test:coverage`, so Bun + deps must
       # be installed here even though lint/typecheck/test jobs do it too.
       - run: bun install --frozen-lockfile
@@ -48,7 +54,13 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run lint
 
@@ -58,7 +70,13 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit -p packages/core/tsconfig.json
       - run: bunx tsc --noEmit -p apps/cli/tsconfig.json
@@ -70,7 +88,13 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: mkdir -p "$WORKSPACE_ROOT" && bun run test
         env:
