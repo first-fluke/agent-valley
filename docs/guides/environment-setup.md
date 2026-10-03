@@ -1,14 +1,46 @@
 # Install and operate Agent Valley
 
-## Install the runtime
+## Install and set up local orders
 
-Use a source checkout with Node.js 26.10.0, Bun 1.4.2 or later, Git, and an authenticated supported agent CLI on PATH:
+Start in an existing Git repository with at least one commit. Git and curl must be installed:
+
+```bash
+cd /absolute/path/to/repo
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+av order "Fix the login failure and add a regression test"
+```
+
+The installer prepares Node.js 26.10.0 and Bun 1.4.2 when needed, installs locked dependencies, and creates a source launcher at `~/.local/bin/av`. Remote installations keep the checkout under `~/.local/share/agent-valley`; a local installation uses its existing checkout. There is no build step. In an interactive terminal, installation opens `av setup --mode order`, including when the script arrives through `curl | bash`.
+
+The default wizard validates the target Git repository, selects the Chief Director CLI and optional model, guides its CLI installation and login, and saves a trusted acceptance command. Browser or device sign-in remains interactive. If a CLI cannot report its login state, the wizard shows that limitation and offers rechecking or finishing setup later. Other ready worker CLIs are discovered automatically; installing every vendor is unnecessary.
+
+The wizard also offers OMA installation or update in the selected target repository, with preparation selected by default. It prepares the latest CLI and full skill set while preserving the existing OMA configuration. A failure offers retry or deferral with a recovery command. OMA preparation does not enable strict completion receipts; those require the separately supported CLI version described in [OMA completion evidence](./oma-integration.md).
+
+Preparation downloads the [official OMA installer](https://raw.githubusercontent.com/first-fluke/oh-my-agent/main/cli/install.sh) into a temporary file and runs it to prepare dependencies. It then waits for `bun install --global oh-my-agent@latest` and runs the latest package in the target repository: `install` with `CI=true` for a new harness, or `update --yes --with-new-skills --all` for an existing one. The update includes newly added skills without using `--force`. The wizard checks the installed project metadata and skill files before reporting success. To prepare OMA after deferring it, run `av setup --edit` and select **OMA skills (install/update)**.
+
+Repository and verification settings go in `av.yaml`. The Chief Director defaults go in `~/.config/agent-valley/settings.yaml` as `actor.type` and optional `actor.model`. A blank model selects the CLI default and removes a previous explicit model. Orders honor the saved Chief Director choice; `--actor` and `--model` override it for a single order. See [Chief Director orders](./chief-missions.md) for generated teams and resume behavior.
+
+`av.yaml` is the only project configuration file. Loading, setup, edits, diagnostics, and configuration watching use this filename. Missing or malformed configuration is reported with instructions for fixing `av.yaml`. Legacy `agent:` blocks remain readable inside supported configuration files; within one file, an explicit `actor:` block takes precedence as a whole.
+
+`--yes`, `--no-setup`, CI, or a missing interactive terminal defer the wizard and print its command. For example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash -s -- --yes --no-workflows
+av setup
+```
+
+Run `av setup` again to change the local order configuration, or `av setup --edit` for selected fields. Existing unrelated global settings are preserved.
+
+## Set up tracker automation
+
+Use the source checkout for the dashboard and tracker runtime:
 
 ```bash
 git clone https://github.com/first-fluke/agent-valley.git
 cd agent-valley
 bun install --frozen-lockfile
-bun av setup
+bun av setup --mode tracker
 bun av doctor
 bun av up --dev
 bun av status
@@ -18,15 +50,15 @@ Run these commands from the Agent Valley checkout. The CLI needs the dashboard s
 
 Use `bun av dev` for foreground logs and configuration watching, or `bun av up --dev` for a background process without a production build. Plain `bun av up` attempts a production dashboard build before starting.
 
-Supported agent values are `claude`, `codex`, `antigravity`, `cursor`, `grok`, `kimi`, and `opencode`. Antigravity uses the `agy` executable. Install and authenticate the selected CLI. For a goal that does not need a tracker or dashboard, follow [chief orders](./chief-missions.md); explicit `--workspace` and `--verify` options can supply its configuration.
+Supported actor values are `claude`, `codex`, `antigravity`, `cursor`, `grok`, `kimi`, and `opencode`. Antigravity uses the `agy` executable. The wizard guides preparation of the selected CLI.
 
-The setup wizard selects Linear or GitHub, the agent, workspace, tunnel, and completion checks. It writes project configuration to `valley.yaml` and user defaults/credentials to `~/.config/agent-valley/settings.yaml`. Project values override global values; existing unrelated global settings are preserved. The example YAML is a reference, not a ready-to-run configuration. OMA is optional in the target repository.
+Tracker mode selects Linear or GitHub, the actor, workspace, tunnel, and completion checks, and offers the same OMA preparation. It writes project configuration to `av.yaml` and user defaults/credentials to `~/.config/agent-valley/settings.yaml`. Project values override global values; existing unrelated global settings are preserved. The example YAML is a reference, not a ready-to-run configuration. OMA preparation can be deferred.
 
-For a first run, use `agent.max_parallel: 1` and `delivery.mode: pr`. Authenticate the chosen CLI before starting Agent Valley. PR delivery requires authenticated `gh`; the target repository needs a usable remote. Increase concurrency after one small task passes verification and creates its PR.
+For a first run, use `actor.max_parallel: 1` and `delivery.mode: pr`. Authenticate the chosen CLI before starting Agent Valley. PR delivery requires authenticated `gh`; the target repository needs a usable remote. Increase concurrency after one small task passes verification and creates its PR.
 
 ## Completion checks
 
-Code tasks require `verify.command` in `valley.yaml`. Use the target repository's deterministic test/typecheck commands, including dependency installation when a new worktree needs it. For example, for this repository:
+Code tasks require `verify.command` in `av.yaml`. Use the target repository's deterministic test/typecheck commands, including dependency installation when a new worktree needs it. For example, for this repository:
 
 ```yaml
 verify:
@@ -34,7 +66,7 @@ verify:
   timeout_sec: 600
 ```
 
-The check runs in the issue worktree before delivery. A failed check retries with its output attached; exhausted retries cancel the issue. A zero agent exit code alone does not mark a code task Done. If the work is a report, select analysis and an attempt-specific report path instead:
+The check runs in the issue worktree before delivery. A failed check retries with its output attached; exhausted retries cancel the issue. A zero actor exit code alone does not mark a code task Done. If the work is a report, select analysis and an attempt-specific report path instead:
 
 ```yaml
 task:
@@ -49,7 +81,7 @@ task:
 | Tracker | Webhook path | Configuration |
 |---|---|---|
 | Linear | `/api/webhook` | Team/API key and Todo/In Progress/Done/Cancelled state IDs. The CLI attempts webhook registration after tunnel startup. Resolve a registration error before relying on incoming issues. |
-| GitHub | `/api/webhook/github` | Owner, repository, `github.token_env`, signing secret and state labels. Export the named token environment variable. Register an Issues webhook with JSON payloads; use `github.webhook_secret` from `valley.yaml`. |
+| GitHub | `/api/webhook/github` | Owner, repository, `github.token_env`, signing secret and state labels. Export the named token environment variable. Register an Issues webhook with JSON payloads; use `github.webhook_secret` from `av.yaml`. |
 
 The default tunnel provider is ngrok. The wizard can select Cloudflare or `none`; install the selected tunnel executable. With `none`, provide your own webhook ingress. Existing runnable issues are reconciled at startup, but new changes still need webhook delivery while the runtime is running.
 
@@ -69,24 +101,24 @@ The default tunnel provider is ngrok. The wizard can select Cloudflare or `none`
 | Symptom | Check and action |
 |---|---|
 | `av up` exits or never becomes healthy | Read `.av.log` in the Agent Valley checkout. Run `bun av doctor`; check dashboard dependencies, port conflicts, and required configuration. |
-| Agent never starts | Check operations-panel blockers/retry time, concurrency, budget limits, selected agent executable/authentication, and webhook delivery in the tracker. |
+| Actor never starts | Check operations-panel blockers/retry time, concurrency, budget limits, selected actor executable/authentication, and webhook delivery in the tracker. |
 | Task retries after producing code | Read the verification/delivery error. Run the configured check in the retained worktree; check Git remote and `gh` authentication. |
-| Process exits without a result | Run the agent interactively once to authenticate and confirm its installed version. Update incompatible CLIs. The task fails promptly instead of waiting for the full task timeout. |
+| Process exits without a result | Run the actor interactively once to authenticate and confirm its installed version. Update incompatible CLIs. The task fails promptly instead of waiting for the full task timeout. |
 | Dashboard says unavailable | Run `bun av doctor` and inspect `.av.log` or the foreground output for the initialization failure. Fix it and restart. A connected SSE socket does not imply a healthy scheduler. |
-| Runtime restarted while an agent was alive | Recovery reserves that task until the old process exits, then retries retained work. Inspect a stuck process before terminating it. |
-| Read-only user cannot control agents | Sign in separately for controls with the intervention token. Viewing status does not require that token. |
+| Runtime restarted while an actor was alive | Recovery reserves that task until the old process exits, then retries retained work. Inspect a stuck process before terminating it. |
+| Read-only user cannot control actors | Sign in separately for controls with the intervention token. Viewing status does not require that token. |
 
 Run `bun run test`, `bun run typecheck`, `bun run lint`, and `./scripts/harness/validate.sh` for repository checks. `validate.sh` checks source safety, architecture and coverage; `av doctor` checks runtime configuration and prerequisites. Use `bun run test` for the Vitest suite; bare `bun test` selects Bun's different test runner.
 
 ## Optional instruction harness
 
-`scripts/install.sh` copies agent instructions and documentation into another project. It does not install the CLI/dashboard. It is optional for running the farm. Review copied conventions for the target project, especially before accepting the optional repository-specific CI workflows.
+`scripts/install.sh` also copies actor instructions and documentation into the target project. Review those conventions, especially before accepting the optional repository-specific CI workflows.
 
 ```bash
 cd your-existing-project
 curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
 # Without an interactive terminal:
-# curl ... | bash -s -- --yes --no-workflows
+# curl ... | bash -s -- --yes --no-workflows --no-setup
 ```
 
 Running the installer inside its own checkout leaves existing files intact. Repeated installs deduplicate the Symphony section and ignore entries.
@@ -126,7 +158,7 @@ the webhook-only listener forwards them.
 ## Team dashboard
 
 Team mode needs `team.supabase_url`, `team.supabase_anon_key`, and
-`team.id` in `valley.yaml` or `~/.config/agent-valley/settings.yaml`.
+`team.id` in `av.yaml` or `~/.config/agent-valley/settings.yaml`.
 Run `av login` on the dashboard machine and restart the dashboard. The
 dashboard reads the saved user session on the server and queries Supabase with
 that user's access token, so the `team_members` and `ledger_events` RLS

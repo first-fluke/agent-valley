@@ -22,9 +22,9 @@
  *     orchestrator secrets in settings.yaml.
  *   - `~/.agent-valley` — relay credentials and local state.
  *   - inactive agent vendor homes — credentials unrelated to this CLI.
- *   - the project's `valley.yaml` — team webhook secret, Linear team
- *     id/uuid (only masked when it resolves under `$HOME`, i.e. is
- *     actually part of the mounted tree — see `maskCredentialPaths`).
+ *   - the project's `av.yaml` — team webhook
+ *     secret and Linear team id/uuid. Mask it in the workspace and
+ *     under the mounted `$HOME` tree — see `maskCredentialPaths`.
  *   - `~/.ssh`, `~/.git-credentials` — git auth material the sandboxed
  *     agent doesn't need; SSH auth for git push/pull goes through the
  *     ssh-agent unix-domain socket (unaffected by filesystem
@@ -54,9 +54,10 @@
  * and at minimum confine filesystem").
  */
 
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
+import { PROJECT_CONFIG_FILENAME } from "../config/project-config-path"
 import { agentHomeAccess } from "./sandbox-agent-paths"
 import { resolveBinaryPath } from "./sandbox-binary"
 import { linkedWorktreeGitPaths } from "./sandbox-git"
@@ -119,7 +120,7 @@ export function buildLinuxSandboxCommand(
 
   // Masks come last so even a workspace nested under a protected directory
   // cannot expose host credentials through its later read-write bind.
-  if (existsSync(home)) maskCredentialPaths(args, home, agentPaths.inactive)
+  if (existsSync(home)) maskCredentialPaths(args, home, agentPaths.inactive, req.workspacePath)
 
   args.push("--chdir", req.workspacePath)
   args.push("--")
@@ -141,23 +142,27 @@ export function buildLinuxSandboxCommand(
  * host, and bwrap creates the destination file node if it isn't already
  * present in the mounted tree.
  *
- * The project's `valley.yaml` is only masked when it resolves to a path
- * under `home` (i.e. is actually part of the tree mounted above) —
+ * Project configuration is masked when its parent is inside a
+ * mounted home, workspace, temporary directory, or system tree —
  * masking a destination whose parent directories were never bound would
  * make bwrap fail to construct the sandbox at all, since bwrap can only
  * create a bind destination inside a tree that already exists in the
  * mount namespace being built.
  */
-function maskCredentialPaths(args: string[], home: string, inactiveAgentPaths: string[]): void {
+function maskCredentialPaths(args: string[], home: string, inactiveAgentPaths: string[], workspacePath: string): void {
   const maskDirs = [`${home}/.config/agent-valley`, `${home}/.agent-valley`, `${home}/.ssh`, ...inactiveAgentPaths]
   for (const dir of maskDirs) {
     args.push("--tmpfs", dir)
   }
 
   const maskFiles = [`${home}/.git-credentials`]
-  const projectValleyYaml = join(process.cwd(), "valley.yaml")
-  if (projectValleyYaml === home || projectValleyYaml.startsWith(`${home}/`)) {
-    maskFiles.push(projectValleyYaml)
+  const mountedRoots = [home, tmpdir(), ...READONLY_ROOTS, workspacePath]
+    .filter((root) => existsSync(root))
+    .flatMap((root) => [root, realpathSync(root)])
+  for (const root of new Set([process.cwd(), workspacePath])) {
+    if (mountedRoots.some((mountedRoot) => root === mountedRoot || root.startsWith(`${mountedRoot}/`))) {
+      maskFiles.push(join(root, PROJECT_CONFIG_FILENAME))
+    }
   }
   for (const file of maskFiles) {
     args.push("--ro-bind", "/dev/null", file)

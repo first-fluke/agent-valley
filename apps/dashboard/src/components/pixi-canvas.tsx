@@ -72,7 +72,7 @@ export function PixiCanvas({ state }: PixiCanvasProps) {
       <canvas
         ref={canvasRef}
         role="img"
-        aria-label={`Office dashboard: ${state?.activeAgents ?? 0} agents active`}
+        aria-label={`Office dashboard: ${state?.activeAgents ?? 0} actors active`}
         style={{
           width: dimensions.width * scale,
           height: dimensions.height * scale,

@@ -154,7 +154,7 @@ When Linear API is unreachable: `{ "status": "degraded", "reason": "linear api u
 ## Optional OTEL Integration (v0.2+)
 
 OpenTelemetry OTLP HTTP tracing is built in but defaults to **off**.
-Enable per deployment via `valley.yaml`:
+Enable per deployment via `av.yaml`:
 
 ```yaml
 observability:
@@ -176,7 +176,7 @@ Implementation: `packages/core/src/observability/otel-exporter.ts`.
 ## Optional Prometheus Integration (v0.2+)
 
 A Prometheus metrics endpoint is built in but defaults to **off**. Enable
-via `valley.yaml`:
+via `av.yaml`:
 
 ```yaml
 observability:

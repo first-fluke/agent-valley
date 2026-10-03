@@ -1,6 +1,6 @@
 /**
  * Workflow Loader — Prompt template rendering and input sanitization.
- * Prompt template now comes from valley.yaml config, not WORKFLOW.md.
+ * Prompt template now comes from av.yaml config, not WORKFLOW.md.
  *
  * Layered defense against prompt injection (see docs/harness/SAFETY.md §3):
  * this module is the boundary sanitizer for untrusted issue-tracker text

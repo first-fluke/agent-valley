@@ -32,6 +32,30 @@ async function unusedPort(): Promise<number> {
 }
 
 describe.skipIf(!bun)("source CLI daemon lifecycle", () => {
+  it.each(["up", "dev"])("rejects %s when only valley.yaml exists", async (command) => {
+    if (!bun) throw new Error("Bun is required for this test")
+    const root = mkdtempSync(join(tmpdir(), "av-missing-config-"))
+    const oldConfig = "workspace:\n  root: /ignored-workspace\nverify:\n  command: ignored-check\n"
+    try {
+      writeFileSync(join(root, "valley.yaml"), oldConfig)
+      await expect(
+        run(bun, [entrypoint, command, ...(command === "up" ? ["--dev"] : [])], {
+          cwd: root,
+          env: { ...process.env, XDG_CONFIG_HOME: join(root, "config") },
+          timeout: 5_000,
+        }),
+      ).rejects.toMatchObject({
+        code: 1,
+        stdout: expect.stringContaining("No av.yaml found. Run `av setup` first."),
+      })
+      expect(existsSync(join(root, ".av.pid"))).toBe(false)
+      expect(existsSync(join(root, "av.yaml"))).toBe(false)
+      expect(readFileSync(join(root, "valley.yaml"), "utf-8")).toBe(oldConfig)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("starts from supervisor.ts, returns to the shell, reads the configured port, and stops", async () => {
     if (!bun) throw new Error("Bun is required for this test")
     const bunBinary = bun
@@ -46,7 +70,7 @@ describe.skipIf(!bun)("source CLI daemon lifecycle", () => {
       mkdirSync(join(root, "bin"))
       writeFileSync(join(root, "apps/dashboard/package.json"), "{}")
       writeFileSync(
-        join(root, "valley.yaml"),
+        join(root, "av.yaml"),
         `
 linear:
   api_key: test-key

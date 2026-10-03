@@ -6,7 +6,7 @@ export const metadata: Metadata = {
     default: "Agent Valley",
     template: "%s | Agent Valley",
   },
-  description: "AI agent orchestration dashboard — monitor agents, issues, and real-time status",
+  description: "Actor orchestration dashboard. Monitor Actors, issues, and live status.",
   applicationName: "Agent Valley",
   icons: {
     icon: "/icon.svg",

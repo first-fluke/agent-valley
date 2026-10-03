@@ -63,13 +63,13 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
     if (!config.secret) {
       throw new Error(
         "GithubWebhookReceiver: secret is required.\n" +
-          "  Fix: set github.webhook_secret in valley.yaml or export the referenced env var.",
+          "  Fix: set github.webhook_secret in av.yaml or export the referenced env var.",
       )
     }
     if (!config.labels?.todo || !config.labels?.inProgress || !config.labels?.done || !config.labels?.cancelled) {
       throw new Error(
         "GithubWebhookReceiver: labels.{todo,inProgress,done,cancelled} are all required.\n" +
-          "  Fix: add github.labels.* entries in valley.yaml.",
+          "  Fix: add github.labels.* entries in av.yaml.",
       )
     }
     this.secret = config.secret

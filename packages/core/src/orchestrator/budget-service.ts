@@ -120,14 +120,14 @@ export interface BudgetServiceOptions {
 
 /**
  * Build an in-memory BudgetService. When no caps are configured (i.e. the
- * budget section is absent from valley.yaml) callers should use
+ * budget section is absent from av.yaml) callers should use
  * `createNoopBudgetService()` instead so allow is always returned.
  */
 export function createInMemoryBudgetService(opts: BudgetServiceOptions): BudgetService {
   return new InMemoryBudgetService(opts)
 }
 
-/** No-op fallback used when `budget` is not configured in valley.yaml. */
+/** No-op fallback used when `budget` is not configured in av.yaml. */
 export function createNoopBudgetService(): BudgetService {
   return {
     async checkBeforeSpawn() {
@@ -422,7 +422,7 @@ export function computeCost(
     logger.warn("budget", "Unknown model in pricing map — charging 0 USD", {
       model: usage.model,
       availableModels: Object.keys(pricing).join(",") || "(none)",
-      fix: "Add the model to budget.pricing in valley.yaml",
+      fix: "Add the model to budget.pricing in av.yaml",
     })
     return 0
   }
@@ -448,7 +448,7 @@ export function formatBudgetBlockComment(
     `Symphony: budget cap reached for ${identifier} (${scope}).\n` +
     `  Used: ${used} ${unit}\n` +
     `  Cap:  ${cap} ${unit}\n` +
-    `  Fix: raise budget.${decision.reason === "issue_cap" ? "per_issue" : "per_day"}.${decision.unit} in valley.yaml, ` +
+    `  Fix: raise budget.${decision.reason === "issue_cap" ? "per_issue" : "per_day"}.${decision.unit} in av.yaml, ` +
     `or add the "${BUDGET_OVERRIDE_LABEL}" label and enable budget.allow_override_label.`
   )
 }

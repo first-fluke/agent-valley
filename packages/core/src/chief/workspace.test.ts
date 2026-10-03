@@ -22,7 +22,7 @@ beforeEach(async () => {
       "-c",
       "core.hooksPath=/dev/null",
       "-c",
-      "user.name=Chief Test",
+      "user.name=Chief Director Test",
       "-c",
       "user.email=chief@example.test",
       "commit",

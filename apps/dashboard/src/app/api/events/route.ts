@@ -71,7 +71,7 @@ export async function GET(request: Request) {
     } else {
       send("unavailable", {
         message:
-          "Orchestrator is unavailable. Run av doctor in the project directory, fix the reported settings.yaml or valley.yaml errors, and restart av up. Check the server log for the startup error.",
+          "Orchestrator is unavailable. Run av doctor in the project directory, fix the reported settings.yaml or av.yaml errors, and restart av up. Check the server log for the startup error.",
       })
     }
   }

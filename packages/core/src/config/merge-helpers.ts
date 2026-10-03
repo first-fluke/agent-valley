@@ -4,9 +4,9 @@
  */
 
 /**
- * Resolve effective agent concurrency.
+ * Resolve effective actor concurrency.
  *
- * An explicit `agent.max_parallel` from project/global config wins over the
+ * An explicit `actor.max_parallel` from project/global config wins over the
  * hardware-derived recommendation. A value above the recommendation is honored
  * (not clamped) but warns about the resource-exhaustion risk so the operator
  * can self-correct. `explicit` is the already-resolved project > global value
@@ -17,8 +17,8 @@ export function resolveMaxParallel(explicit: number | undefined, recommended: nu
 
   if (explicit > recommended) {
     console.warn(
-      `WARN: agent.max_parallel (${explicit}) exceeds the hardware-recommended concurrency (${recommended}). ` +
-        "Running more agents than recommended may exhaust CPU/RAM and degrade performance. " +
+      `WARN: actor.max_parallel (${explicit}) exceeds the hardware-recommended concurrency (${recommended}). ` +
+        "Running more actors than recommended may exhaust CPU/RAM and degrade performance. " +
         "Proceeding with the configured value.",
     )
   }

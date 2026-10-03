@@ -128,7 +128,7 @@ export async function createIssue(
 
   if (config.trackerKind === "github" && (options?.parent || options?.blockedBy || options?.breakdown)) {
     throw new Error(
-      "GitHub issue creation supports --raw, --yes, and --scope. --parent, --blocked-by, and --breakdown currently require tracker.kind: linear in valley.yaml.",
+      "GitHub issue creation supports --raw, --yes, and --scope. --parent, --blocked-by, and --breakdown currently require tracker.kind: linear in av.yaml.",
     )
   }
 
@@ -246,7 +246,7 @@ export async function createIssue(
   }
 
   if (config.trackerKind === "github") {
-    if (!config.github) throw new Error("Set github configuration in valley.yaml before creating an issue.")
+    if (!config.github) throw new Error("Set github configuration in av.yaml before creating an issue.")
     s.start("Creating GitHub issue...")
     try {
       const { createGithubIssue } = await import("./github-issue")

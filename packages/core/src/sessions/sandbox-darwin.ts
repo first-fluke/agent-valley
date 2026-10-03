@@ -21,7 +21,7 @@
  * `(deny file-read* ...)` rules for `~/.config/agent-valley` (holds
  * LINEAR_API_KEY + other orchestrator secrets in settings.yaml), the
  * relay's `~/.agent-valley` credentials, inactive agent vendor homes, the
- * project's `valley.yaml` (team webhook secret, Linear team id/uuid —
+ * project's `av.yaml` (team webhook secret, Linear team id/uuid —
  * resolved best-effort from the orchestrator's cwd, which is chdir'd to
  * the project root at startup by apps/dashboard/src/lib/bootstrap.ts),
  * and `~/.ssh` + `~/.git-credentials` (git auth material the sandboxed
@@ -61,6 +61,7 @@
 import { realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
+import { PROJECT_CONFIG_FILENAME } from "../config/project-config-path"
 import { agentHomeAccess } from "./sandbox-agent-paths"
 import { resolveBinaryPath } from "./sandbox-binary"
 import { linkedWorktreeGitPaths } from "./sandbox-git"
@@ -160,7 +161,10 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
     `${home}/.ssh`,
     ...agentPaths.inactive,
   ]
-  const denyReadLiterals = [`${home}/.git-credentials`, join(process.cwd(), "valley.yaml")]
+  const denyReadLiterals = [
+    `${home}/.git-credentials`,
+    ...new Set([process.cwd(), req.workspacePath].map((root) => join(root, PROJECT_CONFIG_FILENAME))),
+  ]
   const denyReadRules = [
     ...denyReadSubpaths.map((p) => `(deny file-read* (subpath ${seatbeltString(p)}))`),
     ...denyReadLiterals.map((p) => `(deny file-read* (literal ${seatbeltString(p)}))`),

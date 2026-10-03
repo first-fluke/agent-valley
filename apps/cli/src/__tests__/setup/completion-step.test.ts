@@ -11,6 +11,32 @@ vi.mock("@clack/prompts", () => ({
 beforeEach(() => vi.resetAllMocks())
 
 describe("setup completion requirements", () => {
+  it("defaults standalone orders to Chief-designed checks without requesting a command", async () => {
+    vi.mocked(p.select).mockResolvedValue("chief")
+    const context: SetupContext = { trackerKind: "none", task: { kind: "code" } }
+    await stepCompletion(context, 3, 3)
+    expect(context).toEqual({ trackerKind: "none" })
+    expect(p.text).not.toHaveBeenCalled()
+    expect(p.select).toHaveBeenCalledWith(expect.objectContaining({ initialValue: "chief" }))
+  })
+
+  it("preserves an existing explicit order command as the initial selection and allows switching to Chief", async () => {
+    vi.mocked(p.select).mockResolvedValue("chief")
+    const context: SetupContext = { trackerKind: "none", verifyCommand: "test -s report.md", task: { kind: "code" } }
+    await stepCompletion(context, 3, 3)
+    expect(p.select).toHaveBeenCalledWith(expect.objectContaining({ initialValue: "code" }))
+    expect(context).toEqual({ trackerKind: "none" })
+    expect(p.text).not.toHaveBeenCalled()
+  })
+
+  it("keeps Chief-generated checks out of tracker completion choices", async () => {
+    vi.mocked(p.select).mockResolvedValue("code")
+    vi.mocked(p.text).mockResolvedValue("bun run test")
+    await stepCompletion({ trackerKind: "github" }, 5, 5)
+    const options = vi.mocked(p.select).mock.calls[0]?.[0].options
+    expect(options?.map((option) => option.value)).toEqual(["code", "analysis"])
+  })
+
   it("collects an existing verification command for code work", async () => {
     vi.mocked(p.select).mockResolvedValue("code")
     vi.mocked(p.text).mockResolvedValue(" bun run test ")

@@ -5,7 +5,7 @@
 
 import { z } from "zod"
 
-/** Project-level (valley.yaml) observability section — all fields optional. */
+/** Project-level (av.yaml) observability section — all fields optional. */
 export const observabilityProjectSchema = z
   .object({
     otel: z

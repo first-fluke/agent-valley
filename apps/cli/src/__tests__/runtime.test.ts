@@ -46,7 +46,7 @@ describe("operator ports and PID state", () => {
     mkdirSync(join(root, "config/agent-valley"), { recursive: true })
     writeFileSync(join(root, "config/agent-valley/settings.yaml"), "server:\n  port: 9800\n")
     expect(resolveServerPort(root)).toBe("9800")
-    writeFileSync(join(root, "valley.yaml"), "server:\n  port: 9900\n")
+    writeFileSync(join(root, "av.yaml"), "server:\n  port: 9900\n")
     expect(resolveServerPort(root)).toBe("9900")
     expect(resolveServerPort(root, 9901)).toBe("9901")
     vi.stubEnv("SERVER_PORT", "9902")

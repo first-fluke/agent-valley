@@ -2,7 +2,9 @@
 
 OMA receipt validation is optional. With the default `oma.mode: off`, code tasks still require detected code changes and a configured passing verification command. Text output alone never completes a task.
 
-For an analysis-only task, the operator must configure a report path in `valley.yaml` or a matching routing rule:
+`av setup` offers installation or update of the latest OMA CLI and skills in the selected target repository. This prepares skill use for Chief Director orders; it does not enable strict receipts or claim compatibility with their pinned CLI version. Existing OMA configuration is preserved. See [environment setup](./environment-setup.md) for the wizard flow.
+
+For an analysis-only task, the operator must configure a report path in `av.yaml` or a matching routing rule:
 
 ```yaml
 task:
@@ -12,7 +14,7 @@ task:
 
 The report must be a nonempty regular file inside the current worktree, written during the current attempt. The attempt ID in the configured path prevents an earlier run's report from satisfying completion. A missing, stale, wrong-workspace, or escaping symlink report blocks Done. The default task kind is `code`.
 
-To require OMA evidence, configure the target project's `valley.yaml`:
+To require OMA evidence, configure the target project's `av.yaml`:
 
 ```yaml
 oma:

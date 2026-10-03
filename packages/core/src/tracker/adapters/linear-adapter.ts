@@ -41,14 +41,14 @@ export class LinearTrackerAdapter implements IssueTracker {
       throw new Error(
         "LinearTrackerAdapter: teamId is required.\n" +
           "  Fix: pass config.linearTeamId when constructing the adapter.\n" +
-          "  Source: valley.yaml `linear.teamId`.",
+          "  Source: av.yaml `linear.teamId`.",
       )
     }
     if (!config.teamUuid) {
       throw new Error(
         "LinearTrackerAdapter: teamUuid is required.\n" +
           "  Fix: pass config.linearTeamUuid when constructing the adapter.\n" +
-          "  Source: valley.yaml `linear.teamUuid` (run `bun av setup` to discover it).",
+          "  Source: av.yaml `linear.teamUuid` (run `bun av setup` to discover it).",
       )
     }
   }

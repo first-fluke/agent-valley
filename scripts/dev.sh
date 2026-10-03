@@ -6,7 +6,7 @@
 #
 # What it does:
 #   1. Checks required prerequisites (git)
-#   2. Validates valley.yaml exists in project root
+#   2. Validates av.yaml exists in project root
 #   3. Validates ~/.config/agent-valley/settings.yaml exists (warns if missing)
 #   4. Runs lint/test if src/ exists
 #   5. Prints a clear status summary
@@ -61,17 +61,17 @@ ok "git $(git --version | awk '{print $3}')"
 # ─────────────────────────────────────────────────────────────────────────────
 section "Configuration"
 
-VALLEY_FILE="${REPO_ROOT}/valley.yaml"
+PROJECT_FILE="${REPO_ROOT}/av.yaml"
 GLOBAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent-valley"
 GLOBAL_FILE="${GLOBAL_DIR}/settings.yaml"
 
-if [ -f "${VALLEY_FILE}" ]; then
-  ok "valley.yaml found at ${VALLEY_FILE}"
-  add_ok "valley.yaml found"
+if [ -f "${PROJECT_FILE}" ]; then
+  ok "Project config found at ${PROJECT_FILE}"
+  add_ok "Project config found"
 else
-  fail "valley.yaml not found at ${VALLEY_FILE}"
-  fail "  → Run 'av setup' to create valley.yaml"
-  add_fail "valley.yaml missing — run av setup"
+  fail "av.yaml not found at ${PROJECT_FILE}"
+  fail "  → Run 'av setup' to create av.yaml"
+  add_fail "av.yaml missing — run av setup"
 fi
 
 if [ -f "${GLOBAL_FILE}" ]; then
@@ -80,7 +80,7 @@ if [ -f "${GLOBAL_FILE}" ]; then
 else
   warn "Global config not found at ${GLOBAL_FILE}"
   warn "  → Run 'av setup' to create global settings"
-  warn "  → valley.yaml can include all required fields if preferred"
+  warn "  → av.yaml can include all required fields if preferred"
   add_warn "Global settings.yaml missing"
 fi
 

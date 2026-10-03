@@ -16,7 +16,7 @@ export interface ModelPricing {
   outputPerMtok: number
 }
 
-/** Budget caps configuration resolved from valley.yaml (§ 4.5). */
+/** Budget caps configuration resolved from av.yaml (§ 4.5). */
 export interface BudgetCaps {
   /** Per-issue caps. */
   perIssue: { tokens: number; usd: number }

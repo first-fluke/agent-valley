@@ -32,7 +32,7 @@ Both ports are implemented by two adapters:
 | `LinearTrackerAdapter` + `LinearWebhookReceiver` | `POST https://api.linear.app/graphql` (GraphQL) + HMAC-SHA256 webhook header `Linear-Signature` | `packages/core/src/tracker/adapters/linear-*.ts` |
 | `GitHubTrackerAdapter` + `GitHubWebhookReceiver` | `https://api.github.com/...` (REST v3 + `X-Hub-Signature-256` HMAC) | `packages/core/src/tracker/adapters/github-*.ts` |
 
-The selector is `tracker.kind` in `valley.yaml` (defaults to `linear`).
+The selector is `tracker.kind` in `av.yaml` (defaults to `linear`).
 Each adapter is exercised against `runIssueTrackerContract` /
 `runWebhookReceiverContract` in `packages/core/src/__tests__/contracts/`.
 

@@ -63,7 +63,7 @@ export function resolveServerPort(root: string, runningPort?: number): string {
       9741,
   )
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error("Set SERVER_PORT or server.port in valley.yaml/settings.yaml to an integer between 1 and 65535.")
+    throw new Error("Set SERVER_PORT or server.port in av.yaml/settings.yaml to an integer between 1 and 65535.")
   }
   return String(port)
 }

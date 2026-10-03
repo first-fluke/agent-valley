@@ -31,7 +31,7 @@ export async function createGithubIssue(
   )
   if (!response.ok) {
     throw new Error(
-      `GitHub issue creation failed (HTTP ${response.status}). Check github.owner/repo in valley.yaml, the token's Issues write permission, and the configured labels in the repository.`,
+      `GitHub issue creation failed (HTTP ${response.status}). Check github.owner/repo in av.yaml, the token's Issues write permission, and the configured labels in the repository.`,
     )
   }
   const issue = (await response.json()) as { number?: number; title?: string; html_url?: string }

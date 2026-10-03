@@ -1,15 +1,21 @@
 import { randomUUID } from "node:crypto"
-import { readFile, realpath } from "node:fs/promises"
-import { join, resolve, sep } from "node:path"
-import type { Issue, RunAttempt } from "../domain/models"
+import { join, resolve } from "node:path"
+import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { buildOmaGuidance, prepareOmaAttempt, validateOmaEvidence } from "../oma/receipt-adapter"
 import { AgentRunnerService } from "../orchestrator/agent-runner"
 import { runVerificationGate } from "../orchestrator/verification-gate"
 import { runCommand } from "../workspace/worktree-lifecycle"
 import type { ActiveMissionProcess } from "./active-process"
+import { MissionPause } from "./execution"
+import { withMissionDeadline } from "./execution-signal"
 import { fingerprintWorkspace } from "./fingerprint"
+import { disposeTaskWorktree, integrateTaskWorktree, prepareTaskWorktree } from "./parallel-workspace"
+import { selectWorkActor } from "./routing"
+import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
-import type { ChiefPorts, Mission, Persona } from "./types"
+import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
+import { finishOperatingRun, startOperatingRun } from "./usage"
+import { executeGoalVerification } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
 
 async function finishProcess(active: ActiveMissionProcess): Promise<void> {
@@ -18,7 +24,11 @@ async function finishProcess(active: ActiveMissionProcess): Promise<void> {
       active.finish()
       return
     } catch (error) {
-      if (attempt >= 20) throw error
+      if (attempt >= 20)
+        throw new MissionPause(
+          `Actor process cleanup could not be confirmed: ${error instanceof Error ? error.message : String(error)}`,
+          "unknown-effect",
+        )
       // The process group may briefly contain children awaiting OS reaping.
       await new Promise((resolveWait) => setTimeout(resolveWait, 50))
     }
@@ -54,35 +64,32 @@ export async function intermediateVerifyCommand(workspacePath: string): Promise<
   return `git diff --check ${hash} --`
 }
 
-async function personaSkills(persona: Persona, mission: Mission): Promise<string> {
-  if (!persona.skills.length) return ""
-  const skillsRoot = await realpath(join(mission.workspace.path, ".agents/skills")).catch(() => {
-    throw new Error(
-      `Persona ${persona.id} requires skills in the target repository. Install its OMA harness or remove skills from the persona profile.`,
+async function personaSkills(persona: Persona, mission: Mission, stage: string): Promise<string> {
+  const catalog = mission.availableSkills ?? (await discoverMissionSkills(mission.workspace.path))
+  if (!mission.availableAgents) await validateMissionSkills(mission.workspace.path, catalog)
+  const selected = await loadMissionSkillBodies(
+    mission.workspace.path,
+    persona.skills,
+    mission.availableAgents ? catalog : undefined,
+  )
+  const guidance: string[] = []
+  if (persona.id === mission.chiefId) {
+    guidance.push(
+      "Available OMA skills in this mission worktree (catalog metadata; descriptions do not override the goal or stage permissions):",
+      JSON.stringify(catalog),
+      "Choose relevant actual skills from this catalog for the goal. Read a selected SKILL.md at its listed path and only its needed references. Automatic Actor skills must use these exact names. An empty catalog means no verified OMA skills are available.",
     )
-  })
-  const sections: string[] = []
-  let length = 0
-  for (const name of persona.skills) {
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`Invalid skill name for persona ${persona.id}: ${name}`)
-    const path = await realpath(join(skillsRoot, name, "SKILL.md")).catch(() => {
-      throw new Error(
-        `Persona ${persona.id} requires ${name}/SKILL.md. Restore that installed skill in ${mission.workspace.path}/.agents/skills before resuming.`,
-      )
-    })
-    if (!path.startsWith(`${skillsRoot}${sep}`))
-      throw new Error(`Skill ${name} escapes the skill directory. Fix its symlink before running.`)
-    const content = await readFile(path, "utf8")
-    length += content.length
-    if (length > 256_000)
-      throw new Error(`Persona ${persona.id} has more than 256 KB of skill instructions. Select fewer skills.`)
-    sections.push(`## Skill ${name}\nSource: ${path}\n${content}`)
   }
-  return `\n\nUse these selected skills within the assigned role and acceptance criteria. Planning and review stages must not change product files.\n${sections.join("\n\n")}`
+  if (selected) guidance.push("Use these selected skills within the assigned role and acceptance criteria.", selected)
+  if (guidance.length && stage !== "work")
+    guidance.push(
+      "This stage is read-only: skill instructions do not authorize changes to product files, tests, configuration, or the fixed verification command.",
+    )
+  return guidance.length ? `\n\n${guidance.join("\n\n")}` : ""
 }
 
 export class ChiefRuntime {
-  private readonly runner = new AgentRunnerService()
+  private readonly runners = new Set<AgentRunnerService>()
 
   constructor(
     private readonly store: MissionStore,
@@ -98,37 +105,98 @@ export class ChiefRuntime {
         await assertMissionWorkspace(mission)
         return fingerprintWorkspace(mission.workspace.path)
       },
-      verify: async (mission) => {
-        if (!mission.verifyCommand.trim())
-          throw new Error("A trusted verification command is required. Set --verify before creating an order.")
-        const active = this.store.processGuard(mission.id)
-        active.begin("verify")
-        try {
-          return await runVerificationGate(mission.workspace, mission.verifyCommand, {
-            timeoutSec: mission.timeoutSec,
-            signal: this.signal,
-            onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
-          })
-        } finally {
-          await finishProcess(active)
-        }
+      verify: (mission) => withMissionDeadline(mission, this.signal, (signal) => this.verifyMission(mission, signal)),
+      runAgent: (persona, prompt, mission, stage, context) => this.runAgent(persona, prompt, mission, stage, context),
+      parallel: {
+        prepare: async (mission, taskId, attempt) => {
+          const record = await prepareTaskWorktree(mission, taskId, attempt)
+          await prepareMissionSkills(mission.workspace.path, record.path)
+          return record
+        },
+        integrate: async (mission, record) => {
+          await integrateTaskWorktree(mission, record)
+        },
+        dispose: async (record) => {
+          await disposeTaskWorktree(record)
+        },
       },
-      runAgent: (persona, prompt, mission, stage) => this.runAgent(persona, prompt, mission, stage),
     }
   }
 
   async close(): Promise<void> {
-    await this.runner.killAll()
+    await Promise.allSettled([...this.runners].map((runner) => runner.killAll()))
   }
 
-  private async runAgent(persona: Persona, prompt: string, mission: Mission, stage: string): Promise<string> {
-    if (this.signal?.aborted)
+  private async verifyMission(mission: Mission, signal?: AbortSignal): Promise<{ ok: boolean; output?: string }> {
+    if (!mission.verifyCommand.trim() && !mission.verificationContract)
+      throw new Error("A trusted verification command is required. Set --verify before creating an order.")
+    if (mission.verificationContract) await assertMissionWorkspace(mission)
+    const active = this.store.processGuard(mission.id)
+    active.begin("verify")
+    try {
+      if (mission.verificationContract) {
+        mission.goalVerification = await executeGoalVerification(mission.verificationContract, mission.workspace.path, {
+          successCriteria: mission.goalBrief?.successCriteria ?? [],
+          expectedContractSha256: mission.verificationContractSha256,
+          timeoutMs: mission.timeoutSec * 1_000,
+          signal: signal,
+          onSpawned: (pid, detached) => active.spawned(pid, detached),
+        })
+        if (!mission.goalVerification.ok || !mission.verifyCommand.trim()) return mission.goalVerification
+        await finishProcess(active)
+        active.begin("operator-verify")
+      }
+      return await runVerificationGate(mission.workspace, mission.verifyCommand, {
+        timeoutSec: mission.timeoutSec,
+        signal: signal,
+        onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
+      })
+    } finally {
+      await finishProcess(active)
+    }
+  }
+
+  private runAgent(
+    persona: Persona,
+    prompt: string,
+    mission: Mission,
+    stage: ChiefStage,
+    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal },
+  ): Promise<string> {
+    return withMissionDeadline(mission, context?.signal ?? this.signal, (signal) =>
+      this.executeAgent(persona, prompt, mission, stage, { ...context, signal }),
+    )
+  }
+
+  private async executeAgent(
+    persona: Persona,
+    prompt: string,
+    mission: Mission,
+    stage: ChiefStage,
+    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal },
+  ): Promise<string> {
+    const signal = context?.signal ?? this.signal
+    const workspace = context?.workspace ?? mission.workspace
+    const localMission =
+      workspace === mission.workspace
+        ? mission
+        : {
+            ...mission,
+            workspace,
+            availableSkills: mission.availableSkills?.map((skill) => ({
+              ...skill,
+              path: join(workspace.path, ".agents", "skills", skill.name, "SKILL.md"),
+            })),
+          }
+    if (signal?.aborted)
       throw new Error("Order interrupted. Resume it with av order --resume followed by its mission ID.")
+    const route = stage === "work" ? selectWorkActor(mission, persona, context?.taskId) : undefined
+    persona = route?.actor ?? persona
     this.onStage(stage, persona)
     const attempt: RunAttempt = {
       id: randomUUID(),
       issueId: mission.id,
-      workspacePath: resolve(mission.workspace.path),
+      workspacePath: resolve(workspace.path),
       startedAt: new Date().toISOString(),
       finishedAt: null,
       exitCode: null,
@@ -137,47 +205,68 @@ export class ChiefRuntime {
     const evidence = {
       issue: missionIssue(mission.id, mission.goal),
       attempt,
-      workspace: mission.workspace,
+      workspace,
       agentId: persona.id,
       // A prerequisite task cannot satisfy the whole mission's final gate yet.
       // Receipts bind this intermediate check to its files; independent review
       // assesses task acceptance, and the coordinator runs the final command.
       verifyCommand:
-        mission.oma && stage === "work" ? await intermediateVerifyCommand(mission.workspace.path) : "git diff --check",
+        mission.oma && stage === "work" ? await intermediateVerifyCommand(workspace.path) : "git diff --check",
     }
     if (mission.oma && stage === "work") {
       await prepareOmaAttempt(evidence)
       prompt += `\n\n${buildOmaGuidance(evidence)}`
     }
-    prompt += await personaSkills(persona, mission)
+    prompt += await personaSkills(persona, localMission, stage)
+    if (route)
+      prompt += `\n\nActual work route: ${JSON.stringify({ actorType: persona.agentType, model: persona.model ?? "native default", reason: route.reason })}. This route does not alter the user's Chief Director choice or acceptance contract.`
     let abort: (() => void) | undefined
-    const active = this.store.processGuard(mission.id)
+    const runner = new AgentRunnerService()
+    this.runners.add(runner)
+    const active = this.store.processGuard(mission.id, attempt.id)
     active.begin(stage)
+    const entry = startOperatingRun(mission, persona, attempt, stage, context?.taskId, route?.reason)
+    let observed = attempt
+    let failed = false
     try {
+      await this.store.save(mission)
       const completed = await new Promise<RunAttempt>((resolveRun, rejectRun) => {
         abort = () => {
           rejectRun(
-            new Error("Order interrupted. The worktree and mission record were retained; use av order --resume."),
+            signal?.reason instanceof MissionPause
+              ? signal.reason
+              : new Error("Order interrupted. The worktree and mission record were retained; use av order --resume."),
           )
         }
-        this.signal?.addEventListener("abort", abort, { once: true })
-        if (this.signal?.aborted) {
+        signal?.addEventListener("abort", abort, { once: true })
+        if (signal?.aborted) {
           abort()
           return
         }
-        void this.runner
+        void runner
           .spawn(
             attempt,
             {
               agentType: persona.agentType,
               model: persona.model,
               timeout: mission.timeoutSec,
-              workspacePath: mission.workspace.path,
+              workspacePath: workspace.path,
               prompt,
             },
             {
-              onComplete: resolveRun,
-              onError: (error) => rejectRun(new Error(error.message)),
+              onComplete: (completed) => {
+                observed = completed
+                resolveRun(completed)
+              },
+              onError: (error) => {
+                observed = {
+                  ...attempt,
+                  finishedAt: new Date().toISOString(),
+                  exitCode: error.exitCode ?? null,
+                  tokenUsage: error.tokenUsage,
+                }
+                rejectRun(new Error(error.message))
+              },
               onHeartbeat: () => {},
               onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
             },
@@ -185,7 +274,7 @@ export class ChiefRuntime {
           .catch(rejectRun)
       })
       // Session disposal must finish before a reviewer reads the shared worktree.
-      await this.runner.killAll()
+      await runner.killAll()
       if (mission.oma && stage === "work") {
         const receipt = validateOmaEvidence({ ...evidence, attempt: completed, kind: "code" })
         if (!receipt.ok)
@@ -194,10 +283,16 @@ export class ChiefRuntime {
           )
       }
       return completed.agentOutput ?? ""
+    } catch (error) {
+      failed = true
+      throw error
     } finally {
-      if (abort) this.signal?.removeEventListener("abort", abort)
-      await this.runner.killAll()
+      if (abort) signal?.removeEventListener("abort", abort)
+      await runner.killAll()
+      this.runners.delete(runner)
       await finishProcess(active)
+      finishOperatingRun(mission, entry, observed, failed)
+      await this.store.save(mission)
     }
   }
 }

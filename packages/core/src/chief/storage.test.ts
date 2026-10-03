@@ -41,7 +41,7 @@ function mission(): Mission {
       createdAt: "2026-10-03",
     },
     personas: [
-      { id: "chief", name: "Chief", role: "Coordinate", agentType: "claude", skills: [] },
+      { id: "chief", name: "Chief Director", role: "Coordinate", agentType: "claude", skills: [] },
       { id: "writer", name: "Writer", role: "Research", agentType: "claude", skills: [] },
     ],
   }

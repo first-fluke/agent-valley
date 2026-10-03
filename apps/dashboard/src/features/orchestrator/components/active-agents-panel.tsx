@@ -27,7 +27,7 @@ export function ActiveAgentsPanel({
 
   return (
     <div className="bg-gray-800/90 rounded-lg p-4 border border-gray-700">
-      <h2 className="text-sm font-bold text-gray-300 mb-3">Active Agents</h2>
+      <h2 className="text-sm font-bold text-gray-300 mb-3">Active Actors</h2>
       {!canIntervene && (
         <p className="mb-2 text-xs text-gray-400">
           Read-only access. Sign in with an intervention token to control agents.

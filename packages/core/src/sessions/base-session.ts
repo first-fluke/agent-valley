@@ -40,36 +40,47 @@ const SAFE_ENV_KEYS = [
  * even though its actual CLI binary is named `agy`).
  */
 const AGENT_ENV_KEYS: Record<string, string[]> = {
-  codex: ["OPENAI_API_KEY"],
-  claude: ["ANTHROPIC_API_KEY"],
+  codex: ["OPENAI_API_KEY", "CODEX_HOME"],
+  claude: ["ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR"],
   antigravity: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
   cursor: ["CURSOR_API_KEY"],
   grok: ["XAI_API_KEY", "GROK_API_KEY"],
   // kimi primarily authenticates via ~/.kimi-code/config.toml (set by the
   // `/login` device-code flow), not env vars — these are forwarded for
   // parity/CI when present, and are harmless no-ops when absent.
-  kimi: ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
+  kimi: ["KIMI_API_KEY", "MOONSHOT_API_KEY", "KIMI_CODE_HOME"],
   // opencode is multi-provider (75+); auth.json is primary, these are
   // convenience passthroughs — opencode's primary auth is
   // ~/.local/share/opencode/auth.json via `opencode auth`, not env vars.
-  opencode: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"],
+  opencode: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "XDG_DATA_HOME"],
+}
+
+/** Credential names only; callers cannot mutate the session environment allowlist. */
+export function getAgentAuthEnvKeys(agentType: string): readonly string[] {
+  return Object.freeze(
+    (AGENT_ENV_KEYS[agentType] ?? []).filter((key) => /_(API_KEY|AUTH_TOKEN|ACCESS_TOKEN)$/.test(key)),
+  )
 }
 
 /**
  * Build a minimal env for the agent subprocess.
  * Only safe system vars + agent-specific auth keys + explicit config.env are included.
  */
-export function buildAgentEnv(agentType: string, extra: Record<string, string> = {}): Record<string, string> {
+export function buildAgentEnv(
+  agentType: string,
+  extra: Record<string, string> = {},
+  source: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
   const env: Record<string, string> = {}
 
   for (const key of SAFE_ENV_KEYS) {
-    const val = process.env[key]
+    const val = source[key]
     if (val != null) env[key] = val
   }
 
   const agentKeys = AGENT_ENV_KEYS[agentType] ?? []
   for (const key of agentKeys) {
-    const val = process.env[key]
+    const val = source[key]
     if (val != null) env[key] = val
   }
 

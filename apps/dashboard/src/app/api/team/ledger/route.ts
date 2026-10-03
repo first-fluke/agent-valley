@@ -20,7 +20,7 @@ export async function GET(request: Request): Promise<Response> {
     return Response.json(result, { status, headers: { "Cache-Control": "no-store" } })
   } catch {
     return Response.json(
-      { mode: "team", status: "error", code: "config_unavailable", message: "Dashboard configuration could not be loaded. Check valley.yaml and settings.yaml." },
+      { mode: "team", status: "error", code: "config_unavailable", message: "Dashboard configuration could not be loaded. Check av.yaml and settings.yaml." },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     )
   }

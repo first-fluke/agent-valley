@@ -1,45 +1,17 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
+import { actorDefaultsSchema, normalizeActorDefaults, routingRuleSchema, scoreRoutingSchema } from "./actor-schema"
 import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
+import { chiefConfigSchema, mergeChiefConfig } from "./chief-schema"
 import { detectHardware } from "./hardware"
 import { resolveMaxParallel } from "./merge-helpers"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
+import { resolveProjectConfigPath } from "./project-config-path"
 import { resolvedTaskSchema, taskSchema } from "./task-schema"
 import { buildTunnelConfig, tunnelMergedSchema, tunnelProjectSchema } from "./tunnel-schema"
 import { buildVerifyConfig, verifyMergedSchema, verifyProjectSchema } from "./verify-schema"
 import { readYamlFile } from "./yaml-file"
-
-const routingRuleSchema = z.object({
-  label: z.string().min(1, "Each routing rule must have a non-empty label"),
-  workspace_root: z
-    .string()
-    .min(1)
-    .refine((v) => v.startsWith("/"), "workspace_root in routing rule must be an absolute path"),
-  agent_type: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]).optional(),
-  delivery_mode: z.enum(["merge", "pr"]).optional(),
-  verify_command: z.string().min(1, "verify_command must be a non-empty shell command").optional(),
-  task: taskSchema.optional(),
-})
-
-const scoreRoutingTierSchema = z
-  .object({
-    min: z.number().int().min(1).max(10),
-    max: z.number().int().min(1).max(10),
-    agent: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]),
-  })
-  .refine((v) => v.min <= v.max, "Each score tier must have min <= max")
-
-const scoreRoutingSchema = z
-  .object({
-    easy: scoreRoutingTierSchema,
-    medium: scoreRoutingTierSchema,
-    hard: scoreRoutingTierSchema,
-  })
-  .refine(
-    (v) => v.easy.max < v.medium.min && v.medium.max < v.hard.min,
-    "Score tiers must not overlap. Ensure easy.max < medium.min and medium.max < hard.min",
-  )
 
 /** Schema for ~/.config/agent-valley/settings.yaml */
 export const globalConfigSchema = z
@@ -49,15 +21,9 @@ export const globalConfigSchema = z
         api_key: z.string().min(1).optional(),
       })
       .optional(),
-    agent: z
-      .object({
-        type: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]).optional(),
-        timeout: z.number().min(30).optional(),
-        max_retries: z.number().min(1).optional(),
-        retry_delay: z.number().min(1).optional(),
-        max_parallel: z.number().min(1, "agent.max_parallel must be >= 1").optional(),
-      })
-      .optional(),
+    actor: actorDefaultsSchema.optional(),
+    agent: actorDefaultsSchema.optional(),
+    chief: chiefConfigSchema.optional(),
     logging: z
       .object({
         level: z.enum(["debug", "info", "warn", "error"]).optional(),
@@ -79,10 +45,11 @@ export const globalConfigSchema = z
       .optional(),
   })
   .strict()
+  .overwrite(normalizeActorDefaults)
 
 export type GlobalConfig = z.infer<typeof globalConfigSchema>
 
-/** Schema for <project>/valley.yaml */
+/** Schema for <project>/av.yaml */
 export const projectConfigSchema = z
   .object({
     tracker: z
@@ -128,15 +95,8 @@ export const projectConfigSchema = z
         root: z.string().min(1).optional(),
       })
       .optional(),
-    agent: z
-      .object({
-        type: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]).optional(),
-        timeout: z.number().min(30).optional(),
-        max_retries: z.number().min(1).optional(),
-        retry_delay: z.number().min(1).optional(),
-        max_parallel: z.number().min(1, "agent.max_parallel must be >= 1").optional(),
-      })
-      .optional(),
+    actor: actorDefaultsSchema.optional(),
+    agent: actorDefaultsSchema.optional(),
     delivery: z
       .object({
         mode: z.enum(["merge", "pr"]).optional(),
@@ -179,24 +139,24 @@ export const projectConfigSchema = z
     verify: verifyProjectSchema,
     task: taskSchema.optional(),
     oma: z.object({ mode: z.enum(["off", "strict"]).default("off") }).optional(),
+    chief: chiefConfigSchema.optional(),
   })
   .strict()
+  .overwrite(normalizeActorDefaults)
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>
 const githubConfigSchema = z.object({
   token: z
     .string()
     .min(1, "github token resolved from token_env is empty.\n  Fix: export the env var named in github.token_env."),
-  owner: z.string().min(1, "github.owner is not set.\n  Fix: Add github.owner to valley.yaml"),
-  repo: z.string().min(1, "github.repo is not set.\n  Fix: Add github.repo to valley.yaml"),
-  webhookSecret: z
-    .string()
-    .min(1, "github.webhook_secret is not set.\n  Fix: Add github.webhook_secret to valley.yaml"),
+  owner: z.string().min(1, "github.owner is not set.\n  Fix: Add github.owner to av.yaml"),
+  repo: z.string().min(1, "github.repo is not set.\n  Fix: Add github.repo to av.yaml"),
+  webhookSecret: z.string().min(1, "github.webhook_secret is not set.\n  Fix: Add github.webhook_secret to av.yaml"),
   labels: z.object({
-    todo: z.string().min(1, "github.labels.todo is not set.\n  Fix: Add it to valley.yaml"),
-    inProgress: z.string().min(1, "github.labels.in_progress is not set.\n  Fix: Add it to valley.yaml"),
-    done: z.string().min(1, "github.labels.done is not set.\n  Fix: Add it to valley.yaml"),
-    cancelled: z.string().min(1, "github.labels.cancelled is not set.\n  Fix: Add it to valley.yaml"),
+    todo: z.string().min(1, "github.labels.todo is not set.\n  Fix: Add it to av.yaml"),
+    inProgress: z.string().min(1, "github.labels.in_progress is not set.\n  Fix: Add it to av.yaml"),
+    done: z.string().min(1, "github.labels.done is not set.\n  Fix: Add it to av.yaml"),
+    cancelled: z.string().min(1, "github.labels.cancelled is not set.\n  Fix: Add it to av.yaml"),
   }),
 })
 
@@ -218,10 +178,10 @@ const mergedConfigSchema = z
     github: githubConfigSchema.optional(),
     workspaceRoot: z
       .string()
-      .min(1, "workspace.root is not set.\n  Fix: Add workspace.root to valley.yaml")
+      .min(1, "workspace.root is not set.\n  Fix: Add workspace.root to av.yaml")
       .refine(
         (v) => v.startsWith("/"),
-        "workspace.root must be an absolute path.\n  Fix: Set workspace.root: /absolute/path in valley.yaml",
+        "workspace.root must be an absolute path.\n  Fix: Set workspace.root: /absolute/path in av.yaml",
       ),
     agentType: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]),
     agentTimeout: z.number().min(30),
@@ -232,7 +192,7 @@ const mergedConfigSchema = z
     logLevel: z.enum(["debug", "info", "warn", "error"]),
     logFormat: z.enum(["json", "text"]),
     deliveryMode: z.enum(["merge", "pr"]),
-    promptTemplate: z.string().min(1, "prompt is not set.\n  Fix: Add prompt field to valley.yaml"),
+    promptTemplate: z.string().min(1, "prompt is not set.\n  Fix: Add prompt field to av.yaml"),
     routingRules: z.array(
       z.object({
         label: z.string().min(1),
@@ -258,22 +218,19 @@ const mergedConfigSchema = z
     verify: verifyMergedSchema,
     task: resolvedTaskSchema.optional(),
     oma: z.object({ mode: z.enum(["off", "strict"]) }).optional(),
+    chief: chiefConfigSchema.optional(),
   })
   .superRefine((cfg, ctx) => {
     if (cfg.trackerKind === "linear") {
       const linearRequired: Array<[string, string, string]> = [
-        [cfg.linearApiKey, "linearApiKey", "linear.api_key in ~/.config/agent-valley/settings.yaml or valley.yaml"],
-        [cfg.linearTeamId, "linearTeamId", "linear.team_id in valley.yaml"],
-        [cfg.linearTeamUuid, "linearTeamUuid", "linear.team_uuid in valley.yaml"],
-        [cfg.linearWebhookSecret, "linearWebhookSecret", "linear.webhook_secret in valley.yaml"],
-        [cfg.workflowStates.todo, "workflowStates.todo", "linear.workflow_states.todo in valley.yaml"],
-        [
-          cfg.workflowStates.inProgress,
-          "workflowStates.inProgress",
-          "linear.workflow_states.in_progress in valley.yaml",
-        ],
-        [cfg.workflowStates.done, "workflowStates.done", "linear.workflow_states.done in valley.yaml"],
-        [cfg.workflowStates.cancelled, "workflowStates.cancelled", "linear.workflow_states.cancelled in valley.yaml"],
+        [cfg.linearApiKey, "linearApiKey", "linear.api_key in ~/.config/agent-valley/settings.yaml or av.yaml"],
+        [cfg.linearTeamId, "linearTeamId", "linear.team_id in av.yaml"],
+        [cfg.linearTeamUuid, "linearTeamUuid", "linear.team_uuid in av.yaml"],
+        [cfg.linearWebhookSecret, "linearWebhookSecret", "linear.webhook_secret in av.yaml"],
+        [cfg.workflowStates.todo, "workflowStates.todo", "linear.workflow_states.todo in av.yaml"],
+        [cfg.workflowStates.inProgress, "workflowStates.inProgress", "linear.workflow_states.in_progress in av.yaml"],
+        [cfg.workflowStates.done, "workflowStates.done", "linear.workflow_states.done in av.yaml"],
+        [cfg.workflowStates.cancelled, "workflowStates.cancelled", "linear.workflow_states.cancelled in av.yaml"],
       ]
       for (const [value, path, fix] of linearRequired) {
         if (!value) {
@@ -332,7 +289,7 @@ export function loadGlobalConfig(configPath?: string): GlobalConfig | null {
 
 export function loadProjectConfig(projectRoot?: string): ProjectConfig | null {
   const root = projectRoot ?? process.cwd()
-  const path = join(root, "valley.yaml")
+  const path = resolveProjectConfigPath(root)
   const raw = readYamlFile(path)
   if (!raw) return null
 
@@ -347,7 +304,7 @@ export function loadProjectConfig(projectRoot?: string): ProjectConfig | null {
 // ── Merge ───────────────────────────────────────────────────────────
 
 /**
- * Resolve agent.max_parallel with precedence project > global > hardware
+ * Resolve actor.max_parallel with precedence project > global > hardware
  * default. An explicit operator value that exceeds the hardware-recommended
  * concurrency is honored (never silently clamped) but logged as a WARN so
  * the operator can see the risk of resource exhaustion.
@@ -358,6 +315,8 @@ function mergeConfigs(
   env: NodeJS.ProcessEnv,
 ): Record<string, unknown> {
   const hw = detectHardware()
+  const projectActor = project?.actor ?? project?.agent
+  const globalActor = global?.actor ?? global?.agent
 
   // Defaults
   const defaults = {
@@ -414,11 +373,11 @@ function mergeConfigs(
     },
     github: githubMerged,
     workspaceRoot: project?.workspace?.root ?? "",
-    agentType: project?.agent?.type ?? global?.agent?.type ?? defaults.agentType,
-    agentTimeout: project?.agent?.timeout ?? global?.agent?.timeout ?? defaults.agentTimeout,
-    agentMaxRetries: project?.agent?.max_retries ?? global?.agent?.max_retries ?? defaults.agentMaxRetries,
-    agentRetryDelay: project?.agent?.retry_delay ?? global?.agent?.retry_delay ?? defaults.agentRetryDelay,
-    maxParallel: resolveMaxParallel(project?.agent?.max_parallel ?? global?.agent?.max_parallel, hw.recommended),
+    agentType: projectActor?.type ?? globalActor?.type ?? defaults.agentType,
+    agentTimeout: projectActor?.timeout ?? globalActor?.timeout ?? defaults.agentTimeout,
+    agentMaxRetries: projectActor?.max_retries ?? globalActor?.max_retries ?? defaults.agentMaxRetries,
+    agentRetryDelay: projectActor?.retry_delay ?? globalActor?.retry_delay ?? defaults.agentRetryDelay,
+    maxParallel: resolveMaxParallel(projectActor?.max_parallel ?? globalActor?.max_parallel, hw.recommended),
     serverPort: project?.server?.port ?? global?.server?.port ?? defaults.serverPort,
     logLevel: project?.logging?.level ?? global?.logging?.level ?? defaults.logLevel,
     logFormat: project?.logging?.format ?? global?.logging?.format ?? defaults.logFormat,
@@ -427,7 +386,7 @@ function mergeConfigs(
     routingRules: (project?.routing?.rules ?? []).map((r) => ({
       label: r.label,
       workspaceRoot: r.workspace_root,
-      agentType: r.agent_type,
+      agentType: r.actor_type ?? r.agent_type,
       deliveryMode: r.delivery_mode,
       verifyCommand: r.verify_command,
       task: r.task?.kind === "analysis" ? { kind: "analysis" as const, reportPath: r.task.report_path } : r.task,
@@ -447,6 +406,7 @@ function mergeConfigs(
         ? { kind: "analysis" as const, reportPath: project.task.report_path }
         : { kind: "code" as const },
     oma: { mode: project?.oma?.mode ?? "off" },
+    chief: global?.chief || project?.chief ? mergeChiefConfig(global?.chief, project?.chief) : undefined,
   }
 }
 // ── Public API ──────────────────────────────────────────────────────
@@ -469,21 +429,18 @@ export function resolveConfig(
   return result.data
 }
 
-/**
- * Load configuration from settings.yaml (global) + valley.yaml (project).
- * Merges with project winning, validates with Zod, returns typed Config.
- */
+/** Load global and project YAML, apply project overrides, and validate the merged configuration. */
 export function loadConfig(projectRoot?: string, globalConfigPath?: string): Config {
   const global = loadGlobalConfig(globalConfigPath)
   const project = loadProjectConfig(projectRoot)
 
   if (!project) {
     const root = projectRoot ?? process.cwd()
-    const valleyPath = join(root, "valley.yaml")
+    const projectPath = join(root, "av.yaml")
     console.error(
-      `valley.yaml not found at ${valleyPath}.\n` +
-        "  Fix: Run 'av setup' in your project directory to create valley.yaml.\n" +
-        "  Or create valley.yaml manually — see docs/plans/config-layer-split-design.md for format.",
+      `av.yaml not found at ${projectPath}.\n` +
+        "  Fix: Run 'av setup' in your project directory to create av.yaml.\n" +
+        "  Or create av.yaml manually — see docs/plans/config-layer-split-design.md for format.",
     )
     process.exit(1)
   }

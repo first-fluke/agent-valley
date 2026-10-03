@@ -1,7 +1,7 @@
 /**
  * Step: choose the webhook tunnel provider.
  *
- * Writes `tunnel:` into valley.yaml. All three providers are opt-in —
+ * Writes `tunnel:` into av.yaml. All three providers are opt-in —
  * the default (ngrok) preserves the v0.2 behaviour for users who skip
  * the prompt.
  */
@@ -42,7 +42,7 @@ export async function stepTunnel(ctx: SetupContext, step: number, total: number)
         message: stepLabel(step, total, "Cloudflare tunnel name (from `cloudflared tunnel create <name>`)"),
         initialValue: ctx.tunnel.cloudflare.name ?? "",
         validate: (v) => {
-          if (!v || !v.trim()) return "Required for named mode"
+          if (!v?.trim()) return "Required for named mode"
         },
       })
       if (p.isCancel(name)) return CANCEL

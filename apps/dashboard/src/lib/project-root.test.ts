@@ -15,11 +15,11 @@ describe("resolveProjectRoot", () => {
     )
   })
 
-  test("walks up from standalone dashboard path to find valley.yaml", async () => {
+  test("walks up from standalone dashboard path to find av.yaml", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "av-bootstrap-"))
     tempDirs.push(root)
 
-    await writeFile(path.join(root, "valley.yaml"), "linear:\n  team_id: TEST\n")
+    await writeFile(path.join(root, "av.yaml"), "linear:\n  team_id: TEST\n")
 
     const standaloneDashboardDir = path.join(root, "apps", "dashboard", ".next", "standalone", "apps", "dashboard")
     await mkdir(standaloneDashboardDir, { recursive: true })
@@ -27,10 +27,20 @@ describe("resolveProjectRoot", () => {
     await expect(resolveProjectRoot(standaloneDashboardDir)).resolves.toBe(root)
   })
 
-  test("throws when valley.yaml cannot be found", async () => {
+  test("throws when av.yaml cannot be found", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "av-bootstrap-miss-"))
     tempDirs.push(root)
 
-    await expect(resolveProjectRoot(root)).rejects.toThrow("valley.yaml not found")
+    await expect(resolveProjectRoot(root)).rejects.toThrow("av.yaml not found")
+  })
+
+  test("ignores valley.yaml as a project root marker", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "av-bootstrap-old-config-"))
+    tempDirs.push(root)
+    await writeFile(path.join(root, "valley.yaml"), "linear:\n  team_id: OLD\n")
+    const nested = path.join(root, "apps", "dashboard")
+    await mkdir(nested, { recursive: true })
+
+    await expect(resolveProjectRoot(nested)).rejects.toThrow("av.yaml not found")
   })
 })

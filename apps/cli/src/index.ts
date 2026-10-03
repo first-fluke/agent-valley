@@ -13,10 +13,13 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process"
 import { existsSync, unlinkSync } from "node:fs"
 import { resolve } from "node:path"
+import { resolveProjectConfigPath } from "@agent-valley/core/config/project-config-path"
 import { loadConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
-import { program } from "commander"
+import { Option, program } from "commander"
 import pc from "picocolors"
 import { registerChiefCommands } from "./chief"
+import { registerOrganizationCommands } from "./chief-organization"
+import { watchConfig } from "./config-watch"
 import { registerDoctorCommand } from "./doctor"
 import { registerLinearWebhook } from "./linear-webhook-register"
 import {
@@ -38,8 +41,8 @@ const PID_FILE = resolve(ROOT, ".av.pid")
 const LOG_FILE = resolve(ROOT, ".av.log")
 
 function ensureConfig(): void {
-  if (!existsSync(resolve(ROOT, "valley.yaml"))) {
-    console.log(pc.red("No valley.yaml found. Run `av setup` first."))
+  if (!existsSync(resolveProjectConfigPath(ROOT))) {
+    console.log(pc.red("No av.yaml found. Run `av setup` first."))
     process.exit(1)
   }
 }
@@ -70,13 +73,18 @@ program
   .command("setup")
   .description("Interactive setup wizard")
   .option("--edit", "Modify specific values in existing config")
-  .action(async (opts: { edit?: boolean }) => {
+  .addOption(
+    new Option("--mode <mode>", "Setup for local orders (default) or issue tracker automation")
+      .choices(["order", "tracker"])
+      .conflicts("edit"),
+  )
+  .action(async (opts: { edit?: boolean; mode?: "order" | "tracker" }) => {
     if (opts.edit) {
       const { setupEdit } = await import("./setup/index")
       await setupEdit()
     } else {
       const { setup } = await import("./setup/index")
-      await setup()
+      await setup({ mode: opts.mode })
     }
   })
 
@@ -252,19 +260,14 @@ program
 
     const webhookProxy = await startWebhookProxy(port, publicPort)
 
-    // tunnel (ngrok / cloudflared / none — from valley.yaml)
+    // tunnel (ngrok / cloudflared / none — from av.yaml)
     const tunnel = startTunnel(publicPort)
     tunnel.ready.then((url) => {
       if (url) void registerLinearWebhook(ROOT, url)
     })
 
-    // Watch config files
-    const chokidar = await import("chokidar")
-    const watcher = chokidar.watch([resolve(ROOT, "valley.yaml"), resolveGlobalConfigPath()], {
-      ignoreInitial: true,
-    })
-
-    watcher.on("change", (path: string) => {
+    // Both project filenames are watched so migration and removal reload the selected config.
+    const watcher = await watchConfig(ROOT, resolveGlobalConfigPath(), (path) => {
       console.log(pc.dim(`  changed: ${path}`))
       console.log(pc.yellow("↻ Restarting dashboard..."))
       clearTimeout(restartTimer)
@@ -472,6 +475,7 @@ program.action(() => {
 
 registerDoctorCommand(program)
 registerChiefCommands(program)
+registerOrganizationCommands(program)
 
 program.parseAsync().catch((error: unknown) => {
   console.error(pc.red(error instanceof Error ? error.message : String(error)))

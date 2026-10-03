@@ -55,7 +55,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
   const caps = useMemo(() => (attempt ? capabilitiesFor(attempt.agentType) : []), [attempt])
 
   // Focus management: move focus into the drawer on open, restore it to
-  // whatever triggered the drawer (e.g. the Active Agents list item) on
+  // whatever triggered the drawer (e.g. the Active Actors list item) on
   // close — required so keyboard/screen-reader users don't lose their place.
   useEffect(() => {
     setPromptText("")
@@ -161,7 +161,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
       ref={panelRef}
       role="dialog"
       aria-modal="true"
-      aria-label="Agent intervention"
+      aria-label="Actor intervention"
       onKeyDown={onTrapKeyDown}
       className="fixed top-0 right-0 h-full w-96 max-w-full bg-gray-900/95 border-l border-gray-700 shadow-xl z-50 flex flex-col motion-reduce:transition-none"
     >

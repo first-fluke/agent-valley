@@ -144,12 +144,12 @@ describe("buildDarwinSandboxCommand", () => {
     )
   })
 
-  test("denies read access to the project's valley.yaml, ~/.ssh, and ~/.git-credentials", () => {
+  test("denies read access to the project's av.yaml, ~/.ssh, and ~/.git-credentials", () => {
     const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
     const profile = result.args[1] as string
     expect(profile).toContain(`(deny file-read* (subpath "${homedir()}/.ssh"))`)
     expect(profile).toContain(`(deny file-read* (literal "${homedir()}/.git-credentials"))`)
-    expect(profile).toContain(`(deny file-read* (literal "${join(process.cwd(), "valley.yaml")}"))`)
+    expect(profile).toContain(`(deny file-read* (literal "${join(process.cwd(), "av.yaml")}"))`)
   })
 
   test.skipIf(process.platform !== "darwin")(

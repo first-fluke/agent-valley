@@ -3,7 +3,7 @@
  *
  * Security invariants:
  *   1. The PAT is captured in-memory only. It is never written to
- *      settings.yaml, valley.yaml, or any log line.
+ *      settings.yaml, av.yaml, or any log line.
  *   2. Only the env var name (`github.token_env`) is persisted. After
  *      save, we instruct the operator to `export <NAME>=<token>`.
  *
@@ -109,7 +109,7 @@ export async function stepGithubWebhookSecret(ctx: SetupContext, step: number, t
 
   if (generate) {
     gh.webhookSecret = randomWebhookSecret()
-    p.log.success("Generated a 256-bit webhook secret (saved as github.webhook_secret in valley.yaml).")
+    p.log.success("Generated a 256-bit webhook secret (saved as github.webhook_secret in av.yaml).")
   } else {
     const secret = await p.password({
       message: "Webhook secret",
@@ -129,7 +129,7 @@ export async function stepGithubWebhookSecret(ctx: SetupContext, step: number, t
       "",
       `1. Payload URL: your tunnel/HTTPS URL + ${pc.bold("/api/webhook/github")}`,
       `2. Content type: ${pc.bold("application/json")}`,
-      `3. Secret: ${pc.bold("copy github.webhook_secret from valley.yaml after saving")}`,
+      `3. Secret: ${pc.bold("copy github.webhook_secret from av.yaml after saving")}`,
       `4. Events: ${pc.bold("Issues")}`,
       "Start the server after setup to obtain the tunnel URL in av logs.",
     ].join("\n"),

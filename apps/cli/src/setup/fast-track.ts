@@ -4,11 +4,17 @@
  * values and reuse the team's shared Linear config.
  */
 
+import { mergeChiefConfig } from "@agent-valley/core/config/chief-schema"
+import { loadProjectConfig } from "@agent-valley/core/config/yaml-loader"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 import type { InviteData } from "../invite"
+import { stepAgentType } from "./agent-step"
+import { stepChief } from "./chief-step"
 import { stepCompletion } from "./completion-step"
+import { GLOBAL_CONFIG_REPAIR_WARNING, readSetupGlobalConfig } from "./global-settings"
 import { stepApiKey } from "./linear-step"
+import { stepOma } from "./oma-step"
 import { stepParallel } from "./parallel-step"
 import { renderPreview } from "./preview"
 import { resolveContext } from "./resolve"
@@ -16,9 +22,23 @@ import { saveConfig } from "./save"
 import { BACK, CANCEL, type SetupContext } from "./types"
 import { stepWorkspace } from "./workspace-step"
 
-export async function fastTrackSetup(invite: InviteData): Promise<void> {
+export async function fastTrackSetup(
+  invite: InviteData,
+  options: { replaceInvalidGlobal?: boolean } = {},
+): Promise<void> {
   p.log.info(pc.green("Invite data detected. Loading team configuration."))
 
+  const globalSettings = readSetupGlobalConfig()
+  if (globalSettings.invalid && !options.replaceInvalidGlobal) p.log.warn(GLOBAL_CONFIG_REPAIR_WARNING)
+  const defaults = globalSettings.config.agent
+  let projectChief: SetupContext["chief"]
+  let replaceInvalidProject = false
+  try {
+    projectChief = loadProjectConfig()?.chief
+  } catch {
+    replaceInvalidProject = true
+    p.log.warn("Existing av.yaml cannot be read. Confirm the new configuration to replace it.")
+  }
   const ctx: SetupContext = {
     trackerKind: "linear",
     linear: {
@@ -30,10 +50,12 @@ export async function fastTrackSetup(invite: InviteData): Promise<void> {
       doneStateId: invite.doneStateId,
       cancelledStateId: invite.cancelledStateId,
     },
-    agentType: (invite.agentType as SetupContext["agentType"]) ?? "claude",
+    agentType: defaults?.type ?? (invite.agentType as SetupContext["agentType"]) ?? "claude",
+    agentModel: defaults?.model,
+    chief: mergeChiefConfig(globalSettings.config.chief, projectChief),
   }
 
-  const fastSteps = [stepApiKey, stepWorkspace, stepParallel, stepCompletion]
+  const fastSteps = [stepApiKey, stepWorkspace, stepAgentType, stepOma, stepChief, stepParallel, stepCompletion]
   const totalSteps = fastSteps.length
   let i = 0
   while (i < fastSteps.length) {
@@ -64,6 +86,9 @@ export async function fastTrackSetup(invite: InviteData): Promise<void> {
     process.exit(0)
   }
 
-  await saveConfig(resolved.ctx)
+  await saveConfig(resolved.ctx, {
+    replaceInvalidGlobal: globalSettings.invalid || options.replaceInvalidGlobal,
+    replaceInvalidProject,
+  })
   p.outro(pc.green("Setup complete! Start the server with `bun av up`."))
 }

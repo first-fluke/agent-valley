@@ -151,13 +151,13 @@ describe("loadProjectConfig", () => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  test("returns null when valley.yaml does not exist", () => {
+  test("returns null when av.yaml does not exist", () => {
     const result = loadProjectConfig(tempDir)
     expect(result).toBeNull()
   })
 
   test("parses valid project config", () => {
-    writeYaml(tempDir, "valley.yaml", VALID_PROJECT)
+    writeYaml(tempDir, "av.yaml", VALID_PROJECT)
     const result = loadProjectConfig(tempDir)
 
     expect(result).not.toBeNull()
@@ -170,7 +170,7 @@ describe("loadProjectConfig", () => {
   test("parses routing rules", () => {
     writeYaml(
       tempDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: ACR
@@ -205,7 +205,7 @@ routing:
   test("parses verify block and per-route verify_command", () => {
     writeYaml(
       tempDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: ACR
@@ -239,7 +239,7 @@ routing:
   test("rejects an empty verify.command", () => {
     writeYaml(
       tempDir,
-      "valley.yaml",
+      "av.yaml",
       `
 ${VALID_PROJECT}
 verify:
@@ -252,7 +252,7 @@ verify:
   test("parses scoring routes", () => {
     writeYaml(
       tempDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -293,7 +293,7 @@ scoring:
   test("rejects routing rule with relative workspace_root", () => {
     writeYaml(
       tempDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -319,7 +319,7 @@ routing:
   test("rejects overlapping score tiers", () => {
     writeYaml(
       tempDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -379,7 +379,7 @@ describe("loadConfig", () => {
 
   test("valid global + project produces correct Config", () => {
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
-    writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+    writeYaml(projectDir, "av.yaml", VALID_PROJECT)
 
     const config = loadConfig(projectDir, globalPath)
 
@@ -403,11 +403,11 @@ describe("loadConfig", () => {
     expect(config.verify.timeoutSec).toBe(600)
   })
 
-  test("resolves verify.command and timeout_sec from valley.yaml", () => {
+  test("resolves verify.command and timeout_sec from av.yaml", () => {
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `${VALID_PROJECT}
 verify:
   command: "bun run typecheck && bun test"
@@ -439,7 +439,7 @@ server:
     )
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   api_key: project_key
@@ -491,7 +491,7 @@ server:
     )
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: TEAM
@@ -529,7 +529,7 @@ linear:
     )
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -558,19 +558,19 @@ prompt: test
     expect(config.serverPort).toBe(9741)
   })
 
-  test("missing valley.yaml exits with actionable error", () => {
+  test("missing av.yaml exits with actionable error", () => {
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
 
     expect(() => loadConfig(projectDir, globalPath)).toThrow("process.exit(1)")
     const errorOutput = (errorSpy.mock.calls[0] as string[])[0]
-    expect(errorOutput).toContain("valley.yaml not found")
+    expect(errorOutput).toContain("av.yaml not found")
     expect(errorOutput).toContain("av setup")
   })
 
   test("missing global config is OK (returns null, uses defaults)", () => {
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   api_key: project_key
@@ -598,7 +598,7 @@ prompt: test prompt
     writeYaml(globalDir, "settings.yaml", "")
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 workspace:
   root: /tmp/ws
@@ -618,7 +618,7 @@ prompt: test
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -644,7 +644,7 @@ prompt: test
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -677,7 +677,7 @@ routing:
 
   test("empty routing rules defaults to empty array", () => {
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
-    writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+    writeYaml(projectDir, "av.yaml", VALID_PROJECT)
     const config = loadConfig(projectDir, globalPath)
 
     expect(config.routingRules).toEqual([])
@@ -699,7 +699,7 @@ team:
     )
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -727,7 +727,7 @@ prompt: test
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -758,7 +758,7 @@ prompt: |
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -788,7 +788,7 @@ workspace:
 
     try {
       writeYaml(avDir, "settings.yaml", VALID_GLOBAL)
-      writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+      writeYaml(projectDir, "av.yaml", VALID_PROJECT)
 
       // loadConfig without explicit globalConfigPath should use XDG
       const config = loadConfig(projectDir)
@@ -805,7 +805,7 @@ workspace:
 
   test("tunnel defaults to provider=ngrok when the tunnel block is omitted", () => {
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
-    writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+    writeYaml(projectDir, "av.yaml", VALID_PROJECT)
     const config = loadConfig(projectDir, globalPath)
     expect(config.tunnel.provider).toBe("ngrok")
     expect(config.tunnel.cloudflare.mode).toBe("quick")
@@ -817,7 +817,7 @@ workspace:
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -845,7 +845,7 @@ tunnel:
   test("tunnel cloudflare named mode requires name — error is actionable", () => {
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -882,7 +882,7 @@ tunnel:
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -915,7 +915,7 @@ tunnel:
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -941,7 +941,7 @@ tunnel:
     writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -966,7 +966,7 @@ tunnel:
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -1020,7 +1020,7 @@ agent:
     )
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -1053,14 +1053,14 @@ agent:
   max_parallel: 7
 `,
     )
-    writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+    writeYaml(projectDir, "av.yaml", VALID_PROJECT)
     const config = loadConfig(projectDir, globalPath)
     expect(config.maxParallel).toBe(7)
   })
 
   test("falls back to hardware-recommended concurrency when neither config sets max_parallel", () => {
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
-    writeYaml(projectDir, "valley.yaml", VALID_PROJECT)
+    writeYaml(projectDir, "av.yaml", VALID_PROJECT)
     const config = loadConfig(projectDir, globalPath)
     expect(config.maxParallel).toBe(detectHardware().recommended)
   })
@@ -1068,7 +1068,7 @@ agent:
   test("rejects agent.max_parallel of 0 in project config", () => {
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -1106,7 +1106,7 @@ agent:
     const globalPath = writeYaml(globalDir, "settings.yaml", VALID_GLOBAL)
     writeYaml(
       projectDir,
-      "valley.yaml",
+      "av.yaml",
       `
 linear:
   team_id: T
@@ -1126,7 +1126,7 @@ agent:
     )
     const config = loadConfig(projectDir, globalPath)
     expect(config.maxParallel).toBe(999)
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("agent.max_parallel (999) exceeds"))
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("actor.max_parallel (999) exceeds"))
     warnSpy.mockRestore()
   })
 })

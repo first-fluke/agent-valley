@@ -33,7 +33,7 @@ afterAll(() => {
 })
 
 describe("saveConfig", () => {
-  it("writes linear settings.yaml and valley.yaml", async () => {
+  it("writes linear settings.yaml and av.yaml", async () => {
     const ctx: ResolvedSetupContext = {
       trackerKind: "linear",
       linear: {
@@ -68,16 +68,16 @@ describe("saveConfig", () => {
     await saveConfig(ctx)
 
     const settings = readFileSync(join(tmpRoot, "agent-valley", "settings.yaml"), "utf-8")
-    const valley = readFileSync(join(tmpRoot, "valley.yaml"), "utf-8")
+    const valley = readFileSync(join(tmpRoot, "av.yaml"), "utf-8")
 
     expect(settings).toContain("api_key: lin_api_12345")
     expect(valley).toContain("kind: linear")
     expect(valley).toContain("team_id: ACR")
     expect(valley).toContain("command: bun run test")
-    expect(statSync(join(tmpRoot, "valley.yaml")).mode & 0o777).toBe(0o600)
+    expect(statSync(join(tmpRoot, "av.yaml")).mode & 0o777).toBe(0o600)
   })
 
-  it("writes github valley.yaml with token_env only — never the token", async () => {
+  it("writes github av.yaml with token_env only — never the token", async () => {
     const RAW_TOKEN = "ghp_DO_NOT_PERSIST_ME_0123456789"
     writeFileSync(
       join(tmpRoot, "agent-valley", "settings.yaml"),
@@ -120,7 +120,7 @@ describe("saveConfig", () => {
     await saveConfig(ctx)
 
     const settings = readFileSync(join(tmpRoot, "agent-valley", "settings.yaml"), "utf-8")
-    const valley = readFileSync(join(tmpRoot, "valley.yaml"), "utf-8")
+    const valley = readFileSync(join(tmpRoot, "av.yaml"), "utf-8")
 
     // A new GitHub project must preserve credentials and settings for other projects.
     expect(settings).toContain("api_key: existing_linear_key")
@@ -128,7 +128,7 @@ describe("saveConfig", () => {
     expect(settings).toContain("id: existing-team")
     expect(settings).not.toContain(RAW_TOKEN)
 
-    // valley.yaml must contain token_env reference but not the token itself
+    // av.yaml must contain token_env reference but not the token itself
     expect(valley).toContain("kind: github")
     expect(valley).toContain("token_env: GITHUB_TOKEN")
     expect(valley).not.toContain(RAW_TOKEN)

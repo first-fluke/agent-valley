@@ -30,11 +30,23 @@ function deps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
 }
 
 describe("checkOma", () => {
-  test("requires code verification even when OMA is off", () => {
-    expect(checkOma({}, deps())).toMatchObject([
+  test("requires code verification for tracker work even when OMA is off", () => {
+    expect(checkOma({ tracker: { kind: "github" } }, deps())).toMatchObject([
       { id: "task.code", status: "fail", critical: true },
       { id: "oma.mode", status: "warn", critical: false },
     ])
+  })
+
+  test("accepts Chief-designed checks in a configured local order without claiming the goal passed", () => {
+    expect(checkOma({ workspace: { root: "/repo" } }, deps())).toMatchObject([
+      { id: "task.chief", status: "pass", critical: false, message: expect.stringContaining("before work") },
+      { id: "oma.mode", status: "warn", critical: false },
+    ])
+  })
+
+  test("does not infer Chief checks for a missing project or legacy tracker configuration", () => {
+    for (const project of [null, { linear: {} }, { github: {} }])
+      expect(checkOma(project, deps())[0]).toMatchObject({ id: "task.code", status: "fail", critical: true })
   })
 
   test("accepts an explicit analysis report template without OMA", () => {

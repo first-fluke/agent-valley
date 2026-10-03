@@ -1,12 +1,13 @@
 import { realpath } from "node:fs/promises"
 import { runCommand } from "../workspace/worktree-lifecycle"
+import { clearedGitEnvironment } from "./parallel-git"
 import type { Mission } from "./types"
 
 export async function assertMissionWorkspace(mission: Mission): Promise<void> {
   const cwd = mission.workspace.path
   const [top, branch] = await Promise.all([
-    runCommand("git", ["rev-parse", "--show-toplevel"], { cwd }),
-    runCommand("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd }),
+    runCommand("git", ["rev-parse", "--show-toplevel"], { cwd, env: clearedGitEnvironment }),
+    runCommand("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd, env: clearedGitEnvironment }),
   ])
   const root = top.exitCode === 0 ? await realpath(top.stdout.trim()).catch(() => null) : null
   const current = await realpath(cwd).catch(() => null)

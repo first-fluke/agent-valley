@@ -45,7 +45,7 @@ async function fixture() {
   writeFileSync(join(root, ".gitignore"), ".agents/state/\n.agents/results/\n")
   writeFileSync(join(root, "input.txt"), "Initial input\n")
   run("git", ["init", "-q"], root)
-  run("git", ["config", "user.name", "Chief Fixture"], root)
+  run("git", ["config", "user.name", "Chief Director Fixture"], root)
   run("git", ["config", "user.email", "fixture@example.invalid"], root)
   run("git", ["config", "core.whitespace", "blank-at-eol,blank-at-eof,space-before-tab"], root)
   commit(root, "Initial fixture")

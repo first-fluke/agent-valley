@@ -4,7 +4,7 @@ import { parsePlan, parseReview, validateMission } from "./schemas"
 import type { ChiefPlan, ChiefPorts, Mission, Persona } from "./types"
 
 const personas: Persona[] = [
-  { id: "chief", name: "Chief", role: "Coordinate and verify", agentType: "codex", skills: [] },
+  { id: "chief", name: "Chief Director", role: "Coordinate and verify", agentType: "codex", skills: [] },
   { id: "engineer", name: "Engineer", role: "Implement the task", agentType: "codex", skills: ["oma-backend"] },
 ]
 const plan: ChiefPlan = {
@@ -151,7 +151,7 @@ describe("chief coordinator", () => {
     expect(verify).not.toHaveBeenCalled()
   })
 
-  it("routes final rejection back to workers and repeats verification", async () => {
+  it("routes final rejection back to Actors and repeats verification", async () => {
     const { mission, ports, runAgent, verify } = fixture()
     const original = runAgent.getMockImplementation()
     let reviews = 0
@@ -203,7 +203,7 @@ describe("chief coordinator", () => {
       if (args[3] === stage) mutate("unauthorized-change")
       return output
     })
-    await expect(coordinate(mission, ports)).rejects.toThrow(`${stage} agent changed the worktree`)
+    await expect(coordinate(mission, ports)).rejects.toThrow(`${stage} Actor changed the worktree`)
     expect(mission.status).toBe("failed")
   })
 
@@ -248,7 +248,7 @@ describe("chief coordinator", () => {
     expect(verify).toHaveBeenCalledTimes(2)
   })
 
-  it("persists an interrupted state before any agent runs", async () => {
+  it("persists an interrupted state before any Actor runs", async () => {
     const { mission, ports, runAgent, snapshots } = fixture()
     ports.signal = AbortSignal.abort()
     await expect(coordinate(mission, ports)).rejects.toThrow("Mission interrupted")
@@ -271,7 +271,7 @@ describe("chief boundaries", () => {
 
   it.each([
     ["cycle", { tasks: [{ ...plan.tasks[0], dependencies: ["implement"] }] }],
-    ["Unknown persona", { tasks: [{ ...plan.tasks[0], personaId: "missing" }] }],
+    ["Unknown Actor", { tasks: [{ ...plan.tasks[0], personaId: "missing" }] }],
     ["Duplicate task", { tasks: [plan.tasks[0], plan.tasks[0]] }],
     ["unknown task", { tasks: [{ ...plan.tasks[0], dependencies: ["missing"] }] }],
     [
@@ -296,18 +296,18 @@ describe("chief boundaries", () => {
   it("rejects contradictory, missing, malformed, and oversized review evidence", () => {
     expect(() => parseReview('{"passed":true,"summary":"ok","findings":["broken"]}')).toThrow()
     expect(() => parseReview('{"passed":false,"summary":"bad","findings":[]}')).toThrow()
-    expect(() => parseReview("agent said done")).toThrow("not valid JSON")
+    expect(() => parseReview("Actor said done")).toThrow("not valid JSON")
     expect(() => parseReview("x".repeat(128_001))).toThrow("exceeds 128 KB")
   })
 
-  it("validates persisted persona and task state before resuming", async () => {
+  it("validates persisted Actor and task state before resuming", async () => {
     const { mission, ports } = fixture()
     await coordinate(mission, ports)
     const invalid = structuredClone(mission)
     const task = invalid.tasks[0]
     if (!task) throw new Error("Expected task state")
     task.reviewerId = "engineer"
-    expect(() => validateMission(invalid)).toThrow("reviewer different from its worker")
+    expect(() => validateMission(invalid)).toThrow("reviewer different from its Actor")
     task.reviewerId = "chief"
     delete task.review
     expect(() => validateMission(invalid)).toThrow("lacks passing review evidence")
@@ -315,6 +315,6 @@ describe("chief boundaries", () => {
     expect(() => validateMission(invalid)).toThrow("does not match the plan")
     delete invalid.plan
     invalid.personas.push(personas[0] as Persona)
-    expect(() => validateMission(invalid)).toThrow("Duplicate persona ids")
+    expect(() => validateMission(invalid)).toThrow("Duplicate Actor ids")
   })
 })

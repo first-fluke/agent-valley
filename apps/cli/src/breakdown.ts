@@ -135,7 +135,7 @@ async function expandBreakdownWithClaude(rawInput: string): Promise<BreakdownRes
 export async function executeBreakdown(input: string, opts: { yes?: boolean; scope?: string }): Promise<void> {
   const config = loadConfig()
   if (config.trackerKind !== "linear")
-    throw new Error("Issue breakdown currently requires tracker.kind: linear in valley.yaml.")
+    throw new Error("Issue breakdown currently requires tracker.kind: linear in av.yaml.")
 
   p.intro(pc.bgMagenta(pc.black(" Issue Breakdown ")))
   const s = p.spinner()

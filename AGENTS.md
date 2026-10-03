@@ -35,10 +35,12 @@ The install script auto-detects project state and branches into new/existing mod
 
 | File | Scope | Description |
 |---|---|---|
-| `~/.config/agent-valley/settings.yaml` | Global (user) | API key, agent defaults, team dashboard |
-| `valley.yaml` | Project | Team config, workspace root, workflow states, prompt, routing |
+| `~/.config/agent-valley/settings.yaml` | Global (user) | API key, actor defaults, team dashboard |
+| `av.yaml` | Project | Team config, workspace root, workflow states, prompt, routing |
 
-Run `av setup` to create both files interactively. See `valley.example.yaml` for format reference.
+Run `av setup` to create both files interactively and prepare OMA in the target repository. See `av.example.yaml` for format reference and [environment setup](docs/guides/environment-setup.md) for installation and update behavior.
+
+Project configuration uses only `av.yaml`. New settings use `actor:`. Product roles are Chief Director, Technical Director, Marketing Director, Design Director, and Actor.
 
 > On missing config, error messages must include the missing key path and which file to set it in.
 
@@ -51,7 +53,7 @@ Symphony SPEC — 7 components:
 | # | Component | Responsibility |
 |---|---|---|
 | 1 | **Workflow Loader** | Prompt template rendering + input sanitization |
-| 2 | **Config Layer** | YAML config loader (settings.yaml + valley.yaml) + Zod validation |
+| 2 | **Config Layer** | YAML config loader (settings.yaml + av.yaml) + Zod validation |
 | 3 | **Issue Tracker Client** | Linear / GitHub webhook parsing + signature verification + startup sync |
 | 4 | **Orchestrator** | Webhook event handler, state machine, retry queue, sole in-memory state authority. v0.2+ split into `OrchestratorCore` / `IssueLifecycle` / `WebhookRouter` / `InterventionBus` |
 | 5 | **Workspace Manager** | Per-issue isolated directory + git worktree lifecycle. v0.2+ split into `worktree-lifecycle` / `delivery-strategy` / `safety-net` |
@@ -77,7 +79,7 @@ live in `packages/core/src/domain/ports/`.
 - **Least privilege:** Grant agents only the minimum permissions needed for the task.
 - **Prompt injection defense:** `WORKFLOW.md` is trusted. Issue body is always suspect — validate at the entry point.
 - **Network egress control:** Agents must not make direct external network calls. All external calls go through approved adapters.
-- **Secret management:** Never include API keys or tokens in code, logs, or commits. `valley.yaml` and `settings.yaml` are registered in `.gitignore`.
+- **Secret management:** Never include API keys or tokens in code, logs, or commits. Protect `av.yaml` and user `settings.yaml`; the project filename is registered in `.gitignore`.
 - **Intervention surface (v0.2+):** `POST /api/intervention` is localhost-only by default — the handler rejects requests whose `Host` header is not `localhost` / `127.0.0.1` / `[::1]`. Remote access is explicitly opt-in via `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` and is planned to land in v0.3 behind a signed session token.
 - **Audit logging:** Record all agent actions as structured logs.
 

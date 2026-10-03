@@ -86,7 +86,7 @@ spawn through an OS-level sandbox so containment comes from the kernel:
 
 | Env var | Effect |
 |---|---|
-| `SYMPHONY_ALLOW_UNSANDBOXED=1` | Opt-in escape hatch: run without an OS sandbox when one isn't available on the host. NOT the default. Every unsandboxed spawn logs a loud WARN naming exactly what's missing and what it grants (full host filesystem + network access to a prompt-injected issue body). Set in the orchestrator process environment, not in `valley.yaml`. |
+| `SYMPHONY_ALLOW_UNSANDBOXED=1` | Opt-in escape hatch: run without an OS sandbox when one isn't available on the host. NOT the default. Every unsandboxed spawn logs a loud WARN naming exactly what's missing and what it grants (full host filesystem + network access to a prompt-injected issue body). Set in the orchestrator process environment, not in `av.yaml`. |
 | `SYMPHONY_SANDBOX_NETWORK_ALLOWLIST` | Comma-separated extra hostnames appended to the default egress allowlist (`api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com`, `github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `registry.npmjs.org`). See the residual gap below — this allowlist is not fully enforced on macOS. |
 
 **Residual gaps (tracked, not silent shortfalls):**
@@ -110,7 +110,7 @@ spawn through an OS-level sandbox so containment comes from the kernel:
    evaluation; Linux: `--tmpfs`/`--ro-bind /dev/null` masks layered over
    the read-only `$HOME` bind) covering `~/.config/agent-valley`
    (LINEAR_API_KEY + other orchestrator secrets in settings.yaml), the
-   project's `valley.yaml` (team webhook secret, Linear team id/uuid —
+   project's `av.yaml` (team webhook secret, Linear team id/uuid —
    masked on a best-effort basis, resolved from the orchestrator's cwd),
    `~/.ssh`, and `~/.git-credentials`. SSH-based git auth is unaffected
    since it goes through the already-allowed ssh-agent unix-domain
@@ -240,7 +240,7 @@ Without audit logs, it is impossible to determine the cause when problems occur.
 {
   "ts": "2026-03-16T10:00:00Z",
   "level": "info",
-  "event": "agent.action",
+  "event": "actor.action",
   "agent_id": "codex-worker-1",
   "issue_key": "ACR-42",
   "workspace": "/workspaces/ACR-42",
@@ -257,7 +257,7 @@ Without audit logs, it is impossible to determine the cause when problems occur.
 
 ### OpenTelemetry Tracing (v0.2+, optional)
 
-When `observability.otel.enabled: true` (see `valley.example.yaml`),
+When `observability.otel.enabled: true` (see `av.example.yaml`),
 `packages/core/src/observability/otel-exporter.ts` exports spans and
 metrics via OTLP/HTTP JSON to the configured collector endpoint. Agent
 invocation spans and token accounting follow the OpenTelemetry GenAI
@@ -265,7 +265,7 @@ semantic conventions (stable, v1.43.0): `gen_ai.*` span attributes plus a
 `gen_ai.client.token.usage` histogram metric. Exporter errors (network
 failures, non-2xx responses) are swallowed and counted via
 `av_observability_errors_total{exporter="otel"}` — they never affect
-orchestrator flow. Endpoint/service name resolve from valley.yaml first,
+orchestrator flow. Endpoint/service name resolve from av.yaml first,
 then fall back to the standard `OTEL_EXPORTER_OTLP_ENDPOINT` /
 `OTEL_SERVICE_NAME` env vars, then to `agent-valley`.
 

@@ -4,7 +4,7 @@
  * orchestrator-singleton.ts (Turbopack bundling may instantiate
  * modules per-route).
  *
- * When Prometheus is disabled in valley.yaml, the stored instance is
+ * When Prometheus is disabled in av.yaml, the stored instance is
  * null and the /api/metrics handler returns 404.
  */
 

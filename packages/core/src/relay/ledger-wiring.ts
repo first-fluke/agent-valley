@@ -5,7 +5,7 @@
  *
  * Team dashboard relay is opt-in: it only activates when
  * `config.isTeamMode()` is true (supabase_url + supabase_anon_key +
- * team.id are all set in valley.yaml/settings.yaml) AND a valid Supabase
+ * team.id are all set in av.yaml/settings.yaml) AND a valid Supabase
  * session exists on disk (`av login`). Any other state — single-node
  * setups, or team config present but not yet logged in — is a clean
  * no-op, never a crash.

@@ -3,7 +3,7 @@
  * tunnel, webhook-secret checks, and the top-level orchestration
  * (runDoctorChecks / computeExitCode / summarize). Every dependency is a
  * fake `DoctorDeps` — no test here touches the real filesystem, PATH, or
- * spawns a real agent CLI / sandbox binary.
+ * spawns a real actor CLI / sandbox binary.
  */
 
 import { join } from "node:path"
@@ -173,22 +173,30 @@ describe("checkConfig", () => {
   it("fails (critical) with the loader's own message when global config validation throws", () => {
     const deps = makeDeps({
       loadGlobalConfig: () => {
-        throw new Error("Global config validation failed: agent.type invalid")
+        throw new Error("Global config validation failed: actor.type invalid")
       },
       loadProjectConfig: () => ({}),
     })
     const result = checkConfig(deps).results.find((r) => r.id === "config.global")
     expect(result?.status).toBe("fail")
     expect(result?.critical).toBe(true)
-    expect(result?.message).toContain("agent.type invalid")
+    expect(result?.message).toContain("actor.type invalid")
   })
 
-  it("fails (critical) when valley.yaml is missing", () => {
+  it("fails (critical) when av.yaml is missing", () => {
     const deps = makeDeps({ loadProjectConfig: () => null })
     const result = checkConfig(deps).results.find((r) => r.id === "config.project")
     expect(result?.status).toBe("fail")
     expect(result?.critical).toBe(true)
     expect(result?.fix).toContain("av setup")
+  })
+
+  it("reports av.yaml missing even when valley.yaml exists", () => {
+    const deps = makeDeps({ existsSync: (path) => path === "/project/valley.yaml" })
+    const result = checkConfig(deps).results.find((item) => item.id === "config.project")
+    expect(result?.status).toBe("fail")
+    expect(result?.message).toBe("/project/av.yaml not found")
+    expect(result?.fix).toContain("create av.yaml")
   })
 
   it("fails (critical) with the loader's own message when project config validation throws", () => {
@@ -269,7 +277,7 @@ describe("runDoctorChecks", () => {
     const runtime = results.find((result) => result.id === "config.runtime")
     expect(runtime?.status).toBe("fail")
     expect(runtime?.critical).toBe(true)
-    expect(runtime?.message).toContain("linear.team_uuid in valley.yaml")
+    expect(runtime?.message).toContain("linear.team_uuid in av.yaml")
     expect(runtime?.message).toContain("workspace.root")
   })
 
@@ -326,7 +334,7 @@ describe("runDoctorChecks", () => {
     const deps = makeDeps({ loadProjectConfig: () => ({ tracker: { kind: "github" }, agent: { type: "codex" } }) })
     const results = await runDoctorChecks(deps)
     const resolved = results.find((r) => r.id === "config.resolved")
-    expect(resolved?.message).toBe("tracker: github, agent: codex")
+    expect(resolved?.message).toBe("tracker: github, actor: codex")
   })
 })
 

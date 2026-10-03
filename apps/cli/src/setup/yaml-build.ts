@@ -26,10 +26,27 @@ Path: {{workspace_path}}
 4. Leave the completed changes in this workspace for Agent Valley to deliver
 `
 
-export function buildGlobalYaml(config: { apiKey: string; agentType: string; maxParallel: number }): string {
+function buildAgentDefaults(config: {
+  agentType: string
+  agentModel?: string
+  maxParallel: number
+}): GlobalConfig["agent"] {
+  return {
+    type: config.agentType as AgentType,
+    max_parallel: config.maxParallel,
+    ...(config.agentModel?.trim() ? { model: config.agentModel.trim() } : {}),
+  }
+}
+
+export function buildGlobalYaml(config: {
+  apiKey: string
+  agentType: string
+  agentModel?: string
+  maxParallel: number
+}): string {
   const obj: GlobalConfig = {
     linear: { api_key: config.apiKey },
-    agent: { type: config.agentType as AgentType, max_parallel: config.maxParallel },
+    actor: buildAgentDefaults(config),
     logging: { level: "info", format: "json" },
     server: { port: 9741 },
   }
@@ -40,18 +57,31 @@ export function buildGlobalYaml(config: { apiKey: string; agentType: string; max
  * Global config for a GitHub-only setup. No Linear key is written; the
  * agent type is still a global preference, not a tracker preference.
  */
-export function buildGlobalYamlGithub(config: { agentType: string; maxParallel: number }): string {
+export function buildGlobalYamlGithub(config: { agentType: string; agentModel?: string; maxParallel: number }): string {
   const obj: GlobalConfig = {
-    agent: { type: config.agentType as AgentType, max_parallel: config.maxParallel },
+    actor: buildAgentDefaults(config),
     logging: { level: "info", format: "json" },
     server: { port: 9741 },
   }
   return yamlStringify(obj, { lineWidth: 0 })
 }
 
+export function buildProjectYamlOrder(config: {
+  workspaceRoot: string
+  verifyCommand?: string
+  task?: ProjectConfig["task"]
+}): string {
+  const obj: ProjectConfig = {
+    workspace: { root: config.workspaceRoot },
+    ...(config.verifyCommand?.trim() ? { verify: { command: config.verifyCommand.trim() } } : {}),
+    ...(config.task ? { task: config.task } : {}),
+  }
+  return yamlStringify(obj, { lineWidth: 0 })
+}
+
 /**
  * Translate the in-memory tunnel context into the shape persisted to
- * `valley.yaml`. Returns `undefined` when the context is absent OR when
+ * `av.yaml`. Returns `undefined` when the context is absent OR when
  * the provider is the ngrok default with no extra fields — omitting the
  * block keeps the on-disk YAML minimal and preserves v0.2 compatibility.
  */
@@ -110,7 +140,7 @@ export function buildProjectYaml(config: {
 }
 
 /**
- * Build the `valley.yaml` body for a GitHub tracker. Token is **never**
+ * Build the `av.yaml` body for a GitHub tracker. Token is **never**
  * persisted; only the env var name is stored under `github.token_env`.
  */
 export function buildProjectYamlGithub(config: {

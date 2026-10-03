@@ -26,13 +26,16 @@ REPO_URL="https://github.com/first-fluke/agent-valley.git"
 TARGET_DIR="${PWD}"
 ASSUME_YES=false
 INSTALL_WORKFLOWS=true
+RUN_SETUP=true
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) ASSUME_YES=true ;;
     --no-workflows) INSTALL_WORKFLOWS=false ;;
+    --no-setup) RUN_SETUP=false ;;
     --help|-h)
-      echo "Usage: bash install.sh [--yes] [--no-workflows]"
-      echo "Installs agent instructions into the current project. To run the agent farm, clone Agent Valley and run bun install, bun av setup, bun av doctor, bun av dev."
+      echo "Usage: bash install.sh [--yes] [--no-workflows] [--no-setup]"
+      echo "Installs the harness and av CLI, then opens av setup --mode order in an interactive terminal."
+      echo "--yes, --no-setup and CI defer the setup wizard; run av setup --mode order afterward."
       exit 0 ;;
     *) err "Unknown option: $arg. Run with --help for supported options."; exit 1 ;;
   esac
@@ -50,7 +53,7 @@ fi
 
 if [[ "$IS_LOCAL" == true && "$SOURCE_DIR" == "$(pwd -P)" ]]; then
   info "Agent Valley is already cloned here; the harness files are present."
-  info "Run: bun install && bun av setup && bun av doctor && bun av dev"
+  bash "${SOURCE_DIR}/scripts/install-cli.sh" "$SOURCE_DIR" "$TARGET_DIR" "$RUN_SETUP" "$ASSUME_YES"
   exit 0
 fi
 
@@ -131,8 +134,12 @@ ask() {
   [[ "$default" == "Y" ]] && hint="[Y/n]" || hint="[y/N]"
   local answer
   if [[ "$ASSUME_YES" == true ]]; then return 0; fi
+  if [[ -n "${CI:-}" ]]; then
+    err "CI cannot answer installer prompts. Run bash install.sh --yes --no-setup."
+    exit 1
+  fi
   # stdin may contain this script (curl | bash). Never read answers from it.
-  if ! { read -r -p "  ${prompt} ${hint} " answer < /dev/tty; } 2>/dev/null; then
+  if ! { printf '  %s %s ' "$prompt" "$hint" > /dev/tty; read -r answer < /dev/tty; } 2>/dev/null; then
     err "No interactive terminal. Run bash install.sh --yes (optionally --no-workflows)."
     exit 1
   fi
@@ -169,14 +176,37 @@ echo ""
 
 # ── Fetch source if not running locally ──────────────────────────────────────
 if [[ "$IS_LOCAL" == false ]]; then
-  TEMP_DIR="$(mktemp -d)"
-  trap 'rm -rf "$TEMP_DIR"' EXIT
-
-  info "Fetching agent-valley harness..."
-  git clone --depth 1 --quiet "$REPO_URL" "$TEMP_DIR"
-  SOURCE_DIR="$TEMP_DIR"
-  success "Harness fetched."
+  SOURCE_DIR="${AGENT_VALLEY_INSTALL_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/agent-valley}"
+  if [[ "$SOURCE_DIR" != /* ]]; then
+    err "AGENT_VALLEY_INSTALL_DIR must be an absolute path. Set it to a persistent Agent Valley checkout."
+    exit 1
+  fi
+  if [[ -e "$SOURCE_DIR" ]]; then
+    if [[ ! -d "${SOURCE_DIR}/.git" || ! -f "${SOURCE_DIR}/apps/cli/src/index.ts" ]] || \
+       [[ "$(git -C "$SOURCE_DIR" remote get-url origin)" != "$REPO_URL" ]]; then
+      err "$SOURCE_DIR is not an Agent Valley checkout. Choose an empty AGENT_VALLEY_INSTALL_DIR; existing files were retained."
+      exit 1
+    fi
+    if [[ -n "$(git -C "$SOURCE_DIR" status --porcelain)" ]]; then
+      err "$SOURCE_DIR has local changes. Keep them and select another AGENT_VALLEY_INSTALL_DIR, or install from that local checkout."
+      exit 1
+    fi
+    info "Updating the installed Agent Valley checkout..."
+    git -C "$SOURCE_DIR" pull --ff-only --quiet
+  else
+    info "Fetching Agent Valley into $SOURCE_DIR..."
+    mkdir -p "$(dirname "$SOURCE_DIR")"
+    git clone --depth 1 --quiet "$REPO_URL" "$SOURCE_DIR"
+  fi
+  success "Agent Valley source ready."
   echo ""
+fi
+
+# A piped installer can also target the persistent checkout itself.
+if [[ "$(cd "$SOURCE_DIR" && pwd -P)" == "$(pwd -P)" ]]; then
+  info "The Agent Valley checkout already contains the harness."
+  bash "${SOURCE_DIR}/scripts/install-cli.sh" "$SOURCE_DIR" "$TARGET_DIR" "$RUN_SETUP" "$ASSUME_YES"
+  exit 0
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -209,7 +239,7 @@ chmod +x \
   "${TARGET_DIR}/scripts/harness/gc.sh" \
   "${TARGET_DIR}/scripts/harness/validate.sh" 2>/dev/null || true
 
-copy_file "valley.example.yaml"
+copy_file "av.example.yaml"
 
 echo ""
 
@@ -232,7 +262,7 @@ if [[ "$MODE" == "existing" ]]; then
       echo "## Symphony Harness"
       echo ""
       echo "This project uses the [Agent Valley harness](https://github.com/first-fluke/agent-valley)."
-      echo "See \`valley.example.yaml\` and \`docs/specs/\` for configuration and component specifications."
+      echo "See \`av.example.yaml\` and \`docs/specs/\` for configuration and component specifications."
       echo "Run \`./scripts/harness/validate.sh\` to check architecture conformance."
     } >> "${TARGET_DIR}/AGENTS.md"
     success "Updated AGENTS.md (appended Symphony Harness section)"
@@ -294,14 +324,8 @@ fi
 echo ""
 echo -e "${GREEN}${BOLD}  ✓ Agent Valley harness installed successfully${RESET}"
 echo ""
-echo "  Next steps:"
-echo ""
-echo "  1. Review AGENTS.md and the copied docs for your project's conventions."
-echo "  2. This installs instructions only; it does not install the agent farm CLI/dashboard."
-echo ""
-echo "  To operate the agent farm, clone https://github.com/first-fluke/agent-valley"
-echo "  and run: bun install && bun av setup && bun av doctor && bun av dev"
-echo "  Set workspace.root to the repository you want the agents to work on."
+bash "${SOURCE_DIR}/scripts/install-cli.sh" "$SOURCE_DIR" "$TARGET_DIR" "$RUN_SETUP" "$ASSUME_YES"
+echo "  Review AGENTS.md and the copied docs for your project's conventions."
 echo ""
 echo "  Docs: https://github.com/first-fluke/agent-valley"
 echo ""

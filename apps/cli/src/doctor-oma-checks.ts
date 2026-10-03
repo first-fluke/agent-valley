@@ -7,6 +7,7 @@ import type { CheckResult, DoctorDeps } from "./doctor-checks"
 
 export function checkOma(project: ProjectConfig | null, deps: DoctorDeps): CheckResult[] {
   const strict = project?.oma?.mode === "strict"
+  const order = !!project && !project.tracker && !project.linear && !project.github
   const task = project?.task
   const taskCheck: CheckResult =
     task?.kind === "analysis"
@@ -25,7 +26,7 @@ export function checkOma(project: ProjectConfig | null, deps: DoctorDeps): Check
             name: "Analysis report",
             status: "fail",
             message: "task.report_path must contain {{attempt.id}}",
-            fix: "Set task.report_path to a relative path containing {{attempt.id}} in valley.yaml.",
+            fix: "Set task.report_path to a relative path containing {{attempt.id}} in av.yaml.",
             critical: true,
           }
       : project?.verify?.command?.trim()
@@ -36,14 +37,22 @@ export function checkOma(project: ProjectConfig | null, deps: DoctorDeps): Check
             message: "verify.command is configured",
             critical: false,
           }
-        : {
-            id: "task.code",
-            name: "Code verification",
-            status: "fail",
-            message: "Code tasks require verify.command in valley.yaml",
-            fix: "Set verify.command to a deterministic check in valley.yaml before running code tasks.",
-            critical: true,
-          }
+        : order && !strict
+          ? {
+              id: "task.chief",
+              name: "Goal verification",
+              status: "pass",
+              message: "Chief Director defines goal-specific checks before work",
+              critical: false,
+            }
+          : {
+              id: "task.code",
+              name: "Code verification",
+              status: "fail",
+              message: "Code tasks require verify.command in av.yaml",
+              fix: "Set verify.command to a deterministic check in av.yaml before running code tasks.",
+              critical: true,
+            }
   if (!strict) {
     return [
       taskCheck,
@@ -51,9 +60,10 @@ export function checkOma(project: ProjectConfig | null, deps: DoctorDeps): Check
         id: "oma.mode",
         name: "OMA completion evidence",
         status: "warn",
-        message:
-          "OMA receipts are optional; code changes and verification or a current-attempt analysis report are still required",
-        fix: "Set oma.mode: strict in valley.yaml to require current OMA receipts.",
+        message: order
+          ? "OMA receipts are optional; Chief Director designs verification checks for each goal"
+          : "OMA receipts are optional; code changes and verification or a current-attempt analysis report are still required",
+        fix: "Set oma.mode: strict in av.yaml to require current OMA receipts.",
         critical: false,
       },
     ]
@@ -104,8 +114,8 @@ export function checkOma(project: ProjectConfig | null, deps: DoctorDeps): Check
           id: "oma.verify",
           name: "OMA required verification",
           status: "fail",
-          message: "verify.command is missing from valley.yaml",
-          fix: "Set verify.command to a deterministic non-build check in valley.yaml before using oma.mode: strict.",
+          message: "verify.command is missing from av.yaml",
+          fix: "Set verify.command to a deterministic non-build check in av.yaml before using oma.mode: strict.",
           critical: true,
         },
   )

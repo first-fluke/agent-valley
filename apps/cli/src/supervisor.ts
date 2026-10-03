@@ -131,7 +131,7 @@ startWebhookProxy(port, webhookPort(port))
         if (!url || shuttingDown) return
         if (config.trackerKind === "github") {
           log(
-            `Register GitHub webhook ${url}/api/webhook/github for ${config.github?.owner}/${config.github?.repo}; select Issues events and the github.webhook_secret from valley.yaml.`,
+            `Register GitHub webhook ${url}/api/webhook/github for ${config.github?.owner}/${config.github?.repo}; select Issues events and the github.webhook_secret from av.yaml.`,
           )
         } else {
           await registerLinearWebhook(process.cwd(), url)

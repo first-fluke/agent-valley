@@ -1,6 +1,6 @@
 /**
  * Workflow Loader tests — prompt rendering and input sanitization.
- * parseWorkflow was removed — config now comes from valley.yaml via yaml-loader.
+ * parseWorkflow was removed — config now comes from av.yaml via yaml-loader.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"

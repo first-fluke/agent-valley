@@ -234,7 +234,7 @@ export function createCompletionCallbacks(
       if (task.kind === "analysis" && hasCodeChanges) {
         await handleWorkspaceFailure(
           {
-            error: "Analysis task produced code changes; configure task.kind: code in valley.yaml for code delivery.",
+            error: "Analysis task produced code changes; configure task.kind: code in av.yaml for code delivery.",
             retryable: true,
           },
           {
@@ -272,7 +272,7 @@ export function createCompletionCallbacks(
         if (!verifyCommand) {
           await handleWorkspaceFailure(
             {
-              error: "Code completion requires verify.command or routing.rules[].verify_command in valley.yaml.",
+              error: "Code completion requires verify.command or routing.rules[].verify_command in av.yaml.",
               retryable: true,
             },
             {

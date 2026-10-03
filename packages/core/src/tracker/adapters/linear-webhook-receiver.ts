@@ -19,7 +19,7 @@ import type { LinearParsedWebhookEvent } from "../types"
 import { parseWebhookEvent, verifyWebhookSignature } from "../webhook-handler"
 
 /**
- * UUID-based workflow state identifiers from `valley.yaml`. The receiver
+ * UUID-based workflow state identifiers from `av.yaml`. The receiver
  * uses this table to translate Linear state IDs into logical states on
  * every incoming webhook.
  */

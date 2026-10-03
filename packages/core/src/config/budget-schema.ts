@@ -7,7 +7,7 @@
 
 import { z } from "zod"
 
-/** Project-level (valley.yaml) budget section — every field optional. */
+/** Project-level (av.yaml) budget section — every field optional. */
 export const budgetProjectSchema = z
   .object({
     per_issue: z
@@ -54,7 +54,7 @@ export type BudgetProjectConfig = z.infer<typeof budgetProjectSchema>
 export type BudgetMergedConfig = z.infer<typeof budgetMergedSchema>
 
 /**
- * Translate the optional `budget:` section from valley.yaml into the
+ * Translate the optional `budget:` section from av.yaml into the
  * camelCased merged shape consumed by BudgetService. Returns `undefined`
  * when the section is absent so the bootstrap can fall back to a no-op
  * service. Missing sub-fields fall back to 0 (BudgetService treats caps

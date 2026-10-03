@@ -21,10 +21,13 @@ export interface ResolvedSetupContext {
   github: GithubSetupValues
   workspaceRoot: string
   agentType: AgentType
+  agentModel?: string
   maxParallel: number
   tunnel: TunnelSetupValues
   task?: SetupContext["task"]
   verifyCommand?: string
+  chief?: SetupContext["chief"]
+  chiefChanged?: boolean
 }
 
 /**
@@ -40,7 +43,7 @@ export function resolveContext(
   if (!ctx.trackerKind) missing.push("trackerKind")
   if (!ctx.workspaceRoot) missing.push("workspaceRoot")
   if (!ctx.agentType) missing.push("agentType")
-  if (ctx.maxParallel == null) missing.push("maxParallel")
+  if (ctx.trackerKind !== "none" && ctx.maxParallel == null) missing.push("maxParallel")
 
   if (ctx.trackerKind === "linear") {
     const l = ctx.linear ?? {}
@@ -66,7 +69,8 @@ export function resolveContext(
   }
 
   // Tunnel: defaults to ngrok when the step is skipped (backwards compat).
-  const tunnel: TunnelSetupValues = ctx.tunnel ?? { provider: "ngrok" }
+  const tunnel: TunnelSetupValues =
+    ctx.trackerKind === "none" ? { provider: "none" } : (ctx.tunnel ?? { provider: "ngrok" })
   if (tunnel.provider === "cloudflare" && tunnel.cloudflare?.mode === "named" && !tunnel.cloudflare.name) {
     missing.push("tunnel.cloudflare.name")
   }
@@ -91,10 +95,13 @@ export function resolveContext(
       github: (ctx.github ?? {}) as GithubSetupValues,
       workspaceRoot: ctx.workspaceRoot as string,
       agentType: ctx.agentType as AgentType,
-      maxParallel: ctx.maxParallel as number,
+      agentModel: ctx.agentModel,
+      maxParallel: ctx.trackerKind === "none" ? 1 : (ctx.maxParallel as number),
       tunnel,
       task: ctx.task,
-      verifyCommand: ctx.verifyCommand,
+      verifyCommand: ctx.verifyCommand?.trim() || undefined,
+      chief: ctx.chief,
+      chiefChanged: ctx.chiefChanged,
     },
   }
 }

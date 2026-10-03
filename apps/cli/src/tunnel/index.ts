@@ -44,7 +44,7 @@ export function spawnTunnel(config: TunnelConfig, input: TunnelSpawnInput): Tunn
       const never: never = config.provider
       throw new Error(
         `Unknown tunnel.provider: ${JSON.stringify(never)}.\n` +
-          "  Fix: set tunnel.provider to one of cloudflare | ngrok | none in valley.yaml.",
+          "  Fix: set tunnel.provider to one of cloudflare | ngrok | none in av.yaml.",
       )
     }
   }

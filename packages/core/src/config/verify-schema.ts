@@ -12,7 +12,7 @@ import { z } from "zod"
 
 export const DEFAULT_VERIFY_TIMEOUT_SEC = 600
 
-/** Project-level (valley.yaml) verify section — omit entirely to disable the gate. */
+/** Project-level (av.yaml) verify section — omit entirely to disable the gate. */
 export const verifyProjectSchema = z
   .object({
     command: z.string().min(1, "verify.command must be a non-empty shell command").optional(),

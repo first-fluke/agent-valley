@@ -83,5 +83,5 @@ function killTree(proc: ChildProcess): void {
 function emitMissingBinaryWarning(logger: TunnelLogger): void {
   logger.warn("⚠ ngrok not found — Linear webhooks won't reach localhost")
   logger.dim("  Fix: install ngrok (brew install ngrok — https://ngrok.com/download)")
-  logger.dim("  Alternative: set tunnel.provider: cloudflare in valley.yaml to use Cloudflare Tunnel.")
+  logger.dim("  Alternative: set tunnel.provider: cloudflare in av.yaml to use Cloudflare Tunnel.")
 }

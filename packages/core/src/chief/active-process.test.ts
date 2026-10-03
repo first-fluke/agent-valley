@@ -24,13 +24,13 @@ describe("active mission process", () => {
     guard.begin("work")
     expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ stage: "work", pid: null })
     expect(() => new ActiveMissionProcess(directory, "mission").assertIdle()).toThrow(path)
-    expect(() => guard.begin("review")).toThrow("before recording its worker PID")
+    expect(() => guard.begin("review")).toThrow("before recording its Actor PID")
     expect(await new MissionStore(directory).list()).toEqual([])
     guard.finish()
     expect(readdirSync(directory)).toEqual([])
   })
 
-  it("blocks resume for a live worker and checks the full recorded process group", () => {
+  it("blocks resume for a live Actor and checks the full recorded process group", () => {
     const guard = new ActiveMissionProcess(directory, "mission")
     guard.begin("verify")
     guard.spawned(87654, true)
@@ -46,7 +46,7 @@ describe("active mission process", () => {
     guard.finish()
   })
 
-  it("allows crash recovery only after the recorded worker has exited", () => {
+  it("allows crash recovery only after the recorded Actor has exited", () => {
     const guard = new ActiveMissionProcess(directory, "mission")
     guard.begin("review")
     guard.spawned(87654)
@@ -61,7 +61,7 @@ describe("active mission process", () => {
     resumed.finish()
   })
 
-  it("preserves workers that cannot be inspected and malformed markers", () => {
+  it("preserves Actors that cannot be inspected and malformed markers", () => {
     const guard = new ActiveMissionProcess(directory, "mission")
     guard.begin("work")
     guard.spawned(87654)
@@ -92,7 +92,7 @@ describe("active mission process", () => {
     const guard = new ActiveMissionProcess(directory, "mission")
     guard.begin("work")
     guard.spawned(undefined)
-    expect(() => guard.assertIdle()).toThrow("before recording its worker PID")
+    expect(() => guard.assertIdle()).toThrow("before recording its Actor PID")
     expect(() => new ActiveMissionProcess(directory, "../mission")).toThrow("Invalid mission ID")
     guard.finish()
   })

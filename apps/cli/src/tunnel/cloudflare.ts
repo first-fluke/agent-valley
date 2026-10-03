@@ -72,7 +72,7 @@ function spawnQuick(port: string, logger: TunnelLogger): TunnelHandle {
 function spawnNamed(cfg: TunnelConfig["cloudflare"], logger: TunnelLogger): TunnelHandle {
   // Schema guarantees name is present when mode === "named"; guard defensively.
   if (!cfg.name) {
-    logger.warn("⚠ tunnel.cloudflare.mode=named requires tunnel.cloudflare.name in valley.yaml.")
+    logger.warn("⚠ tunnel.cloudflare.mode=named requires tunnel.cloudflare.name in av.yaml.")
     logger.dim("  Fix: add tunnel.cloudflare.name: <tunnel-name> or switch mode to 'quick'.")
     return nullTunnelHandle()
   }
@@ -88,7 +88,7 @@ function spawnNamed(cfg: TunnelConfig["cloudflare"], logger: TunnelLogger): Tunn
     logger.dim(`  Webhook URL: https://${hostname}/api/webhook`)
   } else {
     logger.info(`▶ cloudflared (named:${cfg.name}) running`)
-    logger.dim("  Set tunnel.cloudflare.hostname in valley.yaml to print the webhook URL.")
+    logger.dim("  Set tunnel.cloudflare.hostname in av.yaml to print the webhook URL.")
   }
 
   const ready: Promise<string | null> = new Promise((resolvePromise) => {
@@ -156,5 +156,5 @@ function emitMissingBinaryWarning(logger: TunnelLogger): void {
   logger.warn("⚠ cloudflared not found — Linear webhooks won't reach localhost")
   logger.dim("  Fix: install cloudflared (brew install cloudflared —")
   logger.dim("        https://github.com/cloudflare/cloudflared/releases)")
-  logger.dim("  Or fall back: set tunnel.provider: ngrok in valley.yaml.")
+  logger.dim("  Or fall back: set tunnel.provider: ngrok in av.yaml.")
 }

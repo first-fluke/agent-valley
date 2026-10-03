@@ -4,7 +4,7 @@
  *
  * State model:
  *   - The `stateIds` parameters surfaced by the port are **label names**
- *     configured in `valley.yaml` (`github.labels.{todo,inProgress,...}`).
+ *     configured in `av.yaml` (`github.labels.{todo,inProgress,...}`).
  *   - `updateIssueState` swaps state labels and closes/reopens the issue
  *     when transitioning to/from the terminal states.
  *   - Pull requests are excluded from `fetchIssuesByState`.
@@ -105,24 +105,24 @@ export class GithubTrackerAdapter implements IssueTracker {
     if (!config.token) {
       throw new Error(
         "GithubTrackerAdapter: token is required.\n" +
-          "  Fix: set github.token_env in valley.yaml and export the referenced env var.\n" +
+          "  Fix: set github.token_env in av.yaml and export the referenced env var.\n" +
           "  Required scopes: issues:write, pull_requests:write, contents:write.",
       )
     }
     if (!config.owner) {
       throw new Error(
-        "GithubTrackerAdapter: owner is required.\n  Fix: set github.owner in valley.yaml (e.g. 'first-fluke').",
+        "GithubTrackerAdapter: owner is required.\n  Fix: set github.owner in av.yaml (e.g. 'first-fluke').",
       )
     }
     if (!config.repo) {
       throw new Error(
-        "GithubTrackerAdapter: repo is required.\n  Fix: set github.repo in valley.yaml (e.g. 'agent-valley').",
+        "GithubTrackerAdapter: repo is required.\n  Fix: set github.repo in av.yaml (e.g. 'agent-valley').",
       )
     }
     if (!config.labels?.todo || !config.labels?.inProgress || !config.labels?.done || !config.labels?.cancelled) {
       throw new Error(
         "GithubTrackerAdapter: labels.{todo,inProgress,done,cancelled} are all required.\n" +
-          "  Fix: add github.labels.* entries in valley.yaml.",
+          "  Fix: add github.labels.* entries in av.yaml.",
       )
     }
     this.token = config.token
@@ -202,7 +202,7 @@ export class GithubTrackerAdapter implements IssueTracker {
         code: "github.not_found",
         message: `GitHub resource not found (404): ${method} ${url}`,
         context: { method, url, status: response.status },
-        fixHint: "Verify github.owner / github.repo in valley.yaml and that the issue exists.",
+        fixHint: "Verify github.owner / github.repo in av.yaml and that the issue exists.",
         retryable: false,
       })
     }
@@ -291,7 +291,7 @@ export class GithubTrackerAdapter implements IssueTracker {
         code: "github.unknown_state_label",
         message: `updateIssueState called with unknown state label "${newLabel}".`,
         context: { stateId: newLabel, known: [...allStateLabels] },
-        fixHint: "Pass one of github.labels.{todo,in_progress,done,cancelled} values from valley.yaml.",
+        fixHint: "Pass one of github.labels.{todo,in_progress,done,cancelled} values from av.yaml.",
         retryable: false,
       })
     }

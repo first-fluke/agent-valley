@@ -55,7 +55,7 @@ const { spawn } = require('node:child_process');
 process.stdin.resume();
 process.stdin.on('end', () => {
   spawn(process.execPath, ['-e', ${JSON.stringify(descendantCode())}], { stdio: 'ignore' });
-  fs.writeFileSync(${JSON.stringify(join(root, "agent-pid"))}, String(process.pid));
+  fs.writeFileSync(${JSON.stringify(join(root, "Actor-pid"))}, String(process.pid));
   const ready = setInterval(() => {
     if (!fs.existsSync(${JSON.stringify(join(root, "ready"))})) return;
     clearInterval(ready);
@@ -82,7 +82,7 @@ beforeEach(async () => {
     goal: "Create a report",
     chiefId: "chief",
     personas: [
-      { id: "chief", name: "Chief", role: "Coordinate", agentType: "claude", skills: [] },
+      { id: "chief", name: "Chief Director", role: "Coordinate", agentType: "claude", skills: [] },
       { id: "worker", name: "Worker", role: "Write", agentType: "claude", skills: [] },
     ],
     workspace: {
@@ -120,7 +120,7 @@ describe.skipIf(process.platform === "win32")("chief process tree ownership", ()
   it("kills descendants after a terminal event before the next stage may inspect files", async () => {
     await fakeAgent(true)
     const actor = mission.personas[1]
-    if (!actor) throw new Error("Missing worker fixture")
+    if (!actor) throw new Error("Missing Actor fixture")
     expect(await runtime.ports().runAgent(actor, "Do the work", mission, "work")).toBe("Task complete")
     expect(existsSync(join(root, "ready"))).toBe(true)
     await delay(650)
@@ -132,7 +132,7 @@ describe.skipIf(process.platform === "win32")("chief process tree ownership", ()
     const controller = new AbortController()
     runtime = new ChiefRuntime(new MissionStore(join(root, "missions")), controller.signal)
     const actor = mission.personas[1]
-    if (!actor) throw new Error("Missing worker fixture")
+    if (!actor) throw new Error("Missing Actor fixture")
     const stopped = expect(runtime.ports().runAgent(actor, "Do the work", mission, "work")).rejects.toThrow(
       "interrupted",
     )

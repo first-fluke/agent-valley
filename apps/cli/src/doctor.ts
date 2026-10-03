@@ -3,7 +3,7 @@
  *
  * Runs every check in doctor-checks.ts and prints a ✓/✗/⚠ line per check
  * with an actionable fix on failure. Exit code is 0 only when every
- * CRITICAL check (config, the configured agent CLI's install, the OS
+ * CRITICAL check (config, the configured actor CLI's install, the OS
  * sandbox binary) passes — so this is CI-usable as a health gate.
  * Non-critical checks (agent auth heuristic, tunnel, webhook secret) are
  * still reported and can fail without affecting the exit code, since
@@ -80,7 +80,7 @@ export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
     .description("Diagnose install/config/auth problems (one-shot health check)")
-    .option("-a, --all", `Check all ${AGENT_TYPES.length} supported agent CLIs, not just the configured one`)
+    .option("-a, --all", `Check all ${AGENT_TYPES.length} supported actor CLIs, not just the configured one`)
     .action(async (opts: { all?: boolean }) => {
       const exitCode = await doctor({ all: opts.all })
       process.exit(exitCode)

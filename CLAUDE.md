@@ -54,7 +54,7 @@ Domain         packages/core/src/domain/         Pure types: Issue, Workspace, R
 Infrastructure packages/core/src/tracker/        Linear GraphQL client + webhook HMAC + state mutations + comments
                packages/core/src/workspace/      Git worktree lifecycle
                packages/core/src/sessions/       AgentSession implementations (Claude, Codex, Antigravity, Cursor, Grok, Kimi, opencode)
-               packages/core/src/config/         Zod-based YAML config validation (settings.yaml + valley.yaml)
+               packages/core/src/config/         Zod-based YAML config validation (settings.yaml + av.yaml)
                packages/core/src/observability/  Structured JSON/text logger
                packages/core/src/relay/          Supabase ledger bridge (team dashboard event sourcing)
 ```
@@ -82,9 +82,9 @@ Infrastructure packages/core/src/tracker/        Linear GraphQL client + webhook
 Two YAML config files, merged at startup (project wins over global):
 
 - **Global:** `~/.config/agent-valley/settings.yaml` — user credentials (LINEAR_API_KEY), agent defaults, team dashboard settings
-- **Project:** `valley.yaml` — team config, workspace root, workflow states, prompt template, routing rules
+- **Project:** `av.yaml` — team config, workspace root, workflow states, prompt template, routing rules
 
-Zod schema in `packages/core/src/config/yaml-loader.ts` validates the merged config. Fails fast with actionable error messages. Prompt template in `valley.yaml` supports `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.description}}`, `{{workspace_path}}` variables.
+Zod schema in `packages/core/src/config/yaml-loader.ts` validates the merged config. Fails fast with actionable error messages. Prompt template in `av.yaml` supports `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.description}}`, `{{workspace_path}}` variables.
 
 ## Event Flow
 

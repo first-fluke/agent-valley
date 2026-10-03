@@ -4,10 +4,10 @@
  * Every check takes an explicit `DoctorDeps` bag (filesystem, PATH
  * resolver, sandbox-availability probes, config loaders) so checks are
  * unit-testable without touching the real filesystem, PATH, or spawning
- * a real agent CLI. No console output lives here — that is doctor.ts's
+ * a real actor CLI. No console output lives here — that is doctor.ts's
  * job (Presentation layer). This file only computes structured results.
  *
- * Holds: shared types/deps, agent CLI install + auth checks, sandbox
+ * Holds: shared types/deps, actor CLI install + auth checks, sandbox
  * check. Config/tunnel/webhook-secret checks + orchestration live in
  * `doctor-config-checks.ts` (kept in a separate file to stay under the
  * 500-line-per-file limit — see docs/architecture/CONSTRAINTS.md).
@@ -111,7 +111,7 @@ export const AGENT_INSTALL_HINT: Record<AgentType, string> = {
 export const AGENT_LOGIN_HINT: Record<AgentType, string> = {
   claude: "Run `claude` and complete the browser login prompt.",
   codex: "Run `codex login`.",
-  antigravity: "Run `agy login` (see Antigravity docs).",
+  antigravity: "Run `agy` and complete its first-launch browser sign-in, then exit.",
   cursor: "Run `cursor-agent login`.",
   grok: "Run `grok login` (see xAI docs).",
   kimi: "Run `kimi`, then `/login` to complete the device-code flow.",
@@ -119,7 +119,7 @@ export const AGENT_LOGIN_HINT: Record<AgentType, string> = {
 }
 
 /**
- * Best-effort, cheap auth-state probe per agent CLI. Never spawns the CLI
+ * Best-effort, cheap auth-state probe per actor CLI. Never spawns the CLI
  * or makes a real LLM call — only checks for the presence of the vendor's
  * own auth/config file. When that isn't a reliable enough signal (agy,
  * cursor), reports "unknown" instead of guessing.

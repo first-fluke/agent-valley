@@ -72,7 +72,7 @@ export async function readTeamLedger(config: TeamLedgerConfig, deps: TeamLedgerD
   const { supabaseUrl, supabaseAnonKey, teamId } = config
   if (!supabaseUrl && !supabaseAnonKey && !teamId) return { mode: "standalone" }
   if (!supabaseUrl || !supabaseAnonKey || !teamId) {
-    return failure("team_config_incomplete", "Set team.supabase_url, team.supabase_anon_key, and team.id in valley.yaml or settings.yaml.")
+    return failure("team_config_incomplete", "Set team.supabase_url, team.supabase_anon_key, and team.id in av.yaml or settings.yaml.")
   }
   let endpoint: URL
   try {

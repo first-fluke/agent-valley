@@ -8,7 +8,7 @@
  *     named (pre-registered tunnel whose hostname is in DNS).
  *
  * Backwards compat: when the top-level `tunnel:` block is omitted,
- * provider defaults to `ngrok` so existing valley.yaml files keep the
+ * provider defaults to `ngrok` so existing av.yaml files keep the
  * v0.2 behaviour.
  *
  * Pure Zod + type definitions. No I/O, no process spawning.
@@ -39,7 +39,7 @@ export const tunnelProjectSchema = z
           path: ["cloudflare", "name"],
           message:
             "tunnel.cloudflare.name is required when tunnel.cloudflare.mode === 'named'.\n" +
-            "  Fix: Add tunnel.cloudflare.name: <tunnel-name> to valley.yaml, " +
+            "  Fix: Add tunnel.cloudflare.name: <tunnel-name> to av.yaml, " +
             "or switch tunnel.cloudflare.mode to 'quick'.",
         })
       }

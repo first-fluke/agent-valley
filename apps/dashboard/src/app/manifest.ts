@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Agent Valley",
     short_name: "AV",
-    description: "AI agent orchestration dashboard — monitor agents, issues, and real-time status",
+    description: "Actor orchestration dashboard. Monitor Actors, issues, and live status.",
     start_url: "/",
     display: "standalone",
     background_color: "#0a0a0a",

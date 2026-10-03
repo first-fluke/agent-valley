@@ -1,16 +1,16 @@
 # Agent Valley
 
-Run AI agents in isolated Git worktrees. Use Linear/GitHub issues for queued, parallel work, or give a local chief a goal to plan, delegate, review, and verify.
+Run AI actors in isolated Git worktrees. Use Linear/GitHub issues for queued, parallel work, or give a local Chief Director a goal to plan, delegate, review, and verify.
 
 > Read this in: [한국어](./README.ko.md)
 
 ```
 Linear Issue (Todo)
-  → Webhook → Orchestrator → Git Worktree → Agent Session
+  → Webhook → Orchestrator → Git Worktree → Actor Session
   → Completion → Merge/PR → Done
 ```
 
-Tracker mode manages lifecycle transitions (Todo → In Progress → Done/Cancelled) and delivers verified changes. Chief orders keep a local plan, task reviews, and verification results for a goal.
+Tracker mode manages lifecycle transitions (Todo → In Progress → Done/Cancelled) and delivers verified changes. Chief Director orders keep a local plan, task reviews, and verification results for a goal.
 
 Built with **TypeScript + Bun**. Supports **Claude Code, Codex, Antigravity, Cursor, Grok, Kimi, and OpenCode** through the AgentSession interface.
 
@@ -25,60 +25,64 @@ See the [operability audit](./docs/reports/operability-audit-2026-10-03.md) for 
 3. Orchestrator verifies HMAC signature, transitions the issue to In Progress
 4. DAG scheduler checks dependencies — blocked issues wait until blockers complete
 5. WorkspaceManager creates an isolated git worktree under `workspace.root`
-6. AgentRunnerService starts the configured agent CLI
+6. AgentRunnerService starts the configured actor CLI
 7. After verification: merge and push or create a PR, post a tracker summary, transition to Done
 8. On failure: exponential backoff retry (60s × 2^n, max 3 attempts), then cancel with error comment
-9. Slot refill: completed agents free up capacity, next waiting issue starts automatically
+9. Slot refill: completed actors free up capacity, next waiting issue starts automatically
 
-Multiple issues run in parallel up to `agent.max_parallel` (auto-detected from hardware).
+Multiple issues run in parallel up to `actor.max_parallel` (auto-detected from hardware).
 
 ---
 
 ## Quick Start
 
-Use Node.js 26.10.0 and Bun 1.4.2 or later, with Git and an authenticated supported agent CLI on PATH.
+Run the installer from the Git repository you want actors to work on. It prepares Node.js 26.10.0 and Bun 1.4.2 when needed, installs `av`, and opens the setup wizard in an interactive terminal.
 
 ```bash
-# Clone
-git clone https://github.com/first-fluke/agent-valley.git
-cd agent-valley
-bun install --frozen-lockfile
-
-# Interactive setup wizard
-bun av setup
-bun av doctor
-
-# Start dashboard + orchestrator + tunnel in the background without a production build
-bun av up --dev
-bun av status
+cd /absolute/path/to/repo
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+av order "Fix the login failure"
 ```
 
-Run from this checkout and set `workspace.root` to the existing Git repository you want agents to work on. Configure a code verification command or an analysis report path in the wizard. See the [installation, first-task and recovery guide](./docs/guides/environment-setup.md).
+The default wizard asks for the target repository and Chief Director CLI and model, and can save a trusted verification command. It guides installation and login for the chosen Chief Director and prepares the latest OMA CLI and skills in the target repository. OMA preparation is selected by default; failures offer retry or deferral. Browser sign-in and unsupported readiness checks may require your input. The repository must have at least one commit. Your choices are saved, so later orders need only a goal. See the [installation, first-task and recovery guide](./docs/guides/environment-setup.md).
 
-For a goal without a tracker, use `bun av order "Fix the login failure" --workspace /absolute/path/to/repo --verify "bun run test" --agent codex`. See [chief orders and named personas](./docs/guides/chief-missions.md) for OMA integration, research reports, and resume behavior.
+The Chief Director consults its Technical Director, Design Director and Marketing Director concurrently, turns the goal into success criteria and executable checks, creates 4–8 Actors including those advisers, and assigns work using available supported CLIs and installed OMA skills. Up to three independent Actors run in separate worktrees by default; reviewed changes are integrated before dependent work and final verification. Use `--parallel 1` for serial execution. The Technical Director focuses on cost, reuse, standardization and dependencies; the Design Director focuses on usability, user tests, data and retention, including a preference for dark patterns; the Marketing Director focuses on promotion, acquisition, revenue and ROI. The Chief Director reviews evidence and decides whether to repair, reassign, or replan when work fails. Each order produces a report with a plain-language explanation, checks, and remaining limits. Orders start without a tracker or daemon. `--actor` and `--model` override the saved Chief Director choice for one order; `--actors` supplies your own team. See [Chief Director orders and named actors](./docs/guides/chief-missions.md).
+
+Without `--verify` or a saved command, the Chief Director designs fixed file, JSON, or explicit test checks bound to the original success criteria. A supplied command remains immutable. The foreground supervisor resumes child crashes and scheduled retries within saved limits; `--no-supervise` runs directly and `av missions --watch` restores eligible checkpoints after a stopped supervisor or machine. Authentication and uncertain external effects pause for inspection. `--runs`, `--duration`, `--rounds`, and the configured-price estimate limit `--cost` can be increased on resume without resetting spent budgets. Unknown cost pauses when a cost limit is set; in-flight or subscription charges are not an exact billing cap.
+
+The Chief Director chooses how to execute and supervise the work. The user retains operational responsibility for the goal and resulting actions; the report records those actions and their verification evidence.
+
+Orders also record actual token usage, duration and review outcomes for routing, select different available CLI types for task review, reuse repository organization evidence and enforce configured business metric targets. User-configured Stripe revenue, HTTP JSON, or file sources provide real observations; orders wait for the measurement window and unmet targets remain incomplete. Optional reporting sends actual report, screenshot and video files through replaceable Slack, Discord, Telegram, Teams, Google Chat, Mattermost or webhook adapters. Aside MCP captures the configured browser target; MP4 encoding requires ffmpeg. See [operations and report attachments](./docs/guides/chief-integrations.md).
+
+For issue tracker automation, use an Agent Valley source checkout containing `apps/dashboard`. Run `bun av setup --mode tracker`, then `bun av doctor` and `bun av up --dev` there. Set `workspace.root` to the repository actors should work on.
 
 The CLI attempts automatic Linear webhook registration. For manual registration use `{url}/api/webhook`; GitHub uses `{url}/api/webhook/github`.
-The default tunnel provider is ngrok; set `tunnel.provider: cloudflare` in `valley.yaml` to use Cloudflare Tunnel (see Configuration below).
+The default tunnel provider is ngrok; set `tunnel.provider: cloudflare` in `av.yaml` to use Cloudflare Tunnel (see Configuration below).
 
 ---
 
 ## CLI
 
 ```bash
-bun av setup              # Interactive setup wizard
+bun av setup              # Local orders: repository, Chief Director, login, OMA, verification
+bun av setup --mode tracker # Linear/GitHub automation setup
 bun av doctor             # Validate configuration and runtime prerequisites
 bun av dev                # Start in foreground (file watching + auto-restart)
 bun av up --dev           # Start background daemon without a production build
 bun av up                 # Build dashboard, then start background daemon
 bun av down               # Stop background daemon
 bun av status             # Query orchestrator status
-bun av top                # Live agent status monitor
+bun av top                # Live actor status monitor
 bun av logs               # Tail dashboard logs (-n for line count)
 bun av login              # Login to team (Supabase auth)
 bun av logout             # Logout from team
 bun av invite             # Copy team config to clipboard
-bun av order --help       # Give a chief a goal with a required acceptance check
-bun av missions           # List saved local chief orders
+bun av order --help       # Give a Chief Director a goal; --verify supplies an optional trusted command
+bun av missions           # List saved local Chief Director orders
+bun av missions --watch   # Resume eligible saved orders and scheduled observations
+bun av reports list       # Inspect third-party delivery receipts
+bun av reports retry      # Retry saved report files without running Actors
 ```
 
 ### Creating Issues
@@ -104,10 +108,12 @@ Two YAML config files, merged at startup (project wins over global):
 
 | File | Scope | Description |
 |---|---|---|
-| `~/.config/agent-valley/settings.yaml` | Global (user) | API key, agent defaults, team dashboard |
-| `valley.yaml` | Project | Team config, workspace root, prompt template, routing |
+| `~/.config/agent-valley/settings.yaml` | Global (user) | API key, actor defaults, team dashboard |
+| `av.yaml` | Project | Team config, workspace root, prompt template, routing |
 
-Run `av setup` to create both files interactively. See `valley.example.yaml` for format reference.
+Run `av setup` to create both files interactively. See `av.example.yaml` for format reference.
+
+Project configuration uses only `av.yaml`; setup and edits save that file. Configuration uses `actor:`. Actor profiles use `director`, `actors`, and `actorType`; existing profile fields and CLI flags remain aliases.
 
 ### Global Config (`~/.config/agent-valley/settings.yaml`)
 
@@ -115,11 +121,11 @@ Run `av setup` to create both files interactively. See `valley.example.yaml` for
 linear:
   api_key: lin_api_xxx
 
-agent:
-  type: claude          # Default agent: claude / codex / antigravity / cursor / grok / kimi / opencode
+actor:
+  type: claude          # Default actor: claude / codex / antigravity / cursor / grok / kimi / opencode
   timeout: 3600
   max_retries: 3
-  max_parallel: 3       # Max concurrent agent runs (default: hardware-detected recommendation)
+  max_parallel: 3       # Max concurrent actor runs (default: hardware-detected recommendation)
 
 logging:
   level: info           # debug / info / warn / error
@@ -136,7 +142,7 @@ team:
   display_name: my-node
 ```
 
-### Project Config (`valley.yaml`)
+### Project Config (`av.yaml`)
 
 ```yaml
 # Tracker selector (v0.2+). Defaults to `linear` when omitted.
@@ -183,12 +189,12 @@ routing:
       workspace_root: /path/to/backend
     - label: "frontend"
       workspace_root: /path/to/frontend
-      agent_type: codex
+      actor_type: codex
       delivery_mode: pr
       verify_command: "pytest && mypy ."   # overrides verify.command below for this route
 
 # Verification Gate (required for code tasks). Runs before delivery and before the
-# issue transitions to Done; on failure the agent retries with the captured
+# issue transitions to Done; on failure the actor retries with the captured
 # output as context. Set this to commands available in the target repository.
 verify:
   command: "bun run typecheck && bun run test"
@@ -198,11 +204,11 @@ verify:
 scoring:
   model: haiku
   routes:
-    easy:  { min: 1, max: 3, agent: antigravity }
-    medium: { min: 4, max: 7, agent: codex }
-    hard:  { min: 8, max: 10, agent: claude }
+    easy:  { min: 1, max: 3, actor: antigravity }
+    medium: { min: 4, max: 7, actor: codex }
+    hard:  { min: 8, max: 10, actor: claude }
 
-# Agent Budget Caps (optional, v0.2+). Omit to disable (default).
+# Actor Budget Caps (optional, v0.2+). Omit to disable (default).
 # budget:
 #   per_issue:
 #     tokens: 2_000_000
@@ -246,10 +252,10 @@ agent-valley/
 ├── packages/
 │   └── core/                 @agent-valley/core — Orchestration engine
 │       └── src/
-│           ├── config/         YAML config loader (settings.yaml + valley.yaml)
+│           ├── config/         YAML config loader (settings.yaml + av.yaml)
 │           ├── domain/         Pure types: Issue, Workspace, RunAttempt, DAG
-│           ├── orchestrator/   State machine, agent runner, retry queue, DAG scheduler
-│           ├── sessions/       Agent plugins: Claude, Codex, Antigravity
+│           ├── orchestrator/   State machine, actor runner, retry queue, DAG scheduler
+│           ├── sessions/       Actor plugins: Claude, Codex, Antigravity
 │           ├── tracker/        Linear GraphQL client + webhook HMAC verification
 │           ├── workspace/      Git worktree lifecycle + merge/PR
 │           └── observability/  Structured JSON/text logger
@@ -264,9 +270,9 @@ agent-valley/
 │   └── harness/
 │       ├── validate.sh       Architecture validation (secrets, layer violations)
 │       └── gc.sh             Worktree garbage collector
-├── AGENTS.md                 Agent instructions (shared entry point)
+├── AGENTS.md                 Actor instructions (shared entry point)
 ├── CLAUDE.md                 Claude Code project instructions
-└── valley.example.yaml       Project config template
+└── av.example.yaml       Project config template
 ```
 
 ### Clean Architecture Layers
@@ -279,7 +285,7 @@ Application    Orchestrator (core / lifecycle / router / bus), AgentRunnerServic
 Domain         Issue, Workspace, RunAttempt, DAG, ParsedWebhookEvent (pure types)
                + ports: IssueTracker, WebhookReceiver, WorkspaceGateway, AgentRunnerPort
      ↓
-Infrastructure Linear + GitHub adapters, git operations, agent sessions, observability
+Infrastructure Linear + GitHub adapters, git operations, actor sessions, observability
 ```
 
 Dependency arrows point **downward only**. See `docs/architecture/LAYERS.md`.
@@ -294,23 +300,23 @@ domain ports so adapters can be swapped without touching the orchestrator:
 | `IssueTracker` | Fetch / update issues, post comments, attach labels | `LinearTrackerAdapter`, `GitHubTrackerAdapter` |
 | `WebhookReceiver<TEvent>` | Verify signature + parse to `ParsedWebhookEvent` | `LinearWebhookReceiver`, `GitHubWebhookReceiver` |
 | `WorkspaceGateway` | Per-issue worktree lifecycle + delivery | `FileSystemWorkspaceGateway` |
-| `AgentRunnerPort` | Spawn agents + expose `RunHandle` for interventions | `SpawnAgentRunnerAdapter` |
+| `AgentRunnerPort` | Spawn actors + expose `RunHandle` for interventions | `SpawnAgentRunnerAdapter` |
 
 ### The 7 Symphony Components
 
 | # | Component | Responsibility | Spec |
 |---|---|---|---|
 | 1 | **Workflow Loader** | Prompt template rendering + input sanitization | `docs/specs/workflow-loader.md` |
-| 2 | **Config Layer** | YAML config loader (settings.yaml + valley.yaml) + Zod validation | `docs/specs/config-layer.md` |
+| 2 | **Config Layer** | YAML config loader (settings.yaml + av.yaml) + Zod validation | `docs/specs/config-layer.md` |
 | 3 | **Tracker Client** | Linear GraphQL — fetch issues, state transitions, comments, HMAC verification | `docs/specs/tracker-client.md` |
 | 4 | **Orchestrator** | Webhook event handler, state machine, retry queue, DAG scheduler | `docs/specs/orchestrator.md` |
 | 5 | **Workspace Manager** | Per-issue git worktree creation, merge/PR, cleanup | `docs/specs/workspace-manager.md` |
-| 6 | **Agent Runner** | AgentSession abstraction, timeout enforcement, parallel execution | `docs/specs/agent-runner.md` |
+| 6 | **Actor Runner** | AgentSession abstraction, timeout enforcement, parallel execution | `docs/specs/agent-runner.md` |
 | 7 | **Observability** | Structured JSON logs, system metrics, SSE status surface | `docs/specs/observability.md` |
 
-### Agent Session Plugins
+### Actor Session Plugins
 
-| Agent | Config value | Executable |
+| Actor | Config value | Executable |
 |---|---|---|
 | Claude Code | `claude` | `claude` |
 | Codex | `codex` | `codex` |
@@ -320,19 +326,19 @@ domain ports so adapters can be swapped without touching the orchestrator:
 | Kimi | `kimi` | `kimi` |
 | OpenCode | `opencode` | `opencode` |
 
-Extensible via `registerSession()` — implement the `AgentSession` interface to add custom agents.
+Extensible via `registerSession()` — implement the `AgentSession` interface to add custom actors.
 
 ---
 
 ## Dashboard
 
-PixiJS-rendered office scene showing real-time agent status:
+PixiJS-rendered office scene showing real-time actor status:
 
-- **Agent characters** at desks with issue identifier bubbles
-- **Office visualization** — desks scale to `agent.max_parallel`, coffee machine, server rack, etc.
+- **Actor characters** at desks with issue identifier bubbles
+- **Office visualization** — desks scale to `actor.max_parallel`, coffee machine, server rack, etc.
 - **Operations panel** — dependency blockers, retry reasons and next retry times
 - **System metrics** — CPU, memory, uptime
-- **SSE real-time events** — instant updates on agent.start, agent.done, agent.failed
+- **SSE real-time events** — instant updates on actor.start, actor.done, actor.failed
 - **Team HUD** — multi-node view (requires Supabase config)
 
 ### API Endpoints
@@ -344,7 +350,7 @@ PixiJS-rendered office scene showing real-time agent status:
 | `/api/events` | GET | SSE stream for real-time dashboard updates |
 | `/api/status` | GET | JSON orchestrator status snapshot |
 | `/api/health` | GET | Health check (503 if the orchestrator is unavailable or stopped) |
-| `/api/intervention` | POST | Live agent intervention; local by default, token-authenticated when configured |
+| `/api/intervention` | POST | Live actor intervention; local by default, token-authenticated when configured |
 | `/api/metrics` | GET | Prometheus-format metrics (enabled via `observability.prometheus.enabled`) |
 
 ---
@@ -353,18 +359,18 @@ PixiJS-rendered office scene showing real-time agent status:
 
 ### GitHub Issues Support (v0.2+)
 
-Alongside Linear, GitHub Issues can drive the orchestrator. Set `tracker.kind: github` in `valley.yaml` and configure the GitHub section — the domain `IssueTracker` / `WebhookReceiver` ports swap transparently. Both trackers reuse the same orchestration, retry, and delivery pipeline.
+Alongside Linear, GitHub Issues can drive the orchestrator. Set `tracker.kind: github` in `av.yaml` and configure the GitHub section — the domain `IssueTracker` / `WebhookReceiver` ports swap transparently. Both trackers reuse the same orchestration, retry, and delivery pipeline.
 
 ### Observability (v0.2+)
 
-OpenTelemetry OTLP HTTP traces and Prometheus metrics ship built in but **default to off**. Enable per deployment via the `observability` section in `valley.yaml`. When enabled:
+OpenTelemetry OTLP HTTP traces and Prometheus metrics ship built in but **default to off**. Enable per deployment via the `observability` section in `av.yaml`. When enabled:
 
-- OTel spans are emitted for agent start/done/failed + webhook + DAG events.
-- Prometheus metrics are served from `GET /api/metrics` (active agents, retry queue size, completion counts, failure counts, DAG cycle detections).
+- OTel spans are emitted for actor start/done/failed + webhook + DAG events.
+- Prometheus metrics are served from `GET /api/metrics` (active actors, retry queue size, completion counts, failure counts, DAG cycle detections).
 
-### Agent Budget Caps (v0.2+)
+### Actor Budget Caps (v0.2+)
 
-Per-issue and per-day token / cost caps prevent runaway agents. Budgets are evaluated before each spawn (`BudgetService.checkBeforeSpawn`) — when exceeded, the issue is cancelled with an actionable comment instead of spawning.
+Per-issue and per-day token / cost caps prevent runaway actors. Budgets are evaluated before each spawn (`BudgetService.checkBeforeSpawn`) — when exceeded, the issue is cancelled with an actionable comment instead of spawning.
 
 ### Live Intervention (v0.2+)
 
@@ -382,13 +388,13 @@ Issues with `blocked_by` relations wait until all blockers complete. On blocker 
 
 ### Retry Queue
 
-Failed agent runs are retried with exponential backoff (`60s × 2^(attempt-1)`, max 3 attempts). Workspace creation failures and state transition failures are also retried. Max retries exceeded → issue cancelled with error comment.
+Failed actor runs are retried with exponential backoff (`60s × 2^(attempt-1)`, max 3 attempts). Workspace creation failures and state transition failures are also retried. Max retries exceeded → issue cancelled with error comment.
 
 ### Safety Net
 
-- Detects uncommitted agent work and auto-commits before delivery
+- Detects uncommitted actor work and auto-commits before delivery
 - Creates safety-net draft PRs in PR mode
-- Graceful shutdown on SIGTERM/SIGINT — stops all running agents
+- Graceful shutdown on SIGTERM/SIGINT — stops all running actors
 - Hot reload cleanup — previous orchestrator instance stopped before new one starts
 
 ### Startup Sync
@@ -427,13 +433,13 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 ## Security
 
 - **HMAC-SHA256** webhook signature verification on all incoming Linear and GitHub events
-- **Prompt injection defense** — prompt template in `valley.yaml` is trusted, issue body is always sanitized at entry point
-- **Least privilege** — agents operate only within their assigned worktree
-- **Secret management** — secrets in `valley.yaml` and `settings.yaml` (gitignored), pre-commit secret detection
+- **Prompt injection defense** — prompt template in `av.yaml` is trusted, issue body is always sanitized at entry point
+- **Least privilege** — actors operate only within their assigned worktree
+- **Secret management** — secrets in `av.yaml` and `settings.yaml` (gitignored), pre-commit secret detection
 - **Fetch timeout** — 30s timeout on all tracker API calls
 - **Intervention access** — local by default. A configured `SYMPHONY_INTERVENTION_TOKEN` requires authentication for local and remote requests. Browser mutations require a matching Origin; a valid bearer token also authorizes API clients. The remote flag without a token rejects all requests.
-- **Sandbox execution** — every spawned agent CLI runs inside an OS-level sandbox (`sandbox-exec` on macOS, `bwrap` on Linux); spawns fail closed if no sandbox is available unless `SYMPHONY_ALLOW_UNSANDBOXED=1` is explicitly set
-- **Audit logging** — all agent actions logged in structured JSON
+- **Sandbox execution** — every spawned actor CLI runs inside an OS-level sandbox (`sandbox-exec` on macOS, `bwrap` on Linux); spawns fail closed if no sandbox is available unless `SYMPHONY_ALLOW_UNSANDBOXED=1` is explicitly set
+- **Audit logging** — all actor actions logged in structured JSON
 
 Full documentation: `docs/harness/SAFETY.md`
 
@@ -457,7 +463,7 @@ Full list with examples: `docs/architecture/CONSTRAINTS.md`
 
 ## For AI Agents
 
-If you are an AI agent reading this repository, see **[AGENTS.md](./AGENTS.md)** for detailed setup instructions, conventions, and implementation guidance.
+If you are an AI actor reading this repository, see **[AGENTS.md](./AGENTS.md)** for detailed setup instructions, conventions, and implementation guidance.
 
 Claude Code sub-agents are available in `.claude/agents/`:
 - `symphony-architect.md` — Architecture decisions, SPEC interpretation

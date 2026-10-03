@@ -7,6 +7,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { mergeChiefConfig } from "@agent-valley/core/config/chief-schema"
 import {
   loadGlobalConfig,
   loadProjectConfig,
@@ -16,15 +17,23 @@ import {
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 import { stringify as yamlStringify } from "yaml"
+import { stepAgentType } from "./agent-step"
+import { stepChief } from "./chief-step"
+import { changedProjectChief } from "./chief-write"
 import { stepCompletion } from "./completion-step"
-import { CANCEL, type SetupContext } from "./types"
+import { canonicalConfig } from "./config-write"
+import { stepOma } from "./oma-step"
+import { BACK, CANCEL, type SetupContext, type StepFn } from "./types"
+import { stepWorkspace } from "./workspace-step"
 
 const EDITABLE_FIELDS: { value: string; label: string; scope: "global" | "project" }[] = [
   { value: "apiKey", label: "Linear API Key", scope: "global" },
   { value: "webhookSecret", label: "Tracker Webhook Secret", scope: "project" },
   { value: "workspaceRoot", label: "Workspace Path", scope: "project" },
-  { value: "agentType", label: "Agent Type", scope: "global" },
+  { value: "agentType", label: "Chief Director CLI and model", scope: "global" },
+  { value: "oma", label: "OMA skills (install/update)", scope: "project" },
   { value: "completion", label: "Task output and verification", scope: "project" },
+  { value: "chief", label: "Reports, browser capture and business metrics", scope: "project" },
 ]
 
 export async function setupEdit(): Promise<void> {
@@ -33,6 +42,8 @@ export async function setupEdit(): Promise<void> {
   const globalConfig = loadGlobalConfig()
   const projectConfig = loadProjectConfig()
   const isGithub = projectConfig?.tracker?.kind === "github" || (!projectConfig?.linear && !!projectConfig?.github)
+  const isOrder = !!projectConfig && !projectConfig.tracker && !projectConfig.linear && !projectConfig.github
+  const trackerKind = isOrder ? "none" : isGithub ? "github" : "linear"
 
   if (!globalConfig && !projectConfig) {
     p.log.error("No config files found. Run `bun av setup` first.")
@@ -41,7 +52,10 @@ export async function setupEdit(): Promise<void> {
 
   const fields = await p.multiselect({
     message: "Select fields to change",
-    options: EDITABLE_FIELDS.filter((field) => !isGithub || field.value !== "apiKey").map((f) => ({
+    options: EDITABLE_FIELDS.filter((field) => {
+      if (isOrder && (field.value === "apiKey" || field.value === "webhookSecret")) return false
+      return !isGithub || field.value !== "apiKey"
+    }).map((f) => ({
       value: f.value,
       label: `${f.label} ${pc.dim(`(${f.scope})`)}`,
     })),
@@ -101,48 +115,49 @@ export async function setupEdit(): Promise<void> {
     projectChanged = true
   }
 
-  if (selectedFields.includes("workspaceRoot")) {
-    const root = await p.text({
-      message: "Agent workspace path (absolute)",
-      initialValue: pConfig.workspace?.root,
-      validate: (v) => {
-        if (!v) return "Required"
-        if (!v.startsWith("/")) return "Must be an absolute path"
-      },
-    })
-    if (p.isCancel(root)) {
-      p.cancel("Cancelled")
-      process.exit(0)
+  if (selectedFields.some((field) => ["workspaceRoot", "agentType", "oma"].includes(field))) {
+    const context: SetupContext = {
+      trackerKind,
+      workspaceRoot: pConfig.workspace?.root,
+      agentType: gConfig.agent?.type,
+      agentModel: gConfig.agent?.model,
     }
-    if (!pConfig.workspace) pConfig.workspace = {}
-    pConfig.workspace.root = root
-    projectChanged = true
-  }
-
-  if (selectedFields.includes("agentType")) {
-    const agent = await p.select({
-      message: "Select agent",
-      options: [
-        { value: "claude", label: "Claude", hint: "Anthropic Claude Code" },
-        { value: "codex", label: "Codex", hint: "OpenAI Codex" },
-        { value: "antigravity", label: "Antigravity", hint: "Google Antigravity (agy)" },
-        { value: "cursor", label: "Cursor", hint: "Cursor Agent" },
-        { value: "grok", label: "Grok", hint: "xAI Grok Build" },
-        { value: "kimi", label: "Kimi", hint: "Moonshot AI Kimi Code" },
-        { value: "opencode", label: "opencode", hint: "Multi-provider (75+ backends)" },
-      ],
-    })
-    if (p.isCancel(agent)) {
-      p.cancel("Cancelled")
-      process.exit(0)
+    const prepareSteps: StepFn[] = []
+    if (selectedFields.includes("workspaceRoot") || !context.workspaceRoot) prepareSteps.push(stepWorkspace)
+    if (selectedFields.includes("agentType")) prepareSteps.push(stepAgentType)
+    prepareSteps.push(stepOma)
+    let index = 0
+    while (index < prepareSteps.length) {
+      const current = prepareSteps[index]
+      if (!current) break
+      const result = await current(context, index + 1, prepareSteps.length)
+      if (result === CANCEL) {
+        p.cancel("Cancelled")
+        process.exit(0)
+      }
+      if (result === BACK) {
+        if (index === 0) return setupEdit()
+        index--
+        continue
+      }
+      index++
     }
-    if (!gConfig.agent) gConfig.agent = {}
-    gConfig.agent.type = agent as "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
-    globalChanged = true
+    if (selectedFields.includes("workspaceRoot") || !pConfig.workspace?.root) {
+      if (!pConfig.workspace) pConfig.workspace = {}
+      pConfig.workspace.root = context.workspaceRoot
+      projectChanged = true
+    }
+    if (selectedFields.includes("agentType")) {
+      if (!gConfig.agent) gConfig.agent = {}
+      gConfig.agent.type = context.agentType
+      if (context.agentModel) gConfig.agent.model = context.agentModel
+      else delete gConfig.agent.model
+      globalChanged = true
+    }
   }
 
   if (selectedFields.includes("completion")) {
-    const context: SetupContext = { task: pConfig.task, verifyCommand: pConfig.verify?.command }
+    const context: SetupContext = { trackerKind, task: pConfig.task, verifyCommand: pConfig.verify?.command }
     if ((await stepCompletion(context, 1, 1)) === CANCEL) {
       p.cancel("Cancelled")
       process.exit(0)
@@ -150,6 +165,20 @@ export async function setupEdit(): Promise<void> {
     pConfig.task = context.task
     pConfig.verify = context.verifyCommand ? { ...pConfig.verify, command: context.verifyCommand } : undefined
     projectChanged = true
+  }
+
+  if (selectedFields.includes("chief")) {
+    const context: SetupContext = { chief: mergeChiefConfig(gConfig.chief, pConfig.chief) }
+    const result = await stepChief(context, 1, 1)
+    if (result === BACK) return setupEdit()
+    if (result === CANCEL) {
+      p.cancel("Cancelled")
+      process.exit(0)
+    }
+    if (context.chiefChanged) {
+      pConfig.chief = changedProjectChief(gConfig.chief, pConfig.chief, context.chief)
+      projectChanged = true
+    }
   }
 
   const confirmed = await p.confirm({ message: "Save changes?" })
@@ -161,13 +190,13 @@ export async function setupEdit(): Promise<void> {
   if (globalChanged) {
     const globalDir = resolveGlobalConfigDir()
     if (!existsSync(globalDir)) mkdirSync(globalDir, { recursive: true })
-    writeFileSync(resolveGlobalConfigPath(), yamlStringify(gConfig, { lineWidth: 0 }), "utf-8")
+    writeFileSync(resolveGlobalConfigPath(), yamlStringify(canonicalConfig(gConfig), { lineWidth: 0 }), "utf-8")
     p.log.success(`Global config updated: ${resolveGlobalConfigPath()}`)
   }
 
   if (projectChanged) {
-    writeFileSync("valley.yaml", yamlStringify(pConfig, { lineWidth: 0 }), "utf-8")
-    p.log.success("Project config updated: valley.yaml")
+    writeFileSync("av.yaml", yamlStringify(canonicalConfig(pConfig), { lineWidth: 0 }), "utf-8")
+    p.log.success("Project config updated: av.yaml")
   }
 
   p.outro(pc.green("Configuration updated!"))

@@ -6,11 +6,22 @@ import { missionSchema } from "./schemas"
 import type { Mission } from "./types"
 
 export class MissionStore {
+  private writes: Promise<void> = Promise.resolve()
   constructor(private readonly directory: string) {}
 
-  processGuard(id: string): ActiveMissionProcess {
+  processGuard(id: string, runId?: string): ActiveMissionProcess {
     this.path(id)
-    return new ActiveMissionProcess(this.directory, id)
+    return new ActiveMissionProcess(this.directory, id, runId)
+  }
+
+  async recoverProcesses(id: string): Promise<void> {
+    this.path(id)
+    const names = await readdir(this.directory)
+    for (const name of names) {
+      if (name === `${id}.active`) await this.processGuard(id).recoverOrphan()
+      else if (name.startsWith(`${id}.run-`) && name.endsWith(".active"))
+        await this.processGuard(id, name.slice(id.length + 5, -7)).recoverOrphan()
+    }
   }
 
   private path(id: string): string {
@@ -19,7 +30,13 @@ export class MissionStore {
     return join(this.directory, `${id}.json`)
   }
 
-  async save(mission: Mission): Promise<void> {
+  save(mission: Mission): Promise<void> {
+    const write = this.writes.then(() => this.persist(mission))
+    this.writes = write.catch(() => {})
+    return write
+  }
+
+  private async persist(mission: Mission): Promise<void> {
     const path = this.path(mission.id)
     missionSchema.parse(mission)
     await mkdir(this.directory, { recursive: true, mode: 0o700 })

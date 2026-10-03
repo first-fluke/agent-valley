@@ -81,7 +81,7 @@ export interface OtelConfig {
   /**
    * OTLP/HTTP base endpoint (e.g. `http://localhost:4318`). Falls back
    * to the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var when empty, so
-   * a Collector run with default env-based config (no valley.yaml edit)
+   * a Collector run with default env-based config (no av.yaml edit)
    * still gets picked up. Fails soft (no-op exporter, no crash) when
    * neither is set or the resolved value is not a valid http(s) URL.
    */
@@ -414,9 +414,9 @@ class ActiveOtelExporter implements OtelExporter {
  * JSON endpoint on a timer.
  *
  * Endpoint/serviceName resolution: `cfg.endpoint`/`cfg.serviceName`
- * (from valley.yaml) win when set; otherwise the standard OTel env vars
+ * (from av.yaml) win when set; otherwise the standard OTel env vars
  * `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SERVICE_NAME` are used, so a
- * Collector configured purely through env vars (no valley.yaml edit)
+ * Collector configured purely through env vars (no av.yaml edit)
  * still gets picked up. Fails soft to a no-op exporter (never throws,
  * never crashes boot) when the resolved endpoint is still missing or
  * not a valid http(s) URL — the WARN log names the exact fix.
@@ -431,12 +431,12 @@ export function createOtelExporter(cfg: OtelConfig): OtelExporter {
 
   if (!endpoint || !/^https?:\/\//.test(endpoint)) {
     // Missing / malformed endpoint — fall back to no-op + audit log. This
-    // avoids start-time crashes from a typo in valley.yaml or a missing
+    // avoids start-time crashes from a typo in av.yaml or a missing
     // OTEL_EXPORTER_OTLP_ENDPOINT env var.
     logger.warn("otel-exporter", "OTel endpoint missing or invalid; exporter disabled", {
       endpoint: endpoint || "(unset)",
       fixHint:
-        "Set observability.otel.endpoint to http(s)://host:port in valley.yaml, " +
+        "Set observability.otel.endpoint to http(s)://host:port in av.yaml, " +
         "or set the OTEL_EXPORTER_OTLP_ENDPOINT environment variable.",
     })
     return new DisabledOtelExporter()

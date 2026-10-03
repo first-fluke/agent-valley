@@ -22,17 +22,18 @@ export function renderPreview(ctx: ResolvedSetupContext): string {
   if (ctx.trackerKind === "linear") {
     lines.push(`  linear.api_key         = ${pc.dim(maskApiKey(ctx.linear.apiKey))}`)
   }
-  lines.push(`  agent.type             = ${pc.cyan(ctx.agentType)}`)
+  lines.push(`  actor.type             = ${pc.cyan(ctx.agentType)}`)
+  lines.push(`  actor.model            = ${ctx.agentModel ?? "CLI default"}`)
   lines.push("")
 
-  lines.push(pc.bold("Project") + pc.dim(" (valley.yaml)"))
-  lines.push(`  tracker.kind           = ${pc.cyan(ctx.trackerKind)}`)
+  lines.push(pc.bold("Project") + pc.dim(" (av.yaml)"))
+  if (ctx.trackerKind !== "none") lines.push(`  tracker.kind           = ${pc.cyan(ctx.trackerKind)}`)
 
   if (ctx.trackerKind === "linear") {
     lines.push(`  linear.team_id         = ${ctx.linear.selectedTeam.key}`)
     lines.push(`  linear.team_uuid       = ${pc.dim(ctx.linear.teamUuid)}`)
     lines.push(`  linear.webhook_secret  = ${pc.dim(maskApiKey(ctx.linear.webhookSecret))}`)
-  } else {
+  } else if (ctx.trackerKind === "github") {
     lines.push(`  github.token_env       = ${pc.cyan(ctx.github.tokenEnv)} ${pc.dim("(token lives in env only)")}`)
     lines.push(`  github.owner           = ${ctx.github.owner}`)
     lines.push(`  github.repo            = ${ctx.github.repo}`)
@@ -44,11 +45,41 @@ export function renderPreview(ctx: ResolvedSetupContext): string {
   }
 
   lines.push(`  workspace.root         = ${ctx.workspaceRoot}`)
-  lines.push(`  delivery.mode          = merge`)
-  lines.push(`  task.kind              = ${ctx.task?.kind ?? "code"}`)
+  if (ctx.trackerKind !== "none") lines.push(`  delivery.mode          = merge`)
+  if (ctx.trackerKind !== "none" || ctx.task) lines.push(`  task.kind              = ${ctx.task?.kind ?? "code"}`)
   if (ctx.task?.kind === "analysis") lines.push(`  task.report_path       = ${ctx.task.report_path}`)
   if (ctx.verifyCommand) lines.push(`  verify.command         = ${ctx.verifyCommand}`)
-  lines.push(`  tunnel.provider        = ${pc.cyan(ctx.tunnel.provider)}`)
+  else if (ctx.trackerKind === "none") lines.push("  verification           = Chief-designed checks for each goal")
+  const destinations = ctx.chief?.reporting?.destinations ?? []
+  lines.push(
+    `  chief.reporting        = ${destinations.length ? destinations.map((entry) => entry.channel).join(", ") : "disabled"}`,
+  )
+  for (const destination of destinations)
+    for (const [field, value] of Object.entries(destination))
+      if (field.endsWith("_env")) lines.push(`    ${destination.id}.${field} = ${value} (environment name only)`)
+  lines.push(`  chief.capture          = ${ctx.chief?.capture?.enabled ? "enabled (runtime unverified)" : "disabled"}`)
+  if (ctx.chief?.capture?.enabled) {
+    if (ctx.chief.capture.target_url) lines.push(`    target_url           = ${ctx.chief.capture.target_url}`)
+    if (ctx.chief.capture.tab_id) lines.push(`    tab_id               = ${ctx.chief.capture.tab_id}`)
+    lines.push(`    video                = ${ctx.chief.capture.video ? "yes (requires ffmpeg)" : "no"}`)
+  }
+  const metrics = ctx.chief?.metric_sources
+  if (metrics) {
+    lines.push(`  chief.metric_sources   = ${metrics.sources.length} source(s); runtime collection pending`)
+    for (const source of metrics.sources) {
+      lines.push(`    ${source.name} = ${source.adapter} (${source.unit})`)
+      if (source.file) lines.push(`    file = ${source.file}`)
+      for (const [field, value] of Object.entries(source))
+        if (field.endsWith("_env")) lines.push(`    ${field} = ${value} (environment name only)`)
+    }
+    lines.push(`    observation_window_ms = ${metrics.observation_window_ms}`)
+    lines.push(`    max_observation_ms = ${metrics.max_observation_ms}`)
+  }
+  for (const target of ctx.chief?.metric_targets ?? [])
+    lines.push(
+      `  metric target          = ${target.name}: ${target.direction} ${target.target ?? "from measured baseline"} ${target.unit ?? ""}`.trimEnd(),
+    )
+  if (ctx.trackerKind !== "none") lines.push(`  tunnel.provider        = ${pc.cyan(ctx.tunnel.provider)}`)
   if (ctx.tunnel.provider === "cloudflare") {
     const cf = ctx.tunnel.cloudflare
     lines.push(`  tunnel.cloudflare.mode = ${cf?.mode ?? "quick"}`)

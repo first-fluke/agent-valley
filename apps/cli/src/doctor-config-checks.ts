@@ -1,7 +1,7 @@
 /**
  * doctor-config-checks.ts — Config, tunnel, and webhook-secret checks for
  * `av doctor`, plus the top-level orchestration that assembles every
- * check (agent CLI, sandbox from doctor-checks.ts + these) into one
+ * check (actor CLI, sandbox from doctor-checks.ts + these) into one
  * report. Split out of doctor-checks.ts to stay under the
  * 500-line-per-file limit (docs/architecture/CONSTRAINTS.md).
  *
@@ -13,6 +13,7 @@
  */
 
 import { join } from "node:path"
+import { PROJECT_CONFIG_FILENAME } from "@agent-valley/core/config/project-config-path"
 import type { GlobalConfig, ProjectConfig } from "@agent-valley/core/config/yaml-loader"
 import { resolveConfig } from "@agent-valley/core/config/yaml-loader"
 import {
@@ -84,7 +85,7 @@ export function checkTunnel(project: ProjectConfig | null, deps: DoctorDeps): Ch
       name: "Tunnel (ngrok)",
       status: "fail",
       message: "`ngrok` not found on PATH",
-      fix: "Install: brew install ngrok (https://ngrok.com/download), or set tunnel.provider: cloudflare in valley.yaml.",
+      fix: "Install: brew install ngrok (https://ngrok.com/download), or set tunnel.provider: cloudflare in av.yaml.",
       critical: false,
     }
   }
@@ -186,31 +187,31 @@ export function checkConfig(deps: DoctorDeps): ConfigCheckOutcome {
     })
   }
 
-  const projectPath = join(deps.cwd, "valley.yaml")
+  const projectPath = join(deps.cwd, PROJECT_CONFIG_FILENAME)
   try {
     project = deps.loadProjectConfig(deps.cwd)
     results.push(
       project
         ? {
             id: "config.project",
-            name: "Project config (valley.yaml)",
+            name: "Project config (av.yaml)",
             status: "pass",
             message: `Valid — ${projectPath}`,
             critical: false,
           }
         : {
             id: "config.project",
-            name: "Project config (valley.yaml)",
+            name: "Project config (av.yaml)",
             status: "fail",
             message: `${projectPath} not found`,
-            fix: "Run `av setup` in this directory to create valley.yaml.",
+            fix: "Run `av setup` in this directory to create av.yaml.",
             critical: true,
           },
     )
   } catch (err) {
     results.push({
       id: "config.project",
-      name: "Project config (valley.yaml)",
+      name: "Project config (av.yaml)",
       status: "fail",
       message: (err as Error).message,
       fix: `Fix the validation error above in ${projectPath}, or re-run \`av setup\` to regenerate it.`,
@@ -248,7 +249,7 @@ export function checkWebhookSecret(project: ProjectConfig | null): CheckResult {
           name: "Webhook secret (github)",
           status: "fail",
           message: "github.webhook_secret is not set",
-          fix: "Add github.webhook_secret to valley.yaml (generate with `openssl rand -hex 32`, register the same value as the GitHub webhook secret).",
+          fix: "Add github.webhook_secret to av.yaml (generate with `openssl rand -hex 32`, register the same value as the GitHub webhook secret).",
           critical: false,
         }
   }
@@ -266,7 +267,7 @@ export function checkWebhookSecret(project: ProjectConfig | null): CheckResult {
         name: "Webhook secret (linear)",
         status: "fail",
         message: "linear.webhook_secret is not set",
-        fix: "Add linear.webhook_secret to valley.yaml (copy the signing secret from the Linear webhook settings page).",
+        fix: "Add linear.webhook_secret to av.yaml (copy the signing secret from the Linear webhook settings page).",
         critical: false,
       }
 }
@@ -274,7 +275,7 @@ export function checkWebhookSecret(project: ProjectConfig | null): CheckResult {
 // ── Orchestration ────────────────────────────────────────────────────────────
 
 export interface RunDoctorOptions {
-  /** Check every supported agent CLI, not just the one resolved from config. */
+  /** Check every supported actor CLI, not just the one resolved from config. */
   allAgents?: boolean
 }
 
@@ -300,7 +301,7 @@ export async function runDoctorChecks(deps: DoctorDeps, options: RunDoctorOption
         name: "Runtime configuration",
         status: "fail",
         message: (error as Error).message,
-        fix: "Set the listed keys in valley.yaml or settings.yaml and export the environment variable named by github.token_env.",
+        fix: "Set the listed keys in av.yaml or settings.yaml and export the environment variable named by github.token_env.",
         critical: true,
       })
     }
@@ -312,7 +313,7 @@ export async function runDoctorChecks(deps: DoctorDeps, options: RunDoctorOption
     id: "config.resolved",
     name: "Resolved config",
     status: "pass",
-    message: `tracker: ${trackerKind}, agent: ${agentType}`,
+    message: `tracker: ${trackerKind}, actor: ${agentType}`,
     critical: false,
   })
 

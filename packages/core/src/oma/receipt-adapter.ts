@@ -1,4 +1,4 @@
-/** OMA 15.0.10 receipt adapter. Strict mode is opt-in in valley.yaml. */
+/** OMA 15.0.10 receipt adapter. Strict mode is opt-in in av.yaml. */
 import { spawnSync } from "node:child_process"
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
@@ -68,7 +68,7 @@ function shellQuote(value: string): string {
  * may write its claim, but cannot choose or weaken required checks. */
 export async function prepareOmaAttempt(request: Omit<OmaEvidenceRequest, "kind">): Promise<string> {
   if (!request.verifyCommand.trim()) {
-    throw new Error("oma.mode: strict requires verify.command in valley.yaml or a routing verify_command")
+    throw new Error("oma.mode: strict requires verify.command in av.yaml or a routing verify_command")
   }
   const table = getCachedTriggerTable(request.workspace.path)
   if (!table) {
@@ -240,7 +240,7 @@ export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidence
     JSON.stringify(required[0].command) !== JSON.stringify(["sh", "-c", request.verifyCommand]) ||
     required[0].cwd !== "."
   ) {
-    return fail("OMA receipt check contract differs from trusted valley.yaml configuration")
+    return fail("OMA receipt check contract differs from trusted av.yaml configuration")
   }
   if (!Array.isArray(run.checks)) return fail("OMA verification receipts are missing")
   const latestChecks = new Map<string, Record<string, unknown>>()

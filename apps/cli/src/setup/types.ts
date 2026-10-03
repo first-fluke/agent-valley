@@ -6,6 +6,8 @@
  * accidental string equality.
  */
 
+import type { ChiefConfig } from "@agent-valley/core/config/chief-schema"
+
 export interface LinearTeam {
   id: string
   key: string
@@ -22,7 +24,7 @@ export const BACK = Symbol("BACK")
 export const CANCEL = Symbol("CANCEL")
 export type StepResult = typeof BACK | typeof CANCEL | undefined
 
-export type TrackerKind = "linear" | "github"
+export type TrackerKind = "none" | "linear" | "github"
 
 export type AgentType = "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
 
@@ -43,7 +45,7 @@ export interface LinearSetupValues {
 export interface GithubSetupValues {
   /**
    * Personal access token — captured in-memory only. Never written to
-   * settings.yaml or valley.yaml. The final config references the env var
+   * settings.yaml or av.yaml. The final config references the env var
    * name in `github.token_env`.
    */
   token: string
@@ -87,10 +89,14 @@ export interface SetupContext {
   github?: Partial<GithubSetupValues>
   workspaceRoot?: string
   agentType?: AgentType
+  agentModel?: string
   maxParallel?: number
   tunnel?: TunnelSetupValues
   task?: { kind: "code" } | { kind: "analysis"; report_path: string }
   verifyCommand?: string
+  chief?: ChiefConfig
+  /** Only explicit integration changes are written; existing advanced Chief settings stay intact. */
+  chiefChanged?: boolean
 }
 
 export type StepFn = (ctx: SetupContext, step: number, total: number) => Promise<StepResult>

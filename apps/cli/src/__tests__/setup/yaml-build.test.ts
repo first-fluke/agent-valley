@@ -13,7 +13,7 @@ describe("buildGlobalYaml (linear)", () => {
     const out = buildGlobalYaml({ apiKey: "lin_api_test123", agentType: "claude", maxParallel: 3 })
     const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
     expect(parsed.linear?.api_key).toBe("lin_api_test123")
-    expect(parsed.agent?.type).toBe("claude")
+    expect(parsed.actor?.type).toBe("claude")
     expect(parsed.logging?.level).toBe("info")
     expect(parsed.server?.port).toBe(9741)
   })
@@ -21,7 +21,7 @@ describe("buildGlobalYaml (linear)", () => {
   it("persists maxParallel under agent.max_parallel", () => {
     const out = buildGlobalYaml({ apiKey: "lin_api_test123", agentType: "claude", maxParallel: 5 })
     const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
-    expect(parsed.agent?.max_parallel).toBe(5)
+    expect(parsed.actor?.max_parallel).toBe(5)
   })
 })
 
@@ -30,7 +30,7 @@ describe("buildGlobalYamlGithub", () => {
     const out = buildGlobalYamlGithub({ agentType: "claude", maxParallel: 3 })
     const parsed = parseYaml(out) as Record<string, unknown>
     expect(parsed.linear).toBeUndefined()
-    expect((parsed.agent as Record<string, unknown>).type).toBe("claude")
+    expect((parsed.actor as Record<string, unknown>).type).toBe("claude")
   })
 
   it("never contains the substring 'api_key'", () => {
@@ -41,7 +41,7 @@ describe("buildGlobalYamlGithub", () => {
   it("persists maxParallel under agent.max_parallel", () => {
     const out = buildGlobalYamlGithub({ agentType: "codex", maxParallel: 8 })
     const parsed = parseYaml(out) as Record<string, Record<string, unknown>>
-    expect(parsed.agent?.max_parallel).toBe(8)
+    expect(parsed.actor?.max_parallel).toBe(8)
   })
 })
 

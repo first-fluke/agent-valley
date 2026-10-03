@@ -92,7 +92,7 @@ describe("registerLinearWebhook", () => {
 
   it("logs a WARN and does not throw when loadConfig fails", async () => {
     state.loadConfigImpl = () => {
-      throw new Error("valley.yaml not found")
+      throw new Error("av.yaml not found")
     }
 
     await expect(registerLinearWebhook("/project/root", "https://tunnel.example")).resolves.toBeUndefined()

@@ -75,7 +75,7 @@
 | M5 | MAX_PARALLEL 활용률 | 동시 실행 에이전트 / 최대 한도 평균 | 30~70% |
 | M6 | Doc Freshness | `AGENTS.md` 마지막 업데이트 이후 경과 일수 | ≤ 30일 |
 
-측정 수단: 구조화 로그(JSON) + 팀 대시보드 ledger 이벤트(`agent.start/done/failed/cancelled`).
+측정 수단: 구조화 로그(JSON) + 팀 대시보드 ledger 이벤트(`actor.start/done/failed/cancelled`).
 
 ---
 
@@ -95,7 +95,7 @@
 | 스코어링 | ISO/IEC 14143 기능점수 분석 → easy/medium/hard 모델 라우팅 | `packages/core/src/orchestrator/scoring-service.ts` |
 | 팀 대시보드 | Supabase auth + ledger 이벤트 브로드캐스트, 리플레이 | `packages/core/src/relay/*`, `supabase/migrations/001_team_dashboard.sql` |
 | 관측성 | JSON/text 구조화 로그, `/api/status` 스냅샷, `/api/events` SSE, `/api/health` | `packages/core/src/observability/logger.ts` |
-| 관측성 (v0.2) | OpenTelemetry OTLP HTTP 트레이스 + Prometheus `/api/metrics` (기본 off, `valley.yaml observability` 섹션으로 활성화) | `packages/core/src/observability/otel-exporter.ts`, `prom-metrics.ts` |
+| 관측성 (v0.2) | OpenTelemetry OTLP HTTP 트레이스 + Prometheus `/api/metrics` (기본 off, `av.yaml observability` 섹션으로 활성화) | `packages/core/src/observability/otel-exporter.ts`, `prom-metrics.ts` |
 | GitHub 어댑터 (v0.2) | `IssueTracker` / `WebhookReceiver` 포트의 GitHub 구현 + `POST /api/webhook/github` | `packages/core/src/tracker/adapters/github-adapter.ts`, `github-webhook-receiver.ts` |
 | 에이전트 예산 (v0.2) | 이슈당 / 일별 토큰·비용 한도. spawn 직전 `BudgetService.checkBeforeSpawn` 에서 차단 → cancelled 전이 | `packages/core/src/orchestrator/budget-service.ts` |
 | 라이브 인터벤션 (v0.2) | `POST /api/intervention` (pause / resume / append_prompt / abort), `InterventionBus` FIFO, 대시보드 `InterventionPanel` UI | `packages/core/src/orchestrator/intervention-bus.ts`, `apps/dashboard/src/app/api/intervention/route.ts` |
@@ -190,7 +190,7 @@ Linear webhook POST
 ### FR-5. 에이전트 세션 플러그인
 - FR-5.1 `AgentSession` 인터페이스(`start / execute / cancel / kill / isAlive / on / off / dispose`) 를 구현하는 모든 모듈은 `SessionFactory.registerSession` 으로 등록 가능하다.
 - FR-5.2 내장 구현: Claude(stateless, per-execute spawn), Codex(persistent JSON-RPC), Gemini(ACP persistent + one-shot fallback).
-- FR-5.3 `agent.type` 은 라우팅 우선순위로 결정된다: `model:*` 레이블 → `score:N` → `config.agentType`(기본값).
+- FR-5.3 `actor.type` 은 라우팅 우선순위로 결정된다: `model:*` 레이블 → `score:N` → `config.agentType`(기본값).
 - FR-5.4 타임아웃(기본 3600s) 초과 시 SIGTERM → 5s 후 SIGKILL.
 
 ### FR-6. 재시도 큐
@@ -200,9 +200,9 @@ Linear webhook POST
 - FR-6.4 프로세스 재시작 시 In Progress 이슈를 Linear 로부터 재조회해 재시도 큐를 복구한다(startup sync).
 
 ### FR-7. CLI (`av`)
-- FR-7.1 `av setup` 은 `~/.config/agent-valley/settings.yaml` 와 `valley.yaml` 을 대화형으로 생성한다.
+- FR-7.1 `av setup` 은 `~/.config/agent-valley/settings.yaml` 와 `av.yaml` 을 대화형으로 생성한다.
 - FR-7.2 `av up / down` 은 대시보드 + ngrok 을 백그라운드 데몬으로 관리하고 `.av.pid` 에 상태를 기록한다.
-- FR-7.3 `av dev` 는 포그라운드 실행 + `valley.yaml` 파일 변경 감지 시 자동 재시작.
+- FR-7.3 `av dev` 는 포그라운드 실행 + `av.yaml` 파일 변경 감지 시 자동 재시작.
 - FR-7.4 `av status` 는 `/api/status` 를 조회해 JSON 스냅샷을 출력한다.
 - FR-7.5 `av top` 은 2초 간격으로 활성 에이전트·대기 이슈·재시도 큐를 TUI 로 표시한다.
 - FR-7.6 `av issue <desc>` 는 Claude CLI 로 설명을 확장해 Linear 이슈를 생성한다. `--raw/--parent/--blocked-by/--scope/--breakdown` 옵션 지원.
@@ -211,17 +211,17 @@ Linear webhook POST
 ### FR-8. 대시보드 API
 - FR-8.1 `POST /api/webhook` — Linear 웹훅 수신.
 - FR-8.2 `GET /api/status` — `activeWorkspaces / waitingIssues / retryQueueSize / config` 스냅샷.
-- FR-8.3 `GET /api/events` — SSE 스트림 (`agent.start/done/failed`).
+- FR-8.3 `GET /api/events` — SSE 스트림 (`actor.start/done/failed`).
 - FR-8.4 `GET /api/health` — 오케스트레이터 초기화 여부. 미초기화 시 503.
 - FR-8.5 대시보드 UI 는 PixiJS 로 오피스 씬(책상 = `MAX_PARALLEL`, 캐릭터 = 에이전트)을 렌더링하고 실시간 업데이트한다.
 
 ### FR-9. 팀 대시보드 (옵션)
-- FR-9.1 Supabase 인증 + ledger 이벤트 삽입(`node.join/reconnect/leave`, `agent.start/done/failed/cancelled`).
+- FR-9.1 Supabase 인증 + ledger 이벤트 삽입(`node.join/reconnect/leave`, `actor.start/done/failed/cancelled`).
 - FR-9.2 RLS 로 본인 소속 팀만 이벤트를 읽을 수 있다.
 - FR-9.3 노드 재연결 시 `lastSeq` 기반으로 누락 이벤트를 리플레이한다.
 
 ### FR-10. 설정
-- FR-10.1 `settings.yaml`(글로벌, 사용자 자격) + `valley.yaml`(프로젝트, 팀/워크스페이스/라우팅) 머지. 프로젝트가 글로벌을 덮어쓴다.
+- FR-10.1 `settings.yaml`(글로벌, 사용자 자격) + `av.yaml`(프로젝트, 팀/워크스페이스/라우팅) 머지. 프로젝트가 글로벌을 덮어쓴다.
 - FR-10.2 Zod 스키마 검증 실패 시 누락된 키 경로와 수정 대상 파일을 포함하는 에러 메시지를 출력한다.
 - FR-10.3 프롬프트 템플릿 변수: `{{issue.identifier}} / {{issue.title}} / {{issue.description}} / {{workspace_path}} / {{attempt.id}} / {{retry_count}} / {{retry_reason}}`.
 
@@ -231,7 +231,7 @@ Linear webhook POST
 
 | 범주 | 요구사항 |
 |---|---|
-| 보안 | HMAC-SHA256 서명 검증 필수. 시크릿은 `settings.yaml / valley.yaml`(gitignore)에만 존재. 프롬프트 주입 방어: `valley.yaml` prompt 는 trusted, 이슈 본문은 untrusted. 외부 네트워크 호출은 승인된 어댑터만 경유. Linear API 요청은 30s 타임아웃. |
+| 보안 | HMAC-SHA256 서명 검증 필수. 시크릿은 `settings.yaml / av.yaml`(gitignore)에만 존재. 프롬프트 주입 방어: `av.yaml` prompt 는 trusted, 이슈 본문은 untrusted. 외부 네트워크 호출은 승인된 어댑터만 경유. Linear API 요청은 30s 타임아웃. |
 | 성능 | 웹훅 수신 → 에이전트 spawn 까지 p95 ≤ 2s. `av top` 렌더 주기 2s ± 200ms. 세션 spawn/kill 오버헤드 ≤ 1s. |
 | 신뢰성 | SIGTERM/SIGINT 수신 시 graceful shutdown — 실행 중 세션 모두 cancel. Hot reload 시 이전 오케스트레이터 인스턴스 정지 후 새 인스턴스 기동. Startup sync 로 오프라인 중 누락 이벤트 복구. |
 | 관측성 | 모든 에이전트 액션은 구조화 JSON 로그로 기록. 팀 모드에서는 ledger 이벤트로 브로드캐스트. |

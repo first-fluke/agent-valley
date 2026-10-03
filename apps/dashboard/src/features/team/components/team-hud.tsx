@@ -36,7 +36,7 @@ export function TeamHud({ teamState, connectionStatus, retryQueueSize, lastEvent
         </div>
 
         <div className="flex justify-between">
-          <span className="text-gray-400">Agents</span>
+          <span className="text-gray-400">Actors</span>
           <span className="text-white">
             {activeAgents} / {totalSlots}
           </span>

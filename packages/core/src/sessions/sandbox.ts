@@ -177,7 +177,7 @@ function fallbackOrThrow(
         "  permission-bypass flag then has full host filesystem + network access to a\n" +
         "  prompt-injected issue body):\n" +
         `    ${ALLOW_UNSANDBOXED_ENV_VAR}=1\n` +
-        "  Location: set in the orchestrator process environment (shell/.env), not in valley.yaml.",
+        "  Location: set in the orchestrator process environment (shell/.env), not in av.yaml.",
     )
   }
 

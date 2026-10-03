@@ -452,7 +452,7 @@ describe("createOtelExporter — env var fallback", () => {
     }
   })
 
-  test("cfg.endpoint from valley.yaml wins over the env var when both are set", async () => {
+  test("cfg.endpoint from av.yaml wins over the env var when both are set", async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://ignored:4318"
     const fetchSpy = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
     const exp = createOtelExporter({ enabled: true, endpoint: "http://configured:4318", serviceName: "x" })

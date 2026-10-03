@@ -3,7 +3,7 @@
  * formatting (icons, fix lines, summary, exit code) and commander
  * wiring. `doctor-checks` is module-mocked so these tests exercise only
  * doctor.ts's own printing/exit-code/registration logic, never the real
- * filesystem, PATH, or a real agent CLI.
+ * filesystem, PATH, or a real actor CLI.
  */
 
 import { stripVTControlCharacters } from "node:util"

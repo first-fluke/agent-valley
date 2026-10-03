@@ -1,9 +1,9 @@
-# valley.yaml — Agent Valley project configuration
+# av.yaml — Agent Valley project configuration
 #
 # This file defines project-specific settings for the Symphony orchestrator.
 # User-scoped settings (API key, defaults) go in ~/.config/agent-valley/settings.yaml
 #
-# Run `av setup` to generate both files interactively.
+# Run `av setup` for local orders, or `av setup --mode tracker` for this tracker configuration.
 
 # ── Tracker Selector (v0.2+) ──────────────────────────────────────────
 # Picks which IssueTracker + WebhookReceiver adapter to use.
@@ -41,10 +41,11 @@ linear:
 workspace:
   # root: /absolute/path/to/target-repo # Existing Git repository; worktrees are created inside it
 
-# ── Agent ─────────────────────────────────────────────────────────────
-# agent:
+# ── Actor ─────────────────────────────────────────────────────────────
+# actor:
 #   type: claude                    # claude | codex | antigravity | cursor | grok | kimi | opencode
-#   max_parallel: 3                 # Max concurrent agent runs. Default: hardware-detected
+#   model: your-model               # Optional Chief Director model for av order; actors use CLI defaults
+#   max_parallel: 3                 # Max concurrent actor runs. Default: hardware-detected
 #                                    # recommendation. An explicit value above the recommendation
 #                                    # is honored (never silently clamped) but logged as a WARN.
 
@@ -75,18 +76,20 @@ prompt: |
 #   rules:
 #     - label: "scope:backend"
 #       workspace_root: /path/to/backend-repo
-#       agent_type: codex
+#       actor_type: codex
 #       delivery_mode: pr
 #       verify_command: "pytest && mypy ."   # overrides verify.command below for this route
 #     - label: "scope:frontend"
 #       workspace_root: /path/to/frontend-repo
 
-# ── Verification Gate (required for code tasks) ────────────────────────
+# ── Verification Gate (required for tracker code tasks) ────────────────
 # Set this to the target project's deterministic test/lint/typecheck command.
 # Code tasks cannot transition to Done without a configured passing check.
-# On failure, the agent gets another attempt through the retry queue; once
+# On failure, the actor gets another attempt through the retry queue; once
 # retries are exhausted, the issue is cancelled rather than delivered.
 # Replace this example with commands that exist in the target repository.
+# For local av order, --verify or this saved command is an immutable override.
+# Omit both to let the Chief Director design executable checks for the goal.
 verify:
   command: "bun run typecheck && bun run test" # use commands from the target repository
   timeout_sec: 600                          # kill the command after N seconds (default 600)
@@ -104,17 +107,17 @@ verify:
 #     easy:
 #       min: 1
 #       max: 3
-#       agent: antigravity
+#       actor: antigravity
 #     medium:
 #       min: 4
 #       max: 7
-#       agent: codex
+#       actor: codex
 #     hard:
 #       min: 8
 #       max: 10
-#       agent: claude
+#       actor: claude
 
-# ── Agent Budget Caps (v0.2+, optional) ───────────────────────────────
+# ── Actor Budget Caps (v0.2+, optional) ───────────────────────────────
 # Per-issue and per-day token / USD limits. Budget is evaluated before
 # each spawn — exceeding a cap cancels the issue with an actionable
 # comment instead of spawning. Omit the whole block to disable.
@@ -166,6 +169,32 @@ verify:
 #   prometheus:
 #     enabled: false
 #     path: /api/metrics                # Served by apps/dashboard
+
+# Chief orders: see docs/guides/chief-integrations.md for routing,
+# organization memory, metric targets, channels and Aside capture.
+# chief:
+#   execution:
+#     max_parallel: 3             # Separate task worktrees; 1 uses serial execution
+#     max_duration_sec: 86400      # Elapsed mission time, including waits and restarts
+#     max_runs: 200                # Chief, Director, Actor and reviewer calls combined
+#     max_retries: 3               # Bounded provider retry and worker crash recovery
+#     retry_delay_ms: 1000
+#     auto_resume: true            # Foreground supervisor resumes scheduled retries
+#     # max_estimated_cost_usd: 10 # Configured-price estimate; unknown usage pauses calls
+#   review_vendor: prefer
+#   memory: true
+#   # metric_sources and metric_targets require real configured observations.
+#   # See the guide for stripe-revenue, http-json and json-file adapter settings.
+#   reporting:
+#     destinations:
+#       - id: team
+#         channel: slack
+#         token_env: AV_SLACK_TOKEN
+#         channel_id_env: AV_SLACK_CHANNEL
+#   capture:
+#     enabled: true
+#     target_url: http://localhost:3000
+#     video: true
 
 # ── Team Dashboard / Ledger Relay (optional) ──────────────────────────
 # Streams orchestrator events (node.join, issue lifecycle, etc.) to a

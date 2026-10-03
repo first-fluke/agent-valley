@@ -3,7 +3,7 @@
  * and sandbox check functions. Every dependency (filesystem, PATH
  * resolver, sandbox availability) is a fake passed through `DoctorDeps` —
  * no test here touches the real filesystem, PATH, or spawns a real
- * agent CLI / sandbox binary.
+ * actor CLI / sandbox binary.
  *
  * Config, tunnel, webhook-secret, and orchestration checks are tested in
  * doctor-config-checks.test.ts (mirrors the doctor-checks.ts /

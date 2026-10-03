@@ -21,7 +21,7 @@ beforeEach(async () => {
     id: "runtime-test",
     goal: "Deliver a report",
     chiefId: "chief",
-    personas: [{ id: "chief", name: "Chief", role: "Coordinate", agentType: "claude", skills: [] }, worker],
+    personas: [{ id: "chief", name: "Chief Director", role: "Coordinate", agentType: "claude", skills: [] }, worker],
     workspace: {
       issueId: "runtime-test",
       path: root,
@@ -59,7 +59,7 @@ afterEach(async () => {
 })
 
 describe("chief runtime boundaries", () => {
-  it("adds only a selected skill's real content to the launched persona prompt", async () => {
+  it("adds only a selected skill's real content to the launched Actor prompt", async () => {
     const directory = join(root, ".agents/skills/test-skill")
     await mkdir(directory, { recursive: true })
     await writeFile(join(directory, "SKILL.md"), "Synthetic skill: write an evidence report.")
@@ -103,7 +103,7 @@ describe("chief runtime boundaries", () => {
     expect(planSandboxedSpawn).not.toHaveBeenCalled()
   })
 
-  it("rejects an aborted agent stage before launching a child process", async () => {
+  it("rejects an aborted Actor stage before launching a child process", async () => {
     runtime = new ChiefRuntime(new MissionStore(join(root, "records")), AbortSignal.abort())
     await expect(runtime.ports().runAgent(worker, "Perform assigned work.", mission, "work")).rejects.toThrow(
       "interrupted",

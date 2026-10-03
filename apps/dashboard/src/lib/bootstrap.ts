@@ -27,7 +27,7 @@ export function bootstrap(): Promise<void> {
 }
 
 async function startOrchestrator(): Promise<OrchestratorInstance> {
-  // Resolve project root: walk up until we find valley.yaml
+  // Resolve project root: walk up until we find av.yaml
   const projectRoot = await resolveProjectRoot(process.cwd())
   process.chdir(projectRoot)
 
@@ -59,7 +59,7 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
         })
   const workspace = new FileSystemWorkspaceGateway(new WorkspaceManager(config.workspaceRoot))
 
-  // Observability — both OTel and Prometheus are opt-in via valley.yaml.
+  // Observability — both OTel and Prometheus are opt-in via av.yaml.
   // When disabled (default), the hooks become zero-cost no-ops.
   const metrics = createPromMetrics({ enabled: config.observability.prometheus.enabled })
   const otel = createOtelExporter({
@@ -75,7 +75,7 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
     metrics,
   })
 
-  // Budget service — configured via valley.yaml budget: section. When the
+  // Budget service — configured via av.yaml budget: section. When the
   // section is absent the no-op service is used so spawn is never gated.
   // Design § 4.5 / § 6.4 (E16–E19). Counters are persisted to
   // `.agent-valley/budget-usage.json` (same convention as DagScheduler /
@@ -93,7 +93,7 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
 
   const orchestrator = new Orchestrator(config, tracker, webhook, workspace, undefined, observability, budget)
 
-  // Team ledger relay — opt-in via valley.yaml team: (supabase_url +
+  // Team ledger relay — opt-in via av.yaml team: (supabase_url +
   // supabase_anon_key + id) AND a valid `av login` session. Clean no-op
   // (null) for single-node setups or a team config with no session yet;
   // never throws, never blocks boot. Must be wired before start() so the

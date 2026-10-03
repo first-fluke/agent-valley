@@ -84,6 +84,8 @@ describe("operator dashboard rendering", () => {
       }),
     )
     expect(html).toContain("AV-1")
+    expect(html).toContain("Active Actors")
+    expect(html).not.toContain("Active Agents")
     expect(html).toContain("Read-only access")
     expect(html).toContain("disabled")
   })
