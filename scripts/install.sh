@@ -34,12 +34,20 @@ SETUP_OMA=""
 SETUP_ACTOR_SET=false
 SETUP_MODEL_SET=false
 SETUP_OMA_SET=false
+INSTALL_REF="${AGENT_VALLEY_INSTALL_REF-main}"
+INSTALL_REF_EXPLICIT=false
+INSTALL_REF_FLAG_SET=false
+if [[ "${AGENT_VALLEY_INSTALL_REF+x}" == x ]]; then INSTALL_REF_EXPLICIT=true; fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --yes|-y) ASSUME_YES=true; shift ;;
     --no-workflows) INSTALL_WORKFLOWS=false; shift ;;
     --no-setup) RUN_SETUP=false; shift ;;
     --headless) HEADLESS=true; shift ;;
+    --ref)
+      [[ "$INSTALL_REF_FLAG_SET" == false ]] || { err "Pass --ref only once."; exit 1; }
+      [[ $# -ge 2 && "${2-}" != -* ]] || { err "--ref requires main or a release tag such as v1.0.0."; exit 1; }
+      INSTALL_REF="$2"; INSTALL_REF_EXPLICIT=true; INSTALL_REF_FLAG_SET=true; shift 2 ;;
     --actor)
       [[ "$SETUP_ACTOR_SET" == false ]] || { err "Pass --actor only once."; exit 1; }
       [[ $# -ge 2 && "${2-}" != -* ]] || { err "--actor requires a vendor. Run with --help."; exit 1; }
@@ -66,11 +74,17 @@ while [[ $# -gt 0 ]]; do
       echo "--headless accepts installation answers and runs av setup --yes without a terminal, including CI."
       echo "Supply the calling agent's actor/model, or let setup resolve its trusted runtime or saved identity."
       echo "--model '' clears a saved model pin. OMA defaults to prepare; --oma skip defers it explicitly."
+      echo "--ref main|vX.Y.Z[-prerelease] pins the source checkout; overrides AGENT_VALLEY_INSTALL_REF (default main)."
+      echo "A versioned script URL also requires --ref with the same tag for a reproducible install."
       echo "Installer output is progress text. Use av setup --yes --json separately for JSON results."
       exit 0 ;;
     *) err "Unknown option: $1. Run with --help for supported options."; exit 1 ;;
   esac
 done
+if [[ "$INSTALL_REF" != main && ! "$INSTALL_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ ]]; then
+  err "Invalid installation ref '$INSTALL_REF'. Set --ref or AGENT_VALLEY_INSTALL_REF to main or a release tag such as v1.0.0."
+  exit 1
+fi
 if [[ "$HEADLESS" == true && "$RUN_SETUP" != true ]]; then
   err "--headless cannot be combined with --no-setup. Choose unattended setup or setup deferral."
   exit 1
@@ -114,6 +128,20 @@ if [[ -d "${SCRIPT_DIR}/../.agents" && -f "${SCRIPT_DIR}/../AGENTS.md" ]]; then
   SOURCE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 fi
 
+if [[ "$IS_LOCAL" == true && "$INSTALL_REF_EXPLICIT" == true ]]; then
+  if [[ -n "$(git -C "$SOURCE_DIR" status --porcelain)" ]]; then
+    err "$SOURCE_DIR has local changes and cannot provide reproducible ref $INSTALL_REF. Keep them and use a clean checkout for --ref, or omit --ref for a local development install."
+    exit 1
+  fi
+  LOCAL_REF="refs/tags/${INSTALL_REF}"
+  if [[ "$INSTALL_REF" == main ]]; then LOCAL_REF=refs/heads/main; fi
+  if ! LOCAL_COMMIT="$(git -C "$SOURCE_DIR" rev-parse --verify "${LOCAL_REF}^{commit}" 2>/dev/null)" || \
+     [[ "$(git -C "$SOURCE_DIR" rev-parse HEAD)" != "$LOCAL_COMMIT" ]]; then
+    err "$SOURCE_DIR is not at requested ref $INSTALL_REF. Keep this checkout and select the correct local ref, or use a remote install with another AGENT_VALLEY_INSTALL_DIR."
+    exit 1
+  fi
+fi
+
 if [[ "$IS_LOCAL" == true && "$SOURCE_DIR" == "$(pwd -P)" ]]; then
   info "Agent Valley is already cloned here; the harness files are present."
   install_cli
@@ -131,29 +159,6 @@ detect_project_type() {
     echo "existing"
   else
     echo "new"
-  fi
-}
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-copy_dir() {
-  local rel="$1"
-  local src="${SOURCE_DIR}/${rel}"
-  local dst="${TARGET_DIR}/${rel}"
-  if [[ -d "$src" ]]; then
-    mkdir -p "$dst"
-    cp -r "${src}/." "$dst/"
-    success "Copied  ${rel}/"
-  fi
-}
-
-copy_file() {
-  local rel="$1"
-  local src="${SOURCE_DIR}/${rel}"
-  local dst="${TARGET_DIR}/${rel}"
-  if [[ -f "$src" ]]; then
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst"
-    success "Copied  ${rel}"
   fi
 }
 
@@ -244,8 +249,8 @@ if [[ "$IS_LOCAL" == false ]]; then
     err "AGENT_VALLEY_INSTALL_DIR must be an absolute path. Set it to a persistent Agent Valley checkout."
     exit 1
   fi
-  if [[ -e "$SOURCE_DIR" ]]; then
-    if [[ ! -d "${SOURCE_DIR}/.git" || ! -f "${SOURCE_DIR}/apps/cli/src/index.ts" ]] || \
+  if [[ -e "$SOURCE_DIR" || -L "$SOURCE_DIR" ]]; then
+    if [[ -L "$SOURCE_DIR" || ! -d "${SOURCE_DIR}/.git" || ! -f "${SOURCE_DIR}/apps/cli/src/index.ts" ]] || \
        [[ "$(git -C "$SOURCE_DIR" remote get-url origin)" != "$REPO_URL" ]]; then
       err "$SOURCE_DIR is not an Agent Valley checkout. Choose an empty AGENT_VALLEY_INSTALL_DIR; existing files were retained."
       exit 1
@@ -254,12 +259,35 @@ if [[ "$IS_LOCAL" == false ]]; then
       err "$SOURCE_DIR has local changes. Keep them and select another AGENT_VALLEY_INSTALL_DIR, or install from that local checkout."
       exit 1
     fi
-    info "Updating the installed Agent Valley checkout..."
-    git -C "$SOURCE_DIR" pull --ff-only --quiet
+    info "Updating the installed Agent Valley checkout to $INSTALL_REF..."
+    if [[ "$INSTALL_REF" == main ]]; then
+      if [[ "$(git -C "$SOURCE_DIR" symbolic-ref --quiet --short HEAD || true)" != main ]]; then
+        err "$SOURCE_DIR is not on main. Keep the checkout and choose another AGENT_VALLEY_INSTALL_DIR, or explicitly select a release tag with --ref."
+        exit 1
+      fi
+      if ! git -C "$SOURCE_DIR" fetch --quiet origin refs/heads/main:refs/remotes/origin/main || \
+         ! git -C "$SOURCE_DIR" merge --ff-only --quiet refs/remotes/origin/main; then
+        err "Cannot fast-forward $SOURCE_DIR to main. Keep local commits and resolve the checkout, or select another AGENT_VALLEY_INSTALL_DIR. Target harness files were retained."
+        exit 1
+      fi
+    else
+      # No force: an existing tag cannot be replaced by a rewritten upstream tag.
+      if ! git -C "$SOURCE_DIR" fetch --depth 1 --no-tags --quiet origin "refs/tags/${INSTALL_REF}:refs/tags/${INSTALL_REF}"; then
+        err "Cannot fetch release tag $INSTALL_REF without replacing an existing tag. The current checkout and target harness files were retained. Verify the release exists and investigate any tag change; do not force a replacement."
+        exit 1
+      fi
+      git -C "$SOURCE_DIR" checkout --detach --quiet "refs/tags/${INSTALL_REF}"
+    fi
   else
     info "Fetching Agent Valley into $SOURCE_DIR..."
     mkdir -p "$(dirname "$SOURCE_DIR")"
-    git clone --depth 1 --quiet "$REPO_URL" "$SOURCE_DIR"
+    if ! git clone --depth 1 --single-branch --branch "$INSTALL_REF" --quiet "$REPO_URL" "$SOURCE_DIR"; then
+      err "Cannot fetch requested ref $INSTALL_REF. Verify the published release tag and network access, then rerun; target harness files were retained."
+      exit 1
+    fi
+    if [[ "$INSTALL_REF" != main ]]; then
+      git -C "$SOURCE_DIR" checkout --detach --quiet "refs/tags/${INSTALL_REF}"
+    fi
   fi
   success "Agent Valley source ready."
   echo ""
@@ -272,17 +300,24 @@ if [[ "$(cd "$SOURCE_DIR" && pwd -P)" == "$(pwd -P)" ]]; then
   exit 0
 fi
 
+[[ -f "${SOURCE_DIR}/scripts/install-harness.sh" ]] || {
+  err "The selected source ref has no safe harness installer. Select a release containing scripts/install-harness.sh, or main."
+  exit 1
+}
+# shellcheck source=scripts/install-harness.sh
+source "${SOURCE_DIR}/scripts/install-harness.sh"
+if [[ "$INSTALL_WORKFLOWS" == true ]] && ! ask "Add .github/ workflows and PR template?" N; then
+  INSTALL_WORKFLOWS=false
+fi
+preflight_harness
+
 # ═════════════════════════════════════════════════════════════════════════════
 # [1/3] Harness core — always installed regardless of mode
 # ═════════════════════════════════════════════════════════════════════════════
 echo -e "${BOLD}  [1/3] Harness core${RESET}"
 echo ""
 
-copy_dir  ".agents"
-copy_dir  ".claude"
-copy_dir  ".codex"
-copy_dir  ".cursor"
-copy_dir  ".grok"
+copy_managed_dirs
 # antigravity uses a global CLI harness (~/.gemini/antigravity-cli/), not a
 # project dir, so it is intentionally not copied here.
 # kimi does NOT get a copy_dir either: its harness dir (.kimi-code/) only
@@ -375,7 +410,7 @@ echo ""
 info "Includes: ci.yml, harness-gc.yml (weekly GC cron), PR template, pre-commit config"
 echo ""
 
-if [[ "$INSTALL_WORKFLOWS" == true ]] && ask "Add .github/ workflows and PR template?" N; then
+if [[ "$INSTALL_WORKFLOWS" == true ]]; then
   copy_dir ".github"
 else
   info "Skipped .github/"

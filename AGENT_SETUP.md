@@ -57,6 +57,10 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 
 The installer prepares the required Node.js/Bun runtime and AV launcher without a software build. These flags defer interactive setup and optional repository CI workflows. The installer can also prepare project integrations; the following setup step checks them again with the saved project binding. Check its exit status and actual output before continuing.
 
+Existing OMA and vendor instruction trees are retained. OMA preparation in the next step owns their updates. Other harness files are checked for content, type, and symlink conflicts before copying; a conflict stops installation with the affected path. Preserve that file and report the required reconciliation.
+
+The default source ref is `main`. For a release that includes ref selection, fetch the installer from the chosen published `vX.Y.Z` tag and pass that same tag as `--ref vX.Y.Z` (or `AGENT_VALLEY_INSTALL_REF`). The flag takes precedence over the environment variable. A tag URL alone does not select the installed checkout. Keep this ref on retries; tagged checkouts stay at that tag, and updates refuse dirty or diverged source checkouts.
+
 Use the launcher's installed path rather than relying on the current shell's PATH. Respect an existing `AGENT_VALLEY_BIN_DIR` or an explicitly selected installed launcher:
 
 ```bash

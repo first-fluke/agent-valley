@@ -21,6 +21,8 @@ av order "Fix the login failure and add a regression test"
 
 The installer prepares Node.js 26.10.0 and Bun 1.4.2 when needed, installs locked dependencies, and creates a source launcher at `~/.local/bin/av`. Remote installations keep the checkout under `~/.local/share/agent-valley`; a local installation uses its existing checkout. There is no build step. In an interactive terminal, installation opens `av setup --mode order`, including when the script arrives through `curl | bash`.
 
+Source installation defaults to `main`. Releases containing ref selection support `--ref vX.Y.Z` or `AGENT_VALLEY_INSTALL_REF`; the flag wins. Fetch the installer from the same published tag and retain that ref on updates. Tagged checkouts remain detached at the selected tag. Main updates require a clean checkout and a fast-forward; dirty, diverged, or retagged checkouts stop with recovery instructions.
+
 The interactive wizard validates the target Git repository, selects the Chief Director CLI and optional model, guides its CLI installation and login, and uses Chief-designed checks unless you supply a trusted acceptance command. Agent-led setup supplies the current agent's own vendor/model choice through the noninteractive path above. Browser or device sign-in remains interactive. If a CLI cannot report its login state, readiness remains unknown and the result explains the required action. Other ready worker CLIs are discovered automatically; installing every vendor is unnecessary.
 
 The source installer and completed setup also install the project `av` skill and MCP entry for Codex, Claude Code, Cursor, Qwen Code, and Antigravity. Existing client settings, other skills, and user profiles are preserved; conflicting AV names produce an error with recovery instructions. Restart the client and complete its normal workspace/MCP trust step. Run `av integrations install --workspace /absolute/project` to prepare the integration later. See [agent client integration](./agent-clients.md), [native plugins](./native-plugins.md), and [web OAuth](./web-mcp.md).
@@ -136,6 +138,8 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 ```
 
 Running the installer inside its own checkout leaves existing files intact. Repeated installs deduplicate the Symphony section and ignore entries.
+
+Existing OMA configuration and vendor instruction trees are preserved as a whole; `av setup` updates OMA through its supported installer. Other harness copies fill missing files after checking all planned copies for content, type, and symlink conflicts. A conflicting file stops installation before those copies; retain it and resolve the named conflict before retrying.
 
 ## Dashboard and webhook access
 

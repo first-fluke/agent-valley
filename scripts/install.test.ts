@@ -3,16 +3,20 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterEach, beforeEach, expect, test } from "vitest"
+
+const realGit = spawnSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim()
 
 let root: string
 let source: string
@@ -34,6 +38,7 @@ beforeEach(() => {
   mkdirSync(bin)
   cpSync(resolve("scripts/install.sh"), join(source, "scripts/install.sh"))
   cpSync(resolve("scripts/install-cli.sh"), join(source, "scripts/install-cli.sh"))
+  cpSync(resolve("scripts/install-harness.sh"), join(source, "scripts/install-harness.sh"))
   for (const name of ["gc.sh", "validate.sh"])
     writeFileSync(join(source, "scripts/harness", name), "#!/bin/sh\nexit 0\n")
   writeFileSync(join(source, "AGENTS.md"), "Source instructions\n")
@@ -81,8 +86,10 @@ if [[ "$1" == clone ]]; then
   mkdir -p "$destination/.git"
 elif [[ "$1" == -C && "$3" == remote ]]; then
   echo https://github.com/first-fluke/agent-valley.git
-elif [[ "$1" == -C && "$3" == pull ]]; then
-  echo git=pull >> "$AV_TEST_LOG"
+elif [[ "$1" == -C && "$3" == symbolic-ref ]]; then
+  echo main
+elif [[ "$1" == -C && ( "$3" == fetch || "$3" == merge || "$3" == checkout ) ]]; then
+  printf 'git=%s\\n' "$*" >> "$AV_TEST_LOG"
 elif [[ "$1" != -C || "$3" != status ]]; then
   echo Unexpected git call >&2; exit 1
 fi
@@ -96,8 +103,10 @@ fi
     XDG_DATA_HOME: join(home, ".local/share"),
     AGENT_VALLEY_BIN_DIR: join(home, ".local/bin"),
     AGENT_VALLEY_INSTALL_DIR: join(home, ".local/share/agent-valley"),
+    AGENT_VALLEY_INSTALL_REF: undefined,
     AV_TEST_LOG: log,
     AV_TEST_SOURCE: source,
+    AV_TEST_REAL_GIT: realGit,
   }
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
@@ -117,6 +126,204 @@ function install(cwd: string, args = ["--yes", "--no-workflows"]) {
   })
 }
 
+function remoteInstall(args: string[] = []) {
+  return pipedInstall(["--yes", "--no-workflows", "--no-setup", ...args])
+}
+
+function pipedInstall(args: string[]) {
+  return spawnSync("bash", ["-s", "--", ...args], {
+    input: readFileSync(join(source, "scripts/install.sh"), "utf8"),
+    cwd: target,
+    env,
+    encoding: "utf8",
+    timeout: 15_000,
+  })
+}
+
+function fixtureGit(cwd: string, ...args: string[]) {
+  const result = spawnSync(realGit, args, {
+    cwd,
+    env: {
+      ...env,
+      GIT_AUTHOR_NAME: "Installer Fixture",
+      GIT_AUTHOR_EMAIL: "fixture@example.invalid",
+      GIT_COMMITTER_NAME: "Installer Fixture",
+      GIT_COMMITTER_EMAIL: "fixture@example.invalid",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    },
+    encoding: "utf8",
+    timeout: 10_000,
+  })
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  return result.stdout.trim()
+}
+
+function releaseFixture() {
+  fixtureGit(source, "init", "--initial-branch=main")
+  fixtureGit(source, "add", ".")
+  fixtureGit(source, "commit", "-m", "Fixture release one")
+  fixtureGit(source, "tag", "v1.0.0")
+  const first = fixtureGit(source, "rev-parse", "HEAD")
+  writeFileSync(join(source, "apps/cli/src/index.ts"), "// Fixture release two\n")
+  fixtureGit(source, "add", ".")
+  fixtureGit(source, "commit", "-m", "Fixture release two")
+  fixtureGit(source, "tag", "v1.0.1")
+  const second = fixtureGit(source, "rev-parse", "HEAD")
+  const upstream = join(root, "local upstream.git")
+  fixtureGit(root, "clone", "--bare", source, upstream)
+  env.AV_TEST_UPSTREAM = upstream
+  env.GIT_CONFIG_NOSYSTEM = "1"
+  env.GIT_CONFIG_GLOBAL = "/dev/null"
+  executable(
+    "git",
+    `
+printf 'git=%s\\n' "$*" >> "$AV_TEST_LOG"
+if [[ "$1" == -C && "$3" == remote && "$4" == get-url ]]; then
+  echo https://github.com/first-fluke/agent-valley.git
+else
+  exec "$AV_TEST_REAL_GIT" -c "url.file://$AV_TEST_UPSTREAM.insteadOf=https://github.com/first-fluke/agent-valley.git" "$@"
+fi
+`,
+  )
+  return { first, second, upstream, checkout: join(home, ".local/share/agent-valley") }
+}
+
+test("release tags pin a source install and remain reproducible across retries and explicit upgrades", () => {
+  const { first, second, checkout } = releaseFixture()
+  for (const args of [
+    ["--ref", "v1.0.0"],
+    ["--ref", "v1.0.0"],
+  ]) {
+    const result = remoteInstall(args)
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+    expect(fixtureGit(checkout, "rev-parse", "HEAD")).toBe(first)
+  }
+  expect(fixtureGit(checkout, "branch", "--show-current")).toBe("")
+  env.AGENT_VALLEY_INSTALL_REF = "v1.0.0"
+  const upgrade = remoteInstall(["--ref", "v1.0.1"])
+  expect(upgrade.status, `${upgrade.stdout}\n${upgrade.stderr}`).toBe(0)
+  expect(fixtureGit(checkout, "rev-parse", "HEAD")).toBe(second)
+  expect(readFileSync(log, "utf8")).toContain("--branch v1.0.0")
+  expect(readFileSync(log, "utf8")).toContain("refs/tags/v1.0.1:refs/tags/v1.0.1")
+  expect(readFileSync(log, "utf8")).not.toContain("--force")
+})
+
+test("release-ref environment selection works and missing remote tags never install target files", () => {
+  const { first, checkout } = releaseFixture()
+  env.AGENT_VALLEY_INSTALL_REF = "v9.9.9"
+  const missing = remoteInstall()
+  expect(missing.status).toBe(1)
+  expect(missing.stderr).toContain("Cannot fetch requested ref v9.9.9")
+  expect(existsSync(join(target, ".agents"))).toBe(false)
+  expect(existsSync(join(home, ".local/bin/av"))).toBe(false)
+  env.AGENT_VALLEY_INSTALL_REF = "v1.0.0"
+  const result = remoteInstall()
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  expect(fixtureGit(checkout, "rev-parse", "HEAD")).toBe(first)
+})
+
+test("release updates retain dirty checkout edits and refuse forced tag replacements", () => {
+  const { first, second, upstream, checkout } = releaseFixture()
+  expect(remoteInstall(["--ref", "v1.0.0"]).status).toBe(0)
+  const index = join(checkout, "apps/cli/src/index.ts")
+  const original = readFileSync(index, "utf8")
+  writeFileSync(index, "// User local edit\n")
+  const dirty = remoteInstall(["--ref", "v1.0.1"])
+  expect(dirty.status).toBe(1)
+  expect(dirty.stderr).toContain("has local changes")
+  expect(readFileSync(index, "utf8")).toBe("// User local edit\n")
+  expect(fixtureGit(checkout, "rev-parse", "HEAD")).toBe(first)
+  writeFileSync(index, original)
+  fixtureGit(upstream, "tag", "--force", "v1.0.0", second)
+  const rewritten = remoteInstall(["--ref", "v1.0.0"])
+  expect(rewritten.status).not.toBe(0)
+  expect(rewritten.stderr).toContain("without replacing an existing tag")
+  expect(fixtureGit(checkout, "rev-parse", "HEAD")).toBe(first)
+  expect(fixtureGit(checkout, "rev-parse", "refs/tags/v1.0.0")).toBe(first)
+})
+
+test("local explicit refs verify the current commit without modifying the checkout", () => {
+  const { second } = releaseFixture()
+  const mismatch = install(source, ["--yes", "--no-setup", "--ref", "v1.0.0"])
+  expect(mismatch.status).toBe(1)
+  expect(mismatch.stderr).toContain("is not at requested ref v1.0.0")
+  expect(fixtureGit(source, "rev-parse", "HEAD")).toBe(second)
+  expect(existsSync(join(home, ".local/bin/av"))).toBe(false)
+  const matching = install(source, ["--yes", "--no-setup", "--ref", "v1.0.1"])
+  expect(matching.status, `${matching.stdout}\n${matching.stderr}`).toBe(0)
+  expect(fixtureGit(source, "rev-parse", "HEAD")).toBe(second)
+})
+
+test("local explicit refs reject dirty release content while unpinned development installs remain available", () => {
+  releaseFixture()
+  const index = join(source, "apps/cli/src/index.ts")
+  writeFileSync(index, "// Local development change\n")
+  const pinned = install(source, ["--yes", "--no-setup", "--ref", "v1.0.1"])
+  expect(pinned.status).toBe(1)
+  expect(pinned.stderr).toContain("cannot provide reproducible ref v1.0.1")
+  expect(pinned.stderr).toContain("omit --ref for a local development install")
+  expect(readFileSync(index, "utf8")).toBe("// Local development change\n")
+  expect(existsSync(join(home, ".local/bin/av"))).toBe(false)
+  const development = install(source, ["--yes", "--no-setup"])
+  expect(development.status, `${development.stdout}\n${development.stderr}`).toBe(0)
+  expect(readFileSync(index, "utf8")).toBe("// Local development change\n")
+})
+
+test("main updates fast-forward actual Git checkouts and retain divergent local commits", () => {
+  const { second, upstream, checkout } = releaseFixture()
+  expect(remoteInstall().status).toBe(0)
+  expect(fixtureGit(checkout, "rev-parse", "HEAD")).toBe(second)
+  writeFileSync(join(source, "apps/cli/src/index.ts"), "// Upstream main update\n")
+  fixtureGit(source, "add", ".")
+  fixtureGit(source, "commit", "-m", "Fixture main update")
+  fixtureGit(source, "push", upstream, "main")
+  const updated = fixtureGit(source, "rev-parse", "HEAD")
+  const fastForward = remoteInstall()
+  expect(fastForward.status, `${fastForward.stdout}\n${fastForward.stderr}`).toBe(0)
+  expect(fixtureGit(checkout, "rev-parse", "HEAD")).toBe(updated)
+  writeFileSync(join(checkout, "apps/cli/src/index.ts"), "// User committed change\n")
+  fixtureGit(checkout, "add", ".")
+  fixtureGit(checkout, "commit", "-m", "Fixture local commit")
+  const local = fixtureGit(checkout, "rev-parse", "HEAD")
+  writeFileSync(join(source, "apps/cli/src/index.ts"), "// Conflicting upstream change\n")
+  fixtureGit(source, "add", ".")
+  fixtureGit(source, "commit", "-m", "Fixture upstream divergence")
+  fixtureGit(source, "push", upstream, "main")
+  const divergence = remoteInstall()
+  expect(divergence.status).toBe(1)
+  expect(divergence.stderr).toContain("Cannot fast-forward")
+  expect(fixtureGit(checkout, "rev-parse", "HEAD")).toBe(local)
+  expect(readFileSync(join(checkout, "apps/cli/src/index.ts"), "utf8")).toBe("// User committed change\n")
+})
+
+test.each([
+  { remote: false, args: ["--yes", "--no-workflows", "--no-setup"] },
+  { remote: true, args: ["--yes", "--no-workflows", "--no-setup"] },
+  { remote: false, args: ["--headless", "--actor", "codex", "--oma", "prepare", "--no-workflows"] },
+  { remote: true, args: ["--headless", "--actor", "codex", "--oma", "prepare", "--no-workflows"] },
+])("existing OMA routing and settings survive remote=$remote unattended installation: $args", ({ remote, args }) => {
+  const managed = [".agents", ".claude", ".codex", ".cursor", ".qwen", ".grok", ".gemini", ".kimi-code"]
+  for (const path of managed) {
+    mkdirSync(join(source, path), { recursive: true })
+    mkdirSync(join(target, path), { recursive: true })
+    writeFileSync(join(source, path, "settings.json"), '{"source":"defaults"}\n')
+    writeFileSync(join(target, path, "settings.json"), '{"user":"custom settings"}\n')
+  }
+  const definitions = ["oma-config.yaml", "oma-config.cue", "agents/custom.md", "skills/custom/SKILL.md"]
+  for (const path of definitions) {
+    mkdirSync(join(source, ".agents", path, ".."), { recursive: true })
+    mkdirSync(join(target, ".agents", path, ".."), { recursive: true })
+    writeFileSync(join(source, ".agents", path), "source defaults\n")
+    writeFileSync(join(target, ".agents", path), `user ${path}\n`)
+  }
+  const result = remote ? pipedInstall(args) : install(target, args)
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  for (const path of managed)
+    expect(readFileSync(join(target, path, "settings.json"), "utf8")).toBe('{"user":"custom settings"}\n')
+  for (const path of definitions) expect(readFileSync(join(target, ".agents", path), "utf8")).toBe(`user ${path}\n`)
+})
+
 test("running inside a clone leaves its existing instructions intact", () => {
   const result = install(source)
   expect(result.status).toBe(0)
@@ -125,6 +332,90 @@ test("running inside a clone leaves its existing instructions intact", () => {
   expect(readFileSync(log, "utf8")).toContain("arg=--ignore-scripts")
   expect(readFileSync(log, "utf8")).not.toContain("arg=setup")
   expect(readFileSync(join(source, "AGENTS.md"), "utf8")).toBe("Source instructions\n")
+})
+
+test("harness file conflicts are detected before any target writes or dependency installation", () => {
+  mkdirSync(join(source, "docs/specs"), { recursive: true })
+  mkdirSync(join(target, "docs/specs"), { recursive: true })
+  writeFileSync(join(source, "docs/specs/custom.md"), "source documentation\n")
+  writeFileSync(join(target, "docs/specs/custom.md"), "user documentation\n")
+  writeFileSync(join(target, "AGENTS.md"), "user instructions\n")
+  const result = install(target)
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("docs/specs/custom.md")
+  expect(result.stderr).toContain("Existing files were retained")
+  expect(readFileSync(join(target, "docs/specs/custom.md"), "utf8")).toBe("user documentation\n")
+  expect(readFileSync(join(target, "AGENTS.md"), "utf8")).toBe("user instructions\n")
+  expect(existsSync(join(target, ".agents"))).toBe(false)
+  expect(existsSync(join(target, "scripts"))).toBe(false)
+  expect(existsSync(log)).toBe(false)
+})
+
+test("harness copies reject symlinked target parents without touching external files", () => {
+  const external = join(root, "external docs")
+  mkdirSync(join(source, "docs/specs"), { recursive: true })
+  mkdirSync(external)
+  writeFileSync(join(source, "docs/specs/custom.md"), "source documentation\n")
+  writeFileSync(join(external, "keep.txt"), "user file\n")
+  symlinkSync(external, join(target, "docs"))
+  const result = install(target)
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("Harness conflict")
+  expect(readFileSync(join(external, "keep.txt"), "utf8")).toBe("user file\n")
+  expect(existsSync(join(external, "specs"))).toBe(false)
+  expect(existsSync(join(target, ".agents"))).toBe(false)
+  expect(existsSync(log)).toBe(false)
+})
+
+test("existing internal managed vendor links are preserved without copying through them", () => {
+  for (const path of [".codex", ".kimi-code", ".opencode"]) {
+    mkdirSync(join(source, path), { recursive: true })
+    writeFileSync(join(source, path, "settings.json"), "source defaults\n")
+    const destination = join(target, ".agents", "vendors", path)
+    mkdirSync(destination, { recursive: true })
+    writeFileSync(join(destination, "settings.json"), "linked user settings\n")
+    symlinkSync(join(".agents", "vendors", path), join(target, path))
+  }
+  const result = install(target)
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  for (const path of [".codex", ".kimi-code", ".opencode"]) {
+    expect(lstatSync(join(target, path)).isSymbolicLink()).toBe(true)
+    expect(readFileSync(join(target, path, "settings.json"), "utf8")).toBe("linked user settings\n")
+  }
+})
+
+test("external managed vendor links are refused and their targets remain untouched", () => {
+  const external = join(root, "external vendor")
+  mkdirSync(external)
+  mkdirSync(join(source, ".codex"))
+  writeFileSync(join(source, ".codex/settings.json"), "source defaults\n")
+  writeFileSync(join(external, "settings.json"), "user settings\n")
+  symlinkSync(external, join(target, ".codex"))
+  const result = install(target)
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("Harness conflict")
+  expect(readFileSync(join(external, "settings.json"), "utf8")).toBe("user settings\n")
+  expect(existsSync(join(target, ".agents"))).toBe(false)
+  expect(existsSync(log)).toBe(false)
+})
+
+test("new scaffolds preserve unrelated user files when an otherwise empty project has a conflict", () => {
+  rmSync(join(target, "package.json"))
+  writeFileSync(join(target, "AGENTS.md"), "custom instructions\n")
+  const result = install(target)
+  expect(result.status).toBe(1)
+  expect(readFileSync(join(target, "AGENTS.md"), "utf8")).toBe("custom instructions\n")
+  expect(existsSync(join(target, ".agents"))).toBe(false)
+  expect(existsSync(log)).toBe(false)
+})
+
+test("empty installation ref environment values fail before any target effect", () => {
+  env.AGENT_VALLEY_INSTALL_REF = ""
+  const result = install(target)
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("AGENT_VALLEY_INSTALL_REF")
+  expect(existsSync(join(target, ".agents"))).toBe(false)
+  expect(existsSync(log)).toBe(false)
 })
 
 test("repeated install preserves existing instructions and deduplicates exact ignore entries", () => {
@@ -270,6 +561,12 @@ test.each([
   ["--model", ""],
   ["--oma", "skip"],
   ["--headless", "--json"],
+  ["--ref"],
+  ["--ref", ""],
+  ["--ref", "feature/custom"],
+  ["--ref", "--force"],
+  ["--ref", "v1.0.0", "--ref", "main"],
+  ["--ref", "v1.0.0; touch marker"],
 ])("invalid installer options fail before network or filesystem effects: %s", (...args) => {
   const result = install(target, args)
   expect(result.status).toBe(1)
@@ -350,7 +647,8 @@ test("remote stdin install keeps a persistent checkout and updates it safely on 
   expect(existsSync(join(checkout, "apps/cli/src/index.ts"))).toBe(true)
   expect(readFileSync(join(home, ".local/bin/av"), "utf8")).toContain("agent-valley/apps/cli/src/index.ts")
   expect(invoke().status).toBe(0)
-  expect(readFileSync(log, "utf8")).toContain("git=pull")
+  expect(readFileSync(log, "utf8")).toContain("fetch --quiet origin refs/heads/main:refs/remotes/origin/main")
+  expect(readFileSync(log, "utf8")).toContain("merge --ff-only --quiet refs/remotes/origin/main")
   expect(existsSync(checkout)).toBe(true)
 })
 
