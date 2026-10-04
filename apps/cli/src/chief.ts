@@ -13,6 +13,7 @@ import { type Command, Option } from "commander"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
 import { createMissionMetricPorts } from "./chief-metrics"
+import { orderExitCode, printOrderOutcome } from "./chief-outcome"
 import { applyResumeOptions, validateResumeOptions } from "./chief-resume"
 import { abortableDelay, superviseOrder } from "./chief-supervisor"
 import { assertNotManagedRun } from "./managed-run"
@@ -45,7 +46,13 @@ export async function runOrder(
   const id = options.resume ?? options.missionId ?? randomUUID()
   const unlock = await store.lock(id)
   const abortController = new AbortController()
-  const interrupt = () => abortController.abort()
+  const interrupt = () =>
+    abortController.abort(
+      new MissionPause(
+        "Operator stopped the order. Its checks and worktree were retained; repair any interrupted effects before resuming with --retry.",
+        "interrupted",
+      ),
+    )
   const runtime = new ChiefRuntime(store, abortController.signal, (stage, persona) =>
     console.log(`[${stage}] ${persona.name} (${persona.agentType})`),
   )
@@ -167,9 +174,6 @@ export async function runOrder(
     await finishCapture()
     await saveAndDeliverMissionReport(result, root)
     reportSaved = true
-    console.log(
-      `Order ${result.status}: ${result.finalReview?.summary ?? result.goal}\nWorktree: ${result.workspace.path}\nBranch: ${result.workspace.branch}`,
-    )
     return result
   } catch (error) {
     if (mission && error instanceof Error && /orphan|process marker/.test(error.message)) {
@@ -185,6 +189,7 @@ export async function runOrder(
             `Could not write the report: ${reportError instanceof Error ? reportError.message : String(reportError)}`,
           ),
         )
+      if (!options.worker) printOrderOutcome(mission)
     }
     throw error
   } finally {
@@ -234,8 +239,12 @@ export function registerChiefCommands(program: Command): void {
     .addOption(new Option("--mission-id <id>", "Internal mission identity").hideHelp())
     .option("--resume <id>", "Resume a saved order with its original acceptance contract")
     .action(async (goal: string | undefined, options: OrderOptions) => {
-      if (options.worker || options.supervise === false) await runOrder(goal, options)
-      else await superviseOrder(goal, options, process.cwd())
+      const mission =
+        options.worker || options.supervise === false
+          ? await runOrder(goal, options)
+          : await superviseOrder(goal, options, process.cwd())
+      if (!options.worker) printOrderOutcome(mission)
+      process.exitCode = orderExitCode(mission)
     })
 
   program
@@ -259,7 +268,9 @@ export function registerChiefCommands(program: Command): void {
               if (mission.execution?.nextRunAt && Date.parse(mission.execution.nextRunAt) > Date.now()) continue
               await superviseOrder(undefined, { resume: mission.id }, process.cwd(), {
                 signal: controller.signal,
-              }).catch((error: unknown) => console.error(String(error)))
+              })
+                .then(printOrderOutcome)
+                .catch((error: unknown) => console.error(String(error)))
             }
             await abortableDelay(5_000, controller.signal)
           }

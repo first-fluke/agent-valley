@@ -134,7 +134,7 @@ describe("durable order worker supervision", () => {
     await store.save(current)
     const worker = vi
       .fn<Worker>()
-      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(2)
       .mockImplementation(async (args) => {
         expect(Date.now()).toBeGreaterThanOrEqual(now + 65_000)
         expect(args).toEqual(["order", "--worker", "--resume", current.id])
@@ -153,6 +153,61 @@ describe("durable order worker supervision", () => {
     expect(delay).toHaveBeenCalledTimes(3)
     expect(result.execution?.crashRestarts).toBeUndefined()
     expect(worker).toHaveBeenCalledTimes(2)
+  })
+
+  it("counts a crashed waiting worker as a restart instead of a successful scheduled observation", async () => {
+    const current = checkpoint()
+    current.status = "waiting"
+    if (!current.execution) throw new Error("Expected execution checkpoint")
+    current.execution.nextRunAt = new Date(now + 65_000).toISOString()
+    await store.save(current)
+    const worker = vi
+      .fn<Worker>()
+      .mockResolvedValueOnce(1)
+      .mockImplementation(async () => {
+        const restored = await store.load(current.id)
+        expect(restored.execution?.crashRestarts).toBe(1)
+        expect(Date.now()).toBe(now)
+        restored.status = "completed"
+        await store.save(restored)
+        return 0
+      })
+    const delay = vi.fn<typeof abortableDelay>().mockResolvedValue()
+    expect((await superviseOrder(undefined, { resume: current.id }, root, { runWorker: worker, delay })).status).toBe(
+      "completed",
+    )
+    expect(delay).toHaveBeenCalledOnce()
+    expect(delay).toHaveBeenCalledWith(1_000, expect.any(AbortSignal))
+    expect((await store.load(current.id)).history.at(-1)?.message).toContain("exit 1")
+  })
+
+  it("reports a worker failure after verified completion without resetting or replaying the completed checkpoint", async () => {
+    const current = checkpoint()
+    current.status = "completed"
+    await store.save(current)
+    const worker = vi.fn<Worker>().mockResolvedValue(1)
+    await expect(superviseOrder(undefined, { resume: current.id }, root, { runWorker: worker })).rejects.toThrow(
+      "Verified work remains completed",
+    )
+    expect((await store.load(current.id)).status).toBe("completed")
+    expect((await store.load(current.id)).execution?.crashRestarts).toBeUndefined()
+    expect(worker).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { status: "failed", exitCode: 1 },
+    { status: "paused", exitCode: 2 },
+  ] as const)("accepts expected worker outcome $status/$exitCode without restarting", async ({ status, exitCode }) => {
+    const current = checkpoint()
+    current.status = status
+    await store.save(current)
+    const worker = vi.fn<Worker>().mockResolvedValue(exitCode)
+    const delay = vi.fn<typeof abortableDelay>()
+    expect((await superviseOrder(undefined, { resume: current.id }, root, { runWorker: worker, delay })).status).toBe(
+      status,
+    )
+    expect(worker).toHaveBeenCalledOnce()
+    expect(delay).not.toHaveBeenCalled()
   })
 
   it("joins an interrupted child before returning and never restarts after cancellation", async () => {

@@ -7,6 +7,7 @@ import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import type { OrderOptions } from "./chief-config"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
+import { orderExitCode } from "./chief-outcome"
 import { assertNotManagedRun } from "./managed-run"
 
 export function orderWorkerArgs(goal: string | undefined, options: OrderOptions, id: string): string[] {
@@ -92,25 +93,28 @@ export async function superviseOrder(
   let returned: Mission | undefined
   try {
     while (!controller.signal.aborted) {
-      await (dependencies.runWorker ?? runWorker)(args, root, controller.signal)
+      const workerExit = await (dependencies.runWorker ?? runWorker)(args, root, controller.signal)
       const mission = await store.load(id).catch(() => undefined)
       if (!mission)
         throw new Error(
           "Order could not be initialized. Correct its configuration and retry; no automatic initialization replay was attempted.",
         )
       returned = mission
-      if (
-        controller.signal.aborted ||
-        ["completed", "failed", "paused"].includes(mission.status) ||
-        !mission.executionPolicy?.autoResume
-      )
-        return mission
+      const terminal = ["completed", "failed", "paused"].includes(mission.status)
+      if (!controller.signal.aborted && terminal && workerExit !== 0 && workerExit !== orderExitCode(mission))
+        throw new Error(
+          `Order worker exited ${workerExit === null ? "by signal" : `with code ${workerExit}`} after saving ${mission.status} for ${id}. ` +
+            (mission.status === "completed"
+              ? `Verified work remains completed. Inspect .agent-valley/reports/${id}.md and the worker log; use av reports retry for pending deliveries.`
+              : `Inspect the worker error and saved checkpoint, then use av order --resume ${id} --retry after repairing the blocker.`),
+        )
+      if (controller.signal.aborted || terminal || !mission.executionPolicy?.autoResume) return mission
       assertExecutionDeadline(mission)
       const remainingTime = () =>
         mission.executionPolicy && mission.execution
           ? Date.parse(mission.execution.startedAt) + mission.executionPolicy.maxDurationSec * 1_000 - Date.now()
           : Infinity
-      if (mission.status === "waiting" && mission.execution?.nextRunAt) {
+      if (mission.status === "waiting" && mission.execution?.nextRunAt && (workerExit === 0 || workerExit === 2)) {
         while (Date.parse(mission.execution.nextRunAt) > Date.now()) {
           assertExecutionDeadline(mission)
           await (dependencies.delay ?? abortableDelay)(
@@ -139,7 +143,7 @@ export async function superviseOrder(
           latest.history.push({
             at: new Date().toISOString(),
             stage: "worker-restart",
-            message: `Restarting crashed mission worker, attempt ${state.crashRestarts}.`,
+            message: `Restarting crashed mission worker, attempt ${state.crashRestarts} (exit ${workerExit ?? "signal"}).`,
           })
           await store.save(latest)
         } finally {
