@@ -3,7 +3,7 @@ import { lstat, readdir, realpath } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
 import { clientSkillAssetCandidates, loadClientSkillAsset } from "./client-integrations-assets"
 import { applyIntegrationFiles, contentHash, integrationFile } from "./client-integrations-files"
-import { loadPluginManifestAsset } from "./plugin-assets"
+import { loadPluginLicenseAsset, loadPluginManifestAsset } from "./plugin-assets"
 import { pluginPackageFiles } from "./plugin-packages"
 
 const receiptName = ".agent-valley-plugins.json"
@@ -15,6 +15,7 @@ export interface PluginExportOptions {
   remoteUrl?: string
   sourceSkillRoot?: string
   sourceManifest?: string
+  sourceLicense?: string
 }
 
 export interface PluginExportResult {
@@ -129,7 +130,8 @@ export async function exportPluginPackages(options: PluginExportOptions): Promis
   const { content: skill } = await loadClientSkillAsset(
     options.sourceSkillRoot ? [join(options.sourceSkillRoot, "SKILL.md")] : clientSkillAssetCandidates(),
   )
-  const packageFiles = pluginPackageFiles(manifest, skill, { workspace, remoteUrl })
+  const { content: license } = await loadPluginLicenseAsset(options.sourceLicense ? [options.sourceLicense] : undefined)
+  const packageFiles = pluginPackageFiles(manifest, skill, license, { workspace, remoteUrl })
   const receipt = await integrationFile(output, join(output, receiptName), "", 0o600)
   const hashes = ownedFileHashes(receipt.before, receipt.path)
   const existing = await outputFiles(output)

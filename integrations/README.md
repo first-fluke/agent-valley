@@ -4,7 +4,7 @@
 
 The repository's `.claude-plugin/marketplace.json` and `.cursor-plugin/marketplace.json` point to this directory. Codex supports the shared Claude-compatible catalog and its plain-string relative source; the repository's managed `.agents` definitions are unchanged. See [OpenAI marketplace compatibility](https://developers.openai.com/plugins/build/plugins).
 
-See [data handling](./PRIVACY.md) and [usage terms](./TERMS.md) for the public package. Its software license is [AGPL-3.0](../LICENSE).
+See [data handling](./PRIVACY.md) and [usage terms](./TERMS.md) for the public package. Its software license is [AGPL-3.0](./LICENSE).
 
 Public repository installation:
 
@@ -18,7 +18,7 @@ qwen extensions install first-fluke/agent-valley:av
 
 Install `av` from the `agent-valley` marketplace in the ChatGPT desktop Plugins Directory after adding it with Codex. Cursor imports the repository through its GitHub marketplace flow. From a checkout, Antigravity installs `./integrations/plugins/antigravity/av` with `agy plugin install`.
 
-Install the AV runtime, then run `av setup` from the intended project to configure the Chief Director and prepare that project's MCP entry. Public packages include no MCP command, private workspace path, credential, or endpoint. The shared skill uses the project's configured AV tools. Installing the public plugin does not host AV, connect a web account, or submit a central marketplace listing. See [native plugin installation](../docs/guides/native-plugins.md).
+Install the AV runtime, then run `av setup` from the intended project to configure the Chief Director and prepare that project's MCP entry. Public packages include no MCP command, private workspace path, credential, or endpoint. The shared skill uses the project's configured AV tools. Installing the public plugin does not host AV, connect a web account, or submit a central marketplace listing. See [native plugin installation](https://github.com/first-fluke/agent-valley/blob/main/docs/guides/native-plugins.md).
 
 ## Project-bound exports
 
@@ -38,4 +38,4 @@ av plugins export --workspace /absolute/project --output /absolute/av-web-plugin
 
 The export contains portable Agent Plugins v1 files and an OpenAI local marketplace, native Claude and Cursor manifests and marketplaces, a Qwen extension, and an Antigravity plugin. Each package includes the shared AV skill and its MCP server configuration. Local servers receive an absolute `--workspace` argument; moving a package or changing the client's working directory does not change the selected AV project. Regenerate the export after moving that project.
 
-Use the generated `README.md` for client installation commands. Exports preserve unowned files and local edits; choose a new output directory when an existing export conflicts. Exporting does not install into user profiles, publish a marketplace, or host the web server. See [native plugins](../docs/guides/native-plugins.md) and [web MCP](../docs/guides/web-mcp.md).
+Use the generated `README.md` for client installation commands. Exports preserve unowned files and local edits; choose a new output directory when an existing export conflicts. Exporting does not install into user profiles, publish a marketplace, or host the web server. See [native plugins](https://github.com/first-fluke/agent-valley/blob/main/docs/guides/native-plugins.md) and [web MCP](https://github.com/first-fluke/agent-valley/blob/main/docs/guides/web-mcp.md).

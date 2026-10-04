@@ -8,6 +8,7 @@ export interface PluginPackageBinding {
 export function pluginPackageFiles(
   manifest: PluginManifest,
   skill: string,
+  license: string,
   binding: PluginPackageBinding,
 ): Map<string, string> {
   const files = new Map<string, string>()
@@ -22,7 +23,10 @@ export function pluginPackageFiles(
   const qwenServer = binding.remoteUrl ? { httpUrl: binding.remoteUrl } : local
   const agyServer = binding.remoteUrl ? { serverUrl: binding.remoteUrl } : local
   const roots = ["portable/av", "claude/plugins/av", "cursor/plugins/av", "qwen/av", "antigravity/av"]
-  for (const root of roots) files.set(`${root}/skills/av/SKILL.md`, skill)
+  for (const root of roots) {
+    files.set(`${root}/skills/av/SKILL.md`, skill)
+    files.set(`${root}/LICENSE`, license)
+  }
 
   json("portable/av/plugin.json", {
     ...manifest,

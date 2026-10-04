@@ -1,6 +1,6 @@
 # Agent Valley plugin usage
 
-Agent Valley and its public plugin sources are provided under the repository's [GNU Affero General Public License, version 3](../LICENSE). That license states the permissions, conditions, warranty disclaimer, and liability limitation for this software.
+Agent Valley and its public plugin sources are provided under the repository's [GNU Affero General Public License, version 3](./LICENSE). That license states the permissions, conditions, warranty disclaimer, and liability limitation for this software.
 
 The public plugin supplies instructions for an AV runtime you configure. It does not include a hosted execution service or a connected model account. Install and configure AV in the intended project before delegating work. Plugin installation does not grant permissions to a repository, enable client trust, or approve an action on your behalf.
 

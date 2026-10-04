@@ -10,6 +10,6 @@ Configured reporting channels can receive reports and actual attachments. Browse
 
 With remote MCP, requests reach the configured AV server and its reverse proxy. OAuth login is handled by the configured identity provider. AV verifies access-token signatures, issuer, audience, expiry, scopes, and permitted user subjects before granting mission access. Server and identity-provider operators control their own logs and retention.
 
-Do not include credentials or unnecessary personal information in a goal or report. Keep AV credentials outside public plugin packages and repository history. The project documents its configuration and operation in the [client guide](../docs/guides/agent-clients.md) and [web MCP guide](../docs/guides/web-mcp.md).
+Do not include credentials or unnecessary personal information in a goal or report. Keep AV credentials outside public plugin packages and repository history. The project documents its configuration and operation in the [client guide](https://github.com/first-fluke/agent-valley/blob/main/docs/guides/agent-clients.md) and [web MCP guide](https://github.com/first-fluke/agent-valley/blob/main/docs/guides/web-mcp.md).
 
 For project questions, use [GitHub issues](https://github.com/first-fluke/agent-valley/issues). Do not post credentials, private reports, or personal records in a public issue. Contact the operator of your AV deployment for questions about data stored or processed by that deployment.

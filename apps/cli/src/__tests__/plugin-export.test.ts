@@ -72,8 +72,13 @@ describe("AV plugin exports", () => {
       expect(await realpath(join(result.output, vendor, nativeMarket.plugins[0].source))).toBe(result.packages[vendor])
     }
     const source = await readFile(new URL("../../../../integrations/skills/av/SKILL.md", import.meta.url), "utf8")
-    for (const path of Object.values(result.packages))
+    const license = await readFile(new URL("../../../../LICENSE", import.meta.url), "utf8")
+    for (const path of Object.values(result.packages)) {
       expect(await readFile(join(path, "skills/av/SKILL.md"), "utf8")).toBe(source)
+      expect(await readFile(join(path, "LICENSE"), "utf8")).toBe(license)
+    }
+    const receipt = await json(join(result.output, ".agent-valley-plugins.json"))
+    expect(Object.keys(receipt.files).filter((path) => path.endsWith("/LICENSE"))).toHaveLength(5)
     expect((await exportPluginPackages(options)).files).toEqual([])
   })
 
@@ -151,6 +156,37 @@ describe("AV plugin exports", () => {
     )
     expect(await readFile(edited, "utf8")).toBe("local custom configuration\n")
     expect(await readFile(join(result.packages.portable, "mcp.json"), "utf8")).toBe(originalPortable)
+  })
+
+  it("updates owned licenses together and preserves a locally edited license before any other write", async () => {
+    const options = await fixture()
+    const sourceLicense = join(options.root, "LICENSE")
+    const original = await readFile(new URL("../../../../LICENSE", import.meta.url), "utf8")
+    await writeFile(sourceLicense, original)
+    await exportPluginPackages({ ...options, sourceLicense })
+    const changed = `${original}\n`
+    await writeFile(sourceLicense, changed)
+    const result = await exportPluginPackages({ ...options, sourceLicense })
+    expect(result.files.filter((path) => path.endsWith("/LICENSE"))).toHaveLength(5)
+    for (const path of Object.values(result.packages))
+      expect(await readFile(join(path, "LICENSE"), "utf8")).toBe(changed)
+    const edited = join(result.packages.antigravity, "LICENSE")
+    await writeFile(edited, "local license edit\n")
+    const portableMcp = join(result.packages.portable, "mcp.json")
+    const before = await readFile(portableMcp, "utf8")
+    await expect(
+      exportPluginPackages({ ...options, sourceLicense, remoteUrl: "https://av.example.org/mcp" }),
+    ).rejects.toThrow("changed or removed locally")
+    expect(await readFile(edited, "utf8")).toBe("local license edit\n")
+    expect(await readFile(portableMcp, "utf8")).toBe(before)
+  })
+
+  it("does not create a partial export when its packaged license is missing", async () => {
+    const options = await fixture()
+    await expect(exportPluginPackages({ ...options, sourceLicense: join(options.root, "missing") })).rejects.toThrow(
+      "restore integrations/LICENSE",
+    )
+    await expect(readFile(join(options.output, "README.md"))).rejects.toMatchObject({ code: "ENOENT" })
   })
 
   it("retains unowned files and refuses an output symlink", async () => {

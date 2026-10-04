@@ -29,6 +29,33 @@ export function pluginManifestAssetCandidates(moduleUrl = import.meta.url): stri
   ]
 }
 
+export function pluginLicenseAssetCandidates(moduleUrl = import.meta.url): string[] {
+  return [
+    fileURLToPath(new URL("./assets/LICENSE", moduleUrl)),
+    fileURLToPath(new URL("../../../integrations/LICENSE", moduleUrl)),
+  ]
+}
+
+export async function loadPluginLicenseAsset(
+  candidates = pluginLicenseAssetCandidates(),
+): Promise<{ path: string; content: string }> {
+  for (const path of candidates) {
+    let content: string
+    try {
+      content = await readFile(path, "utf8")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue
+      throw new Error(`Cannot read AV license at ${path}. Restore its permissions and rerun av plugins export.`)
+    }
+    if (!content.trim())
+      throw new Error(`AV license at ${path} is empty. Restore integrations/LICENSE or reinstall the CLI package.`)
+    return { path, content }
+  }
+  throw new Error(
+    `AV license is missing at ${candidates.join(" or ")}. Reinstall the complete CLI package or restore integrations/LICENSE, then rerun av plugins export.`,
+  )
+}
+
 export async function loadPluginManifestAsset(
   candidates = pluginManifestAssetCandidates(),
 ): Promise<{ path: string; manifest: PluginManifest }> {
@@ -56,6 +83,14 @@ export async function loadPluginManifestAsset(
 export async function copyPluginManifestAsset(destinationRoot: string, sourceManifest?: string): Promise<string> {
   const asset = await loadPluginManifestAsset(sourceManifest ? [sourceManifest] : undefined)
   const target = join(destinationRoot, "assets/plugin.json")
+  await mkdir(dirname(target), { recursive: true })
+  await copyFile(asset.path, target)
+  return target
+}
+
+export async function copyPluginLicenseAsset(destinationRoot: string, sourceLicense?: string): Promise<string> {
+  const asset = await loadPluginLicenseAsset(sourceLicense ? [sourceLicense] : undefined)
+  const target = join(destinationRoot, "assets/LICENSE")
   await mkdir(dirname(target), { recursive: true })
   await copyFile(asset.path, target)
   return target

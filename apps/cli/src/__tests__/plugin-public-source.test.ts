@@ -36,6 +36,12 @@ async function json(path: string): Promise<unknown> {
 }
 
 describe("public skills-only plugin sources", () => {
+  it("includes the unchanged repository license in every independently installed public package", async () => {
+    const license = await readFile(join(repository, "LICENSE"), "utf8")
+    expect(await readFile(join(sourceRoot, "LICENSE"), "utf8")).toBe(license)
+    expect(await readFile(join(sourceRoot, "plugins/antigravity/av/LICENSE"), "utf8")).toBe(license)
+  })
+
   it("resolves the Claude and Cursor repository catalogs to the shared public source", async () => {
     const { manifest } = await loadPluginManifestAsset([join(sourceRoot, "plugin.json")])
     for (const vendor of ["claude", "cursor"]) {
