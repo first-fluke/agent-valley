@@ -2,7 +2,9 @@
 
 Codex, Claude Code, Cursor, Qwen Code, and Antigravity can delegate a repository goal to AV through the project `av` skill and a local stdio MCP server. The client submits the goal; AV's Chief Director supervises Actors, reviews the work, runs checks, and saves the mission and report. [Native plugins](./native-plugins.md) package the same skill and tools. [Web MCP](./web-mcp.md) connects ChatGPT or Claude to a running AV server through OAuth.
 
-Install AV, configure the repository with `av setup`, then prepare the client integration:
+For an authorized agent-led installation, follow [AGENT_SETUP.md](../../AGENT_SETUP.md). The user-facing initiating agent becomes the Chief Director, prepares OMA and project MCP, and checks setup readiness without a mission. It carries its confirmed active model or explicitly saves the native default when the exact model is unknown; an installer worker preserves that identity. Login and client reload/trust may remain pending.
+
+After AV configuration is ready, prepare or repair the client integration:
 
 ```bash
 cd /absolute/project
@@ -11,7 +13,7 @@ av integrations install
 av integrations install --workspace /absolute/project
 ```
 
-The source installer runs this integration step before the setup wizard, including when setup is deferred. `av setup` also installs the integration after saving the selected repository's configuration. The command copies the product skill from `integrations/skills/av/SKILL.md` and adds only the `av` MCP entry to each client:
+The source installer's deferred-setup path runs this integration step before the setup wizard. `av setup`, including `--yes`, installs the integration after saving the selected repository's configuration. The command copies the product skill from `integrations/skills/av/SKILL.md` and adds only the `av` MCP entry to each client:
 
 <!-- oma-docs:ignore-start -->
 <!-- The following paths are installation outputs in the user's target repository. -->
@@ -35,6 +37,8 @@ av integrations install --workspace /repository/B --project-root /configuration/
 Keep `av` on the client's PATH; a desktop client may inherit a different PATH from your terminal. The saved AV configuration supplies the Chief Director vendor/model, Actors, verification, budgets, metric sources, and optional reporting. Client login, trust, and approval settings remain under your control.
 
 Restart or reload the client after installing. Codex discovers repository skills from `.agents/skills` and loads project configuration only for a trusted project; its stdio MCP table uses `mcp_servers`, `command`, and `args`. See [Codex skills](https://developers.openai.com/codex/skills), [MCP](https://developers.openai.com/codex/mcp), and [project configuration](https://developers.openai.com/codex/config-basic). Claude Code reads project servers from `.mcp.json` and normally asks you to approve them in interactive sessions; check its `/mcp` view. See [Claude Code MCP](https://code.claude.com/docs/en/mcp). Qwen Code reads project `mcpServers` entries from `.qwen/settings.json`; restart it and inspect `/mcp`. See [Qwen Code MCP](https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp/).
+
+To check a live connection, read `av_missions` and compare `project` with the AV configuration directory and `workspace` with the intended working repository. For the A/B case above, both `project=A` and `workspace=B` must match. This read-only check does not start work. If the current client cannot load the new integration until reload, report that step as pending. An `av_order` test would start a real mission and is outside setup verification.
 
 Ask the client, for example: “Use AV to implement the checkout goal in this repository, verify it, and explain the result.” The skill carries your constraints into `av_order`. It can inspect existing missions, read status and reports, resume authorized work, and cancel a mission when asked.
 

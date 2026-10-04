@@ -27,24 +27,87 @@ TARGET_DIR="${PWD}"
 ASSUME_YES=false
 INSTALL_WORKFLOWS=true
 RUN_SETUP=true
-for arg in "$@"; do
-  case "$arg" in
-    --yes|-y) ASSUME_YES=true ;;
-    --no-workflows) INSTALL_WORKFLOWS=false ;;
-    --no-setup) RUN_SETUP=false ;;
+HEADLESS=false
+SETUP_ACTOR=""
+SETUP_MODEL=""
+SETUP_OMA=""
+SETUP_ACTOR_SET=false
+SETUP_MODEL_SET=false
+SETUP_OMA_SET=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --yes|-y) ASSUME_YES=true; shift ;;
+    --no-workflows) INSTALL_WORKFLOWS=false; shift ;;
+    --no-setup) RUN_SETUP=false; shift ;;
+    --headless) HEADLESS=true; shift ;;
+    --actor)
+      [[ "$SETUP_ACTOR_SET" == false ]] || { err "Pass --actor only once."; exit 1; }
+      [[ $# -ge 2 && "${2-}" != -* ]] || { err "--actor requires a vendor. Run with --help."; exit 1; }
+      SETUP_ACTOR="$2"
+      SETUP_ACTOR_SET=true
+      shift 2 ;;
+    --model)
+      [[ "$SETUP_MODEL_SET" == false ]] || { err "Pass --model only once."; exit 1; }
+      [[ $# -ge 2 && "${2-}" != -* ]] || { err "--model requires a value; pass an empty string to clear a model pin."; exit 1; }
+      SETUP_MODEL="$2"
+      SETUP_MODEL_SET=true
+      shift 2 ;;
+    --oma)
+      [[ "$SETUP_OMA_SET" == false ]] || { err "Pass --oma only once."; exit 1; }
+      [[ $# -ge 2 && "${2-}" != -* ]] || { err "--oma requires prepare or skip."; exit 1; }
+      SETUP_OMA="$2"
+      SETUP_OMA_SET=true
+      shift 2 ;;
     --help|-h)
       echo "Usage: bash install.sh [--yes] [--no-workflows] [--no-setup]"
+      echo "       bash install.sh --headless [--actor <vendor>] [--model <model>] [--oma prepare|skip] [--no-workflows]"
       echo "Installs the harness and av CLI, then opens av setup --mode order in an interactive terminal."
       echo "--yes, --no-setup and CI defer the setup wizard; run av setup --mode order afterward."
+      echo "--headless accepts installation answers and runs av setup --yes without a terminal, including CI."
+      echo "Supply the calling agent's actor/model, or let setup resolve its trusted runtime or saved identity."
+      echo "--model '' clears a saved model pin. OMA defaults to prepare; --oma skip defers it explicitly."
+      echo "Installer output is progress text. Use av setup --yes --json separately for JSON results."
       exit 0 ;;
-    *) err "Unknown option: $arg. Run with --help for supported options."; exit 1 ;;
+    *) err "Unknown option: $1. Run with --help for supported options."; exit 1 ;;
   esac
 done
+if [[ "$HEADLESS" == true && "$RUN_SETUP" != true ]]; then
+  err "--headless cannot be combined with --no-setup. Choose unattended setup or setup deferral."
+  exit 1
+fi
+if [[ "$HEADLESS" != true ]] && \
+   [[ "$SETUP_ACTOR_SET" == true || "$SETUP_MODEL_SET" == true || "$SETUP_OMA_SET" == true ]]; then
+  err "--actor, --model and --oma require --headless. For separate setup, use av setup --yes afterward."
+  exit 1
+fi
+if [[ "$SETUP_ACTOR_SET" == true ]]; then
+  case "$SETUP_ACTOR" in
+    claude|codex|qwen|antigravity|cursor|grok|kimi|opencode) ;;
+    *) err "Unsupported --actor '$SETUP_ACTOR'. Use claude, codex, qwen, antigravity, cursor, grok, kimi or opencode."; exit 1 ;;
+  esac
+fi
+if [[ "$SETUP_MODEL_SET" == true && -n "$SETUP_MODEL" && -z "${SETUP_MODEL//[[:space:]]/}" ]]; then
+  err "--model cannot contain only whitespace. Pass an empty string to clear a saved model pin."
+  exit 1
+fi
+if [[ "$SETUP_OMA_SET" == true && "$SETUP_OMA" != prepare && "$SETUP_OMA" != skip ]]; then
+  err "Unsupported --oma '$SETUP_OMA'. Use prepare or skip."
+  exit 1
+fi
 
 # Detect whether we're running from inside the cloned repo
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
 IS_LOCAL=false
 SOURCE_DIR=""
+
+install_cli() {
+  local options=("$SOURCE_DIR" "$TARGET_DIR" "$RUN_SETUP" "$ASSUME_YES")
+  if [[ "$HEADLESS" == true ]]; then options+=(--headless); fi
+  if [[ "$SETUP_ACTOR_SET" == true ]]; then options+=(--actor "$SETUP_ACTOR"); fi
+  if [[ "$SETUP_MODEL_SET" == true ]]; then options+=(--model "$SETUP_MODEL"); fi
+  if [[ "$SETUP_OMA_SET" == true ]]; then options+=(--oma "$SETUP_OMA"); fi
+  bash "${SOURCE_DIR}/scripts/install-cli.sh" "${options[@]}"
+}
 
 if [[ -d "${SCRIPT_DIR}/../.agents" && -f "${SCRIPT_DIR}/../AGENTS.md" ]]; then
   IS_LOCAL=true
@@ -53,7 +116,7 @@ fi
 
 if [[ "$IS_LOCAL" == true && "$SOURCE_DIR" == "$(pwd -P)" ]]; then
   info "Agent Valley is already cloned here; the harness files are present."
-  bash "${SOURCE_DIR}/scripts/install-cli.sh" "$SOURCE_DIR" "$TARGET_DIR" "$RUN_SETUP" "$ASSUME_YES"
+  install_cli
   exit 0
 fi
 
@@ -133,7 +196,7 @@ ask() {
   local hint
   [[ "$default" == "Y" ]] && hint="[Y/n]" || hint="[y/N]"
   local answer
-  if [[ "$ASSUME_YES" == true ]]; then return 0; fi
+  if [[ "$ASSUME_YES" == true || "$HEADLESS" == true ]]; then return 0; fi
   if [[ -n "${CI:-}" ]]; then
     err "CI cannot answer installer prompts. Run bash install.sh --yes --no-setup."
     exit 1
@@ -205,7 +268,7 @@ fi
 # A piped installer can also target the persistent checkout itself.
 if [[ "$(cd "$SOURCE_DIR" && pwd -P)" == "$(pwd -P)" ]]; then
   info "The Agent Valley checkout already contains the harness."
-  bash "${SOURCE_DIR}/scripts/install-cli.sh" "$SOURCE_DIR" "$TARGET_DIR" "$RUN_SETUP" "$ASSUME_YES"
+  install_cli
   exit 0
 fi
 
@@ -324,7 +387,7 @@ fi
 echo ""
 echo -e "${GREEN}${BOLD}  ✓ Agent Valley harness installed successfully${RESET}"
 echo ""
-bash "${SOURCE_DIR}/scripts/install-cli.sh" "$SOURCE_DIR" "$TARGET_DIR" "$RUN_SETUP" "$ASSUME_YES"
+install_cli
 echo "  Review AGENTS.md and the copied docs for your project's conventions."
 echo ""
 echo "  Docs: https://github.com/first-fluke/agent-valley"

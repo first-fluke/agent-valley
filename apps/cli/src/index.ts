@@ -15,7 +15,7 @@ import { existsSync, unlinkSync } from "node:fs"
 import { resolve } from "node:path"
 import { resolveProjectConfigPath } from "@agent-valley/core/config/project-config-path"
 import { loadConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
-import { Option, program } from "commander"
+import { program } from "commander"
 import pc from "picocolors"
 import { registerAgentClientCommands } from "./agent-client-commands"
 import { registerChiefCommands } from "./chief"
@@ -32,6 +32,7 @@ import {
   waitForDashboard,
   writePids,
 } from "./runtime"
+import { registerSetupCommand } from "./setup/command"
 import { readStatus } from "./status-client"
 import { spawnTunnel, type TunnelHandle, type TunnelLogger } from "./tunnel"
 import { dashboardHost, startWebhookProxy, webhookPort } from "./webhook-proxy"
@@ -70,24 +71,7 @@ function startTunnel(port: string): TunnelHandle {
 program.name("av").description("Agent Valley — AI agent orchestrator").version("0.3.0")
 
 // ── setup ────────────────────────────────────────────────────────────────────
-program
-  .command("setup")
-  .description("Interactive setup wizard")
-  .option("--edit", "Modify specific values in existing config")
-  .addOption(
-    new Option("--mode <mode>", "Setup for local orders (default) or issue tracker automation")
-      .choices(["order", "tracker"])
-      .conflicts("edit"),
-  )
-  .action(async (opts: { edit?: boolean; mode?: "order" | "tracker" }) => {
-    if (opts.edit) {
-      const { setupEdit } = await import("./setup/index")
-      await setupEdit()
-    } else {
-      const { setup } = await import("./setup/index")
-      await setup({ mode: opts.mode })
-    }
-  })
+registerSetupCommand(program)
 
 // ── invite ───────────────────────────────────────────────────────────────────
 program

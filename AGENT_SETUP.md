@@ -1,106 +1,137 @@
-# AGENT_SETUP.md — AI Agent Onboarding Guide
+# Install and configure AV with an agent
 
-> **This document is written for AI agents.**
-> If you are an AI agent (Claude Code, Codex, Gemini, Antigravity, Cursor, Amp, or any other coding assistant), read this file to understand the project and navigate to the right guide.
+Give this document and a target repository to an agent that can run commands on the target machine. The user-facing agent that receives the installation request becomes AV's Chief Director. It installs AV, prepares OMA and project MCP settings, checks readiness, and reports what is complete or still needs action.
 
----
+Capture that initiating session's vendor and model choice before delegating installation. A worker must pass them unchanged to `--actor` and `--model`; its own vendor/model never replaces the initiating agent. An explicit user override takes precedence.
 
-## Project Overview
+This procedure requires the user's installation request. Reading or downloading this document alone does not authorize changes. Follow the user's constraints and the target repository's execution policy. Installation does not authorize a mission, a build, a purchase, account changes, publishing, or changes to client trust settings.
 
-This repository is a **stack-agnostic AI coding agent orchestration harness** based on the [OpenAI Symphony SPEC](https://github.com/openai/symphony/blob/main/SPEC.md).
+## Copy-paste request
 
-### What it does
+Replace the repository path and give this request to your local agent:
 
-1. **Receives a Linear webhook** when an issue moves to "In Progress"
-2. **Creates an isolated git worktree** per issue at `{WORKSPACE_ROOT}/{issue-key}/`
-3. **Spawns a coding agent** (claude, gemini, or codex) in that worktree with a rendered prompt from `WORKFLOW.md`
-4. **Monitors the agent**, handles timeouts and retries
-5. **The agent** reads `AGENTS.md`, implements the issue, commits, opens a PR
-6. **CI validates** the PR → human reviews architecture → merge → worktree GC
+```text
+/absolute/path/to/repo에 AV를 설치하고 설정해줘.
+https://raw.githubusercontent.com/first-fluke/agent-valley/main/AGENT_SETUP.md 를 따라
+너 자신을 Chief Director로 지정해줘. 현재 세션의 정확한 모델을 확인할 수 있으면
+그 모델을 유지하고, 확인할 수 없으면 native default를 저장하고 그렇게 보고해줘.
+AV 설치, OMA 준비, 프로젝트 MCP 설정을 승인한다.
+설정 확인용 미션은 실행하지 말고, 실제 완료 항목과 남은 조치를 보고해줘.
+```
 
-### What Symphony does NOT do
+ChatGPT or Claude in a browser without local shell access cannot perform this installation. Report that limit and have a local shell-capable agent carry out this same request. A web account connection requires a separately configured public MCP server; local setup does not create one.
 
-- Symphony **never writes to Linear**. Agents write to Linear (status changes, comments).
-- Symphony is a **scheduler and runner only**.
+## Resolve the initiating agent's identity
 
----
+Use the initiating agent runtime's trusted identity to choose the Chief Director. A delegated worker uses the identity passed by that initiating session. Do not choose from installed executables, authentication state, repository OMA settings, price, or a model's provider name. For example, an OpenCode session using an OpenAI model remains an `opencode` Chief Director.
 
-## Quick Start
+| Initiating agent runtime | `--actor` |
+|---|---|
+| Codex | `codex` |
+| Claude Code | `claude` |
+| Cursor | `cursor` |
+| Qwen Code | `qwen` |
+| Antigravity | `antigravity` |
+| Grok CLI | `grok` |
+| Kimi CLI | `kimi` |
+| OpenCode | `opencode` |
 
-Use Node.js 26.10.0 and Bun 1.4.2 or later.
+Pass the exact active model only when trusted session metadata or the effective runtime configuration confirms it. Static configuration or a variable such as `ANTHROPIC_MODEL` alone may have been overridden in the session. Do not invent or translate model aliases. If the exact model is unavailable, pass `--model ''`: this clears a saved model pin and uses that CLI's native default. Report that the exact session model was not pinned. Never change the Chief Director to another vendor because it is cheaper or already authenticated. AV can route Actors independently.
+
+If the runtime identity cannot be established or has no supported adapter, report `action_required` with that specific limit. Do not guess a vendor or ask the user to choose one merely because the exact model is unknown.
+
+## Install on the target machine
+
+Resolve the user-selected repository to an absolute path. It must be a Git repository with at least one commit. Check this prerequisite without changing Git history. Preserve existing repository files and user configuration. Check only the needed paths and readiness results; do not print credentials or dump the environment.
+
+If `AGENT_VALLEY_MANAGED_RUN=1` or you are executing an existing AV Chief Director/Actor assignment, perform that assignment directly. Do not start a nested setup or AV mission.
+
+Run the official installer from the selected repository:
 
 ```bash
-# 1. Install dependencies
-bun install
-
-# 2. Copy and fill environment variables
-cp .env.example .env
-# Edit .env with your Linear API key, webhook secret, etc.
-
-# 3. Start the orchestrator
-bun run src/main.ts
-
-# Orchestrator listens on :9741 (configurable via SERVER_PORT)
-# POST /webhook  — Linear webhook receiver
-# GET  /status   — Runtime state
-# GET  /health   — Health check
+set -o pipefail
+cd /absolute/path/to/repo
+curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh \
+  | bash -s -- --yes --no-workflows --no-setup
 ```
 
-See [`docs/guides/environment-setup.md`](docs/guides/environment-setup.md) for detailed Linear setup instructions.
+The installer prepares the required Node.js/Bun runtime and AV launcher without a software build. These flags defer interactive setup and optional repository CI workflows. The installer can also prepare project integrations; the following setup step checks them again with the saved project binding. Check its exit status and actual output before continuing.
 
----
+Use the launcher's installed path rather than relying on the current shell's PATH. Respect an existing `AGENT_VALLEY_BIN_DIR` or an explicitly selected installed launcher:
 
-## Navigate to What You Need
-
-| Task | Read this |
-|---|---|
-| **First time setup** (install, .env, Linear UUIDs) | [`docs/guides/environment-setup.md`](docs/guides/environment-setup.md) |
-| **Implement a Symphony component** | [`docs/guides/implementation-guide.md`](docs/guides/implementation-guide.md) |
-| **Code style, git workflow, common mistakes** | [`docs/guides/conventions.md`](docs/guides/conventions.md) |
-| **Pre-ship checklist, conformance audit** | [`docs/guides/conformance-checklist.md`](docs/guides/conformance-checklist.md) |
-
----
-
-## Key Files (Always Read First)
-
-| File | Why |
-|---|---|
-| `AGENTS.md` | Project conventions, golden principles, component overview — **read this first** |
-| `WORKFLOW.md` | The YAML config + agent prompt template |
-| `.env.example` | All required environment variables |
-| `docs/architecture/LAYERS.md` | Dependency direction rules — violating this breaks CI |
-| `docs/architecture/CONSTRAINTS.md` | 7 forbidden patterns with code examples |
-
----
-
-## Primary Context Files
-
-### AGENTS.md — The Source of Truth
-
-`AGENTS.md` is the single source of truth for all agents. It contains:
-- Build & test commands
-- Architecture overview (7 Symphony components)
-- Security rules
-- Git workflow
-- Conventions and golden principles
-- Metrics
-
-**Always read `AGENTS.md` before starting any task in this repository.**
-
-### WORKFLOW.md — The Contract File
-
-`WORKFLOW.md` has two parts separated by `---`:
-1. **YAML front matter**: Orchestrator configuration (tracker, workspace, agent, concurrency)
-2. **Prompt body**: The template rendered and sent to the agent for each issue
-
-The `$VAR` syntax in YAML references environment variables. The `{{variable}}` syntax in the prompt body is filled at runtime.
-
-### docs/ — Detailed Specifications
-
+```bash
+AV_SETUP_BIN_DIR="${AGENT_VALLEY_BIN_DIR:-$HOME/.local/bin}"
+AV_SETUP_BIN="$AV_SETUP_BIN_DIR/av"
+export PATH="$AV_SETUP_BIN_DIR:$PATH"
+"$AV_SETUP_BIN" setup --help
 ```
-docs/specs/           ← Component-by-component interface specs (read before implementing)
-docs/architecture/    ← Layer rules + forbidden patterns + stack-specific enforcement
-docs/stacks/          ← Quick-start guides per language (TypeScript / Python / Go)
-docs/harness/         ← Security, observability, entropy management, feedback loops
-docs/guides/          ← Step-by-step guides (environment, implementation, conventions, checklist)
+
+If an existing launcher is from an older release and lacks the flags below, update it through the installer before proceeding. Do not run a mission to check the launcher.
+
+The installer also supports `--headless --actor <initiator-vendor> --model <confirmed-model-or-empty> --oma prepare`. That path uses the current invocation project as the target and propagates setup's exit status, but prints progress text and has no separate target flag. Do not combine `--headless` with `--no-setup`. Use the canonical two-step procedure when the user selected a specific target repository, or when you need setup JSON or a saved `--verify` command.
+
+## Save configuration and prepare dependencies
+
+Set `AV_SETUP_WORKSPACE` to the user-selected absolute repository path and `AV_SETUP_ACTOR` from the verified initiating runtime identity. This example is for a Codex initiating session whose exact active model is unavailable; another initiating runtime must use its own table entry. If its exact active model is confirmed, assign that exact ID to `AV_SETUP_MODEL`. A delegated worker preserves these values, including the empty native-default value. Carry the resolved invocation directory and variables into each tool call; do not assume a fresh shell retains earlier assignments.
+
+```bash
+AV_SETUP_WORKSPACE='/absolute/path/to/repo'
+AV_SETUP_BIN_DIR="${AGENT_VALLEY_BIN_DIR:-$HOME/.local/bin}"
+AV_SETUP_BIN="$AV_SETUP_BIN_DIR/av"
+AV_SETUP_ACTOR='codex'
+AV_SETUP_MODEL=''
+export PATH="$AV_SETUP_BIN_DIR:$PATH"
+cd "$AV_SETUP_WORKSPACE"
+"$AV_SETUP_BIN" setup --yes \
+  --actor "$AV_SETUP_ACTOR" --model "$AV_SETUP_MODEL" \
+  --workspace "$AV_SETUP_WORKSPACE" --oma prepare --json
 ```
+
+Always pass this explicit workspace for the user-selected target. Otherwise setup may retain an existing `workspace.root` that points to a different repository.
+
+`--yes` performs local order setup without prompts. It saves `av.yaml` in the invocation directory and Chief Director defaults in `~/.config/agent-valley/settings.yaml`, prepares OMA in the working repository, and installs the project AV skill and MCP entries for Codex, Claude Code, Cursor, Qwen Code, and Antigravity. It uses the existing provider acquisition and readiness adapters. It does not run a paid model probe, start a mission, or complete browser/device login unattended.
+
+OMA preparation is the default. Use `--oma skip` only if the user asks to defer OMA, and report the deferral. An OMA failure must be reported; do not silently turn it into a skip. Preserve existing OMA configuration and use the supported installer/update path instead of editing managed definitions directly.
+
+Leave `--verify` unset unless the user supplied a trusted check or the selected repository already defines one that you can confirm. To save such a check, append `--verify 'the existing trusted check'`. Setup saves this acceptance command; readiness verification does not require executing a mission or building software.
+
+Usually the configuration directory and working repository are the same. If the user identifies configuration directory A and working repository B, run setup from A and pass `--workspace B`:
+
+```bash
+cd /absolute/configuration-A
+"$AV_SETUP_BIN" setup --yes \
+  --actor "$AV_SETUP_ACTOR" --model "$AV_SETUP_MODEL" \
+  --workspace /absolute/repository-B --oma prepare --json
+```
+
+Configuration and mission history stay in A, `workspace.root` selects B, and the client integration in B launches `av mcp --workspace A`. Preserve that binding when retrying or repairing an integration.
+
+## Check the result without starting work
+
+Read setup's JSON and exit status. Its report includes project/config paths, Chief Director selection and readiness, OMA and integration results, and `nextActions`.
+
+| Setup status | Exit | Agent action |
+|---|---|---|
+| `ready` | `0` | Report the verified local setup and any remaining client reload/trust step. |
+| `action_required` | `2` | Preserve saved configuration, report the exact next action, and stop unattended retries. Rerun the same setup command after the action is complete. |
+| `failed` | `1` | Report the actual error and affected path. Fix an authorized, understood cause or report the remaining blocker. |
+
+An installed executable does not prove authentication. Unknown authentication or model readiness must remain visible in the report. Browser/device sign-in is a concrete user action; do not bypass it or choose another vendor to avoid it.
+
+Inspect the integration result's client files and confirm the MCP server points to the configuration directory above. Restart or reload the selected agent client and let the user complete its normal workspace/MCP trust step when required. Desktop clients may need the AV launcher directory on their PATH.
+
+If the current client already exposes the AV tools, use the read-only `av_missions` call to confirm `project` equals the configuration directory, `workspace` equals the selected working repository, and the execution context matches the current session. For the A/B case, check both `project=A` and `workspace=B`. Report this check as pending if the client needs a reload or cannot expose newly installed tools in the current session. Do not call `av_order`, `av_resume`, or any sample goal merely to verify setup.
+
+## Recover while preserving files
+
+- For login or unknown readiness, follow the reported vendor action and rerun the same setup command after login. Do not loop unattended.
+- For an OMA preparation error, retain its diagnostic and fix the stated dependency, permission, or installer failure before retrying. Defer only at the user's request.
+- For an AV skill/MCP name collision or locally edited owned file, preserve the original. Reconcile the reported file only when its ownership and intended binding are established. Keep unrelated entries and user changes; report `action_required` if resolving the collision needs a user decision. Do not delete files or force a managed update.
+- For a missing or malformed configuration key, use the error's key path and named file. Repair only the requested setting and keep unrelated configuration.
+- After an interrupted installation, inspect the installed launcher and existing configuration before retrying. Reuse saved paths and bindings instead of creating a second project.
+
+## Report to the user
+
+Report the target repository and configuration paths, Chief Director vendor, exact saved model or native default, AV launcher, provider readiness, OMA result, and project MCP installation. State whether an `av_missions` check actually ran. List concrete pending actions such as login, reload, trust, or a conflicting file. Distinguish local setup readiness from client connection readiness. Never claim a mission, deployment, remote account connection, or provider login that did not happen.
+
+Further reference: [environment setup](./docs/guides/environment-setup.md), [agent clients](./docs/guides/agent-clients.md), and [native plugins](./docs/guides/native-plugins.md). The procedure above is self-contained; these guides explain optional operation after setup.

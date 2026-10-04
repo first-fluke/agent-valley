@@ -36,16 +36,24 @@ Multiple issues run in parallel up to `actor.max_parallel` (auto-detected from h
 
 ## Quick Start
 
-Run the installer from the Git repository you want actors to work on. It prepares Node.js 26.10.0 and Bun 1.4.2 when needed, installs `av`, and opens the setup wizard in an interactive terminal.
+For agent-led setup, give a local shell-capable agent [AGENT_SETUP.md](./AGENT_SETUP.md) and the target repository. That user-facing initiating agent becomes the Chief Director, keeps its confirmed current model or saves the native default when the exact model is unknown, prepares AV/OMA/project MCP, and reports readiness without starting a mission. Delegating installation to a worker preserves the initiating session's vendor/model.
+
+```text
+/absolute/path/to/repo에 AV를 설치하고 설정해줘.
+https://raw.githubusercontent.com/first-fluke/agent-valley/main/AGENT_SETUP.md 를 따라
+너 자신을 Chief Director로 지정하고, 실제 완료 항목과 남은 조치를 보고해줘.
+AV 설치, OMA 준비, 프로젝트 MCP 설정을 승인한다. 확인용 미션은 실행하지 마.
+```
+
+For interactive setup, run the installer from the Git repository you want actors to work on. It prepares Node.js 26.10.0 and Bun 1.4.2 when needed, installs `av`, and opens the setup wizard in an interactive terminal.
 
 ```bash
 cd /absolute/path/to/repo
 curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
-av order "Fix the login failure"
 ```
 
-The default wizard asks for the target repository and Chief Director CLI and model, and can save a trusted verification command. It guides installation and login for the chosen Chief Director and prepares the latest OMA CLI and skills in the target repository. OMA preparation is selected by default; failures offer retry or deferral. Browser sign-in and unsupported readiness checks may require your input. The repository must have at least one commit. Your choices are saved, so later orders need only a goal. See the [installation, first-task and recovery guide](./docs/guides/environment-setup.md).
+The interactive wizard asks for the target repository and Chief Director CLI and model, and can save a trusted verification command. Agent-led setup passes the initiating agent's own runtime and model choice to `av setup --yes --json`. Setup guides provider preparation and prepares the latest OMA CLI and skills in the target repository. OMA preparation is the default. Browser sign-in and unsupported readiness checks remain concrete pending actions. The repository must have at least one commit. After setup is ready, give AV a goal with `av order "Fix the login failure"`. See the [installation, first-task and recovery guide](./docs/guides/environment-setup.md).
 
 The Chief Director consults its Technical Director, Design Director and Marketing Director concurrently, turns the goal into success criteria and executable checks, creates 4–8 Actors including those advisers, and assigns work using available supported CLIs and installed OMA skills. Up to three independent Actors run in separate worktrees by default; reviewed changes are integrated before dependent work and final verification. Use `--parallel 1` for serial execution. The Technical Director focuses on cost, reuse, standardization and dependencies; the Design Director focuses on usability, user tests, data and retention, including a preference for dark patterns; the Marketing Director focuses on promotion, acquisition, revenue and ROI. The Chief Director reviews evidence and decides whether to repair, reassign, or replan when work fails. Each order produces a report with a plain-language explanation, checks, and remaining limits. Orders start without a tracker or daemon. `--actor` and `--model` override the saved Chief Director choice for one order; `--actors` supplies your own team. See [Chief Director orders and named actors](./docs/guides/chief-missions.md).
 
@@ -66,6 +74,7 @@ The default tunnel provider is ngrok; set `tunnel.provider: cloudflare` in `av.y
 
 ```bash
 bun av setup              # Local orders: repository, Chief Director, login, OMA, verification
+bun av setup --yes --actor codex --model '' --workspace /absolute/path/to/repo --json # Codex initiator, explicit user target
 bun av setup --mode tracker # Linear/GitHub automation setup
 bun av doctor             # Validate configuration and runtime prerequisites
 bun av dev                # Start in foreground (file watching + auto-restart)
@@ -115,7 +124,7 @@ Two YAML config files, merged at startup (project wins over global):
 | `~/.config/agent-valley/settings.yaml` | Global (user) | API key, actor defaults, team dashboard |
 | `av.yaml` | Project | Team config, workspace root, prompt template, routing |
 
-Run `av setup` to create both files interactively. See `av.example.yaml` for format reference.
+Run `av setup` to create both files interactively, or follow [agent-led setup](./AGENT_SETUP.md) for an unattended installation using the initiating agent as Chief Director. See `av.example.yaml` for format reference.
 
 Project configuration uses only `av.yaml`; setup and edits save that file. Configuration uses `actor:`. Actor profiles use `director`, `actors`, and `actorType`; existing profile fields and CLI flags remain aliases.
 
@@ -275,6 +284,7 @@ agent-valley/
 │       ├── validate.sh       Architecture validation (secrets, layer violations)
 │       └── gc.sh             Worktree garbage collector
 ├── AGENTS.md                 Actor instructions (shared entry point)
+├── AGENT_SETUP.md            Agent-led installation and readiness procedure
 ├── CLAUDE.md                 Claude Code project instructions
 └── av.example.yaml       Project config template
 ```

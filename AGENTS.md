@@ -40,6 +40,8 @@ The install script auto-detects project state and branches into new/existing mod
 
 Run `av setup` to create both files interactively and prepare OMA in the target repository. See `av.example.yaml` for format reference and [environment setup](docs/guides/environment-setup.md) for installation and update behavior.
 
+For an authorized agent-led installation, follow [AGENT_SETUP.md](AGENT_SETUP.md). The user-facing initiating agent becomes the Chief Director using its trusted runtime identity and confirmed active model, or an explicit native default. Installer workers preserve that identity. The procedure prepares OMA/project MCP and reports readiness without launching a mission.
+
 Project configuration uses only `av.yaml`. New settings use `actor:`. Product roles are Chief Director, Technical Director, Marketing Director, Design Director, and Actor.
 
 > On missing config, error messages must include the missing key path and which file to set it in.

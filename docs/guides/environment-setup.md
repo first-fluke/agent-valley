@@ -1,5 +1,13 @@
 # Install and operate Agent Valley
 
+## Set up with a local agent
+
+Give your local agent [AGENT_SETUP.md](../../AGENT_SETUP.md) and the target repository. That single document contains the complete installation procedure. The user-facing initiating agent becomes the Chief Director using its trusted runtime identity. It pins the exact active session model only when confirmed; otherwise it passes `--model ''` to clear a stale pin and save the CLI's native default. An installer worker preserves that initiating session's vendor/model. Installed CLIs, OMA configuration, login state, and price do not select the Chief Director.
+
+The agent runs the installer with `--yes --no-workflows --no-setup`, then uses the installed launcher for `av setup --yes --actor <initiator-vendor> --model <confirmed-model-or-empty> --workspace <selected-repo> --oma prepare --json`. The explicit absolute workspace makes the user's selected target take precedence over an existing saved binding. Setup's JSON and exit status distinguish `ready`/0, `action_required`/2, and `failed`/1. Browser/device login, unknown readiness, client reload, and workspace/MCP trust remain explicit pending actions. Stop unattended retries until the reported action is complete; rerun the same command while preserving saved configuration. OMA is deferred only when the user requests `--oma skip`.
+
+This path configures local orders and project MCP without running a mission or starting the dashboard. `av doctor` provides additional human-readable diagnostics; it does not have a `--json` flag. A web-only chat client needs a local agent to perform installation and a separate authenticated server for web MCP access.
+
 ## Install and set up local orders
 
 Start in an existing Git repository with at least one commit. Git and curl must be installed:
@@ -13,7 +21,7 @@ av order "Fix the login failure and add a regression test"
 
 The installer prepares Node.js 26.10.0 and Bun 1.4.2 when needed, installs locked dependencies, and creates a source launcher at `~/.local/bin/av`. Remote installations keep the checkout under `~/.local/share/agent-valley`; a local installation uses its existing checkout. There is no build step. In an interactive terminal, installation opens `av setup --mode order`, including when the script arrives through `curl | bash`.
 
-The default wizard validates the target Git repository, selects the Chief Director CLI and optional model, guides its CLI installation and login, and uses Chief-designed checks unless you supply a trusted acceptance command. Browser or device sign-in remains interactive. If a CLI cannot report its login state, the wizard shows that limitation and offers rechecking or finishing setup later. Other ready worker CLIs are discovered automatically; installing every vendor is unnecessary.
+The interactive wizard validates the target Git repository, selects the Chief Director CLI and optional model, guides its CLI installation and login, and uses Chief-designed checks unless you supply a trusted acceptance command. Agent-led setup supplies the current agent's own vendor/model choice through the noninteractive path above. Browser or device sign-in remains interactive. If a CLI cannot report its login state, readiness remains unknown and the result explains the required action. Other ready worker CLIs are discovered automatically; installing every vendor is unnecessary.
 
 The source installer and completed setup also install the project `av` skill and MCP entry for Codex, Claude Code, Cursor, Qwen Code, and Antigravity. Existing client settings, other skills, and user profiles are preserved; conflicting AV names produce an error with recovery instructions. Restart the client and complete its normal workspace/MCP trust step. Run `av integrations install --workspace /absolute/project` to prepare the integration later. See [agent client integration](./agent-clients.md), [native plugins](./native-plugins.md), and [web OAuth](./web-mcp.md).
 
@@ -21,18 +29,22 @@ The wizard also offers OMA installation or update in the selected target reposit
 
 Preparation downloads the [official OMA installer](https://raw.githubusercontent.com/first-fluke/oh-my-agent/main/cli/install.sh) into a temporary file and runs it to prepare dependencies. It then waits for `bun install --global oh-my-agent@latest` and runs the latest package in the target repository: `install` with `CI=true` for a new harness, or `update --yes --with-new-skills --all` for an existing one. The update includes newly added skills without using `--force`. The wizard checks the installed project metadata and skill files before reporting success. To prepare OMA after deferring it, run `av setup --edit` and select **OMA skills (install/update)**.
 
-Repository and verification settings go in `av.yaml`. The Chief Director defaults go in `~/.config/agent-valley/settings.yaml` as `actor.type` and optional `actor.model`. A blank model selects the CLI default and removes a previous explicit model. Orders honor the saved Chief Director choice; `--actor` and `--model` override it for a single order. See [Chief Director orders](./chief-missions.md) for generated teams and resume behavior.
+Repository and verification settings go in `av.yaml`. The Chief Director defaults go in `~/.config/agent-valley/settings.yaml` as `actor.type` and optional `actor.model`. A blank model selects the CLI default and removes a previous explicit model. Agent-led setup passes that empty value explicitly when it cannot confirm the active session model; a static provider setting alone may have been overridden in the session. Orders honor the saved Chief Director choice; `--actor` and `--model` override it for a single order. See [Chief Director orders](./chief-missions.md) for generated teams and resume behavior.
 
 `av.yaml` is the only project configuration file. Loading, setup, edits, diagnostics, and configuration watching use this filename. Missing or malformed configuration is reported with instructions for fixing `av.yaml`. Legacy `agent:` blocks remain readable inside supported configuration files; within one file, an explicit `actor:` block takes precedence as a whole.
 
-`--yes`, `--no-setup`, CI, or a missing interactive terminal defer the wizard and print its command. For example:
+Without `--headless`, `--yes`, `--no-setup`, CI, or a missing interactive terminal defer the wizard and print its command. For example:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scripts/install.sh | bash -s -- --yes --no-workflows
 av setup
 ```
 
+For an unattended installer run, `--headless --actor <initiator-vendor> --model <confirmed-model-or-empty> --oma prepare` forwards to local order setup and propagates its `0`/`2`/`1` exit status. It uses the current invocation project as the target, has no separate target flag, and remains a progress-text interface. Use the canonical two-step path with explicit `--workspace` for a user-selected target; it also supplies the structured report and supports `--verify`. `--headless` and `--no-setup` cannot be combined.
+
 Run `av setup` again to change the local order configuration, or `av setup --edit` for selected fields. Existing unrelated global settings are preserved.
+
+Setup saves project configuration in its invocation directory. To keep configuration and mission history in directory A while Actors work in repository B, invoke setup from A with `--workspace /absolute/repository-B`. Integrations are installed in B and launch `av mcp --workspace A`. When client tools are available, read `av_missions` and check both `project=A` and `workspace=B`. Preserve this binding when rerunning setup; see [agent client project binding](./agent-clients.md).
 
 ## Set up tracker automation
 

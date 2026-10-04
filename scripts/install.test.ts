@@ -60,9 +60,17 @@ if [[ "$1" == run ]]; then
   if [[ -n "\${AV_TEST_RESOLVE_AGENT:-}" ]]; then
     printf 'agent=%s\\n' "$(command -v "$AV_TEST_RESOLVE_AGENT")" >> "$AV_TEST_LOG"
   fi
+  if [[ "\${3:-}" == setup ]]; then
+    if [[ "\${AV_TEST_SETUP_ASSERT_EOF:-}" == true ]]; then
+      if read -r answer; then echo 'Setup consumed installer input' >&2; exit 9; fi
+      echo setup-stdin=eof >> "$AV_TEST_LOG"
+    fi
+    exit "\${AV_TEST_SETUP_EXIT:-0}"
+  fi
 fi
 `,
   )
+  executable("curl", "echo 'Unexpected external network request in installer fixture' >&2; exit 99")
   executable(
     "git",
     `
@@ -193,6 +201,119 @@ test("--no-setup and CI defer configuration without consuming answers or hanging
   expect(ci.status).toBe(0)
   expect(ci.stdout).toContain("setup --mode order")
   expect(readFileSync(log, "utf8")).not.toContain("arg=setup")
+})
+
+test("headless setup runs in CI without a terminal and owns project integrations", () => {
+  env.CI = "true"
+  env.AV_TEST_SETUP_ASSERT_EOF = "true"
+  const result = install(target, ["--headless", "--actor", "codex", "--oma", "skip", "--no-workflows"])
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  const calls = readFileSync(log, "utf8")
+  expect(calls).toContain(
+    `cwd=${target}\narg=run\narg=${source}/apps/cli/src/index.ts\narg=setup\narg=--yes\narg=--workspace\narg=${target}\narg=--actor\narg=codex\narg=--oma\narg=skip`,
+  )
+  expect(calls).toContain("stdin=pipe\nsetup-stdin=eof")
+  expect(calls).not.toContain("arg=integrations")
+  expect(calls.indexOf("arg=--ignore-scripts")).toBeLessThan(calls.indexOf("arg=setup"))
+  expect(existsSync(join(home, ".local/bin/av"))).toBe(true)
+  expect(result.stdout).not.toContain("Setup deferred")
+})
+
+test("headless forwarding preserves literal model arguments and an explicit empty model pin", () => {
+  const marker = join(root, "must not execute")
+  const model = `model with spaces $(touch '${marker}') ; \`touch '${marker}'\``
+  const result = install(source, ["--headless", "--actor", "codex", "--model", model, "--oma", "prepare"])
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  expect(readFileSync(log, "utf8")).toContain(`arg=--model\narg=${model}\narg=--oma\narg=prepare`)
+  expect(existsSync(marker)).toBe(false)
+  rmSync(log)
+  const clear = install(source, ["--headless", "--yes", "--actor", "codex", "--model", ""])
+  expect(clear.status, `${clear.stdout}\n${clear.stderr}`).toBe(0)
+  expect(readFileSync(log, "utf8")).toContain("arg=--model\narg=\n")
+  expect(readFileSync(log, "utf8")).not.toContain("arg=integrations")
+})
+
+test("headless installer leaves actor identity and OMA defaults to setup when omitted", () => {
+  const result = install(source, ["--headless"])
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  const calls = readFileSync(log, "utf8")
+  expect(calls).toContain(`arg=setup\narg=--yes\narg=--workspace\narg=${source}`)
+  expect(calls).not.toContain("arg=--actor")
+  expect(calls).not.toContain("arg=--model")
+  expect(calls).not.toContain("arg=--oma")
+})
+
+test.each([0, 1, 2])("headless installer propagates setup exit status %s", (status) => {
+  env.AV_TEST_SETUP_EXIT = String(status)
+  const result = install(target, ["--headless", "--actor", "codex", "--no-workflows"])
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(status)
+  expect(existsSync(join(home, ".local/bin/av"))).toBe(true)
+  expect(readFileSync(log, "utf8")).toContain("arg=setup")
+})
+
+test.each([
+  ["--headless", "--no-setup"],
+  ["--headless", "--actor"],
+  ["--headless", "--actor", "unsupported"],
+  ["--headless", "--actor", ""],
+  ["--headless", "--model"],
+  ["--headless", "--model", "--yes"],
+  ["--headless", "--model", "-y"],
+  ["--headless", "--model", "   "],
+  ["--headless", "--oma"],
+  ["--headless", "--oma", "unsupported"],
+  ["--headless", "--oma", ""],
+  ["--headless", "--actor", "codex", "--actor", "claude"],
+  ["--headless", "--model", "", "--model", "other"],
+  ["--headless", "--oma", "skip", "--oma", "prepare"],
+  ["--actor", "codex"],
+  ["--model", ""],
+  ["--oma", "skip"],
+  ["--headless", "--json"],
+])("invalid installer options fail before network or filesystem effects: %s", (...args) => {
+  const result = install(target, args)
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("agent-valley")
+  expect(existsSync(log)).toBe(false)
+  expect(existsSync(join(home, ".local/bin/av"))).toBe(false)
+  expect(existsSync(join(home, ".local/share/agent-valley"))).toBe(false)
+  expect(existsSync(join(target, "AGENTS.md"))).toBe(false)
+  expect(existsSync(join(target, ".agents"))).toBe(false)
+})
+
+test("direct launcher installer validates headless conflicts before dependencies or launcher writes", () => {
+  const result = spawnSync(
+    "bash",
+    [join(source, "scripts/install-cli.sh"), source, target, "false", "true", "--headless"],
+    { cwd: target, env, encoding: "utf8", timeout: 5_000 },
+  )
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("setup deferral")
+  expect(existsSync(log)).toBe(false)
+  expect(existsSync(join(home, ".local/bin/av"))).toBe(false)
+})
+
+test("curl-style headless install forwards caller identity without consuming the piped script", () => {
+  env.CI = "true"
+  env.AV_TEST_SETUP_ASSERT_EOF = "true"
+  const result = spawnSync(
+    "bash",
+    ["-s", "--", "--headless", "--actor", "claude", "--model", "", "--oma", "skip", "--no-workflows"],
+    {
+      input: readFileSync(join(source, "scripts/install.sh"), "utf8"),
+      cwd: target,
+      env,
+      encoding: "utf8",
+      timeout: 10_000,
+    },
+  )
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  const checkout = join(home, ".local/share/agent-valley")
+  const calls = readFileSync(log, "utf8")
+  expect(calls).toContain(`arg=${checkout}/apps/cli/src/index.ts\narg=setup\narg=--yes`)
+  expect(calls).toContain("arg=--actor\narg=claude\narg=--model\narg=\narg=--oma\narg=skip")
+  expect(calls).toContain("setup-stdin=eof")
+  expect(calls).not.toContain("arg=integrations")
 })
 
 test("absolute av invocation discovers a native agent without local bin on the caller PATH", () => {

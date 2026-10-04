@@ -34,7 +34,7 @@ See [Qwen marketplace sources](https://qwenlm.github.io/qwen-code-docs/en/users/
 agy plugin install ./integrations/plugins/antigravity/av
 ```
 
-Open the repository where AV should work and run `av setup`. Setup saves the Chief Director settings and installs that project's MCP configuration. Restart the client and complete its normal workspace/MCP trust steps. If AV configuration is in directory A and its target repository is B, setup installs the client entry in B and keeps the server bound to A; see [project binding](./agent-clients.md).
+For agent-led runtime installation and configuration, give the local agent [AGENT_SETUP.md](../../AGENT_SETUP.md) and the repository where AV should work. The user-facing initiating agent becomes the Chief Director and carries its confirmed active model or explicitly saves the native default; an installer worker preserves that identity. Setup saves that choice, prepares OMA, and installs the project's MCP configuration without starting a mission. Restart the client and complete its normal workspace/MCP trust steps; read `av_missions` to check the connection when the tools are available. If AV configuration is in directory A and its target repository is B, setup installs the client entry in B and keeps the server bound to A; see [project binding](./agent-clients.md).
 
 The public catalogs point to `integrations/`, which contains the portable identity, native compatibility manifests, and shared skill. The public packages contain no project-specific MCP command or server URL. They need the project's configured AV MCP server. Installing this plugin does not start a mission or connect a ChatGPT/Claude web account; [web access](./web-mcp.md) requires a running authenticated server and an account connection.
 

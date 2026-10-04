@@ -7,6 +7,7 @@ export interface IntegrationFile {
   before: string | null
   after: string
   mode: number
+  writeMode?: number
 }
 
 export function integrationConflict(path: string, reason: string): Error {
@@ -52,12 +53,12 @@ export async function integrationFile(
   }
 }
 
-async function replaceFile(file: IntegrationFile, content: string): Promise<void> {
+async function replaceFile(file: IntegrationFile, content: string, mode = file.mode): Promise<void> {
   await mkdir(dirname(file.path), { recursive: true })
   const temporary = `${file.path}.av-${randomUUID()}`
   try {
-    await writeFile(temporary, content, { flag: "wx", mode: file.mode })
-    await chmod(temporary, file.mode)
+    await writeFile(temporary, content, { flag: "wx", mode })
+    await chmod(temporary, mode)
     await rename(temporary, file.path)
   } finally {
     await rm(temporary, { force: true })
@@ -65,7 +66,9 @@ async function replaceFile(file: IntegrationFile, content: string): Promise<void
 }
 
 export async function applyIntegrationFiles(root: string, files: IntegrationFile[]): Promise<string[]> {
-  const changed = files.filter((file) => file.before !== file.after)
+  const changed = files.filter(
+    (file) => file.before !== file.after || (file.writeMode !== undefined && file.writeMode !== file.mode),
+  )
   const applied: IntegrationFile[] = []
   try {
     for (const file of changed) {
@@ -73,7 +76,7 @@ export async function applyIntegrationFiles(root: string, files: IntegrationFile
       if (current.before !== file.before || current.mode !== file.mode) {
         throw integrationConflict(file.path, "file changed during installation; no concurrent edits are overwritten")
       }
-      await replaceFile(file, file.after)
+      await replaceFile(file, file.after, file.writeMode ?? file.mode)
       applied.push(file)
     }
   } catch (error) {
@@ -81,7 +84,8 @@ export async function applyIntegrationFiles(root: string, files: IntegrationFile
     for (const file of applied.reverse()) {
       try {
         const current = await integrationFile(root, file.path, file.after, file.mode)
-        if (current.before !== file.after) throw new Error("changed since installation")
+        if (current.before !== file.after || current.mode !== (file.writeMode ?? file.mode))
+          throw new Error("changed since installation")
         if (file.before === null) await rm(file.path)
         else await replaceFile(file, file.before)
       } catch {

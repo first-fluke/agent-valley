@@ -35,6 +35,10 @@ export interface ClientIntegrationResult {
   files: string[]
 }
 
+export interface ClientIntegrationPlan extends Omit<ClientIntegrationResult, "files"> {
+  files: IntegrationFile[]
+}
+
 const owner = "agent-valley/client-skill"
 const receiptName = ".av-install.json"
 
@@ -79,10 +83,10 @@ export function parseClientToml(source: string): unknown {
   return parseToml(source, { integersAsBigInt: "asNeeded" })
 }
 
-export async function installClientIntegrations(
+export async function prepareClientIntegrations(
   workspaceRoot: string,
   options: ClientIntegrationOptions = {},
-): Promise<ClientIntegrationResult> {
+): Promise<ClientIntegrationPlan> {
   let root: string
   try {
     root = await realpath(resolve(workspaceRoot))
@@ -122,8 +126,16 @@ export async function installClientIntegrations(
     workspaceRoot: root,
     projectRoot,
     clients: [...integrationClients],
-    files: await applyIntegrationFiles(root, files),
+    files,
   }
+}
+
+export async function installClientIntegrations(
+  workspaceRoot: string,
+  options: ClientIntegrationOptions = {},
+): Promise<ClientIntegrationResult> {
+  const plan = await prepareClientIntegrations(workspaceRoot, options)
+  return { ...plan, files: await applyIntegrationFiles(plan.workspaceRoot, plan.files) }
 }
 
 export async function installClientIntegrationsCommand(
