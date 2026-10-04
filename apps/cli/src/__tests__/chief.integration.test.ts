@@ -24,17 +24,18 @@ let root: string
 let repo: string
 let logPath: string
 
-async function fakeClaude(mode: "success" | "repair" | "interrupt" = "success") {
+async function fakeClaude(mode: "success" | "repair" | "interrupt" = "success", directorOrder: readonly string[] = []) {
   const script = join(root, "fake-claude.cjs")
   await writeFile(
     script,
     `
 const fs = require('node:fs');
 const log = ${JSON.stringify(logPath)};
+const directorOrder = ${JSON.stringify(directorOrder)};
 let prompt = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => prompt += chunk);
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   const stage = prompt.startsWith('You are the Chief Director coordinating') ? 'plan'
     : prompt.startsWith("Review the mission plan as the Chief Director's Technical Director") ? 'technical-review'
     : prompt.startsWith("Review the mission goal as the Chief Director's Design Director") ? 'design-review'
@@ -43,6 +44,15 @@ process.stdin.on('end', () => {
     : prompt.startsWith("Write the Chief Director's outcome report") ? 'report'
     : prompt.startsWith('Perform the Chief Director') ? 'final-review'
     : prompt.startsWith('Independently review') ? 'review' : 'work';
+  const directorIndex = directorOrder.indexOf(stage);
+  if (directorIndex > 0) {
+    const preceding = directorOrder.slice(0, directorIndex);
+    const deadline = Date.now() + 5000;
+    while (!preceding.every(previous => fs.existsSync(log + '.' + previous + '.completed'))) {
+      if (Date.now() >= deadline) throw new Error('Director fixture did not complete its preceding parallel stages');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  }
   const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\\n').filter(Boolean).map(JSON.parse) : [];
   const workers = calls.filter(call => call.stage === 'work').length;
   fs.appendFileSync(log, JSON.stringify({ stage, cwd: process.cwd(), prompt }) + '\\n');
@@ -81,6 +91,8 @@ process.stdin.on('end', () => {
     const delivered = fs.existsSync('deliverable.txt');
     result = JSON.stringify({ passed: delivered, summary: 'Inspected deliverable.txt in the mission worktree.', findings: delivered ? [] : ['Write deliverable.txt'], ...(stage === 'final-review' ? { criteria: [{ criterion: 'deliverable.txt contains accepted', passed: delivered, evidence: 'Read deliverable.txt and checked the acceptance command result' }] } : {}) });
   }
+  // The runner can stop this process immediately after its terminal event.
+  if (directorIndex >= 0) fs.writeFileSync(log + '.' + stage + '.completed', 'completed');
   process.stdout.write(JSON.stringify({ type: 'result', is_error: isError, result, duration_ms: 1 }) + '\\n');
 });
 `,
@@ -301,30 +313,30 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     )
   }, 20_000)
 
-  it("repairs real verifier failures instead of trusting successful worker and reviewer messages", async () => {
-    await fakeClaude("repair")
-    const mission = await runOrder(
-      "Create a verified deliverable",
-      { workspace: repo, verify, agent: "claude", repairs: "1", timeout: "10" },
-      root,
-    )
-    expect(mission.status).toBe("completed")
-    expect(mission.tasks[0]?.attempts).toBe(2)
-    expect(mission.repairRound).toBe(1)
-    expect((await calls()).map((call) => call.stage)).toEqual([
-      "technical-review",
-      "design-review",
-      "marketing-review",
-      "plan",
-      "work",
-      "review",
-      "work",
-      "review",
-      "final-review",
-      "report",
-    ])
-    expect(await readFile(join(mission.workspace.path, "deliverable.txt"), "utf8")).toBe("accepted")
-  }, 20_000)
+  it.each([
+    { schedule: "forward", directorOrder: ["technical-review", "design-review", "marketing-review"] },
+    { schedule: "reversed", directorOrder: ["marketing-review", "design-review", "technical-review"] },
+    { schedule: "design first", directorOrder: ["design-review", "technical-review", "marketing-review"] },
+  ])(
+    "repairs real verifier failures with $schedule Directors instead of trusting successful messages",
+    async ({ directorOrder }) => {
+      await fakeClaude("repair", directorOrder)
+      const mission = await runOrder(
+        "Create a verified deliverable",
+        { workspace: repo, verify, agent: "claude", repairs: "1", timeout: "10", parallel: "3" },
+        root,
+      )
+      expect(mission.status).toBe("completed")
+      expect(mission.tasks[0]?.attempts).toBe(2)
+      expect(mission.repairRound).toBe(1)
+      const stages = (await calls()).map((call) => call.stage)
+      expect(stages.slice(0, 3)).toEqual(directorOrder)
+      expect(stages.slice(0, 3).sort()).toEqual(["design-review", "marketing-review", "technical-review"])
+      expect(stages.slice(3)).toEqual(["plan", "work", "review", "work", "review", "final-review", "report"])
+      expect(await readFile(join(mission.workspace.path, "deliverable.txt"), "utf8")).toBe("accepted")
+    },
+    20_000,
+  )
 
   it("retains a failed worktree and resumes interrupted work from durable state", async () => {
     await fakeClaude("interrupt")
