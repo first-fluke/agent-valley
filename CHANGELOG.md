@@ -6,6 +6,60 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [0.4.0](https://github.com/first-fluke/agent-valley/compare/v0.3.0...v0.4.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **chief:** Project configuration is read only from av.yaml. Rename existing valley.yaml files to av.yaml before running AV.
+
+### Features
+
+* address assessment findings across runtime and dashboard ([de66920](https://github.com/first-fluke/agent-valley/commit/de66920cc747694493f2eeab993b9966103e6fc3))
+* **chief:** add durable goal coordination and verification ([1dfe7cc](https://github.com/first-fluke/agent-valley/commit/1dfe7ccf66d419985a1a32d1f17ad00fdc2a25c8))
+* **chief:** automate verified missions with director teams ([7aa1ae7](https://github.com/first-fluke/agent-valley/commit/7aa1ae7fb0959270b35e7c33d101ae148210e816))
+* **cli:** auto-register linear webhook and add av doctor ([958bfad](https://github.com/first-fluke/agent-valley/commit/958bfad29d055e9dc9c8120df79b3f90cdb8f7e9))
+* **clients:** add durable MCP missions and native plugin exports ([d905d5b](https://github.com/first-fluke/agent-valley/commit/d905d5b32b3757ed1065daf94e9043b3a3267a26))
+* **config:** auto-route issues to oma workflows and inject guidance ([2b57cd4](https://github.com/first-fluke/agent-valley/commit/2b57cd460c739d5d13182b4c17ee9f9061625764))
+* **config:** wire max_parallel and add verify_command schema ([f33e331](https://github.com/first-fluke/agent-valley/commit/f33e331980940711c7cafea24b80f4154683d968))
+* **dashboard:** bearer-token auth and mounted intervention ui ([2593d89](https://github.com/first-fluke/agent-valley/commit/2593d89a82d4c1366528c33efa7215035faec459))
+* **observability:** budget persistence, otel genai, ledger relay ([77d8702](https://github.com/first-fluke/agent-valley/commit/77d87029b348d9f07e4f077e01da7826945679d6))
+* **orchestrator:** thread agent pid for crash-recovery reattach ([414258d](https://github.com/first-fluke/agent-valley/commit/414258d5d2c455a68308695fc06983c01638acbb))
+* **orchestrator:** verification gate, crash recovery, classified retry ([38af8ff](https://github.com/first-fluke/agent-valley/commit/38af8ffdd93e8beb62e150ed6abf0f4f34804b56))
+* **qwen:** add native chief and actor support ([a607968](https://github.com/first-fluke/agent-valley/commit/a607968e4af7b0ab7b1827e1218ef800b67f060e))
+* **security:** sandbox credential isolation and injection spotlighting ([8632373](https://github.com/first-fluke/agent-valley/commit/8632373c8d904ea58677d6532fec0398bdb1babc))
+* **sessions:** add kimi (moonshot) as a supported vendor ([d0f8966](https://github.com/first-fluke/agent-valley/commit/d0f896620be0b97c13c3fbfcfe3f9b8cc1ab34fa))
+* **sessions:** add opencode as a supported vendor ([c828d6b](https://github.com/first-fluke/agent-valley/commit/c828d6b83b9278fcacae9644ff6f199a0a26007b))
+* **sessions:** os sandbox isolation with fail-closed default ([4bc17cc](https://github.com/first-fluke/agent-valley/commit/4bc17cca0446669e1b62ae9070a87c5cc6219b69))
+* **sessions:** replace gemini with antigravity, cursor, grok adapters ([b11e8bc](https://github.com/first-fluke/agent-valley/commit/b11e8bcce03dc9a24d6088e7c8e703318069c35b))
+* **setup:** preserve initiating agent in unattended installation ([1e95da0](https://github.com/first-fluke/agent-valley/commit/1e95da03fa6044d6793cd03cac2c3c8916cdec12))
+* **tracker:** thread github delivery-id for precise webhook dedup ([1d60037](https://github.com/first-fluke/agent-valley/commit/1d60037b2cab05628ddcdd3d28225d761109f18b))
+* **tracker:** timing-safe hmac and webhook replay dedup ([87a49b3](https://github.com/first-fluke/agent-valley/commit/87a49b3a5db848216d62785b0591db9c05da92fc))
+
+
+### Bug Fixes
+
+* await result handlers during shutdown ([e0849cf](https://github.com/first-fluke/agent-valley/commit/e0849cf0e463965556ab287fff766397cce1ac70))
+* **cli:** report mission outcomes with accurate exit codes ([d5f58d2](https://github.com/first-fluke/agent-valley/commit/d5f58d28a262000ae5458cba07061ea9bf7aa5d1))
+* **config:** reduce workflow-routing false positives ([55a9806](https://github.com/first-fluke/agent-valley/commit/55a9806599574fca864c4956d8ef40b856bf31a7))
+* **install:** preserve OMA settings and pin source releases ([dd80c5a](https://github.com/first-fluke/agent-valley/commit/dd80c5ab5a118a42424ce09ffc9d8c948c6546a4))
+* **oma:** verify strict receipt support for CLI 15.0.15 ([c5bc558](https://github.com/first-fluke/agent-valley/commit/c5bc5580f2ef2658e36a7bb431b250a9b3350b53))
+* **plugins:** include licenses in distributed packages ([febb07a](https://github.com/first-fluke/agent-valley/commit/febb07a1a966df33d496ca51dcaac4bd15a11877))
+* preserve linux workspace identity and isolate test fixtures ([acd7c2a](https://github.com/first-fluke/agent-valley/commit/acd7c2afbe79da2b4920c76ee0b39de676575647))
+* **release:** publish standalone Node packages with aligned versions ([9b0c466](https://github.com/first-fluke/agent-valley/commit/9b0c466c05b69516d5b7a74b2070bc0e5d897d12))
+* repair installation and agent farm lifecycle ([6ef27b1](https://github.com/first-fluke/agent-valley/commit/6ef27b1fe6bbecfc2d05615ab2e7801c34b81936))
+* **workspace:** non-destructive merge-conflict resolution ([8d45efd](https://github.com/first-fluke/agent-valley/commit/8d45efdf769b198a206ac6f633ed8c2487b4ee41))
+
+
+### Documentation
+
+* document new config, env vars, and updated specs ([6812d61](https://github.com/first-fluke/agent-valley/commit/6812d61f001e0a80ee9a25cfb41ca8f10bf16979))
+
+
+### Tests
+
+* **chief:** allow parallel director completion order ([029199d](https://github.com/first-fluke/agent-valley/commit/029199dbce7e6c2ff93cbcbdd95d6a0e8b53c642))
+
 ## [0.3.0](https://github.com/first-fluke/agent-valley/compare/v0.2.0...v0.3.0) (2026-04-22)
 
 
