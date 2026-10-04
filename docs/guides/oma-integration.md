@@ -23,9 +23,9 @@ verify:
   command: npm test
 ```
 
-Strict mode currently supports OMA CLI **15.0.10** and its v1 agent-run receipts. Run `av doctor` from the target project to check the CLI, trigger table, routed workflow files, and `verify.command`. A routing rule may override `verify.command` for that route, but the project-level command is required so the default route also has a check.
+Strict mode currently supports OMA CLI **15.0.15** and its v1 agent-run receipts. Native code, analysis, tampered-evidence, and Chief task-gate tests verify this version. Run `av doctor` from the target project to check the CLI, trigger table, routed workflow files, and `verify.command`. A routing rule may override `verify.command` for that route, but the project-level command is required so the default route also has a check.
 
-Install the supported CLI with `npm install -g oh-my-agent@15.0.10`. Native receipt commands use `--project-root`; `--root` is not accepted. The project-root and workspace arguments must point to the current issue worktree.
+Install the supported CLI with `npm install -g oh-my-agent@15.0.15`. Native receipt commands use `--project-root`; `--root` is not accepted. The project-root and workspace arguments must point to the current issue worktree.
 
 At dispatch, Valley writes a one-task OMA session plan in the issue worktree. Its session and task IDs equal the Valley attempt ID; the plan pins the operator-configured verification command. The agent prompt contains `oma agent begin`, `verify --required`, and `finish` instructions for that exact attempt and worktree.
 
@@ -35,6 +35,6 @@ Before auto-commit or delivery, Valley checks the completed OMA receipt's run, t
 
 After delivery succeeds, Valley persists a pending tracker finalization before asking the tracker to move the issue to Done. If that update fails, later reconciliation and restart recovery retry only the tracker update. The agent, verification, merge, push, PR creation, and usage accounting are not repeated. A confirmed cancellation clears the pending record without a Done event or DAG unblocking.
 
-OMA 15.0.10 has no machine-readable read-only command that exposes its full `resultEvidenceValid` verdict. Valley accepts only the exact `<agent>:completed` status line from that version and checks the required verification receipts itself. Unknown output or an unavailable CLI fails closed. The receipts are local evidence against accidental stale reuse, not a security boundary against an agent that deliberately edits its own records.
+AV accepts only the exact `<agent>:completed` status line from OMA 15.0.15 and checks the required verification receipts itself. Unknown output or an unavailable CLI fails closed. The receipts are local evidence against accidental stale reuse, not a security boundary against an agent that deliberately edits its own records.
 
 The native-contract integration tests create temporary git repositories and exercise `begin → verify --required → finish → status` for both code and analysis. They also change code or report content after completion and require rejection. These tests run when the supported OMA CLI is installed; they do not invoke a model or skill.

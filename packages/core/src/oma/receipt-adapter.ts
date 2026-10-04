@@ -1,4 +1,4 @@
-/** OMA 15.0.10 receipt adapter. Strict mode is opt-in in av.yaml. */
+/** OMA 15.0.15 receipt adapter. Strict mode is opt-in in av.yaml. */
 import { spawnSync } from "node:child_process"
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { getCachedTriggerTable, routeIssue } from "../config/workflow-router"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 
-export const SUPPORTED_OMA_VERSION = "15.0.10"
+export const SUPPORTED_OMA_VERSION = "15.0.15"
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HASH = /^[a-f0-9]{64}$/
 
