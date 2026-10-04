@@ -1,5 +1,5 @@
-# Release PR → exact commit CI → guarded merge → GitHub release → npm.
-# Keep the full chain in one run: GITHUB_TOKEN pushes do not start another run.
+# Release PR → exact commit CI → guarded merge → GitHub release → dispatch npm.
+# GITHUB_TOKEN pushes do not start another run; workflow_dispatch does.
 
 name: Release
 
@@ -126,35 +126,21 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           skip-github-pull-request: true
 
-  npm-publish:
-    name: Publish to npm
+  dispatch-publish:
+    name: Start npm publication from the release tag
     runs-on: ubuntu-latest
     needs: github-release
     if: needs.github-release.outputs.release_created == 'true'
     permissions:
       contents: read
-      id-token: write
+      actions: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.github-release.outputs.tag_name }}
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-          registry-url: https://registry.npmjs.org
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - run: bun install --frozen-lockfile
-      - name: Check release version alignment
-        run: node scripts/check-release-versions.mjs
-      - run: bun run build
-        working-directory: apps/cli
-      - name: Verify standalone npm installation and Node runtime
-        run: node scripts/verify-cli-package.mjs apps/cli/dist/npm
-      - run: npm publish --ignore-scripts --provenance --access public
-        working-directory: apps/cli/dist/npm
+      - uses: actions/github-script@v7
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_TAG: ${{ needs.github-release.outputs.tag_name }}
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo, workflow_id: 'npm-publish.yml', ref: process.env.RELEASE_TAG
+            });
+            core.info(`Started Publish npm at ${process.env.RELEASE_TAG}`);

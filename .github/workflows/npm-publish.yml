@@ -1,0 +1,58 @@
+# Dispatch at the release tag so npm provenance names the actual build commit.
+name: Publish npm
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  npm-publish:
+    name: Publish verified release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require a release tag
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          case "$RELEASE_REF" in
+            refs/tags/v*) ;;
+            *) echo "Run Publish npm at a vX.Y.Z release tag, or rerun its failed job." >&2; exit 1 ;;
+          esac
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: Check release version and tag alignment
+        run: |
+          node scripts/check-release-versions.mjs
+          EXPECTED_TAG="v$(node -p 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
+          if [ "$GITHUB_REF_NAME" != "$EXPECTED_TAG" ]; then
+            echo "Release tag $GITHUB_REF_NAME must match package version $EXPECTED_TAG." >&2
+            exit 1
+          fi
+      - run: bun run build
+        working-directory: apps/cli
+      - name: Verify standalone npm installation and Node runtime
+        run: node scripts/verify-cli-package.mjs apps/cli/dist/npm
+      - run: npm publish --ignore-scripts --provenance --access public
+        working-directory: apps/cli/dist/npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

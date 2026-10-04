@@ -31,6 +31,21 @@
       "semicolons": "asNeeded"
     }
   },
+  "overrides": [
+    {
+      "includes": [
+        "integrations/plugin.json",
+        "integrations/.claude-plugin/plugin.json",
+        "integrations/.cursor-plugin/plugin.json",
+        "integrations/qwen-extension.json"
+      ],
+      "json": {
+        "formatter": {
+          "expand": "always"
+        }
+      }
+    }
+  ],
   "files": {
     "includes": [
       "**",
