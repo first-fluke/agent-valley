@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { resolve } from "node:path"
+import { AV_VERSION } from "@agent-valley/core/version"
 import { type CallToolResult, McpServer, ResourceTemplate } from "@modelcontextprotocol/server"
 import { z } from "zod"
 import {
@@ -31,7 +32,7 @@ async function toolResult(action: () => Promise<Record<string, unknown>>): Promi
 export function createAvMcpServer(api: MissionApiPort, options: AvMcpOptions): McpServer {
   const managed = (options.env ?? process.env).AGENT_VALLEY_MANAGED_RUN === "1"
   const server = new McpServer(
-    { name: "agent-valley", version: "0.3.0" },
+    { name: "agent-valley", version: AV_VERSION },
     {
       maxToolInputElements: 100,
       instructions:

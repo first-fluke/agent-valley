@@ -40,6 +40,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
@@ -49,9 +51,13 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - name: Check release version alignment
+        run: node scripts/check-release-versions.mjs
       - run: bun run build
         working-directory: apps/cli
-      - run: npm publish --provenance --access public
-        working-directory: apps/cli
+      - name: Verify standalone npm installation and Node runtime
+        run: node scripts/verify-cli-package.mjs apps/cli/dist/npm
+      - run: npm publish --ignore-scripts --provenance --access public
+        working-directory: apps/cli/dist/npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,6 +1,5 @@
 import { lstat, realpath } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { parse as parseToml } from "smol-toml"
 import { clientSkillAssetCandidates, loadClientSkillAsset } from "./client-integrations-assets"
 import { jsonMcpFile, type ParseToml, tomlMcpFile } from "./client-integrations-config"
 import {
@@ -11,6 +10,9 @@ import {
   integrationFile,
   safeIntegrationPath,
 } from "./client-integrations-files"
+import { parseClientToml } from "./client-toml"
+
+export { parseClientToml } from "./client-toml"
 
 export const integrationClients = ["codex", "claude", "qwen", "cursor", "antigravity"] as const
 export type IntegrationClient = (typeof integrationClients)[number]
@@ -77,10 +79,6 @@ async function skillFiles(root: string, relativeDirectory: string, skill: string
   }
   receipt.after = `${JSON.stringify({ owner, version: 1, skillSha256: contentHash(skill) }, null, 2)}\n`
   return [markdown, receipt]
-}
-
-export function parseClientToml(source: string): unknown {
-  return parseToml(source, { integersAsBigInt: "asNeeded" })
 }
 
 export async function prepareClientIntegrations(

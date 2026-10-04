@@ -15,6 +15,7 @@ import { existsSync, unlinkSync } from "node:fs"
 import { resolve } from "node:path"
 import { resolveProjectConfigPath } from "@agent-valley/core/config/project-config-path"
 import { loadConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
+import { AV_VERSION } from "@agent-valley/core/version"
 import { program } from "commander"
 import pc from "picocolors"
 import { registerAgentClientCommands } from "./agent-client-commands"
@@ -68,7 +69,7 @@ function startTunnel(port: string): TunnelHandle {
   return spawnTunnel(cfg.tunnel, { port, logger: tunnelLogger })
 }
 
-program.name("av").description("Agent Valley — AI agent orchestrator").version("0.3.0")
+program.name("av").description("Agent Valley — AI agent orchestrator").version(AV_VERSION)
 
 // ── setup ────────────────────────────────────────────────────────────────────
 registerSetupCommand(program)

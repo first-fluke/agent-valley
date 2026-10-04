@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { stripVTControlCharacters } from "node:util"
 import { buildAgentEnv, getAgentAuthEnvKeys } from "@agent-valley/core/sessions/base-session"
 import { resolveBinaryPath } from "@agent-valley/core/sessions/sandbox-binary"
+import { parseClientToml } from "./client-toml"
 import { AGENT_BINARY, AGENT_INSTALL_HINT, AGENT_LOGIN_HINT, AGENT_TYPES, type AgentType } from "./doctor-checks"
 import { qwenAuth } from "./qwen-discovery"
 
@@ -105,7 +106,7 @@ function defaultDeps(): DiscoveryDeps {
       }
     },
     readFile: (path) => readFileSync(path, "utf8"),
-    parseToml: (content) => Bun.TOML.parse(content),
+    parseToml: parseClientToml,
     probe: defaultProbe,
   }
 }

@@ -6,6 +6,7 @@ import { connectAsideBrowser, screenshotCode } from "./capture-mcp"
 import { capturePolicySchema } from "./capture-schema"
 
 const sdk = vi.hoisted(() => ({
+  client: vi.fn(),
   connect: vi.fn(),
   listTools: vi.fn(),
   callTool: vi.fn(),
@@ -14,12 +15,16 @@ const sdk = vi.hoisted(() => ({
 }))
 vi.mock("@modelcontextprotocol/client", () => ({
   Client: class {
+    constructor(info: unknown) {
+      sdk.client(info)
+    }
     connect = sdk.connect
     listTools = sdk.listTools
     callTool = sdk.callTool
     close = sdk.close
   },
 }))
+vi.mock("../version", () => ({ AV_VERSION: "9.2.1-rc.4" }))
 vi.mock("@modelcontextprotocol/client/stdio", () => ({
   StdioClientTransport: class {
     constructor(config: unknown) {
@@ -62,6 +67,7 @@ describe("Aside MCP binding without spawning", () => {
     )
     const policy = capturePolicySchema.parse({ enabled: true, tabId: "wanted", timeoutMs: 9000 })
     const browser = await connectAsideBrowser(root, policy)
+    expect(sdk.client).toHaveBeenCalledWith({ name: "agent-valley-capture", version: "9.2.1-rc.4" })
     expect(sdk.transport).toHaveBeenCalledWith({
       command: "/fixture/aside",
       args: ["mcp", "--fixture"],

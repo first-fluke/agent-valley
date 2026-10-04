@@ -19,7 +19,15 @@
     ".": {
       "package-name": "agent-valley",
       "changelog-path": "CHANGELOG.md",
-      "extra-files": ["apps/cli/package.json", "packages/core/package.json", "apps/dashboard/package.json"]
+      "extra-files": [
+        "apps/cli/package.json",
+        "packages/core/package.json",
+        "apps/dashboard/package.json",
+        { "type": "json", "path": "integrations/plugin.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "integrations/.claude-plugin/plugin.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "integrations/.cursor-plugin/plugin.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "integrations/qwen-extension.json", "jsonpath": "$.version" }
+      ]
     }
   }
 }

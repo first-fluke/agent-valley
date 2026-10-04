@@ -6,15 +6,20 @@
  */
 
 import { rmSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { copyClientSkillAsset } from "./src/client-integrations-assets"
+import { stageNpmDistribution } from "./src/npm-distribution"
 import { copyPluginLicenseAsset, copyPluginManifestAsset } from "./src/plugin-assets"
 
-rmSync("dist", { recursive: true, force: true })
+const cliRoot = dirname(fileURLToPath(import.meta.url))
+const repositoryRoot = resolve(cliRoot, "../..")
+const output = resolve(cliRoot, "dist")
+rmSync(output, { recursive: true, force: true })
 
-// Main CLI entry point
-await Bun.build({
-  entrypoints: ["src/index.ts"],
-  outdir: "dist",
+const result = await Bun.build({
+  entrypoints: [resolve(cliRoot, "src/index.ts"), resolve(cliRoot, "src/supervisor.ts")],
+  outdir: output,
   target: "node",
   format: "esm",
   minify: false,
@@ -23,20 +28,11 @@ await Bun.build({
   banner: "#!/usr/bin/env node",
 })
 
-// Supervisor (spawned as separate process by `av up`)
-await Bun.build({
-  entrypoints: ["src/supervisor.ts"],
-  outdir: "dist",
-  target: "node",
-  format: "esm",
-  minify: false,
-  sourcemap: "none",
-  packages: "bundle",
-  banner: "#!/usr/bin/env node",
-})
+if (!result.success) throw new AggregateError(result.logs, "CLI bundling failed; no npm distribution was prepared.")
 
-await copyClientSkillAsset("dist")
-await copyPluginManifestAsset("dist")
-await copyPluginLicenseAsset("dist")
+await copyClientSkillAsset(output)
+await copyPluginManifestAsset(output)
+await copyPluginLicenseAsset(output)
+const npmRoot = await stageNpmDistribution(cliRoot, repositoryRoot)
 
-console.log("Built dist/index.js + dist/supervisor.js + AV client skill and plugin assets")
+console.log(`Built CLI + supervisor + client/plugin assets. Publish the standalone package from ${npmRoot}.`)

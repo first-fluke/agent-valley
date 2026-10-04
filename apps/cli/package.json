@@ -2,6 +2,10 @@
   "name": "agent-valley",
   "version": "0.3.0",
   "type": "module",
+  "engines": {
+    "node": ">=26.10.0",
+    "bun": ">=1.4.2"
+  },
   "description": "AI agent orchestrator — dispatch Linear issues to Claude, Codex, and Gemini agents in isolated git worktrees",
   "license": "AGPL-3.0-only",
   "repository": {
@@ -29,7 +33,7 @@
   "scripts": {
     "av": "bun run src/index.ts",
     "build": "bun run build.ts",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "node -e \"console.error('Publish the staged package from dist/npm after building and running the standalone package smoke check.'); process.exit(1)\""
   },
   "dependencies": {
     "@agent-valley/core": "workspace:*",

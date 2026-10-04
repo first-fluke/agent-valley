@@ -30,6 +30,13 @@ jobs:
       # validate.sh Check 5/5 runs `bun run test:coverage`, so Bun + deps must
       # be installed here even though lint/typecheck/test jobs do it too.
       - run: bun install --frozen-lockfile
+      - name: Check release version alignment
+        run: node scripts/check-release-versions.mjs
+      - name: Install supported OMA receipt CLI
+        run: |
+          OMA_RECEIPT_VERSION="$(bun -e 'import { SUPPORTED_OMA_VERSION } from "./packages/core/src/oma/receipt-adapter.ts"; console.log(SUPPORTED_OMA_VERSION)')"
+          bun install --global --ignore-scripts "oh-my-agent@$OMA_RECEIPT_VERSION"
+          test "$(oma --version)" = "$OMA_RECEIPT_VERSION"
       - name: Run validate.sh
         env:
           WORKSPACE_ROOT: ${{ runner.temp }}/workspaces
@@ -99,3 +106,20 @@ jobs:
       - run: mkdir -p "$WORKSPACE_ROOT" && bun run test
         env:
           WORKSPACE_ROOT: ${{ runner.temp }}/workspaces
+
+  distribution:
+    name: Node CLI distribution
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/cli build
+      - run: node scripts/verify-cli-package.mjs apps/cli/dist/npm

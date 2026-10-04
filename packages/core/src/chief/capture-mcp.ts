@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { Client } from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import { z } from "zod"
+import { AV_VERSION } from "../version"
 import type { CapturePolicy } from "./capture-schema"
 
 export interface CaptureBrowser {
@@ -39,7 +40,7 @@ export async function connectAsideBrowser(repository: string, policy: CapturePol
         "Read a valid mcpServers.aside stdio configuration from .mcp.json, or remove it to use aside mcp.",
       )
   }
-  const client = new Client({ name: "agent-valley-capture", version: "0.3.0" })
+  const client = new Client({ name: "agent-valley-capture", version: AV_VERSION })
   const transport = new StdioClientTransport({ ...config, stderr: "ignore" })
   try {
     await client.connect(transport)

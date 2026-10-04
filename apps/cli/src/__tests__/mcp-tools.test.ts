@@ -3,9 +3,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client"
 import type { McpServer } from "@modelcontextprotocol/server"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createAvMcpServer } from "../mcp-tools"
 import { missionApiFixture } from "./mcp-fixture"
+
+vi.mock("@agent-valley/core/version", () => ({ AV_VERSION: "9.2.1-rc.4" }))
 
 let workspace: string
 let client: Client
@@ -29,6 +31,10 @@ async function connect(env: NodeJS.ProcessEnv = {}) {
 }
 
 describe("AV MCP mission tools", () => {
+  it("advertises the installed release version in the protocol handshake", async () => {
+    await connect()
+    expect(client.getServerVersion()).toEqual({ name: "agent-valley", version: "9.2.1-rc.4" })
+  })
   it("advertises exactly the six lifecycle tools and truthful read/write annotations", async () => {
     await connect()
     const { tools } = await client.listTools()

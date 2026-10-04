@@ -314,6 +314,36 @@ describe("agent discovery", () => {
     expect((await availability("kimi", { [path]: noKey })).readiness).toBe("unauthenticated")
   })
 
+  it("reads actual Kimi TOML with the default parser when Bun is unavailable", async () => {
+    const path = "/home/test/.kimi-code/config.toml"
+    const probe = vi.fn()
+    const deps = depsFor(
+      "kimi",
+      {
+        [path]: `default_model = "main"
+[models.main]
+provider = "kimi"
+model = "kimi-for-coding"
+[providers.kimi]
+type = "kimi"
+base_url = "https://api.example.test"
+api_key = "${SECRET}"
+`,
+      },
+      { probe },
+    )
+    delete deps.parseToml
+    vi.stubGlobal("Bun", undefined)
+    try {
+      const results = await discoverAgents(deps)
+      expect(results.find((entry) => entry.agentType === "kimi")?.readiness).toBe("ready")
+      expect(JSON.stringify(results)).not.toContain(SECRET)
+      expect(probe).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("reads Kimi OAuth credentials from KIMI_CODE_HOME and rejects expired access", async () => {
     const config = {
       default_model: "main",
