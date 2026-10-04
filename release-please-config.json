@@ -3,6 +3,7 @@
   "release-type": "node",
   "include-component-in-tag": false,
   "bump-minor-pre-major": true,
+  "always-update": true,
   "changelog-sections": [
     { "type": "feat", "section": "Features" },
     { "type": "fix", "section": "Bug Fixes" },

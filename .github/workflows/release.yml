@@ -1,47 +1,144 @@
-# Release Workflow — release-please PR → npm publish on merge
-#
-# 1. release-please creates/updates a release PR on every push to main
-# 2. When the release PR merges, it creates a GitHub Release
-# 3. The npm publish job triggers on the new release
+# Release PR → exact commit CI → guarded merge → GitHub release → npm.
+# Keep the full chain in one run: GITHUB_TOKEN pushes do not start another run.
 
 name: Release
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 jobs:
-  release-please:
-    name: Release Please
+  release-pr:
+    name: Prepare release PR
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      number: ${{ steps.candidate.outputs.number }}
+      head_sha: ${{ steps.candidate.outputs.head_sha }}
+      candidate: ${{ steps.candidate.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          skip-github-release: true
+      - name: Find and pin the release PR
+        id: candidate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { discoverReleaseCandidate } = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/release-automation.mjs`
+            );
+            const candidate = await discoverReleaseCandidate({ github, context });
+            if (candidate) {
+              core.setOutput('number', candidate.number);
+              core.setOutput('head_sha', candidate.headSha);
+              core.setOutput('candidate', JSON.stringify(candidate));
+              core.info(`Validating release PR #${candidate.number} at ${candidate.headSha}`);
+            } else {
+              core.info('No pending release PR; checking for a merged release to tag.');
+            }
+
+  release-ci:
+    name: Verify release commit
+    needs: release-pr
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.release-pr.outputs.head_sha || github.sha }}
+
+  merge-release:
+    name: Merge verified release PR
+    runs-on: ubuntu-latest
+    needs: [release-pr, release-ci]
+    if: needs.release-pr.outputs.number != ''
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      sha: ${{ steps.merge.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Recheck PR and main, then merge the verified commit
+        id: merge
+        uses: actions/github-script@v7
+        env:
+          RELEASE_CANDIDATE: ${{ needs.release-pr.outputs.candidate }}
+        with:
+          script: |
+            const { mergeReleaseCandidate } = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/release-automation.mjs`
+            );
+            const candidate = JSON.parse(process.env.RELEASE_CANDIDATE);
+            const sha = await mergeReleaseCandidate({ github, context, candidate });
+            core.setOutput('sha', sha);
+            core.info(`Merged release PR #${candidate.number} as ${sha}`);
+
+  github-release:
+    name: Create release and tag
+    runs-on: ubuntu-latest
+    needs: [release-pr, release-ci, merge-release]
+    if: >-
+      always() && !cancelled() && needs.release-pr.result == 'success' &&
+      needs.release-ci.result == 'success' &&
+      (needs.release-pr.outputs.number == '' ||
+      needs.merge-release.result == 'success')
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
-      major: ${{ steps.release.outputs.major }}
-      minor: ${{ steps.release.outputs.minor }}
-      patch: ${{ steps.release.outputs.patch }}
     steps:
+      - name: Check main still matches the verified release
+        uses: actions/github-script@v7
+        env:
+          EXPECTED_MAIN_SHA: ${{ needs.merge-release.outputs.sha || github.sha }}
+        with:
+          script: |
+            const { data: main } = await github.rest.git.getRef({
+              ...context.repo, ref: 'heads/main'
+            });
+            if (main.object.sha !== process.env.EXPECTED_MAIN_SHA) {
+              throw new Error('Main changed before tagging. Rerun Release to validate current main.');
+            }
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          skip-github-pull-request: true
 
   npm-publish:
     name: Publish to npm
     runs-on: ubuntu-latest
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: github-release
+    if: needs.github-release.outputs.release_created == 'true'
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.github-release.outputs.tag_name }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version

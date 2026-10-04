@@ -9,9 +9,19 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to validate before release PR merge
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -20,6 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
@@ -61,6 +74,9 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
@@ -77,6 +93,9 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
@@ -95,6 +114,9 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
@@ -113,6 +135,9 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
