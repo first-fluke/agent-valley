@@ -6,6 +6,7 @@ const SPRITE_SIZE = 32
 const AGENT_COLORS: Record<AgentType, { primary: string; secondary: string }> = {
   claude: { primary: "#E87B35", secondary: "#2D1B00" },
   codex: { primary: "#10A37F", secondary: "#1A1A2E" },
+  qwen: { primary: "#615CED", secondary: "#252147" },
   antigravity: { primary: "#4285F4", secondary: "#A142F4" },
   cursor: { primary: "#7B61FF", secondary: "#27213A" },
   grok: { primary: "#5C6670", secondary: "#15191D" },

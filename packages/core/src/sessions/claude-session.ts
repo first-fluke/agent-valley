@@ -16,7 +16,8 @@ import { readJsonLines } from "./json-lines"
 import { planSandboxedSpawn } from "./sandbox"
 
 export class ClaudeSession extends BaseSession {
-  private filesChanged: string[] = []
+  protected filesChanged: string[] = []
+  protected readonly vendor: string = "claude"
   private started = false
 
   async start(config: AgentConfig): Promise<void> {
@@ -24,15 +25,7 @@ export class ClaudeSession extends BaseSession {
     this.started = true
   }
 
-  async execute(prompt: string): Promise<void> {
-    if (!this.started || !this.config) {
-      this.emitError("CRASH", "execute() called before start()", false)
-      return
-    }
-
-    this.filesChanged = []
-    this.startedAt = Date.now()
-
+  protected buildArgs(): string[] {
     const args = [
       "--print",
       "--output-format",
@@ -42,15 +35,35 @@ export class ClaudeSession extends BaseSession {
       "--no-session-persistence",
     ]
 
-    if (this.config.model) {
-      args.push("--model", this.config.model)
+    if (this.config?.model) {
+      args.push("--model", this.config?.model)
     }
 
-    const effort = this.config.options?.effort as string | undefined
+    const effort = this.config?.options?.effort as string | undefined
     if (effort) {
       args.push("--effort", effort)
     }
 
+    return args
+  }
+
+  protected resetNativeState(): void {}
+
+  protected fileChangeType(tool: string): "add" | "modify" | undefined {
+    return tool === "Write" ? "add" : tool === "Edit" ? "modify" : undefined
+  }
+
+  async execute(prompt: string): Promise<void> {
+    if (!this.started || !this.config) {
+      this.emitError("CRASH", "execute() called before start()", false)
+      return
+    }
+
+    this.filesChanged = []
+    this.resetNativeState()
+    this.startedAt = Date.now()
+
+    const args = this.buildArgs()
     // Containment for --dangerously-skip-permissions comes from the OS
     // sandbox wrapping this spawn, not from trusting the flag itself.
     // planSandboxedSpawn() fails closed (throws) when no sandbox is
@@ -58,8 +71,8 @@ export class ClaudeSession extends BaseSession {
     let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
     try {
       plan = await planSandboxedSpawn({
-        agentType: "claude",
-        command: "claude",
+        agentType: this.vendor,
+        command: this.vendor,
         args,
         workspacePath: this.config.workspacePath,
       })
@@ -72,7 +85,7 @@ export class ClaudeSession extends BaseSession {
     this.process = spawn(plan.command, plan.args, {
       detached: process.platform !== "win32",
       cwd: this.config.workspacePath,
-      env: buildAgentEnv("claude", this.config.env) as NodeJS.ProcessEnv,
+      env: buildAgentEnv(this.vendor, this.config.env) as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
     })
 
@@ -95,18 +108,22 @@ export class ClaudeSession extends BaseSession {
     const flush = readJsonLines(proc.stdout, (event) => this.handleEvent(event))
     const { exitCode: code } = await waitForStreamCompletion(proc)
     flush()
+    this.finalizeNativeExit(code)
+  }
+
+  protected finalizeNativeExit(code: number | null): void {
     if (this.terminalEventReceived) return
     const exitCode = code ?? -1
     this.emitError(
       exitCode === -1 ? "TIMEOUT" : "CRASH",
       exitCode === 0
-        ? "claude exited without a result event. Check CLI authentication and update Claude Code, then retry."
-        : `claude exited with code ${exitCode}. Run av doctor and check Claude Code authentication.`,
+        ? `${this.vendor} exited without a result event. Check CLI authentication and update the CLI, then retry.`
+        : `${this.vendor} exited with code ${exitCode}. Run av doctor and check CLI authentication.`,
       exitCode !== 1,
     )
   }
 
-  private handleEvent(event: unknown): void {
+  protected handleEvent(event: unknown): void {
     if (typeof event !== "object" || event === null) return
     const e = event as Record<string, unknown>
 
@@ -125,14 +142,15 @@ export class ClaudeSession extends BaseSession {
               const input = block.input as Record<string, unknown> | undefined
               this.emit({ type: "toolUse", tool: toolName, args: input ?? {} })
 
-              if (toolName === "Edit" || toolName === "Write") {
+              const changeType = this.fileChangeType(toolName)
+              if (changeType) {
                 const path = input?.file_path as string | undefined
                 if (path && !this.filesChanged.includes(path)) {
                   this.filesChanged.push(path)
                   this.emit({
                     type: "fileChange",
                     path,
-                    changeType: toolName === "Write" ? "add" : "modify",
+                    changeType,
                   })
                 }
               }
@@ -176,7 +194,7 @@ export class ClaudeSession extends BaseSession {
     }
   }
 
-  private extractTokenUsage(
+  protected extractTokenUsage(
     resultEvent: Record<string, unknown>,
   ): { input: number; output: number; model: string } | undefined {
     const usage = resultEvent.usage as Record<string, unknown> | undefined

@@ -18,6 +18,14 @@ interface AgentProvisioningPlan {
 
 /** Fixed commands from vendor installation/auth documentation; model/user text never enters this plan. */
 export const AGENT_PROVISIONING: Readonly<Record<AgentType, AgentProvisioningPlan>> = {
+  qwen: {
+    label: "Qwen Code",
+    documentation: "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/",
+    npmPackage: "@qwen-code/qwen-code",
+    loginArgs: [],
+    loginInstructions:
+      "In Qwen Code, enter /auth and configure a current API provider. Then /exit to return. Cached Qwen OAuth alone is not a supported readiness signal.",
+  },
   claude: {
     label: "Claude Code",
     documentation: "https://code.claude.com/docs/en/setup",

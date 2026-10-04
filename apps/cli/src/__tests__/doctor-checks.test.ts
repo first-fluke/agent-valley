@@ -77,6 +77,11 @@ describe("checkAgentInstalled", () => {
 // ── checkAgentAuthenticated ──────────────────────────────────────────────────
 
 describe("checkAgentAuthenticated", () => {
+  it("does not mark Qwen authenticated merely because a cache/profile directory exists", () => {
+    const deps = makeDeps({ existsSync: () => true })
+    expect(checkAgentAuthenticated("qwen", deps).status).toBe("unknown")
+    expect(checkAgentAuthenticated("qwen", deps).fix).toContain("/auth")
+  })
   it("claude: passes when ~/.claude exists", () => {
     const deps = makeDeps({ existsSync: (p) => p === join("/home/user", ".claude") })
     const result = checkAgentAuthenticated("claude", deps)

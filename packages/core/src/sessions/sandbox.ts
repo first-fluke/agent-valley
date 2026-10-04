@@ -37,6 +37,12 @@ export const DEFAULT_NETWORK_ALLOWLIST: readonly string[] = Object.freeze([
   "api.anthropic.com",
   "api.openai.com",
   "generativelanguage.googleapis.com",
+  // Current Qwen Code API-key providers; its removed OAuth flow is not probed.
+  "dashscope.aliyuncs.com",
+  "coding.dashscope.aliyuncs.com",
+  "coding-intl.dashscope.aliyuncs.com",
+  "token-plan.cn-beijing.maas.aliyuncs.com",
+  "token-plan.ap-southeast-1.maas.aliyuncs.com",
   "github.com",
   "api.github.com",
   "codeload.github.com",

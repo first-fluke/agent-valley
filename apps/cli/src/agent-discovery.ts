@@ -6,6 +6,7 @@ import { stripVTControlCharacters } from "node:util"
 import { buildAgentEnv, getAgentAuthEnvKeys } from "@agent-valley/core/sessions/base-session"
 import { resolveBinaryPath } from "@agent-valley/core/sessions/sandbox-binary"
 import { AGENT_BINARY, AGENT_INSTALL_HINT, AGENT_LOGIN_HINT, AGENT_TYPES, type AgentType } from "./doctor-checks"
+import { qwenAuth } from "./qwen-discovery"
 
 export type AgentReadiness = "ready" | "unknown" | "unavailable" | "unauthenticated"
 
@@ -184,6 +185,7 @@ function kimiAuth(deps: DiscoveryDeps): AuthEvidence {
 }
 
 function localAuth(agent: AgentType, deps: DiscoveryDeps): AuthEvidence | null {
+  if (agent === "qwen") return qwenAuth(deps, (path) => readState(path, deps))
   if (agent === "kimi") return kimiAuth(deps)
   if (agent === "antigravity") {
     // https://www.antigravity.google/docs/cli/install/: bare API keys are ignored without this provider.
@@ -355,7 +357,7 @@ export async function discoverAgents(overrides: Partial<DiscoveryDeps> = {}): Pr
       }
       try {
         const credential =
-          agentType === "kimi" || agentType === "antigravity"
+          agentType === "kimi" || agentType === "antigravity" || agentType === "qwen"
             ? undefined
             : getAgentAuthEnvKeys(agentType).find((key) => nonempty(deps.env[key]))
         if (credential) {

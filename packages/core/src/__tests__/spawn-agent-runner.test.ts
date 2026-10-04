@@ -51,6 +51,9 @@ beforeEach(() => {
 })
 
 describe("SpawnAgentRunnerAdapter — capabilities", () => {
+  test("qwen advertises only the implemented single-shot abort capability", () => {
+    expect(new SpawnAgentRunnerAdapter().capabilities("qwen")).toEqual(["abort"])
+  })
   test("claude advertises append_prompt + abort (stateless) and no pause/resume", () => {
     const adapter = new SpawnAgentRunnerAdapter()
     const caps = adapter.capabilities("claude")

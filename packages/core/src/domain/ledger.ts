@@ -7,7 +7,7 @@
 
 // ── Agent Types ──────────────────────────────────────────────────────────────
 
-export const AGENT_TYPES = ["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"] as const
+export const AGENT_TYPES = ["claude", "codex", "qwen", "antigravity", "cursor", "grok", "kimi", "opencode"] as const
 export type AgentType = (typeof AGENT_TYPES)[number]
 
 // ── Ledger Event (Discriminated Union) ───────────────────────────────────────

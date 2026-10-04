@@ -28,9 +28,9 @@ import { resolveBinaryPath } from "@agent-valley/core/sessions/sandbox-binary"
 import { isSandboxExecAvailable } from "@agent-valley/core/sessions/sandbox-darwin"
 import { isBwrapAvailable } from "@agent-valley/core/sessions/sandbox-linux"
 
-export type AgentType = "claude" | "codex" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
+export type AgentType = "claude" | "codex" | "qwen" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
 
-export const AGENT_TYPES: AgentType[] = ["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]
+export const AGENT_TYPES: AgentType[] = ["claude", "codex", "qwen", "antigravity", "cursor", "grok", "kimi", "opencode"]
 
 export type CheckStatus = "pass" | "fail" | "warn" | "unknown"
 
@@ -91,6 +91,7 @@ export function defaultDoctorDeps(): DoctorDeps {
 export const AGENT_BINARY: Record<AgentType, string> = {
   claude: "claude",
   codex: "codex",
+  qwen: "qwen",
   antigravity: "agy",
   cursor: "cursor-agent",
   grok: "grok",
@@ -99,6 +100,7 @@ export const AGENT_BINARY: Record<AgentType, string> = {
 }
 
 export const AGENT_INSTALL_HINT: Record<AgentType, string> = {
+  qwen: "Install: npm install -g @qwen-code/qwen-code (see https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/)",
   claude: "Install: npm install -g @anthropic-ai/claude-code (see https://claude.com/product/claude-code)",
   codex: "Install: npm install -g @openai/codex (see https://github.com/openai/codex)",
   antigravity: "Install: see Antigravity docs for the `agy` CLI (https://antigravity.google)",
@@ -109,6 +111,7 @@ export const AGENT_INSTALL_HINT: Record<AgentType, string> = {
 }
 
 export const AGENT_LOGIN_HINT: Record<AgentType, string> = {
+  qwen: "Run qwen, then /auth to configure an API provider and /exit to return.",
   claude: "Run `claude` and complete the browser login prompt.",
   codex: "Run `codex login`.",
   antigravity: "Run `agy` and complete its first-launch browser sign-in, then exit.",
@@ -128,6 +131,8 @@ function probeAgentAuth(agent: AgentType, deps: DoctorDeps): { status: CheckStat
   const { home, existsSync: exists, readFileSync: read } = deps
 
   switch (agent) {
+    case "qwen":
+      return { status: "unknown", message: "Qwen needs a selected API provider/model; configure qwen /auth" }
     case "claude": {
       const p = join(home, ".claude")
       return exists(p) ? { status: "pass", message: `${p} present` } : { status: "fail", message: `${p} not found` }
@@ -182,6 +187,7 @@ export function checkAgentAuthenticated(agent: AgentType, deps: DoctorDeps): Che
   const { status, message } = probeAgentAuth(agent, deps)
   const base = { id: `agent.${agent}.auth`, name: `Agent CLI authenticated (${agent})`, critical: false }
   if (status === "unknown") {
+    if (agent === "qwen") return { ...base, status, message, fix: AGENT_LOGIN_HINT[agent] }
     return { ...base, status, message: `unknown — run a test issue to confirm (${message})` }
   }
   if (status === "pass") return { ...base, status, message }

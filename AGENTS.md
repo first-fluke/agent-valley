@@ -57,7 +57,7 @@ Symphony SPEC — 7 components:
 | 3 | **Issue Tracker Client** | Linear / GitHub webhook parsing + signature verification + startup sync |
 | 4 | **Orchestrator** | Webhook event handler, state machine, retry queue, sole in-memory state authority. v0.2+ split into `OrchestratorCore` / `IssueLifecycle` / `WebhookRouter` / `InterventionBus` |
 | 5 | **Workspace Manager** | Per-issue isolated directory + git worktree lifecycle. v0.2+ split into `worktree-lifecycle` / `delivery-strategy` / `safety-net` |
-| 6 | **Agent Runner** | `AgentRunnerPort` abstraction (claude/codex/antigravity/cursor/grok/kimi/opencode via native protocols) + live intervention `RunHandle` |
+| 6 | **Agent Runner** | `AgentRunnerPort` abstraction (claude/codex/qwen/antigravity/cursor/grok/kimi/opencode via native protocols) + live intervention `RunHandle` |
 | 7 | **Observability** | Structured logs (JSON) + optional OTel traces + optional Prometheus metrics |
 
 **Domain port layer (v0.2+):** Application code speaks to four domain

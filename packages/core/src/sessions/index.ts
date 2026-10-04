@@ -16,6 +16,7 @@ export { CursorSession } from "./cursor-session"
 export { GrokSession } from "./grok-session"
 export { KimiSession } from "./kimi-session"
 export { OpencodeSession } from "./opencode-session"
+export { QwenSession } from "./qwen-session"
 
 export {
   createSession,

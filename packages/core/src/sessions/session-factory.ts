@@ -1,7 +1,7 @@
 /**
  * SessionFactory — Registry-based factory for creating AgentSession instances.
  *
- * Built-in sessions: codex, claude, antigravity, cursor, grok, kimi, opencode.
+ * Built-in sessions: codex, claude, qwen, antigravity, cursor, grok, kimi, opencode.
  * Community/custom sessions can be registered at runtime.
  */
 
@@ -55,6 +55,7 @@ export class SessionRegistry {
   async registerBuiltins(): Promise<void> {
     const { CodexSession } = await import("./codex-session")
     const { ClaudeSession } = await import("./claude-session")
+    const { QwenSession } = await import("./qwen-session")
     const { AgySession } = await import("./agy-session")
     const { CursorSession } = await import("./cursor-session")
     const { GrokSession } = await import("./grok-session")
@@ -63,6 +64,7 @@ export class SessionRegistry {
 
     this.register("codex", () => new CodexSession())
     this.register("claude", () => new ClaudeSession())
+    this.register("qwen", () => new QwenSession())
     this.register("antigravity", () => new AgySession())
     this.register("cursor", () => new CursorSession())
     this.register("grok", () => new GrokSession())

@@ -85,6 +85,7 @@ const GEN_AI_OPERATION_NAME = "invoke_agent"
 const GEN_AI_SYSTEM_BY_AGENT_TYPE: Record<string, string> = {
   claude: "anthropic",
   codex: "openai",
+  qwen: "qwen-code",
   antigravity: "gcp.antigravity",
   cursor: "cursor",
   grok: "xai",

@@ -1,7 +1,13 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
-import { actorDefaultsSchema, normalizeActorDefaults, routingRuleSchema, scoreRoutingSchema } from "./actor-schema"
+import {
+  actorDefaultsSchema,
+  actorTypeSchema,
+  normalizeActorDefaults,
+  routingRuleSchema,
+  scoreRoutingSchema,
+} from "./actor-schema"
 import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
 import { chiefConfigSchema, mergeChiefConfig } from "./chief-schema"
 import { detectHardware } from "./hardware"
@@ -183,7 +189,7 @@ const mergedConfigSchema = z
         (v) => v.startsWith("/"),
         "workspace.root must be an absolute path.\n  Fix: Set workspace.root: /absolute/path in av.yaml",
       ),
-    agentType: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]),
+    agentType: actorTypeSchema,
     agentTimeout: z.number().min(30),
     agentMaxRetries: z.number().min(1),
     agentRetryDelay: z.number().min(1),
@@ -200,7 +206,7 @@ const mergedConfigSchema = z
           .string()
           .min(1)
           .refine((v) => v.startsWith("/"), "workspaceRoot must be absolute"),
-        agentType: z.enum(["claude", "codex", "antigravity", "cursor", "grok", "kimi", "opencode"]).optional(),
+        agentType: actorTypeSchema.optional(),
         deliveryMode: z.enum(["merge", "pr"]).optional(),
         verifyCommand: z.string().optional(),
         task: resolvedTaskSchema.optional(),

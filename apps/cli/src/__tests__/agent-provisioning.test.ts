@@ -40,6 +40,7 @@ describe("Chief Director provisioning", () => {
   it.each([
     ["claude", "@anthropic-ai/claude-code"],
     ["codex", "@openai/codex"],
+    ["qwen", "@qwen-code/qwen-code"],
     ["grok", "@xai-official/grok"],
     ["kimi", "@moonshot-ai/kimi-code"],
     ["opencode", "opencode-ai"],
@@ -116,6 +117,7 @@ describe("Chief Director provisioning", () => {
     ["grok", ["login"]],
     ["opencode", ["auth", "login"]],
     ["kimi", []],
+    ["qwen", []],
     ["antigravity", []],
   ] as const)(
     "uses only documented native %s login arguments with inherited-session environment",

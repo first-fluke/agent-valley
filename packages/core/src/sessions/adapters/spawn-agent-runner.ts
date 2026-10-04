@@ -40,6 +40,7 @@ import type { AgentSession } from "../agent-session"
 /** Static capability table. Keeps `capabilities()` O(1) and UI-queryable. */
 export const CAPABILITY_TABLE: Record<string, InterventionCapability[]> = Object.freeze({
   claude: ["append_prompt", "abort"],
+  qwen: ["abort"],
   codex: ["pause", "resume", "append_prompt", "abort"],
   antigravity: ["append_prompt", "abort"],
   cursor: ["append_prompt", "abort"],
@@ -199,7 +200,7 @@ class ServiceBackedRunHandle implements RunHandle {
     }
 
     const session = this.service.getSession(this.attemptId)
-    if (!session || !session.isAlive()) {
+    if (!session?.isAlive()) {
       throw new Error(
         `SpawnAgentRunnerAdapter.send(${cmd.kind}): attempt "${this.attemptId}" has no live session.\n` +
           "  Fix: check RunHandle.isAlive() before dispatching interventions.",
