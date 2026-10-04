@@ -17,6 +17,7 @@ import {
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 import { stringify as yamlStringify } from "yaml"
+import { installClientIntegrations } from "../client-integrations"
 import { stepAgentType } from "./agent-step"
 import { stepChief } from "./chief-step"
 import { changedProjectChief } from "./chief-write"
@@ -198,6 +199,9 @@ export async function setupEdit(): Promise<void> {
     writeFileSync("av.yaml", yamlStringify(canonicalConfig(pConfig), { lineWidth: 0 }), "utf-8")
     p.log.success("Project config updated: av.yaml")
   }
+
+  if (selectedFields.includes("workspaceRoot") && pConfig.workspace?.root)
+    await installClientIntegrations(pConfig.workspace.root, { projectRoot: process.cwd() })
 
   p.outro(pc.green("Configuration updated!"))
 }

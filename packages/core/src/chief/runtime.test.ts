@@ -59,6 +59,20 @@ afterEach(async () => {
 })
 
 describe("chief runtime boundaries", () => {
+  it("marks the actual Actor process and prompt to prevent recursive AV delegation", async () => {
+    vi.mocked(planSandboxedSpawn).mockImplementation(async () => ({
+      command: process.execPath,
+      args: [
+        "-e",
+        "process.stdin.resume(); process.stdin.on('end',()=>process.stdout.write(JSON.stringify({type:'result',is_error:false,result:process.env.AGENT_VALLEY_MANAGED_RUN})+'\\n'))",
+      ],
+      sandboxed: false,
+      platform: process.platform,
+      networkAllowlist: [],
+    }))
+    expect(await runtime.ports().runAgent(worker, "Perform assigned work.", mission, "work")).toBe("1")
+  })
+
   it("adds only a selected skill's real content to the launched Actor prompt", async () => {
     const directory = join(root, ".agents/skills/test-skill")
     await mkdir(directory, { recursive: true })

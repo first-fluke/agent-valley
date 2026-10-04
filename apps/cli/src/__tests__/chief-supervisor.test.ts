@@ -36,6 +36,23 @@ function checkpoint() {
 type Worker = NonNullable<OrderSupervisorDependencies["runWorker"]>
 
 describe("durable order worker supervision", () => {
+  it("preserves the API mission ID from supervisor launch through worker checkpoint", async () => {
+    const assignedId = "api-owned-mission"
+    const worker = vi.fn<Worker>().mockImplementation(async (args) => {
+      expect(args).toContain(assignedId)
+      expect(args.slice(-2)).toEqual(["--", "--actor literal-goal"])
+      const saved = checkpoint()
+      saved.id = assignedId
+      saved.status = "completed"
+      await store.save(saved)
+      return 0
+    })
+    expect(
+      (await superviseOrder("--actor literal-goal", { missionId: assignedId }, root, { runWorker: worker })).id,
+    ).toBe(assignedId)
+    expect(worker).toHaveBeenCalledTimes(1)
+  })
+
   it("pauses at the mission deadline while awaiting a much later metric poll and writes a truthful report", async () => {
     const current = checkpoint()
     current.executionPolicy = executionPolicySchema.parse({ maxDurationSec: 60 })
@@ -281,7 +298,6 @@ describe("worker arguments and cancellable scheduler waits", () => {
       ),
     ).toEqual([
       "order",
-      "Goal with spaces",
       "--worker",
       "--workspace",
       "/repo with spaces",
@@ -294,6 +310,8 @@ describe("worker arguments and cancellable scheduler waits", () => {
       "--oma",
       "--mission-id",
       "assigned-id",
+      "--",
+      "Goal with spaces",
     ])
   })
 

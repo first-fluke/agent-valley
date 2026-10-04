@@ -218,6 +218,8 @@ export class ChiefRuntime {
       prompt += `\n\n${buildOmaGuidance(evidence)}`
     }
     prompt += await personaSkills(persona, localMission, stage)
+    prompt +=
+      "\n\nYou are already running inside an AV managed mission. Complete this assigned work directly. Do not invoke av order, av_resume, or delegate this mission back to AV. AGENT_VALLEY_MANAGED_RUN=1 applies to this run."
     if (route)
       prompt += `\n\nActual work route: ${JSON.stringify({ actorType: persona.agentType, model: persona.model ?? "native default", reason: route.reason })}. This route does not alter the user's Chief Director choice or acceptance contract.`
     let abort: (() => void) | undefined
@@ -251,6 +253,7 @@ export class ChiefRuntime {
               model: persona.model,
               timeout: mission.timeoutSec,
               workspacePath: workspace.path,
+              env: { AGENT_VALLEY_MANAGED_RUN: "1" },
               prompt,
             },
             {

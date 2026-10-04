@@ -15,6 +15,7 @@ import { saveAndDeliverMissionReport } from "./chief-delivery"
 import { createMissionMetricPorts } from "./chief-metrics"
 import { applyResumeOptions, validateResumeOptions } from "./chief-resume"
 import { abortableDelay, superviseOrder } from "./chief-supervisor"
+import { assertNotManagedRun } from "./managed-run"
 
 async function organizationContext(repository: string, mission: Mission) {
   const context = await loadOrganizationContext(repository, mission.goal, mission.operatingPolicy?.metricTargets)
@@ -32,6 +33,7 @@ export async function runOrder(
   options: OrderOptions,
   root = process.cwd(),
 ): Promise<Mission> {
+  assertNotManagedRun()
   if (
     !options.resume &&
     [options.retry, options.resolveEffect, options.effectResult, options.accountRun, options.accountCost].some(
@@ -242,6 +244,7 @@ export function registerChiefCommands(program: Command): void {
     .option("--watch", "Resume due or interrupted orders from their saved checkpoints")
     .action(async (options: { watch?: boolean }) => {
       if (options.watch) {
+        assertNotManagedRun()
         const controller = new AbortController()
         const stop = () => controller.abort()
         process.once("SIGINT", stop)

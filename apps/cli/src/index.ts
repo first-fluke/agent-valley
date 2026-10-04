@@ -17,6 +17,7 @@ import { resolveProjectConfigPath } from "@agent-valley/core/config/project-conf
 import { loadConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
 import { Option, program } from "commander"
 import pc from "picocolors"
+import { registerAgentClientCommands } from "./agent-client-commands"
 import { registerChiefCommands } from "./chief"
 import { registerOrganizationCommands } from "./chief-organization"
 import { watchConfig } from "./config-watch"
@@ -476,6 +477,7 @@ program.action(() => {
 registerDoctorCommand(program)
 registerChiefCommands(program)
 registerOrganizationCommands(program)
+registerAgentClientCommands(program)
 
 program.parseAsync().catch((error: unknown) => {
   console.error(pc.red(error instanceof Error ? error.message : String(error)))

@@ -52,6 +52,10 @@ if [[ "$1" == --version ]]; then echo 1.4.2; exit 0; fi
 printf 'cwd=%s\\n' "$PWD" >> "$AV_TEST_LOG"
 printf 'arg=%s\\n' "$@" >> "$AV_TEST_LOG"
 if [[ "$1" == run ]]; then
+  if [[ "\${3:-}" == integrations && "\${AV_TEST_INTEGRATIONS_FAIL:-}" == true ]]; then
+    echo 'Fixture AV skill conflict: preserve existing files' >&2
+    exit 7
+  fi
   if [[ -t 0 ]]; then echo stdin=tty >> "$AV_TEST_LOG"; else echo stdin=pipe >> "$AV_TEST_LOG"; fi
   if [[ -n "\${AV_TEST_RESOLVE_AGENT:-}" ]]; then
     printf 'agent=%s\\n' "$(command -v "$AV_TEST_RESOLVE_AGENT")" >> "$AV_TEST_LOG"
@@ -156,6 +160,28 @@ test("installed av handles spaced source paths and preserves the caller's reposi
   expect(calls).toContain(`cwd=${target}`)
   expect(calls).toContain(`arg=${source}/apps/cli/src/index.ts`)
   expect(calls).toContain("arg=Goal with spaces\narg=--verify\narg=test -s report.md")
+})
+
+test("installer prepares project integrations after locked dependencies even when setup is deferred", () => {
+  const result = install(target, ["--yes", "--no-workflows", "--no-setup"])
+  expect(result.status).toBe(0)
+  const calls = readFileSync(log, "utf8")
+  expect(calls).toContain(
+    `cwd=${target}\narg=run\narg=${source}/apps/cli/src/index.ts\narg=integrations\narg=install\narg=--workspace\narg=${target}`,
+  )
+  expect(calls.indexOf("arg=--ignore-scripts")).toBeLessThan(calls.indexOf("arg=integrations"))
+  expect(calls).not.toContain("arg=setup")
+})
+
+test("an integration conflict reports the installed launcher and incomplete project setup honestly", () => {
+  env.AV_TEST_INTEGRATIONS_FAIL = "true"
+  const result = install(target)
+  expect(result.status).toBe(1)
+  expect(result.stdout).toContain("Installed av")
+  expect(result.stderr).toContain("project client integrations are incomplete")
+  expect(result.stderr).toContain("Keep conflicting files")
+  expect(existsSync(join(home, ".local/bin/av"))).toBe(true)
+  expect(readFileSync(log, "utf8")).not.toContain("arg=setup")
 })
 
 test("--no-setup and CI defer configuration without consuming answers or hanging", () => {

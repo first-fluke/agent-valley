@@ -7,9 +7,10 @@ import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import type { OrderOptions } from "./chief-config"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
+import { assertNotManagedRun } from "./managed-run"
 
 export function orderWorkerArgs(goal: string | undefined, options: OrderOptions, id: string): string[] {
-  const args = ["order", ...(goal ? [goal] : []), "--worker"]
+  const args = ["order", "--worker"]
   const excluded = new Set(["worker", "missionId", "supervise"])
   for (const [key, value] of Object.entries(options)) {
     if (excluded.has(key) || value === undefined || value === false) continue
@@ -18,6 +19,7 @@ export function orderWorkerArgs(goal: string | undefined, options: OrderOptions,
     if (value !== true) args.push(String(value))
   }
   if (!options.resume) args.push("--mission-id", id)
+  if (goal !== undefined) args.push("--", goal)
   return args
 }
 
@@ -75,7 +77,8 @@ export async function superviseOrder(
   root: string,
   dependencies: OrderSupervisorDependencies = {},
 ): Promise<Mission> {
-  const id = options.resume ?? randomUUID()
+  assertNotManagedRun()
+  const id = options.resume ?? options.missionId ?? randomUUID()
   const store = new MissionStore(join(root, ".agent-valley/missions"))
   const controller = new AbortController()
   const interrupt = () => controller.abort()

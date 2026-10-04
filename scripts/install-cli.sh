@@ -73,6 +73,10 @@ case ":${INSTALLER_CALLER_PATH}:" in
   *) printf '[agent-valley] Add av to your shell PATH: export PATH=%q:"$PATH"\n' "$BIN_DIR" ;;
 esac
 
+say "Installing project AV skills and MCP configuration for Codex, Claude Code, Cursor, Qwen Code, and Antigravity."
+(cd "$PROJECT" && "$AV_BIN" integrations install --workspace "$PROJECT" </dev/null) || \
+  fail "av is installed, but project client integrations are incomplete. Keep conflicting files and rerun av integrations install --workspace $(printf '%q' "$PROJECT") after resolving the reported conflict."
+
 defer_setup() {
   say "Setup deferred. Run this command from your target repository:"
   printf '  %q setup --mode order\n' "$AV_BIN"

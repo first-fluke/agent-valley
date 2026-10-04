@@ -13,7 +13,9 @@ av order "Fix the login failure and add a regression test"
 
 The installer prepares Node.js 26.10.0 and Bun 1.4.2 when needed, installs locked dependencies, and creates a source launcher at `~/.local/bin/av`. Remote installations keep the checkout under `~/.local/share/agent-valley`; a local installation uses its existing checkout. There is no build step. In an interactive terminal, installation opens `av setup --mode order`, including when the script arrives through `curl | bash`.
 
-The default wizard validates the target Git repository, selects the Chief Director CLI and optional model, guides its CLI installation and login, and saves a trusted acceptance command. Browser or device sign-in remains interactive. If a CLI cannot report its login state, the wizard shows that limitation and offers rechecking or finishing setup later. Other ready worker CLIs are discovered automatically; installing every vendor is unnecessary.
+The default wizard validates the target Git repository, selects the Chief Director CLI and optional model, guides its CLI installation and login, and uses Chief-designed checks unless you supply a trusted acceptance command. Browser or device sign-in remains interactive. If a CLI cannot report its login state, the wizard shows that limitation and offers rechecking or finishing setup later. Other ready worker CLIs are discovered automatically; installing every vendor is unnecessary.
+
+The source installer and completed setup also install the project `av` skill and MCP entry for Codex, Claude Code, Cursor, Qwen Code, and Antigravity. Existing client settings, other skills, and user profiles are preserved; conflicting AV names produce an error with recovery instructions. Restart the client and complete its normal workspace/MCP trust step. Run `av integrations install --workspace /absolute/project` to prepare the integration later. See [agent client integration](./agent-clients.md), [native plugins](./native-plugins.md), and [web OAuth](./web-mcp.md).
 
 The wizard also offers OMA installation or update in the selected target repository, with preparation selected by default. It prepares the latest CLI and full skill set while preserving the existing OMA configuration. A failure offers retry or deferral with a recovery command. OMA preparation does not enable strict completion receipts; those require the separately supported CLI version described in [OMA completion evidence](./oma-integration.md).
 
@@ -50,7 +52,7 @@ Run these commands from the Agent Valley checkout. The CLI needs the dashboard s
 
 Use `bun av dev` for foreground logs and configuration watching, or `bun av up --dev` for a background process without a production build. Plain `bun av up` attempts a production dashboard build before starting.
 
-Supported actor values are `claude`, `codex`, `antigravity`, `cursor`, `grok`, `kimi`, and `opencode`. Antigravity uses the `agy` executable. The wizard guides preparation of the selected CLI.
+Supported actor values are `claude`, `codex`, `qwen`, `antigravity`, `cursor`, `grok`, `kimi`, and `opencode`. Antigravity uses the `agy` executable. The wizard guides preparation of the selected CLI.
 
 Tracker mode selects Linear or GitHub, the actor, workspace, tunnel, and completion checks, and offers the same OMA preparation. It writes project configuration to `av.yaml` and user defaults/credentials to `~/.config/agent-valley/settings.yaml`. Project values override global values; existing unrelated global settings are preserved. The example YAML is a reference, not a ready-to-run configuration. OMA preparation can be deferred.
 

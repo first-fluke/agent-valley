@@ -12,7 +12,7 @@ Linear Issue (Todo)
 
 Tracker mode manages lifecycle transitions (Todo → In Progress → Done/Cancelled) and delivers verified changes. Chief Director orders keep a local plan, task reviews, and verification results for a goal.
 
-Built with **TypeScript + Bun**. Supports **Claude Code, Codex, Antigravity, Cursor, Grok, Kimi, and OpenCode** through the AgentSession interface.
+Built with **TypeScript + Bun**. Supports **Claude Code, Codex, Qwen Code, Antigravity, Cursor, Grok, Kimi, and OpenCode** through the AgentSession interface.
 
 See the [operability audit](./docs/reports/operability-audit-2026-10-03.md) for tested user journeys, fixes, and remaining limits.
 
@@ -83,7 +83,11 @@ bun av missions           # List saved local Chief Director orders
 bun av missions --watch   # Resume eligible saved orders and scheduled observations
 bun av reports list       # Inspect third-party delivery receipts
 bun av reports retry      # Retry saved report files without running Actors
+bun av integrations install # Install AV skills and MCP entries for Codex, Claude Code, Cursor, Qwen, and Antigravity
+bun av mcp --workspace /absolute/project # Expose local Chief Director mission tools over stdio
 ```
+
+To delegate goals from Codex, Claude Code, Cursor, Qwen Code, or Antigravity, install the project `av` skill and MCP server, then restart the client and complete its normal trust step. AV also exports [native plugin packages](./docs/guides/native-plugins.md) and supplies a [web OAuth gateway](./docs/guides/web-mcp.md) for ChatGPT and Claude. See [agent client integration](./docs/guides/agent-clients.md).
 
 ### Creating Issues
 
@@ -320,6 +324,7 @@ domain ports so adapters can be swapped without touching the orchestrator:
 |---|---|---|
 | Claude Code | `claude` | `claude` |
 | Codex | `codex` | `codex` |
+| Qwen Code | `qwen` | `qwen` |
 | Antigravity | `antigravity` | `agy` |
 | Cursor | `cursor` | `cursor-agent` |
 | Grok | `grok` | `grok` |

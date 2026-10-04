@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "av",
+  "version": "0.3.0",
+  "description": "Delegate repository goals to Agent Valley and inspect mission progress and verification evidence.",
+  "author": { "name": "Agent Valley" },
+  "homepage": "https://github.com/first-fluke/agent-valley",
+  "repository": "https://github.com/first-fluke/agent-valley",
+  "license": "AGPL-3.0-only",
+  "keywords": ["agent-valley", "missions", "development", "orchestration"]
+}

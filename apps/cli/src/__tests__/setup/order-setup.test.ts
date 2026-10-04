@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { globalConfigSchema } from "@agent-valley/core/config/yaml-loader"
@@ -112,6 +112,35 @@ afterEach(() => {
 })
 
 describe("standalone order setup", () => {
+  it("installs clients in a separately selected repository while keeping their server on the original configuration directory", async () => {
+    const selected = join(root, "selected-repository")
+    createRepository(selected)
+    vi.mocked(p.text).mockReset().mockResolvedValueOnce(selected).mockResolvedValueOnce("test -s output.md")
+    await setup()
+    expect(parse(readFileSync(join(repo, "av.yaml"), "utf8")).workspace.root).toBe(selected)
+    expect(readFileSync(join(selected, ".agents/skills/av/SKILL.md"), "utf8")).toContain("AGENT_VALLEY_MANAGED_RUN")
+    expect(JSON.parse(readFileSync(join(selected, ".qwen/settings.json"), "utf8")).mcpServers.av.args).toEqual([
+      "mcp",
+      "--workspace",
+      realpathSync(repo),
+    ])
+  })
+
+  it("prepares client integration for the new target when editing the workspace", async () => {
+    await setup()
+    const selected = join(root, "edited-repository")
+    createRepository(selected)
+    vi.mocked(p.multiselect).mockResolvedValue(["workspaceRoot"])
+    vi.mocked(p.text).mockReset().mockResolvedValueOnce(selected)
+    await setupEdit()
+    expect(parse(readFileSync(join(repo, "av.yaml"), "utf8")).workspace.root).toBe(selected)
+    expect(JSON.parse(readFileSync(join(selected, ".mcp.json"), "utf8")).mcpServers.av.args).toEqual([
+      "mcp",
+      "--workspace",
+      realpathSync(repo),
+    ])
+  })
+
   it("saves a complete order setup with Chief-designed checks and no verification override", async () => {
     vi.mocked(p.select).mockResolvedValue("chief")
     vi.mocked(p.text).mockReset().mockResolvedValueOnce(repo)

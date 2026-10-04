@@ -1,0 +1,7 @@
+{
+  "name": "av",
+  "version": "0.3.0",
+  "description": "Delegate repository goals to Agent Valley and inspect mission progress and verification evidence.",
+  "author": { "name": "Agent Valley" },
+  "skills": "./skills/"
+}

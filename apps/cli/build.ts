@@ -6,6 +6,8 @@
  */
 
 import { rmSync } from "node:fs"
+import { copyClientSkillAsset } from "./src/client-integrations-assets"
+import { copyPluginManifestAsset } from "./src/plugin-assets"
 
 rmSync("dist", { recursive: true, force: true })
 
@@ -33,4 +35,7 @@ await Bun.build({
   banner: "#!/usr/bin/env node",
 })
 
-console.log("Built dist/index.js + dist/supervisor.js")
+await copyClientSkillAsset("dist")
+await copyPluginManifestAsset("dist")
+
+console.log("Built dist/index.js + dist/supervisor.js + AV client skill and plugin assets")

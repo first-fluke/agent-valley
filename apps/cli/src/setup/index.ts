@@ -26,6 +26,7 @@ import { resolveProjectConfigPath } from "@agent-valley/core/config/project-conf
 import { loadProjectConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
+import { installClientIntegrations } from "../client-integrations"
 import { detectInviteFromClipboard } from "../invite"
 import { stepAgentType } from "./agent-step"
 import { stepChief } from "./chief-step"
@@ -148,7 +149,11 @@ export async function setup(options: { mode?: "order" | "tracker" } = {}): Promi
   if (invite) {
     const useInvite = await p.confirm({ message: "Invite data detected in clipboard. Use it?" })
     if (!p.isCancel(useInvite) && useInvite) {
-      return fastTrackSetup(invite, { replaceInvalidGlobal: globalSettings.invalid })
+      await fastTrackSetup(invite, { replaceInvalidGlobal: globalSettings.invalid })
+      await installClientIntegrations(loadProjectConfig()?.workspace?.root ?? process.cwd(), {
+        projectRoot: process.cwd(),
+      })
+      return
     }
   }
 
@@ -191,6 +196,7 @@ export async function setup(options: { mode?: "order" | "tracker" } = {}): Promi
   }
 
   await saveConfig(resolved.ctx, { replaceInvalidGlobal: globalSettings.invalid, replaceInvalidProject })
+  await installClientIntegrations(resolved.ctx.workspaceRoot, { projectRoot: process.cwd() })
 
   if (resolved.ctx.trackerKind === "github") {
     printGithubTokenHint(resolved.ctx.github.tokenEnv)

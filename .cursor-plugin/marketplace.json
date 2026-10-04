@@ -1,0 +1,14 @@
+{
+  "name": "agent-valley",
+  "owner": { "name": "Agent Valley" },
+  "metadata": {
+    "description": "Agent Valley repository goal delegation skills."
+  },
+  "plugins": [
+    {
+      "name": "av",
+      "source": "./integrations",
+      "description": "Delegate repository goals to Agent Valley and inspect mission progress and verification evidence."
+    }
+  ]
+}
