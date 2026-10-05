@@ -32,7 +32,7 @@
             "name": "oma-hook-Stop",
             "type": "command",
             "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'Stop'",
-            "timeout": 15
+            "timeout": 40
           }
         ]
       }
@@ -102,5 +102,10 @@
       "Bash(ls *)",
       "Bash(oma *)"
     ]
+  },
+  "model": {
+    "generationConfig": {
+      "timeout": 300000
+    }
   }
 }
