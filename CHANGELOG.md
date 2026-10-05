@@ -6,6 +6,14 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [1.0.1](https://github.com/first-fluke/agent-valley/compare/v1.0.0...v1.0.1) (2026-10-05)
+
+
+### Documentation
+
+* clarify chief autonomy and token usage ([27caf90](https://github.com/first-fluke/agent-valley/commit/27caf9034c2b5d8153f68417bf756390e0ece5a7))
+* preserve model selection in chief autonomy guidance ([8b6b20a](https://github.com/first-fluke/agent-valley/commit/8b6b20a181b6e934c60d72d01414f848bc889091))
+
 ## [1.0.0](https://github.com/first-fluke/agent-valley/compare/v0.4.0...v1.0.0) (2026-10-04)
 
 
