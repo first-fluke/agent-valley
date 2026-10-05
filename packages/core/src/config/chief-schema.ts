@@ -5,9 +5,11 @@ import { metricSourcePolicySchema } from "../chief/metric-source-policy"
 import { type ChiefOperatingPolicy, chiefOperatingPolicySchema } from "../chief/operations"
 import { metricTargetSchema } from "../chief/organization-types"
 import { reportDeliveryPolicySchema } from "../chief/report-delivery-contract"
+import { toolEnvKeysSchema } from "../chief/tool-environment"
 
 const price = z.number().finite().nonnegative().optional()
 export const chiefConfigSchema = z.strictObject({
+  tool_env_keys: toolEnvKeysSchema.optional(),
   execution: z
     .strictObject({
       max_parallel: z.number().int().min(1).max(8).default(3),

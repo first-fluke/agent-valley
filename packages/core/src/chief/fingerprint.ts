@@ -3,12 +3,14 @@ import { createReadStream } from "node:fs"
 import { lstat, readlink, realpath } from "node:fs/promises"
 import { dirname, resolve, sep } from "node:path"
 import { runCommand } from "../workspace/worktree-lifecycle"
+import { clearedGitEnvironment } from "./parallel-git"
 
 /** Hash product files, including untracked deliverables, without commit timestamps or run receipts. */
 export async function fingerprintWorkspace(workspacePath: string): Promise<string> {
   const root = await realpath(workspacePath)
   const files = await runCommand("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
     cwd: workspacePath,
+    env: clearedGitEnvironment,
   })
   if (files.exitCode !== 0)
     throw new Error(`Cannot inspect mission workspace: ${files.stderr}. Restore its Git metadata before resuming.`)

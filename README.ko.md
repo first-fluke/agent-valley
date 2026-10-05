@@ -2,6 +2,8 @@
 
 Chief Director에게 서비스 개선·리팩토링·사용성·매출 성장 목표를 줍니다. Chief Director가 설치된 OMA 스킬과 Technical Director·Design Director·Marketing Director 페르소나를 활용해 스킬 선택·작업 분담·검토·수정·재계획을 결정하고 목표 달성을 검증합니다. 결정 사항과 이유, 실행 결과, 검증 근거는 보고서로 전달합니다. Actor는 격리된 Git worktree에서 일하며, Linear/GitHub 이슈를 통한 대기열·병렬 작업도 지원합니다.
 
+상시 개선은 `av operate "사용성·안정성·매출을 계속 개선해"`로 시작합니다. Chief가 검증된 변경, 이전 보고서, 관측 지표와 사용 가능한 도구를 보고 다음 목표를 정합니다. `av operations`로 진행 상황을 확인하고, Ctrl-C로 멈춘 뒤 `av operate --resume ID`로 이어갑니다. 실행 한도와 클라우드·MCP 접근, 복구 방법은 [상시 운영 가이드](./docs/guides/chief-continuous.md)에 있습니다.
+
 > Read in: [English](./README.md)
 
 > **토큰 사용 경고:** AV는 토큰 절약보다 사용자가 맡긴 목표 달성을 우선합니다. 계획·페르소나 자문·Actor 작업·독립 검토·수정·재계획으로 모델 사용량이 크게 늘어나거나 API 비용이 발생할 수 있습니다. AV는 구독의 남은 사용량을 확인·관리하지 않습니다. 제공된 사용량은 기록하며, 선택한 추정 비용 한도와 실행 한도는 적용합니다.

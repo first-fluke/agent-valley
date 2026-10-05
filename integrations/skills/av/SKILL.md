@@ -1,6 +1,6 @@
 ---
 name: av
-description: Delegate a repository goal to Agent Valley's Chief Director, inspect saved missions and evidence reports, or resume or cancel an AV mission. Use when the user asks AV or the Chief Director to own a goal through planning, Actor work, independent review, and verification.
+description: Delegate a repository goal or continuous improvement charter to Agent Valley's Chief Director and inspect, resume or stop its verified work. Use when the user asks AV to supervise Actors through execution, review and verification.
 ---
 
 # Agent Valley
@@ -9,7 +9,7 @@ Use the configured `av` MCP server for the repository the user selected. The Chi
 
 ## Prevent recursive delegation
 
-Before `av_order` or `av_resume`, check the current process environment for `AGENT_VALLEY_MANAGED_RUN` when the client has a local shell/environment tool. Check only this variable; do not dump the environment or read credentials. If its value is `1`, or your assignment identifies you as an AV Chief Director or Actor, perform your assigned work directly. Do not start or resume another AV mission or run a nested AV setup.
+Before `av_order`, `av_resume`, `av_operate` or `av_operation_resume`, check the current process environment for `AGENT_VALLEY_MANAGED_RUN` when the client has a local shell/environment tool. Check only this variable; do not dump the environment or read credentials. If its value is `1`, or your assignment identifies you as an AV Chief Director or Actor, perform your assigned work directly. Do not start or resume another AV mission or operation, or run a nested AV setup.
 
 For web clients without a local environment tool, read `av_missions` from the configured AV server. Its structured `executionContext` must report `managed: false` and `delegationAllowed: true` before delegation. Use its advertised workspace instead of inventing a local repository path. A managed assignment or a local `AGENT_VALLEY_MANAGED_RUN=1` always takes priority over a remote server's context. If neither the local environment nor the server establishes the context, do not delegate until it is established.
 
@@ -21,6 +21,16 @@ For web clients without a local environment tool, read `av_missions` from the co
 4. Keep the returned mission ID. An accepted or started order is incomplete. Inspect `av_status` at reasonable intervals and read `av_report` when a report is available. Do not resubmit the goal because a long run has not finished.
 
 AV reads the saved repository settings to select the Chief Director and available Actors. Do not invent model availability, measurements, or a successful outcome.
+
+## Continuous improvement
+
+For a request to keep improving the service, use `av_operate` with the user's operating `charter`. Check `av_operations` for existing work first. Generate and retain a `requestId` with the exact input before submission; uncertain retries reuse both. Supply `cycles`, `interval` or per-mission execution limits only for authorized overrides. The default continues until stopped or paused and can incur ongoing model charges. Limits apply to each improvement and decision checkpoint, not lifetime operation spending.
+
+Keep the returned operation ID. Read `av_operation_status(operationId)` and `av_operation_report(operationId)` for progress and decisions. Use `av_status` and `av_report` with its child mission IDs for actual verification and measurements. A running continuous operation is not a completed service improvement merely because submission succeeded.
+
+`av_operation_resume(operationId, requestId?)` preserves the charter and accepted changes. Repair and explicitly resume a paused child before continuing its operation; this call does not reconcile uncertain external effects or reset spent budgets. `av_operation_cancel(operationId)` requests a stop; poll until the operation is paused and the supervisor is stopped before retrying. MCP disconnect alone leaves detached operations running.
+
+Installed tools or configured MCP names do not prove login or service access. Chief Actors can use available tools within existing permissions; missing evidence remains a reported limitation.
 
 ## Supervise and report
 

@@ -13,6 +13,7 @@ import { disposeTaskWorktree, integrateTaskWorktree, prepareTaskWorktree } from 
 import { selectWorkActor } from "./routing"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
+import { resolveToolEnvironment } from "./tool-environment"
 import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
 import { finishOperatingRun, startOperatingRun } from "./usage"
 import { executeGoalVerification } from "./verification"
@@ -218,8 +219,10 @@ export class ChiefRuntime {
       prompt += `\n\n${buildOmaGuidance(evidence)}`
     }
     prompt += await personaSkills(persona, localMission, stage)
+    if (mission.toolEnvKeys?.length)
+      prompt += `\n\nThe operator explicitly forwards these tool environment variable names: ${JSON.stringify(mission.toolEnvKeys)}. Use only those needed for the assignment. Never print, write to product files, or include credential values in reports; do not dump the environment.`
     prompt +=
-      "\n\nYou are already running inside an AV managed mission. Complete this assigned work directly. Do not invoke av order, av_resume, or delegate this mission back to AV. AGENT_VALLEY_MANAGED_RUN=1 applies to this run."
+      "\n\nYou are already running inside an AV managed mission. Complete this assigned work directly. Do not invoke av order, av_resume, av operate, av_operate, av_operation_resume, or delegate this mission back to AV. AGENT_VALLEY_MANAGED_RUN=1 applies to this run."
     if (route)
       prompt += `\n\nActual work route: ${JSON.stringify({ actorType: persona.agentType, model: persona.model ?? "native default", reason: route.reason })}. This route does not alter the user's Chief Director choice or acceptance contract.`
     let abort: (() => void) | undefined
@@ -253,7 +256,7 @@ export class ChiefRuntime {
               model: persona.model,
               timeout: mission.timeoutSec,
               workspacePath: workspace.path,
-              env: { AGENT_VALLEY_MANAGED_RUN: "1" },
+              env: { ...resolveToolEnvironment(mission.toolEnvKeys), AGENT_VALLEY_MANAGED_RUN: "1" },
               prompt,
             },
             {

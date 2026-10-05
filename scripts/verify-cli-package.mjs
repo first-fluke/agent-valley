@@ -195,7 +195,20 @@ async function verifyMcp(cli, version) {
     assert.equal(initialized.serverInfo.version, version, "MCP and npm package versions must match")
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`)
     const tools = await request("tools/list", {})
-    for (const name of ["av_order", "av_missions", "av_status", "av_report", "av_resume", "av_cancel"])
+    for (const name of [
+      "av_order",
+      "av_missions",
+      "av_status",
+      "av_report",
+      "av_resume",
+      "av_cancel",
+      "av_operate",
+      "av_operations",
+      "av_operation_status",
+      "av_operation_report",
+      "av_operation_resume",
+      "av_operation_cancel",
+    ])
       assert(
         tools.tools.some((tool) => tool.name === name),
         `${name} is missing from the distributed MCP server`,
@@ -203,6 +216,9 @@ async function verifyMcp(cli, version) {
     const missions = await request("tools/call", { name: "av_missions", arguments: {} })
     assert(!missions.isError, "Read-only MCP listing must succeed outside the monorepo")
     assert.deepEqual(missions.structuredContent.missions, [], "Smoke checks must never launch a mission")
+    const operations = await request("tools/call", { name: "av_operations", arguments: {} })
+    assert(!operations.isError, "Read-only operation listing must succeed outside the monorepo")
+    assert.deepEqual(operations.structuredContent.operations, [], "Smoke checks must never launch an operation")
   } finally {
     lines.close()
     child.stdin.end()

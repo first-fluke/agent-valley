@@ -54,12 +54,15 @@ export async function ensureAvDirectory(root: string, parts: string[]): Promise<
 export class MissionJobs {
   private readonly directory: string
 
-  constructor(private readonly root: string) {
-    this.directory = join(root, ".agent-valley/control/jobs")
+  constructor(
+    private readonly root: string,
+    private readonly directoryName: "jobs" | "operation-jobs" = "jobs",
+  ) {
+    this.directory = join(root, ".agent-valley/control", directoryName)
   }
 
   async locked<T>(operation: () => Promise<T>): Promise<T> {
-    await ensureAvDirectory(this.root, ["control", "jobs"])
+    await ensureAvDirectory(this.root, ["control", this.directoryName])
     const release = await new MissionStore(this.directory).lock("submission")
     try {
       return await operation()
@@ -69,21 +72,24 @@ export class MissionJobs {
   }
 
   async findRequest(requestId: string): Promise<MissionJob | undefined> {
-    await ensureAvDirectory(this.root, ["control", "jobs"])
+    await ensureAvDirectory(this.root, ["control", this.directoryName])
     try {
       const path = this.path(requestId)
       if ((await lstat(path)).isSymbolicLink()) throw new Error("AV launch receipt cannot be a symlink.")
       return jobSchema.parse(JSON.parse(await readFile(path, "utf8")))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
-      throw new Error("Invalid AV launch receipt. Inspect .agent-valley/control/jobs before retrying.", {
-        cause: error,
-      })
+      throw new Error(
+        `Invalid AV launch receipt. Inspect .agent-valley/control/${this.directoryName} before retrying.`,
+        {
+          cause: error,
+        },
+      )
     }
   }
 
   async list(): Promise<MissionJob[]> {
-    await ensureAvDirectory(this.root, ["control", "jobs"])
+    await ensureAvDirectory(this.root, ["control", this.directoryName])
     const files = await readdir(this.directory).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return []
       throw error

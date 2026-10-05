@@ -1,0 +1,199 @@
+import { createHash, randomUUID } from "node:crypto"
+import {
+  type ContinuousBaseline,
+  type ContinuousDecision,
+  continuousBaselineSchema,
+  continuousDecisionSchema,
+  type Operation,
+  operationSchema,
+} from "./continuous-contract"
+import type { Mission } from "./types"
+
+export interface ContinuousOperationPorts {
+  decide(operation: Operation, decisionId: string): Promise<ContinuousDecision>
+  findMission(id: string): Promise<Mission | undefined>
+  runMission(operation: Operation, id: string, goal: string, baselinePath: string): Promise<Mission>
+  accept(operation: Operation, mission?: Mission): Promise<ContinuousBaseline>
+  save(operation: Operation): Promise<void>
+  delay(milliseconds: number, signal?: AbortSignal): Promise<void>
+  now?: () => Date
+  signal?: AbortSignal
+}
+
+export function continuousDecisionKey(decision: Extract<ContinuousDecision, { action: "execute" }>): string {
+  return createHash("sha256")
+    .update(JSON.stringify({ goal: decision.goal, evidence: decision.evidence }))
+    .digest("hex")
+}
+
+/** The caller owns the operation lock; children own separate mission locks. */
+export async function runContinuousOperation(
+  operation: Operation,
+  ports: ContinuousOperationPorts,
+): Promise<Operation> {
+  operationSchema.parse(operation)
+  const now = () => (ports.now?.() ?? new Date()).toISOString()
+  const save = async () => {
+    operation.updatedAt = now()
+    await ports.save(operation)
+  }
+  const pause = async (message: string) => {
+    if (operation.phase !== "paused" && operation.phase !== "completed") operation.resumePhase = operation.phase
+    operation.phase = "paused"
+    operation.error = message.slice(0, 16_000)
+    await save()
+    return operation
+  }
+  if (operation.phase === "completed") return operation
+  if (operation.phase === "paused") {
+    operation.phase =
+      operation.resumePhase ?? (operation.currentMissionId ? "running" : operation.nextRunAt ? "waiting" : "deciding")
+    operation.resumePhase = undefined
+    operation.error = undefined
+    await save()
+  }
+  try {
+    while (true) {
+      if (ports.signal?.aborted)
+        return pause(
+          "Operation interrupted. Resume this operation when ready; its current child and decisions were retained.",
+        )
+      if (!operation.baseline) {
+        const initial = continuousBaselineSchema.parse(await ports.accept(operation))
+        if (
+          initial.operationId !== operation.id ||
+          initial.repositoryRoot !== operation.repositoryRoot ||
+          initial.missionId
+        )
+          throw new Error(
+            "Initial snapshot identity does not match this operation. Restore its original baseline receipt.",
+          )
+        operation.baseline = initial
+        await save()
+      }
+      if (operation.currentMissionId) {
+        const id = operation.currentMissionId
+        const decision = operation.decision
+        if (decision?.action !== "execute")
+          throw new Error("Restore the saved child execution decision before resuming.")
+        const assertIdentity = (child: Mission) => {
+          if (child.id !== id || child.repositoryRoot !== operation.repositoryRoot || child.goal !== decision.goal)
+            throw new Error(
+              "Saved child identity, repository or goal does not match this operation. Restore the original child before continuing.",
+            )
+        }
+        let mission = await ports.findMission(id)
+        if (mission) {
+          assertIdentity(mission)
+          if (mission.tasks.some((task) => task.effectState === "unknown"))
+            return pause(
+              `Child ${id} has an unknown effect. Reconcile that mission's effect state before continuing this operation.`,
+            )
+        }
+        if (!mission) {
+          if (operation.phase === "accepting")
+            return pause(`Completed child ${id} is missing. Restore its saved mission record before continuing.`)
+          mission = await ports.runMission(operation, id, decision.goal, operation.baseline.path)
+        } else if (mission.status !== "completed" && mission.status !== "paused" && mission.status !== "failed") {
+          mission = await ports.runMission(operation, id, decision.goal, operation.baseline.path)
+        }
+        assertIdentity(mission)
+        if (mission.status !== "completed")
+          return pause(
+            `Child ${id} is ${mission.status}. ${mission.error ?? "Inspect av status and reconcile or resume that mission before continuing this operation."}`,
+          )
+        if (
+          !mission.verification?.ok ||
+          !mission.finalReview?.passed ||
+          mission.tasks.some((task) => task.effectState === "unknown")
+        )
+          return pause(
+            `Completed child ${id} lacks a passing verification and final review or has an unknown effect. Restore and reconcile its verified mission record before accepting its snapshot.`,
+          )
+        operation.phase = "accepting"
+        await save()
+        const baseline = continuousBaselineSchema.parse(await ports.accept(operation, mission))
+        if (
+          baseline.operationId !== operation.id ||
+          baseline.repositoryRoot !== operation.repositoryRoot ||
+          baseline.missionId !== id
+        )
+          throw new Error(
+            "Accepted snapshot identity does not match the completed child. Restore its snapshot receipt before continuing.",
+          )
+        operation.baseline = baseline
+        operation.completedCycles += 1
+        operation.history = [
+          ...operation.history,
+          {
+            missionId: id,
+            goal: decision.goal,
+            reason: decision.reason,
+            evidence: decision.evidence,
+            completedAt: now(),
+            baselinePath: baseline.path,
+          },
+        ].slice(-20)
+        operation.currentMissionId = undefined
+        operation.decisionId = undefined
+        operation.decision = undefined
+        operation.nextRunAt = undefined
+        operation.phase = "deciding"
+        await save()
+      }
+      if (operation.cycleLimit !== undefined && operation.completedCycles >= operation.cycleLimit) {
+        operation.phase = "completed"
+        await save()
+        return operation
+      }
+      if (operation.phase === "waiting") {
+        const next = operation.nextRunAt ? Date.parse(operation.nextRunAt) : NaN
+        if (!Number.isFinite(next)) throw new Error("Restore the operation's saved next decision timestamp.")
+        let remaining = next - Date.parse(now())
+        while (remaining > 0 && !ports.signal?.aborted) {
+          await ports.delay(Math.min(remaining, 30_000), ports.signal)
+          remaining = next - Date.parse(now())
+        }
+        if (ports.signal?.aborted)
+          return pause("Operation interrupted while waiting. Its next decision time was retained.")
+        operation.phase = "deciding"
+        operation.nextRunAt = undefined
+        operation.decisionId = undefined
+        operation.decision = undefined
+        await save()
+      }
+      if (ports.signal?.aborted) return pause("Operation interrupted before goal selection. Resume when ready.")
+      if (!operation.decisionId) {
+        operation.decisionId = randomUUID()
+        await save()
+      }
+      const decision =
+        operation.decision ?? continuousDecisionSchema.parse(await ports.decide(operation, operation.decisionId))
+      operation.decision = decision
+      if (decision.action === "wait" || continuousDecisionKey(decision) === operation.lastDecisionKey) {
+        if (decision.action === "execute")
+          operation.decision = {
+            action: "wait",
+            reason:
+              "The Chief repeated the previous goal and evidence. Wait for fresh evidence before selecting another improvement.",
+          }
+        operation.phase = "waiting"
+        operation.nextRunAt = new Date(Date.parse(now()) + operation.waitIntervalSec * 1000).toISOString()
+        await save()
+        continue
+      }
+      operation.lastDecisionKey = continuousDecisionKey(decision)
+      operation.currentMissionId = randomUUID()
+      operation.phase = "running"
+      await save()
+    }
+  } catch (error) {
+    return pause(
+      ports.signal?.aborted
+        ? "Operation interrupted. Its current child and decision checkpoints were retained."
+        : error instanceof Error
+          ? error.message
+          : String(error),
+    )
+  }
+}

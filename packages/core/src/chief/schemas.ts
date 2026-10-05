@@ -23,6 +23,7 @@ import { chiefOperatingPolicySchema, chiefOperationsSchema } from "./operations"
 import { organizationContextSchema } from "./organization"
 import { chiefReportSchema } from "./reports"
 import { CTO_ROLE } from "./technical-lead"
+import { toolEnvKeysSchema } from "./tool-environment"
 import type { ChiefPlan, GoalBrief, Mission, Persona, Review } from "./types"
 import {
   goalVerificationContractDigest,
@@ -63,6 +64,7 @@ export const missionSchema = z
   .strictObject({
     id,
     repositoryRoot: text.refine(isAbsolute, "Original repository root must be absolute.").optional(),
+    toolEnvKeys: toolEnvKeysSchema.optional(),
     goal: text,
     chiefId: id,
     technicalLeadId: id.optional(),

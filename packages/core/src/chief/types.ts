@@ -98,6 +98,8 @@ export type ChiefStage =
 export interface Mission {
   id: string
   repositoryRoot?: string
+  /** Explicit tool credential names; values are resolved only in the Actor subprocess environment. */
+  toolEnvKeys?: string[]
   goal: string
   chiefId: string
   technicalLeadId?: string

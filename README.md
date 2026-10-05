@@ -2,6 +2,8 @@
 
 Give a Chief Director a goal for service improvement, refactoring, usability, or revenue growth. It uses installed OMA skills and Technical Director, Design Director, and Marketing Director personas to choose skills, assign Actors, review work, repair or replan, and verify progress. Its report explains the decisions, reasons, results, and verification evidence. Actors work in isolated Git worktrees; Linear/GitHub issues also support queued, parallel work.
 
+For ongoing improvement, use `av operate "Improve usability, reliability and revenue"`. The Chief selects successive goals using accepted changes, previous reports, measured outcomes and available tools. `av operations` shows progress; Ctrl-C pauses and `av operate --resume ID` continues. See [continuous Chief operation](./docs/guides/chief-continuous.md) for limits, cloud/MCP access and recovery.
+
 > Read this in: [한국어](./README.ko.md)
 
 > **Token usage warning:** AV prioritizes your goal over token savings. Planning, persona consultation, Actor work, independent reviews, repairs, and replanning can consume substantial model usage and incur API charges. AV does not check or manage your subscription's remaining allowance. Reported usage is recorded; optional estimated-cost limits and execution limits still apply.

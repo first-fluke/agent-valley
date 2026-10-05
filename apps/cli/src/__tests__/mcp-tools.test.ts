@@ -31,6 +31,37 @@ async function connect(env: NodeJS.ProcessEnv = {}) {
 }
 
 describe("AV MCP mission tools", () => {
+  it("exposes continuous operation tools with async identity and managed recursion guards", async () => {
+    const operate = vi.fn().mockResolvedValue({ operationId: "continuous-one", status: "starting", accepted: true })
+    const operationResume = vi.fn().mockResolvedValue({ operationId: "continuous-one", status: "running" })
+    Object.assign(api, {
+      operate,
+      operationResume,
+      operations: vi.fn().mockResolvedValue({ operations: [] }),
+      operationStatus: vi.fn().mockResolvedValue({ operationId: "continuous-one", status: "waiting" }),
+      operationReport: vi.fn().mockResolvedValue({ markdown: "Easy explanation and actual cycle IDs" }),
+      operationCancel: vi.fn().mockResolvedValue({ cancelRequested: true }),
+    })
+    await connect()
+    expect((await client.listTools()).tools).toHaveLength(12)
+    const input = { charter: "Improve service continuously", cycles: 2, requestId: "operation-one" }
+    expect((await client.callTool({ name: "av_operate", arguments: input })).structuredContent).toMatchObject({
+      operationId: "continuous-one",
+      accepted: true,
+    })
+    expect(operate).toHaveBeenCalledWith(input)
+    expect((await client.callTool({ name: "av_operate", arguments: { ...input, cycles: 0 } })).isError).toBe(true)
+    await client.close()
+    await server.close()
+    await connect({ AGENT_VALLEY_MANAGED_RUN: "1" })
+    expect((await client.callTool({ name: "av_operate", arguments: input })).isError).toBe(true)
+    expect(
+      (await client.callTool({ name: "av_operation_resume", arguments: { operationId: "continuous-one" } })).isError,
+    ).toBe(true)
+    expect(operate).toHaveBeenCalledTimes(1)
+    expect(operationResume).not.toHaveBeenCalled()
+    expect((await client.callTool({ name: "av_operations", arguments: {} })).isError).not.toBe(true)
+  })
   it("advertises the installed release version in the protocol handshake", async () => {
     await connect()
     expect(client.getServerVersion()).toEqual({ name: "agent-valley", version: "9.2.1-rc.4" })

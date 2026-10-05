@@ -43,6 +43,11 @@ export interface OrderOptions {
   worker?: boolean
   missionId?: string
   supervise?: boolean
+  /** Internal accepted operation snapshot; never changes the configuration repository. */
+  baselineWorkspace?: string
+  operationId?: string
+  /** Internal pin for the initiating Chief's explicit native model default. */
+  nativeModel?: boolean
 }
 
 const agents = new Set<string>(AGENT_TYPES)
@@ -177,9 +182,10 @@ export async function resolveOrderConfig(
   if (!chief)
     throw new Error(`Chief Director actor ${chiefId} is not in the roster. Set --director to an existing actor ID.`)
   if (actorOption) chief.agentType = actorOption
+  if (options.nativeModel) delete chief.model
   const configuredType = project?.agent?.type ?? global?.agent?.type
   const configuredModel =
-    !profile && configuredType === chief.agentType
+    !options.nativeModel && !profile && configuredType === chief.agentType
       ? (project?.agent?.model ?? (global?.agent?.type === chief.agentType ? global.agent.model : undefined))
       : undefined
   if (model ?? configuredModel) chief.model = model ?? configuredModel
@@ -228,5 +234,6 @@ export async function resolveOrderConfig(
     capturePolicy: chiefCapturePolicy(chiefConfig),
     executionPolicy,
     metricSourcePolicy: chiefConfig.metric_sources,
+    toolEnvKeys: chiefConfig.tool_env_keys,
   }
 }

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
+import { realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { MissionCapture } from "@agent-valley/core/chief/capture"
+import { createContinuousMissionWorkspace } from "@agent-valley/core/chief/continuous-workspace"
 import { coordinate } from "@agent-valley/core/chief/coordinator"
 import { executionState, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
 import { loadOrganizationContext } from "@agent-valley/core/chief/organization"
@@ -11,11 +13,13 @@ import type { Mission } from "@agent-valley/core/chief/types"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { type Command, Option } from "commander"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
+import { registerContinuousCommands, restoreOperationOrigin } from "./chief-continuous"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
 import { createMissionMetricPorts } from "./chief-metrics"
 import { orderExitCode, printOrderOutcome } from "./chief-outcome"
 import { applyResumeOptions, validateResumeOptions } from "./chief-resume"
 import { abortableDelay, superviseOrder } from "./chief-supervisor"
+import { prepareChiefToolConfig } from "./chief-tool-config"
 import { assertNotManagedRun } from "./managed-run"
 
 async function organizationContext(repository: string, mission: Mission) {
@@ -87,7 +91,19 @@ export async function runOrder(
           "Order goal exceeds 32 KB. Put supporting details in repository files and reference them in a shorter goal.",
         )
       const config = await resolveOrderConfig(root, options)
-      const workspace = await new WorkspaceManager(config.workspace).create(missionIssue(id, goal))
+      if (Boolean(options.baselineWorkspace) !== Boolean(options.operationId))
+        throw new Error("An internal operation snapshot requires both its operation identity and accepted baseline.")
+      const workspace =
+        options.baselineWorkspace && options.operationId
+          ? await createContinuousMissionWorkspace(
+              config.workspace,
+              options.operationId,
+              options.baselineWorkspace,
+              id,
+              goal,
+            )
+          : await new WorkspaceManager(config.workspace).create(missionIssue(id, goal))
+      if (options.operationId) await restoreOperationOrigin(config.workspace, workspace.path)
       await prepareMissionSkills(config.workspace, workspace.path)
       const now = new Date().toISOString()
       mission = {
@@ -111,6 +127,7 @@ export async function runOrder(
         verificationMode: config.verifyCommand.trim() ? "operator" : "chief",
         executionPolicy: config.executionPolicy,
         metricSourcePolicy: config.metricSourcePolicy,
+        toolEnvKeys: config.toolEnvKeys,
         capturePolicy: config.capturePolicy,
         status: "pending",
         tasks: [],
@@ -124,6 +141,8 @@ export async function runOrder(
     if (!mission.plan && mission.availableAgents)
       console.log(`Automatic team planning with: ${mission.availableAgents.join(", ")}`)
     const repository = mission.repositoryRoot ?? root
+    if (mission.status !== "completed")
+      await prepareChiefToolConfig(await realpath(repository), await realpath(mission.workspace.path))
     if (mission.executionPolicy) {
       const started = Date.parse(executionState(mission).startedAt)
       const remaining = started + mission.executionPolicy.maxDurationSec * 1_000 - Date.now()
@@ -156,8 +175,21 @@ export async function runOrder(
       await capture.start()
     }
     const ports = runtime.ports()
+    const parallel = ports.parallel
     const result = await coordinate(mission, {
       ...ports,
+      ...(parallel
+        ? {
+            parallel: {
+              ...parallel,
+              prepare: async (current: Mission, taskId: string, attempt: number) => {
+                const record = await parallel.prepare(current, taskId, attempt)
+                await prepareChiefToolConfig(await realpath(repository), await realpath(record.path))
+                return record
+              },
+            },
+          }
+        : {}),
       ...(mission.operatingPolicy?.memory || mission.operatingPolicy?.metricTargets?.length
         ? {
             refreshOrganization: mission.metricSourcePolicy
@@ -209,6 +241,7 @@ export async function runOrder(
 }
 
 export function registerChiefCommands(program: Command): void {
+  registerContinuousCommands(program)
   program
     .command("order [goal]")
     .description("Give the Chief Director a goal; delegate Actors, review, repair and verify in an isolated worktree")
@@ -237,6 +270,9 @@ export function registerChiefCommands(program: Command): void {
     .option("--no-supervise", "Run directly without worker crash restart or scheduled observation polling")
     .addOption(new Option("--worker", "Internal supervised worker").hideHelp())
     .addOption(new Option("--mission-id <id>", "Internal mission identity").hideHelp())
+    .addOption(new Option("--baseline-workspace <path>", "Internal accepted operation snapshot").hideHelp())
+    .addOption(new Option("--operation-id <id>", "Internal operation identity").hideHelp())
+    .addOption(new Option("--native-model", "Internal pinned Chief native model default").hideHelp())
     .option("--resume <id>", "Resume a saved order with its original acceptance contract")
     .action(async (goal: string | undefined, options: OrderOptions) => {
       const mission =

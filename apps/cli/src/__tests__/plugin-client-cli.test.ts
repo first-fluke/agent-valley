@@ -43,5 +43,18 @@ it("uses an exported plugin's project binding when the client launches from anot
     executionContext: { managed: false, delegationAllowed: true },
   })
   const tools = await client.listTools()
-  expect(tools.tools).toHaveLength(6)
+  expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+    "av_cancel",
+    "av_missions",
+    "av_operate",
+    "av_operation_cancel",
+    "av_operation_report",
+    "av_operation_resume",
+    "av_operation_status",
+    "av_operations",
+    "av_order",
+    "av_report",
+    "av_resume",
+    "av_status",
+  ])
 }, 10_000)

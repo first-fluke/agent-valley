@@ -6,6 +6,8 @@ import { z } from "zod"
 import {
   type AvMcpOptions,
   type MissionApiPort,
+  mcpOperateSchema,
+  mcpOperationResumeSchema,
   mcpOrderSchema,
   mcpResumeSchema,
   missionIdSchema,
@@ -36,7 +38,7 @@ export function createAvMcpServer(api: MissionApiPort, options: AvMcpOptions): M
     {
       maxToolInputElements: 100,
       instructions:
-        "Submit goals to av_order, then inspect av_status and av_report. Orders execute asynchronously. Reports describe actual evidence and remaining blockers. Each server is bound to one workspace. av_missions includes the server executionContext; managed servers forbid nested orders and resumes.",
+        "Submit single goals to av_order. For ongoing service improvement, use av_operate and inspect av_operations, av_operation_status and av_operation_report. Execution is asynchronous. Reports describe actual evidence and blockers. Each server is bound to one workspace; managed Actors cannot start or resume nested orders or operations.",
     },
   )
   const assertManaged = () => {
@@ -134,5 +136,80 @@ export function createAvMcpServer(api: MissionApiPort, options: AvMcpOptions): M
       return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: report.markdown }] }
     },
   )
+  const operate = api.operate?.bind(api)
+  const operations = api.operations?.bind(api)
+  const operationStatus = api.operationStatus?.bind(api)
+  const operationReport = api.operationReport?.bind(api)
+  const operationResume = api.operationResume?.bind(api)
+  const operationCancel = api.operationCancel?.bind(api)
+  if (operate && operations && operationStatus && operationReport && operationResume && operationCancel) {
+    const operationIdentity = z.strictObject({ operationId: missionIdSchema })
+    server.registerTool(
+      "av_operate",
+      {
+        description:
+          "Start continued service improvement under a durable charter. The Chief chooses successive goals, executes and verifies them, and reports decisions. Default runs until stopped or paused; cycles optionally bounds verified improvements. Budgets apply to each mission and decision, not a global spending cap. requestId deduplicates submissions.",
+        inputSchema: mcpOperateSchema,
+        annotations: write,
+      },
+      (input) =>
+        toolResult(async () => {
+          assertManaged()
+          return operate(input)
+        }),
+    )
+    server.registerTool(
+      "av_operations",
+      {
+        description: "List saved continuous operations with progress, active child and pause reasons.",
+        inputSchema: z.strictObject({}),
+        annotations: readOnly,
+      },
+      () => toolResult(() => operations()),
+    )
+    server.registerTool(
+      "av_operation_status",
+      {
+        description: "Read continuous operation state, current mission, completed cycles and next decision time.",
+        inputSchema: operationIdentity,
+        annotations: readOnly,
+      },
+      ({ operationId }) => toolResult(() => operationStatus(operationId)),
+    )
+    server.registerTool(
+      "av_operation_report",
+      {
+        description:
+          "Read the operation report and easy explanation. Its mission IDs lead to detailed av_report evidence and capture attachments.",
+        inputSchema: operationIdentity,
+        annotations: readOnly,
+      },
+      ({ operationId }) => toolResult(() => operationReport(operationId)),
+    )
+    server.registerTool(
+      "av_operation_resume",
+      {
+        description:
+          "Resume the saved operating charter. Paused or failed child missions must first be repaired and explicitly resumed using av_resume or the CLI; this call does not reconcile unknown external effects.",
+        inputSchema: mcpOperationResumeSchema,
+        annotations: write,
+      },
+      (input) =>
+        toolResult(async () => {
+          assertManaged()
+          return operationResume(input)
+        }),
+    )
+    server.registerTool(
+      "av_operation_cancel",
+      {
+        description:
+          "Request operation cancellation. Poll av_operation_status until paused and the supervisor stops before resuming; cleanup is asynchronous.",
+        inputSchema: operationIdentity,
+        annotations: { ...write, idempotentHint: true, openWorldHint: false },
+      },
+      ({ operationId }) => toolResult(() => operationCancel(operationId)),
+    )
+  }
   return server
 }

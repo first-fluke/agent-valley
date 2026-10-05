@@ -29,11 +29,29 @@ export const mcpResumeSchema = z.strictObject({
 })
 export type McpOrderInput = z.infer<typeof mcpOrderSchema>
 export type McpResumeInput = z.infer<typeof mcpResumeSchema>
+export const mcpOperateSchema = z.strictObject({
+  charter: z.string().trim().min(1).max(32_000),
+  requestId,
+  cycles: z.number().int().min(1).max(1_000_000).optional(),
+  interval: z.number().int().min(1).max(86_400).optional(),
+  verify: z.string().max(32_000).optional(),
+  parallel: z.number().int().min(1).max(8).optional(),
+  ...budgets,
+})
+export const mcpOperationResumeSchema = z.strictObject({ operationId: missionIdSchema, requestId })
+export type McpOperateInput = z.infer<typeof mcpOperateSchema>
+export type McpOperationResumeInput = z.infer<typeof mcpOperationResumeSchema>
 export interface McpReportResult extends Record<string, unknown> {
   missionId: string
   markdown: string
 }
 export interface MissionApiPort {
+  operate?(input: McpOperateInput): Promise<Record<string, unknown>>
+  operations?(): Promise<Record<string, unknown>>
+  operationStatus?(id: string): Promise<Record<string, unknown>>
+  operationReport?(id: string): Promise<Record<string, unknown>>
+  operationResume?(input: McpOperationResumeInput): Promise<Record<string, unknown>>
+  operationCancel?(id: string): Promise<Record<string, unknown>>
   order(input: McpOrderInput): Promise<Record<string, unknown>>
   list(): Promise<Record<string, unknown>>
   status(missionId: string): Promise<Record<string, unknown>>

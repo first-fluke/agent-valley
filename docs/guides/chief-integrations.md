@@ -1,5 +1,7 @@
 # Chief operations and attachments
 
+[Continuous operation](./chief-continuous.md) uses these observations and child reports to choose successive improvement goals. It also discovers local cloud/container CLIs and configured MCP metadata. Actor environment credentials can be forwarded explicitly with `chief.tool_env_keys`; discovery itself never confirms authentication.
+
 `av order` records actual run duration, native token usage when supplied by the CLI, review outcomes and the vendor that performed each run. Missing usage and cost remain unknown. Configured token prices produce estimates, not billing receipts.
 
 Automatic teams with multiple authenticated CLIs can route work between native defaults. A configured pool can also select models. Chief Director models and explicit model pins in supplied Actor rosters are preserved. After enough observations, routing selects a qualifying route with the lowest observed cost per accepted deliverable, including failed attempts. Before then it uses configured prices or candidate order. Failed or rejected routes can escalate within the existing task/recovery limits. AV does not download or guess model prices.

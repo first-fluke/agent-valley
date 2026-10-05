@@ -9,6 +9,8 @@ import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { applyResumeOptions, validateResumeOptions } from "./chief-resume"
 import { assertNotManagedRun } from "./managed-run"
 import {
+  type McpOperateInput,
+  type McpOperationResumeInput,
   type McpOrderInput,
   type McpReportResult,
   type McpResumeInput,
@@ -19,6 +21,7 @@ import {
 } from "./mcp-contract"
 import { digest, ensureAvDirectory, type JobLiveness, jobLiveness, type MissionJob, MissionJobs } from "./mission-jobs"
 import { launchMission, type MissionLaunch } from "./mission-launcher"
+import { OperationApi } from "./operation-api"
 
 export interface MissionApiDependencies {
   launch?: (input: MissionLaunch) => Promise<{ pid: number; identity?: string }>
@@ -76,6 +79,7 @@ function missionSummary(mission: Mission): Record<string, unknown> {
 export class MissionApi implements MissionApiPort {
   private readonly store: MissionStore
   private readonly jobs: MissionJobs
+  private readonly operationApi: OperationApi
   private submissions: Promise<unknown> = Promise.resolve()
   private closed = false
 
@@ -86,6 +90,7 @@ export class MissionApi implements MissionApiPort {
   ) {
     this.store = new MissionStore(join(projectRoot, ".agent-valley/missions"))
     this.jobs = new MissionJobs(projectRoot)
+    this.operationApi = new OperationApi(projectRoot, workspace, dependencies)
   }
 
   static async create(workspace: string, dependencies: MissionApiDependencies = {}): Promise<MissionApi> {
@@ -98,6 +103,25 @@ export class MissionApi implements MissionApiPort {
 
   get targetWorkspace(): string {
     return this.workspace
+  }
+
+  operate(input: McpOperateInput) {
+    return this.operationApi.operate(input)
+  }
+  operations() {
+    return this.operationApi.list()
+  }
+  operationStatus(id: string) {
+    return this.operationApi.status(id)
+  }
+  operationReport(id: string) {
+    return this.operationApi.report(id)
+  }
+  operationResume(input: McpOperationResumeInput) {
+    return this.operationApi.resume(input)
+  }
+  operationCancel(id: string) {
+    return this.operationApi.cancel(id)
   }
 
   async order(raw: McpOrderInput): Promise<Record<string, unknown>> {
@@ -202,6 +226,7 @@ export class MissionApi implements MissionApiPort {
 
   async close(): Promise<void> {
     await this.submissions.catch(() => {})
+    await this.operationApi.close()
     this.closed = true
   }
 
