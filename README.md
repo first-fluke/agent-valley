@@ -1,8 +1,10 @@
 # Agent Valley
 
-Run AI actors in isolated Git worktrees. Use Linear/GitHub issues for queued, parallel work, or give a local Chief Director a goal to plan, delegate, review, and verify.
+Give a Chief Director a goal for service improvement, refactoring, usability, or revenue growth. It uses installed OMA skills and Technical Director, Design Director, and Marketing Director personas to choose skills, assign Actors, review work, repair or replan, and verify progress. Its report explains the decisions, reasons, results, and verification evidence. Actors work in isolated Git worktrees; Linear/GitHub issues also support queued, parallel work.
 
 > Read this in: [한국어](./README.ko.md)
+
+> **Token usage warning:** AV prioritizes your goal over token savings. Planning, persona consultation, Actor work, independent reviews, repairs, and replanning can consume substantial model usage and incur API charges. AV does not check or manage your subscription's remaining allowance. Reported usage is recorded; optional estimated-cost limits and execution limits still apply.
 
 ```
 Linear Issue (Todo)
