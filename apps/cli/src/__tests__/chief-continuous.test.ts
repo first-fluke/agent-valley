@@ -3,6 +3,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
+import { containerObservationPolicySchema } from "@agent-valley/core/chief/container-observation-policy"
 import { createContinuousMissionWorkspace } from "@agent-valley/core/chief/continuous-workspace"
 import { fingerprintWorkspace } from "@agent-valley/core/chief/fingerprint"
 import { MissionStore } from "@agent-valley/core/chief/store"
@@ -137,6 +138,43 @@ describe("continuous operation CLI", () => {
     await expect(initializeOperation("different", { workspace: root }, root, operation.id)).rejects.toThrow(
       "already exists",
     )
+  })
+
+  it("renders bounded service evidence as untrusted text with health and resource context", async () => {
+    const operation = await initializeOperation("Improve continuously", { workspace: root }, root)
+    operation.containerObservationPolicy = containerObservationPolicySchema.parse({
+      targets: [{ id: "api", kind: "docker", container: "api" }],
+      cpu_percent_threshold: 80,
+    })
+    const now = new Date()
+    operation.containerObservation = {
+      collectedAt: now.toISOString(),
+      nextPollAt: new Date(now.getTime() + 30_000).toISOString(),
+      fingerprint: "a".repeat(64),
+      results: [
+        {
+          targetId: "api",
+          kind: "docker",
+          status: "collected",
+          state: "running",
+          ready: true,
+          cpuPercent: 95,
+          logsAvailable: false,
+          statsAvailable: true,
+          issues: ["cpu-high"],
+          logExcerpt: "![external image](https://example.invalid/tracker) <script>source evidence</script>",
+          fingerprint: "a".repeat(64),
+        },
+      ],
+    }
+    operation.containerObservationRevision = 3
+    const report = renderOperationReport(operation)
+    expect(report).toContain("CPU=95%")
+    expect(report).toContain("threshold 80")
+    expect(report).toContain("logs=false")
+    expect(report).toContain("Observation transition: 3")
+    expect(report).toContain("&lt;script&gt;")
+    expect(report).not.toContain("![external image]")
   })
 
   it("retains a paused child's identity and resumes acceptance after it is externally repaired", async () => {

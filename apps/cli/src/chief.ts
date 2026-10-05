@@ -14,6 +14,7 @@ import type { Mission } from "@agent-valley/core/chief/types"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { type Command, Option } from "commander"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
+import { createMissionContainerPorts } from "./chief-containers"
 import {
   type ContinuousOptions,
   operationStore,
@@ -98,6 +99,20 @@ export async function runOrder(
           "Order goal exceeds 32 KB. Put supporting details in repository files and reference them in a shorter goal.",
         )
       const config = await resolveOrderConfig(root, options)
+      const operation = options.operationId
+        ? await operationStore(await realpath(root)).load(options.operationId)
+        : undefined
+      if (
+        operation &&
+        (operation.repositoryRoot !== (await realpath(config.workspace)) ||
+          operation.currentMissionId !== id ||
+          operation.decision?.action !== "execute" ||
+          operation.decision.goal !== goal ||
+          operation.baseline?.path !== options.baselineWorkspace)
+      )
+        throw new Error(
+          "Internal child launch does not match its saved operation, goal and accepted baseline. Restore the original operation checkpoint.",
+        )
       if (Boolean(options.baselineWorkspace) !== Boolean(options.operationId))
         throw new Error("An internal operation snapshot requires both its operation identity and accepted baseline.")
       const workspace =
@@ -134,6 +149,10 @@ export async function runOrder(
         verificationMode: config.verifyCommand.trim() ? "operator" : "chief",
         executionPolicy: config.executionPolicy,
         metricSourcePolicy: config.metricSourcePolicy,
+        containerObservationPolicy: operation
+          ? operation.containerObservationPolicy
+          : config.containerObservationPolicy,
+        containerObservation: operation?.containerObservation,
         toolEnvKeys: config.toolEnvKeys,
         capturePolicy: config.capturePolicy,
         status: "pending",
@@ -165,6 +184,7 @@ export async function runOrder(
       )
     }
     const metrics = createMissionMetricPorts(repository, mission, { signal: abortController.signal })
+    const containers = createMissionContainerPorts({ signal: abortController.signal })
     if (mission.metricSourcePolicy && !mission.metricBaselineIds) {
       await metrics.initialize()
       await store.save(mission)
@@ -205,6 +225,7 @@ export async function runOrder(
           }
         : {}),
       ...(mission.metricSourcePolicy ? { observeMetrics: metrics.observeMetrics } : {}),
+      ...(mission.containerObservationPolicy?.enabled ? containers : {}),
       runAgent: (actor, prompt, current, stage, context) => {
         capture?.label(`${stage}${context?.taskId ? `:${context.taskId}` : ""}`)
         return ports.runAgent(actor, prompt, current, stage, context)

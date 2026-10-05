@@ -6,6 +6,7 @@
  *      var to export after setup.
  */
 
+import { chiefConfigSchema } from "@agent-valley/core/config/chief-schema"
 import { describe, expect, it } from "vitest"
 import { renderPreview } from "../../setup/preview"
 import type { ResolvedSetupContext } from "../../setup/resolve"
@@ -143,5 +144,54 @@ describe("renderPreview (github)", () => {
     expect(rendered).toContain("valley:wip")
     expect(rendered).toContain("valley:done")
     expect(rendered).toContain("valley:cancelled")
+  })
+})
+
+describe("container observation configuration review", () => {
+  const chief = chiefConfigSchema.parse({
+    container_observation: {
+      poll_interval_sec: 45,
+      log_tail: 12,
+      log_since_sec: 120,
+      timeout_ms: 3_000,
+      max_output_bytes: 16_384,
+      cpu_percent_threshold: 90,
+      memory_percent_threshold: 75,
+      targets: [
+        { id: "api", kind: "docker", context: "orbstack", container: "app-api" },
+        {
+          id: "worker",
+          kind: "kubernetes",
+          context: "production",
+          namespace: "app",
+          pod: "worker-abc",
+          container: "worker",
+        },
+      ],
+    },
+  })
+
+  it("shows exact targets, collection limits and the health requirement before saving", () => {
+    const out = strip(renderPreview({ ...githubCtx, chief }))
+    expect(out).toContain("chief.container_observation = enabled (runtime unverified)")
+    expect(out).toContain("api = docker container=app-api context=orbstack")
+    expect(out).toContain("worker = kubernetes namespace=app pod=worker-abc container=worker context=production")
+    expect(out).toContain("poll_interval_sec = 45")
+    expect(out).toContain("log_tail = 12; log_since_sec = 120")
+    expect(out).toContain("timeout_ms = 3000; max_output_bytes = 16384")
+    expect(out).toContain("cpu_percent_threshold = 90")
+    expect(out).toContain("memory_percent_threshold = 75")
+    expect(out).toContain("all selected targets must be healthy")
+  })
+
+  it("shows retained disabled targets without claiming they gate completion", () => {
+    const disabled = chiefConfigSchema.parse({
+      container_observation: { ...chief.container_observation, enabled: false },
+    })
+    const out = strip(renderPreview({ ...githubCtx, chief: disabled }))
+    expect(out).toContain("chief.container_observation = disabled")
+    expect(out).toContain("api = docker container=app-api context=orbstack")
+    expect(out).toContain("completion requirement = disabled; targets retained for later editing")
+    expect(out).not.toContain("all selected targets must be healthy")
   })
 })

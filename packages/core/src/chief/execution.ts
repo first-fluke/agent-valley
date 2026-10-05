@@ -165,6 +165,7 @@ export function progressKey(mission: Mission, fingerprint: string): string {
           timestamp: metric.timestamp,
         })),
         effects: mission.tasks.map((task) => ({ id: task.id, effectState: task.effectState })),
+        containers: mission.containerObservation?.fingerprint,
       }),
     )
     .digest("hex")

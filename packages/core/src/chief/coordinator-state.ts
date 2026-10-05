@@ -9,6 +9,7 @@ export function createMissionContract(mission: Mission) {
     operatingPolicy: JSON.stringify(mission.operatingPolicy),
     executionPolicy: JSON.stringify(mission.executionPolicy),
     metricSourcePolicy: JSON.stringify(mission.metricSourcePolicy),
+    containerObservationPolicy: JSON.stringify(mission.containerObservationPolicy),
   }
   let brief = mission.goalBrief ? JSON.stringify(mission.goalBrief) : undefined
   let checks = mission.verificationContract ? JSON.stringify(mission.verificationContract) : undefined
@@ -26,6 +27,7 @@ export function createMissionContract(mission: Mission) {
         JSON.stringify(mission.operatingPolicy) === immutable.operatingPolicy &&
         JSON.stringify(mission.executionPolicy) === immutable.executionPolicy &&
         JSON.stringify(mission.metricSourcePolicy) === immutable.metricSourcePolicy &&
+        JSON.stringify(mission.containerObservationPolicy) === immutable.containerObservationPolicy &&
         (!brief || JSON.stringify(mission.goalBrief) === brief) &&
         (!checks || JSON.stringify(mission.verificationContract) === checks) &&
         mission.verificationContractSha256 === digest
@@ -36,6 +38,9 @@ export function createMissionContract(mission: Mission) {
       mission.operatingPolicy = immutable.operatingPolicy ? JSON.parse(immutable.operatingPolicy) : undefined
       mission.executionPolicy = immutable.executionPolicy ? JSON.parse(immutable.executionPolicy) : undefined
       mission.metricSourcePolicy = immutable.metricSourcePolicy ? JSON.parse(immutable.metricSourcePolicy) : undefined
+      mission.containerObservationPolicy = immutable.containerObservationPolicy
+        ? JSON.parse(immutable.containerObservationPolicy)
+        : undefined
       if (brief) mission.goalBrief = JSON.parse(brief)
       if (checks) mission.verificationContract = JSON.parse(checks)
       mission.verificationContractSha256 = digest
@@ -52,6 +57,7 @@ export function resetTaskApprovals(
   options: { keepReviews?: boolean; preserveUnfinished?: boolean } = {},
 ): void {
   delete mission.observationStartedAt
+  delete mission.containerObservationVerifiedFingerprint
   for (const state of mission.tasks) {
     const preserve = options.preserveUnfinished && state.parallel && state.status !== "completed"
     state.status = "pending"

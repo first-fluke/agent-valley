@@ -162,6 +162,52 @@ describe("Chief integration persistence", () => {
     expect(parse(readFileSync(settings, "utf8")).chief).toEqual(globalChief())
   })
 
+  it("saves new container targets without copying unrelated inherited policies into av.yaml", async () => {
+    writeDefaults()
+    const changed = chiefConfigSchema.parse({
+      ...globalChief(),
+      ...projectChief(),
+      container_observation: {
+        targets: [{ id: "api", kind: "docker", container: "app-api", context: "orbstack" }],
+      },
+    })
+    await saveConfig(context({ chief: changed, chiefChanged: true }))
+    const saved = parse(readFileSync("av.yaml", "utf8")).chief
+    expect(saved.container_observation).toEqual(changed.container_observation)
+    expect(saved.memory).toBe(false)
+    expect(saved.reporting).toEqual(projectChief().reporting)
+    expect(saved.capture).toBeUndefined()
+    expect(saved.routing).toBeUndefined()
+    expect(parse(readFileSync(settings, "utf8")).chief).toEqual(globalChief())
+  })
+
+  it("persists disabling inherited container targets through edit while leaving the global policy active", async () => {
+    writeDefaults()
+    const inherited = chiefConfigSchema.parse({
+      ...globalChief(),
+      container_observation: {
+        targets: [{ id: "api", kind: "docker", container: "app-api", context: "orbstack" }],
+      },
+    })
+    writeFileSync(settings, stringify({ actor: { type: "codex", model: "chief-model" }, chief: inherited }))
+    const oldGlobal = readFileSync(settings, "utf8")
+    vi.mocked(stepChief).mockImplementation(async (ctx) => {
+      ctx.chief = chiefConfigSchema.parse({
+        ...ctx.chief,
+        container_observation: { ...ctx.chief?.container_observation, enabled: false },
+      })
+      ctx.chiefChanged = true
+    })
+    await setupEdit()
+    const saved = parse(readFileSync("av.yaml", "utf8")).chief
+    expect(saved.container_observation).toEqual({ ...inherited.container_observation, enabled: false })
+    expect(saved.metric_targets).toEqual(projectChief().metric_targets)
+    expect(saved.capture).toBeUndefined()
+    expect(saved.routing).toBeUndefined()
+    expect(readFileSync(settings, "utf8")).toBe(oldGlobal)
+    expect(parse(readFileSync(settings, "utf8")).chief.container_observation.enabled).toBe(true)
+  })
+
   it("does not silently replace a malformed project when direct save was not authorized to repair it", async () => {
     writeDefaults()
     writeFileSync("av.yaml", "chief: [broken YAML\n")

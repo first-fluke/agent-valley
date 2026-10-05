@@ -1,5 +1,11 @@
 import { consultDirectors } from "./advisor-coordination"
+import {
+  ensureCurrentMissionContainers,
+  refreshMissionContainers,
+  verifyMissionContainers,
+} from "./coordinator-container"
 import { performParallelWave } from "./coordinator-parallel"
+import { createMissionReporter } from "./coordinator-report"
 import { CheckpointError, createMissionRun, ReadOnlyViolation } from "./coordinator-run"
 import { ContractViolation, createMissionContract, resetTaskApprovals } from "./coordinator-state"
 import {
@@ -14,7 +20,7 @@ import {
 import { readyTaskWave } from "./parallel"
 import { ParallelIntegrationConflict } from "./parallel-workspace"
 import { planPrompt, reviewPrompt, supervisePrompt, workPrompt } from "./prompts"
-import { fallbackReport, parseReport, reportPrompt } from "./reports"
+import { fallbackReport } from "./reports"
 import { selectTaskReviewer } from "./review-routing"
 import { recordTaskVerdict } from "./routing"
 import {
@@ -71,19 +77,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     delete mission.verification
   }
   const run = createMissionRun(mission, ports, assertContract, checkAbort)
-  const generateReport = async () => {
-    if (!mission.supervision) return
-    if (ports.signal?.aborted) {
-      mission.report = fallbackReport(mission)
-      return
-    }
-    try {
-      mission.report = parseReport(await run(persona(mission.chiefId), reportPrompt(mission), "report"))
-    } catch (error) {
-      if (fatal(error)) throw error
-      mission.report = fallbackReport(mission)
-    }
-  }
+  const generateReport = createMissionReporter(mission, ports, run, persona, fatal)
   const requestRecovery = async (reason: string, taskId?: string): Promise<void> => {
     const supervision = mission.supervision
     if (!supervision) throw new Error(reason)
@@ -264,6 +258,10 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         `Chief Director stopped before achieving the goal: ${stopped.reason}. Start a new mission after resolving this blocker.`,
       )
     if (!mission.plan) {
+      await refreshMissionContainers(mission, ports)
+      checkAbort()
+      if (mission.containerObservationPolicy?.enabled)
+        await save("container-observation", "Collected configured container evidence for mission planning.")
       await consultDirectors(mission, ports, { run, save })
       mission.status = "planning"
       await save("plan", "Chief Director is planning the mission.")
@@ -374,6 +372,11 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         continue
       }
       mission.status = "reviewing"
+      const recovery = await verifyMissionContainers(mission, ports, save, checkAbort)
+      if (!recovery.healthy) {
+        await requestRecovery(`Configured service recovery remains unresolved after code checks: ${recovery.reason}`)
+        continue
+      }
       if (ports.refreshOrganization) {
         mission.organizationContext = await ports.refreshOrganization(mission)
         await save(
@@ -420,12 +423,14 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
       if ((await ports.fingerprint(mission)) !== mission.verification.fingerprint) {
         throw new Error("Worktree changed after verification. Resume to rerun task reviews and verification.")
       }
-      mission.status = "completed"
+      if (!(await ensureCurrentMissionContainers(mission, ports, save, checkAbort, requestRecovery))) continue
       await generateReport()
       if ((await ports.fingerprint(mission)) !== mission.verification.fingerprint)
         throw new ReadOnlyViolation(
           "Worktree changed after the Chief Director report. Resume to refresh verification and approvals.",
         )
+      if (!(await ensureCurrentMissionContainers(mission, ports, save, checkAbort, requestRecovery))) continue
+      mission.status = "completed"
       await save(
         "completed",
         "Every task passed independent review, verification passed, and the Chief Director approved the mission.",

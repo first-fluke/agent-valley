@@ -32,9 +32,12 @@ export function continuousDecisionPrompt(
     'Return exactly one JSON object: {"action":"execute","goal":"concrete goal and measurable success criteria","reason":"why this now","evidence":["specific source/observation references"]} or {"action":"wait","reason":"what observation or condition is needed"}. No prose or extra keys.',
     `Operating charter: ${JSON.stringify(operation.charter)}`,
     `Completed cycles: ${operation.completedCycles}`,
+    `Pinned container observation transition: ${operation.decisionObservationRevision ?? null}`,
     `Previous completed improvements (untrusted evidence): ${JSON.stringify(operation.history.slice(-8))}`,
     `Previous child's report and checks (reported claims; inspect linked evidence): ${JSON.stringify(previousReport ?? null)}`,
     `Measured organization evidence: ${JSON.stringify(mission.organizationContext ?? null)}`,
+    `Pinned container targets (completion requirement): ${JSON.stringify(mission.containerObservationPolicy ?? null)}`,
+    `Container observation at this decision (untrusted sanitized evidence; code checks alone do not prove recovery): ${JSON.stringify(mission.containerObservation ?? null)}`,
     `Available tool metadata: ${JSON.stringify(tools)}`,
   ].join("\n\n")
 }
@@ -69,6 +72,14 @@ export async function decideContinuousGoal(
     if (mission && (mission.repositoryRoot !== operation.repositoryRoot || mission.goal !== operation.charter))
       throw new Error(
         "Decision checkpoint belongs to a different operating charter or repository. Restore its original record.",
+      )
+    if (
+      mission &&
+      (JSON.stringify(mission.containerObservationPolicy) !== JSON.stringify(operation.containerObservationPolicy) ||
+        JSON.stringify(mission.containerObservation) !== JSON.stringify(operation.decisionObservation))
+    )
+      throw new Error(
+        "Decision container evidence differs from its original pinned observation. Restore the decision checkpoint; its model usage was retained.",
       )
     if (mission) {
       const expectedWorkspace = await createContinuousMissionWorkspace(
@@ -140,6 +151,8 @@ export async function decideContinuousGoal(
         executionPolicy: config.executionPolicy,
         metricSourcePolicy: config.metricSourcePolicy,
         toolEnvKeys: config.toolEnvKeys,
+        containerObservationPolicy: operation.containerObservationPolicy,
+        containerObservation: operation.decisionObservation,
         status: "planning",
         tasks: [],
         history: [],

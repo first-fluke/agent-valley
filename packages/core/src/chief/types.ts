@@ -1,5 +1,6 @@
 import type { Workspace } from "../domain/models"
 import type { CapturePolicy, CaptureResult } from "./capture"
+import type { ContainerObservationPolicy, ContainerObservationSnapshot } from "./container-observation-policy"
 import type { ExecutionPolicy, ExecutionState } from "./execution"
 import type { MetricSourcePolicy } from "./metric-source-policy"
 import type { ChiefOperatingPolicy, ChiefOperations } from "./operations"
@@ -146,6 +147,9 @@ export interface Mission {
   metricSourcePolicy?: MetricSourcePolicy
   observationStartedAt?: string
   metricBaselineIds?: Record<string, string>
+  containerObservationPolicy?: ContainerObservationPolicy
+  containerObservation?: ContainerObservationSnapshot
+  containerObservationVerifiedFingerprint?: string
 }
 
 export interface GoalBrief {
@@ -194,6 +198,7 @@ export interface ChiefPorts {
   observeMetrics?(
     mission: Mission,
   ): Promise<{ status: "satisfied" | "waiting" | "failed"; reason: string; nextPollAt?: string }>
+  observeContainers?(mission: Mission): Promise<ContainerObservationSnapshot>
   parallel?: {
     prepare(
       mission: Mission,

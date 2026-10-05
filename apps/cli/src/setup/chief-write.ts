@@ -7,7 +7,7 @@ export function changedProjectChief(
   current: ChiefConfig | undefined,
 ): ChiefConfig {
   const previous = mergeChiefConfig(global, project)
-  const fields = new Set(["reporting", "capture", "metric_sources", "metric_targets"])
+  const fields = new Set(["reporting", "capture", "metric_sources", "metric_targets", "container_observation"])
   const changes = Object.fromEntries(
     Object.entries(current ?? {}).filter(
       ([key, value]) => fields.has(key) && JSON.stringify(value) !== JSON.stringify(previous[key as keyof ChiefConfig]),

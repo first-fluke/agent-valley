@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { chiefConfigSchema } from "@agent-valley/core/config/chief-schema"
 import { loadGlobalConfig } from "@agent-valley/core/config/yaml-loader"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentAvailability } from "../agent-discovery"
@@ -28,6 +29,46 @@ afterEach(async () => {
 })
 
 describe("chief order configuration", () => {
+  it("resolves inherited container observation and preserves an explicit disabled project override", async () => {
+    const globalChief = chiefConfigSchema.parse({
+      container_observation: { targets: [{ id: "api", kind: "docker", container: "app-api", context: "orbstack" }] },
+    })
+    vi.mocked(loadGlobalConfig).mockReturnValue({ chief: globalChief })
+    const inherited = await resolveOrderConfig(root, { workspace: root }, discover)
+    expect(inherited.containerObservationPolicy).toEqual(globalChief.container_observation)
+    await writeFile(
+      join(root, "av.yaml"),
+      JSON.stringify({
+        chief: {
+          container_observation: {
+            enabled: false,
+            targets: [{ id: "worker", kind: "kubernetes", namespace: "app", pod: "worker-1", container: "worker" }],
+          },
+        },
+      }),
+    )
+    const override = await resolveOrderConfig(root, { workspace: root }, discover)
+    expect(override.containerObservationPolicy).toMatchObject({
+      enabled: false,
+      targets: [{ id: "worker", kind: "kubernetes", namespace: "app", pod: "worker-1", container: "worker" }],
+    })
+    expect(override.containerObservationPolicy?.targets).toHaveLength(1)
+  })
+
+  it("reports the container key and av.yaml path before actor discovery for an invalid target", async () => {
+    await writeFile(
+      join(root, "av.yaml"),
+      JSON.stringify({
+        chief: { container_observation: { targets: [{ id: "api", kind: "docker", container: "--all" }] } },
+      }),
+    )
+    await expect(resolveOrderConfig(root, { workspace: root }, discover)).rejects.toThrow(
+      "chief.container_observation.targets.0.container",
+    )
+    await expect(resolveOrderConfig(root, { workspace: root }, discover)).rejects.toThrow(join(root, "av.yaml"))
+    expect(discover).not.toHaveBeenCalled()
+  })
+
   it("uses the Chief Director vendor and model saved by setup without per-order flags", async () => {
     vi.mocked(loadGlobalConfig).mockReturnValue({ agent: { type: "codex", model: "configured-chief-model" } })
     await writeFile(join(root, "av.yaml"), `workspace:\n  root: ${root}\nverify:\n  command: "true"\n`)

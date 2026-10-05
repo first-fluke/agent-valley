@@ -1,6 +1,7 @@
 import type { ReportDestination } from "@agent-valley/core/chief/report-delivery-contract"
 import { type ChiefConfig, chiefConfigSchema } from "@agent-valley/core/config/chief-schema"
 import * as p from "@clack/prompts"
+import { stepContainers } from "./container-step"
 import { stepMetrics } from "./metric-step"
 import { BACK, CANCEL, type SetupContext, type StepResult } from "./types"
 import { stepLabel } from "./ui"
@@ -146,9 +147,12 @@ async function captureSettings(previous?: ChiefConfig["capture"]): Promise<Chief
 /** Optional integrations are configured without installing, reading secrets, or contacting a channel. */
 export async function stepChief(ctx: SetupContext, step: number, total: number): Promise<StepResult> {
   const configured =
-    !!ctx.chief?.reporting?.destinations.length || !!ctx.chief?.capture?.enabled || !!ctx.chief?.metric_sources
+    !!ctx.chief?.reporting?.destinations.length ||
+    !!ctx.chief?.capture?.enabled ||
+    !!ctx.chief?.metric_sources ||
+    !!ctx.chief?.container_observation
   const action = await p.select({
-    message: stepLabel(step, total, "Optional reports, browser capture and metrics"),
+    message: stepLabel(step, total, "Optional reports, browser capture, metrics and container observation"),
     initialValue: "keep",
     options: [
       {
@@ -158,6 +162,7 @@ export async function stepChief(ctx: SetupContext, step: number, total: number):
       },
       { value: "configure", label: "Configure reporting and capture" },
       { value: "metrics", label: "Configure a business metric and target" },
+      { value: "containers", label: "Configure container observation" },
       { value: "disable", label: "Disable reporting and capture" },
       { value: "back", label: "Back" },
     ],
@@ -166,6 +171,7 @@ export async function stepChief(ctx: SetupContext, step: number, total: number):
   if (action === "back") return BACK
   if (action === "keep") return
   if (action === "metrics") return stepMetrics(ctx)
+  if (action === "containers") return stepContainers(ctx)
   if (action === "disable") {
     ctx.chief = chiefConfigSchema.parse({ ...ctx.chief, reporting: { destinations: [] }, capture: { enabled: false } })
     ctx.chiefChanged = true

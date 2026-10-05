@@ -14,6 +14,8 @@ import { detectCycles } from "../domain/dag"
 import type { DagNode } from "../domain/models"
 import { actorSchema, actorTaskSchema, normalizeActorAssignment } from "./actor-contract"
 import { capturePolicySchema, captureResultSchema } from "./capture"
+import { containerObservationPolicySchema, containerObservationSnapshotSchema } from "./container-observation-policy"
+import { refineMissionContainerState } from "./container-observation-state"
 import { CDO_ROLE } from "./design-lead"
 import { executionPolicySchema, executionStateSchema } from "./execution"
 import { validateFinalReview } from "./goal-evidence"
@@ -134,8 +136,15 @@ export const missionSchema = z
     metricSourcePolicy: metricSourcePolicySchema.optional(),
     observationStartedAt: z.iso.datetime().optional(),
     metricBaselineIds: z.record(z.string().min(1).max(120), z.string().min(1).max(120)).optional(),
+    containerObservationPolicy: containerObservationPolicySchema.optional(),
+    containerObservation: containerObservationSnapshotSchema.optional(),
+    containerObservationVerifiedFingerprint: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   })
   .superRefine((mission, ctx) => {
+    refineMissionContainerState(mission, ctx)
     if (!mission.verifyCommand.trim() && mission.verificationMode !== "chief")
       ctx.addIssue({
         code: "custom",

@@ -20,11 +20,17 @@ describe("tool discovery", () => {
   it("finds executables without running them or claiming login", async () => {
     const bin = join(root, "bin")
     await mkdir(bin)
-    await writeFile(join(bin, "aws"), "#!/bin/sh\nexit 99\n")
-    await chmod(join(bin, "aws"), 0o700)
+    for (const name of ["aws", "kubectl"]) {
+      await writeFile(join(bin, name), "#!/bin/sh\nexit 99\n")
+      await chmod(join(bin, name), 0o700)
+    }
     await writeFile(join(bin, "docker"), "not executable")
     const tools = await discoverTools(root, { home, env: { PATH: bin, AWS_SECRET_ACCESS_KEY: secret } })
     expect(tools.find((tool) => tool.name === "aws")).toMatchObject({
+      availability: "available",
+      authentication: "unknown",
+    })
+    expect(tools.find((tool) => tool.name === "kubectl")).toMatchObject({
       availability: "available",
       authentication: "unknown",
     })

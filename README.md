@@ -4,6 +4,8 @@ Give a Chief Director a goal for service improvement, refactoring, usability, or
 
 Orders continue improving by default. Use `av order "Improve usability, reliability and revenue"`. Add `--once` to complete one goal and exit. The Chief selects successive goals using accepted changes, previous reports, measured outcomes and available tools. `av operations` shows progress; Ctrl-C pauses and `av order --resume ID` continues. See [continuous Chief operation](./docs/guides/chief-continuous.md) for limits, cloud/MCP access and recovery.
 
+Optional [container observation](./docs/guides/chief-containers.md) supplies Docker/OrbStack and Kubernetes state, restart/OOM evidence and bounded logs. Changed incidents wake an idle Chief, and configured target health must pass a fresh check before mission completion. Setup can configure the targets without starting a container or contacting a cluster.
+
 > Read this in: [한국어](./README.ko.md)
 
 > **Token usage warning:** AV prioritizes your goal over token savings. Planning, persona consultation, Actor work, independent reviews, repairs, and replanning can consume substantial model usage and incur API charges. AV does not check or manage your subscription's remaining allowance. Reported usage is recorded; optional estimated-cost limits and execution limits still apply.

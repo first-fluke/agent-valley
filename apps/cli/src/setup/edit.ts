@@ -34,7 +34,7 @@ const EDITABLE_FIELDS: { value: string; label: string; scope: "global" | "projec
   { value: "agentType", label: "Chief Director CLI and model", scope: "global" },
   { value: "oma", label: "OMA skills (install/update)", scope: "project" },
   { value: "completion", label: "Task output and verification", scope: "project" },
-  { value: "chief", label: "Reports, browser capture and business metrics", scope: "project" },
+  { value: "chief", label: "Reports, browser capture, metrics and container observation", scope: "project" },
 ]
 
 export async function setupEdit(): Promise<void> {

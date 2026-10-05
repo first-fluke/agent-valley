@@ -3,6 +3,10 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
+import {
+  type ContainerObservationSnapshot,
+  containerObservationPolicySchema,
+} from "@agent-valley/core/chief/container-observation-policy"
 import { prepareContinuousBaseline } from "@agent-valley/core/chief/continuous-workspace"
 import { report, mission as reportMission } from "@agent-valley/core/chief/reports.fixture"
 import { MissionStore } from "@agent-valley/core/chief/store"
@@ -68,6 +72,53 @@ function dependencies(run: (mission: Mission, prompt: string) => Promise<string>
 }
 
 describe("read-only persistent Chief operation decisions", () => {
+  it("retains the originally pinned container evidence in cached decisions and rejects replaced evidence", async () => {
+    const current = await operation()
+    current.containerObservationPolicy = containerObservationPolicySchema.parse({
+      targets: [{ id: "api", kind: "docker", container: "api" }],
+    })
+    const now = new Date()
+    const observed: ContainerObservationSnapshot = {
+      collectedAt: now.toISOString(),
+      nextPollAt: new Date(now.getTime() + 30_000).toISOString(),
+      fingerprint: "a".repeat(64),
+      results: [
+        {
+          targetId: "api",
+          kind: "docker",
+          status: "collected",
+          state: "running",
+          ready: true,
+          logsAvailable: true,
+          statsAvailable: true,
+          issues: [],
+          fingerprint: "a".repeat(64),
+        },
+      ],
+    }
+    current.containerObservation = observed
+    current.decisionObservation = observed
+    current.containerObservationRevision = 1
+    current.decisionObservationRevision = 1
+    const fake = dependencies(async (mission, prompt) => {
+      expect(mission.containerObservationPolicy).toEqual(current.containerObservationPolicy)
+      expect(prompt).toContain('"targetId":"api"')
+      expect(prompt).toContain("Pinned container observation transition: 1")
+      return JSON.stringify({ action: "wait", reason: "Observed service is healthy" })
+    })
+    const selected = await decideContinuousGoal(current, "decision-containers", root, fake.result)
+    current.containerObservation = { ...observed, fingerprint: "b".repeat(64) }
+    current.containerObservationRevision = 2
+    expect(await decideContinuousGoal(current, "decision-containers", root, fake.result)).toEqual(selected)
+    expect(fake.call).toHaveBeenCalledOnce()
+    current.decisionObservation = current.containerObservation
+    current.decisionObservationRevision = 2
+    await expect(decideContinuousGoal(current, "decision-containers", root, fake.result)).rejects.toThrow(
+      "original pinned observation",
+    )
+    expect(fake.call).toHaveBeenCalledOnce()
+  })
+
   it("caches a completed decision and reserves its call before dispatch", async () => {
     const current = await operation()
     const store = new MissionStore(join(root, ".agent-valley", "operation-decisions", current.id))

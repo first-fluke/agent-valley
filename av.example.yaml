@@ -185,6 +185,16 @@ verify:
 #   memory: true
 #   # metric_sources and metric_targets require real configured observations.
 #   # See the guide for stripe-revenue, http-json and json-file adapter settings.
+#   # Enabled targets require a fresh healthy observation before mission completion.
+#   # See docs/guides/chief-containers.md for Kubernetes and resource thresholds.
+#   container_observation:
+#     enabled: true
+#     poll_interval_sec: 30
+#     targets:
+#       - id: api
+#         kind: docker
+#         container: app-api
+#         context: orbstack
 #   reporting:
 #     destinations:
 #       - id: team

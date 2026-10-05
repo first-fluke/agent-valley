@@ -1,4 +1,6 @@
 import { z } from "zod"
+import { containerObservationPolicySchema, containerObservationSnapshotSchema } from "./container-observation-policy"
+import { validateContainerObservation } from "./container-observation-state"
 
 export const operationIdSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/)
 const pathSchema = z.string().min(1).max(4096)
@@ -65,6 +67,11 @@ export const operationSchema = z
     completedCycles: z.number().int().min(0),
     cycleLimit: z.number().int().min(1).max(1_000_000).optional(),
     waitIntervalSec: z.number().int().min(1).max(86_400),
+    containerObservationPolicy: containerObservationPolicySchema.optional(),
+    containerObservation: containerObservationSnapshotSchema.optional(),
+    containerObservationRevision: z.number().int().min(1).optional(),
+    decisionObservation: containerObservationSnapshotSchema.optional(),
+    decisionObservationRevision: z.number().int().min(1).optional(),
     baseline: continuousBaselineSchema.optional(),
     currentMissionId: operationIdSchema.optional(),
     decisionId: operationIdSchema.optional(),
@@ -79,6 +86,29 @@ export const operationSchema = z
     history: z.array(historyEntrySchema).max(20),
   })
   .superRefine((operation, context) => {
+    if (
+      (operation.containerObservationRevision && !operation.containerObservation) ||
+      (operation.decisionObservationRevision &&
+        (!operation.decisionObservation ||
+          operation.decisionObservationRevision > (operation.containerObservationRevision ?? 0)))
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["containerObservationRevision"],
+        message: "Observation revisions require their saved evidence and cannot exceed the latest transition.",
+      })
+    for (const key of ["containerObservation", "decisionObservation"] as const) {
+      if (!operation[key]) continue
+      try {
+        validateContainerObservation(operation.containerObservationPolicy, operation[key])
+      } catch (error) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
     if (
       operation.baseline &&
       (operation.baseline.operationId !== operation.id ||

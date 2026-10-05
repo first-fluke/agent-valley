@@ -15,7 +15,18 @@ export interface ToolAvailability {
   reason?: string
 }
 
-const binaries = ["docker", "orb", "orbstack", "aws", "gcloud", "az", "wrangler", "cloudflared", "sentry-cli"]
+const binaries = [
+  "docker",
+  "orb",
+  "orbstack",
+  "kubectl",
+  "aws",
+  "gcloud",
+  "az",
+  "wrangler",
+  "cloudflared",
+  "sentry-cli",
+]
 const MAX_CONFIG_BYTES = 1_048_576
 const record = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}

@@ -50,4 +50,49 @@ describe("Chief policy configuration", () => {
     ).toThrow("unique")
     expect(() => chiefConfigSchema.parse({ capture: { enabled: true } })).toThrow("target_url")
   })
+
+  it("inherits container targets or replaces the entire policy with explicit project settings", () => {
+    const global = globalConfigSchema.parse({
+      chief: {
+        memory: false,
+        container_observation: { targets: [{ id: "api", kind: "docker", container: "app-api", context: "orbstack" }] },
+      },
+    })
+    const inherited = mergeChiefConfig(global.chief, { review_vendor: "require" })
+    expect(inherited.container_observation).toMatchObject({
+      enabled: true,
+      poll_interval_sec: 30,
+      log_tail: 50,
+      log_since_sec: 300,
+      targets: [{ id: "api", kind: "docker", container: "app-api", context: "orbstack" }],
+    })
+    const project = projectConfigSchema.parse({
+      chief: {
+        container_observation: {
+          enabled: false,
+          poll_interval_sec: 60,
+          targets: [{ id: "worker", kind: "kubernetes", namespace: "app", pod: "worker-abc", container: "worker" }],
+        },
+      },
+    })
+    const overridden = mergeChiefConfig(global.chief, project.chief)
+    expect(overridden.memory).toBe(false)
+    expect(overridden.container_observation).toEqual(project.chief?.container_observation)
+    expect(overridden.container_observation?.targets).toHaveLength(1)
+    expect(overridden.container_observation?.enabled).toBe(false)
+  })
+
+  it.each([
+    { targets: [] },
+    { targets: [{ id: "api", kind: "docker", container: "--all" }] },
+    { targets: [{ id: "api", kind: "docker", container: "app", context: "https://user:secret@example.test" }] },
+    { targets: [{ id: "api", kind: "docker", container: "app" }], command: "docker restart app" },
+    { targets: [{ id: "worker", kind: "kubernetes", pod: "worker", container: "app" }] },
+    { targets: [{ id: "api", kind: "docker", container: "app" }], poll_interval_sec: 0 },
+  ])("rejects incomplete, untargeted or command-bearing container policies: %j", (container_observation) => {
+    const result = projectConfigSchema.safeParse({ chief: { container_observation } })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error("Invalid container policy unexpectedly accepted")
+    expect(result.error.issues[0]?.path.slice(0, 2)).toEqual(["chief", "container_observation"])
+  })
 })

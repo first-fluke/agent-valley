@@ -235,6 +235,7 @@ export async function resolveOrderConfig(
     capturePolicy: chiefCapturePolicy(chiefConfig),
     executionPolicy,
     metricSourcePolicy: chiefConfig.metric_sources,
+    containerObservationPolicy: chiefConfig.container_observation,
     toolEnvKeys: chiefConfig.tool_env_keys,
   }
 }

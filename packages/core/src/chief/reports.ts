@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { captureReportLines } from "./capture-report"
+import { containerCompletionVerified, containerObservationReport } from "./container-observation-state"
 import { finalCriteria } from "./goal-evidence"
 import { operationsEvidence, operationsReportLines } from "./operations-report"
 import { assessMetricTargets } from "./organization"
@@ -112,6 +113,8 @@ function incompleteReasons(mission: Mission): string[] {
   for (const metric of assessMetricTargets(mission.organizationContext, mission.operatingPolicy?.metricTargets ?? [])) {
     if (!metric.passed) reasons.push(`사업 지표 미충족: ${metric.criterion}. ${metric.evidence}`)
   }
+  if (!containerCompletionVerified(mission))
+    reasons.push("코드 검증과 별도로 설정된 서비스의 실제 복구가 확인되지 않았습니다.")
   return reasons
 }
 
@@ -233,6 +236,7 @@ export function reportPrompt(mission: Mission): string {
     "The Marketing Director is the standing marketing adviser consulted after the Technical Director and Design Director, before the Chief Director's initial plan, without a final veto. Preserve the Marketing Director's configured role, promotion, acquisition and monetization choices, known or unknown channels, indirect routes and performance demands. Distinguish proposed channel actions from executed campaigns, actual tests and measured results. Never infer revenue, profit, ROI or cost reductions from advice, simulations or an unverified Actor claim.",
     "External delivery by Actors, including creating a PR, pushing, or publishing, is permitted only when the operator's goal explicitly requests it. Describe such delivery as completed only when actual Actor execution evidence and verification support it; the scheduler does not automatically deliver externally.",
     "The recorded verdict is authoritative. A failed, interrupted, unfinished, or insufficiently verified mission is incomplete, even if earlier checks passed. Explain the original failure; reporting cannot approve a mission.",
+    "Distinguish passing code checks from actual configured service recovery. Use the recorded container observation timestamps, health, unavailable sources and sanitized logs; a saved log excerpt or historical restart count alone does not establish recovery.",
     "A selected CLI/model is configuration; an omitted model means the CLI's native default, not a known model name. Assigned skills are selections, not proof of use. Claim a skill was actually used only with direct execution evidence; otherwise describe it as selected. Do not invent models, skills, paths, results, or publication.",
     "Return ONLY one JSON object under 8,000 characters. summary, eli5, goalAssessment are required nonempty strings, each at most 1,200 characters; eli5 must have at least 20 characters. Each array has at most 20 nonempty strings of at most 500 characters.",
     "Account for actual run usage, configured-price cost estimates, unknown usage/cost, actual routed work vendors and cross-vendor review fallbacks, reused organization evidence and recorded metric target assessments. Do not claim advisory business prose or operator-recorded metrics are independently audited revenue/ROI.",
@@ -245,6 +249,7 @@ export function reportPrompt(mission: Mission): string {
       status: mission.status,
       operations: operationsEvidence(mission),
       capture: mission.capture,
+      containerObservation: mission.containerObservation,
       verdict: incompleteReasons(mission).length === 0 ? "completed" : "incomplete",
       incompleteReasons: incompleteReasons(mission),
       error: mission.error ? bounded(mission.error, 2_000) : undefined,
@@ -354,7 +359,7 @@ export function fallbackReport(mission: Mission): ChiefReport {
   }
 }
 
-function markdown(value: string, limit = 1_200): string {
+export function markdown(value: string, limit = 1_200): string {
   return bounded(value, limit)
     .replace(/[\p{Cc}\p{Cf}]/gu, " ")
     .replace(/\s+/g, " ")
@@ -442,6 +447,7 @@ export function renderReport(mission: Mission): string {
       : []),
     "## 실제 검증 기록",
     list(checkEvidence(mission)),
+    ...containerObservationReport(mission, (line) => markdown(line, 2_200)),
     ...(mission.goalVerification
       ? [
           "### Chief가 설계한 목표별 검사",

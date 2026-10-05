@@ -79,6 +79,29 @@ export function renderPreview(ctx: ResolvedSetupContext): string {
     lines.push(
       `  metric target          = ${target.name}: ${target.direction} ${target.target ?? "from measured baseline"} ${target.unit ?? ""}`.trimEnd(),
     )
+  const containers = ctx.chief?.container_observation
+  lines.push(`  chief.container_observation = ${containers?.enabled ? "enabled (runtime unverified)" : "disabled"}`)
+  if (containers) {
+    for (const target of containers.targets) {
+      const location =
+        target.kind === "docker"
+          ? `container=${target.container}`
+          : `namespace=${target.namespace} pod=${target.pod} container=${target.container}`
+      lines.push(`    ${target.id} = ${target.kind} ${location} context=${target.context ?? "CLI default"}`)
+    }
+    lines.push(`    poll_interval_sec = ${containers.poll_interval_sec}`)
+    lines.push(`    log_tail = ${containers.log_tail}; log_since_sec = ${containers.log_since_sec}`)
+    lines.push(`    timeout_ms = ${containers.timeout_ms}; max_output_bytes = ${containers.max_output_bytes}`)
+    if (containers.cpu_percent_threshold !== undefined)
+      lines.push(`    cpu_percent_threshold = ${containers.cpu_percent_threshold}`)
+    if (containers.memory_percent_threshold !== undefined)
+      lines.push(`    memory_percent_threshold = ${containers.memory_percent_threshold}`)
+    lines.push(
+      containers.enabled
+        ? "    completion requirement = all selected targets must be healthy"
+        : "    completion requirement = disabled; targets retained for later editing",
+    )
+  }
   if (ctx.trackerKind !== "none") lines.push(`  tunnel.provider        = ${pc.cyan(ctx.tunnel.provider)}`)
   if (ctx.tunnel.provider === "cloudflare") {
     const cf = ctx.tunnel.cloudflare

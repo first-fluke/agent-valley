@@ -3,12 +3,17 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
+import * as containerObservation from "@agent-valley/core/chief/container-observation"
+import { containerObservationPolicySchema } from "@agent-valley/core/chief/container-observation-policy"
+import { prepareContinuousBaseline } from "@agent-valley/core/chief/continuous-workspace"
 import { addOrganizationMemory, listOrganizationOutcomes } from "@agent-valley/core/chief/organization"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { planSandboxedSpawn } from "@agent-valley/core/sessions/sandbox"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { discoverAgents } from "../agent-discovery"
 import { runOrder } from "../chief"
+import type { OrderOptions } from "../chief-config"
+import { initializeOperation, operationStore } from "../chief-continuous"
 
 vi.mock("@agent-valley/core/sessions/sandbox", () => ({ planSandboxedSpawn: vi.fn() }))
 vi.mock("../agent-discovery", () => ({ discoverAgents: vi.fn() }))
@@ -138,6 +143,103 @@ async function calls(): Promise<Array<{ stage: string; cwd: string; prompt: stri
 }
 
 describe("chief CLI mission lifecycle with real sessions and Git", () => {
+  it("pins configured container targets in operation children and rechecks them on resume despite edited config", async () => {
+    const policy = containerObservationPolicySchema.parse({
+      targets: [{ id: "api", kind: "docker", container: "production-api" }],
+      cpu_percent_threshold: 80,
+    })
+    await writeFile(join(root, "av.yaml"), JSON.stringify({ chief: { container_observation: policy } }))
+    const operation = await initializeOperation(
+      "Create a verified deliverable",
+      { workspace: repo, verify, model: "selected-chief-model", timeout: "10" },
+      root,
+    )
+    expect(operation.containerObservationPolicy).toEqual(policy)
+    operation.baseline = await prepareContinuousBaseline(
+      operation.repositoryRoot,
+      operation.id,
+      operation.repositoryRoot,
+    )
+    operation.currentMissionId = "container-child"
+    operation.decision = {
+      action: "execute",
+      goal: operation.charter,
+      reason: "Requested deliverable",
+      evidence: ["operator-goal"],
+    }
+    operation.phase = "running"
+    await operationStore(await realpath(root)).save(operation)
+    await writeFile(
+      join(root, "av.yaml"),
+      JSON.stringify({
+        chief: {
+          container_observation: {
+            ...policy,
+            enabled: false,
+            targets: [{ id: "other", kind: "docker", container: "other" }],
+          },
+        },
+      }),
+    )
+    let available = true
+    const collect = vi.spyOn(containerObservation, "collectContainerObservation").mockImplementation(async (pinned) => {
+      expect(pinned).toEqual(policy)
+      const now = new Date()
+      const fingerprint = (available ? "a" : "b").repeat(64)
+      return {
+        collectedAt: now.toISOString(),
+        nextPollAt: new Date(now.getTime() + 30_000).toISOString(),
+        fingerprint,
+        results: [
+          {
+            targetId: "api",
+            kind: "docker",
+            status: available ? "collected" : "unavailable",
+            state: "running",
+            ready: true,
+            health: "healthy",
+            cpuPercent: 3,
+            memoryPercent: 20,
+            logsAvailable: true,
+            statsAvailable: true,
+            issues: [],
+            fingerprint,
+            ...(available ? {} : { reason: "Docker source access unavailable" }),
+          },
+        ],
+      }
+    })
+    const mission = await runOrder(
+      operation.charter,
+      {
+        ...(operation.settings as OrderOptions),
+        missionId: operation.currentMissionId,
+        operationId: operation.id,
+        baselineWorkspace: operation.baseline.path,
+      },
+      root,
+    )
+    expect(mission.status).toBe("completed")
+    expect(mission.containerObservationPolicy).toEqual(policy)
+    expect(collect).toHaveBeenCalledTimes(2)
+    available = false
+    collect.mockClear()
+    const resumed = await runOrder(undefined, { resume: mission.id }, root)
+    expect(resumed).toMatchObject({
+      status: "paused",
+      verification: { ok: true },
+      execution: { failureKind: "environment" },
+    })
+    expect(resumed.containerObservationPolicy).toEqual(policy)
+    expect(resumed.personas.find((actor) => actor.id === resumed.chiefId)?.model).toBe("selected-chief-model")
+    expect(collect).toHaveBeenCalledOnce()
+    const rendered = await readFile(join(root, ".agent-valley/reports", `${mission.id}.md`), "utf8")
+    expect(rendered).toContain("코드 검증과 별도로")
+    expect(rendered).toContain("CPU=3%")
+    expect(rendered).toContain("threshold 80")
+    expect(rendered).toContain("unavailable")
+  }, 20_000)
+
   it("reuses source-repository decisions and stores verified evidence with unknown costs intact", async () => {
     await addOrganizationMemory(repo, {
       kind: "stack-standard",

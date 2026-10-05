@@ -3,12 +3,15 @@ import { randomUUID } from "node:crypto"
 import { mkdir, realpath, rename, unlink, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { promisify } from "node:util"
+import { collectContainerObservation } from "@agent-valley/core/chief/container-observation"
+import { containerObservationLines } from "@agent-valley/core/chief/container-observation-state"
 import { type ContinuousOperation, operationSchema } from "@agent-valley/core/chief/continuous-contract"
 import { type ContinuousOperationPorts, runContinuousOperation } from "@agent-valley/core/chief/continuous-operation"
 import { ContinuousOperationStore } from "@agent-valley/core/chief/continuous-store"
 import { prepareContinuousBaseline } from "@agent-valley/core/chief/continuous-workspace"
 import { finalizeAbandonedRuns } from "@agent-valley/core/chief/execution"
 import { clearedGitEnvironment } from "@agent-valley/core/chief/parallel-git"
+import { markdown } from "@agent-valley/core/chief/reports"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { type Command, Option } from "commander"
@@ -136,6 +139,7 @@ async function newOperation(
     completedCycles: 0,
     cycleLimit: integerOption(options.cycles, "--cycles", 1_000_000),
     waitIntervalSec: integerOption(options.interval, "--interval", 86_400) ?? 300,
+    containerObservationPolicy: config.containerObservationPolicy,
     history: [],
   })
 }
@@ -186,6 +190,13 @@ export function renderOperationReport(operation: ContinuousOperation): string {
   if (operation.decision) lines.push(`Latest decision: ${operation.decision.action} — ${operation.decision.reason}`)
   if (operation.nextRunAt) lines.push(`Next decision: ${operation.nextRunAt}`)
   if (operation.error) lines.push(`Paused reason: ${operation.error}`)
+  lines.push(
+    ...containerObservationLines(operation.containerObservationPolicy, operation.containerObservation).map((line) =>
+      markdown(line, 2_200),
+    ),
+  )
+  if (operation.containerObservationRevision)
+    lines.push(`Observation transition: ${operation.containerObservationRevision}`)
   for (const entry of operation.history) {
     lines.push("", `## ${entry.goal}`, "", entry.reason, `Verified child: ${entry.missionId}`)
     if (entry.evidence.length) lines.push(`Evidence: ${entry.evidence.join("; ")}`)
@@ -213,6 +224,7 @@ export interface ContinuousRunDependencies {
   runMission?: ContinuousOperationPorts["runMission"]
   delay?: ContinuousOperationPorts["delay"]
   now?: ContinuousOperationPorts["now"]
+  observeContainers?: ContinuousOperationPorts["observeContainers"]
 }
 
 /** The operation lock covers selection and acceptance; existing supervisors own child lifecycle and interruption. */
@@ -298,6 +310,15 @@ export async function runOperation(
     return await runContinuousOperation(operation, {
       signal: controller.signal,
       ...(dependencies.now ? { now: dependencies.now } : {}),
+      observeContainers:
+        dependencies.observeContainers ??
+        ((current) => {
+          if (!current.containerObservationPolicy) throw new Error("Restore the saved container observation policy.")
+          return collectContainerObservation(current.containerObservationPolicy, current.containerObservation, {
+            signal: controller.signal,
+            now: dependencies.now,
+          })
+        }),
       decide:
         dependencies.decide ??
         ((current, decisionId) => decideContinuousGoal(current, decisionId, root, { signal: controller.signal })),

@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { type CapturePolicy, capturePolicySchema } from "../chief/capture-schema"
+import { containerObservationPolicySchema } from "../chief/container-observation-policy"
 import { type ExecutionPolicy, executionPolicySchema } from "../chief/execution"
 import { metricSourcePolicySchema } from "../chief/metric-source-policy"
 import { type ChiefOperatingPolicy, chiefOperatingPolicySchema } from "../chief/operations"
@@ -9,6 +10,7 @@ import { toolEnvKeysSchema } from "../chief/tool-environment"
 
 const price = z.number().finite().nonnegative().optional()
 export const chiefConfigSchema = z.strictObject({
+  container_observation: containerObservationPolicySchema.optional(),
   tool_env_keys: toolEnvKeysSchema.optional(),
   execution: z
     .strictObject({
