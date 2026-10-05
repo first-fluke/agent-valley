@@ -6,6 +6,17 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [2.0.0](https://github.com/first-fluke/agent-valley/compare/v1.1.0...v2.0.0) (2026-10-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* av order and av_order now continue improving by default. Use --once or once:true for the former single-goal behavior. MCP default submission returns operationId; av_operate is replaced by av_order.
+
+### Features
+
+* make order the continuous chief entry point ([7ac8405](https://github.com/first-fluke/agent-valley/commit/7ac8405f0900a344006e7aaba772a892eb646183))
+
 ## [1.1.0](https://github.com/first-fluke/agent-valley/compare/v1.0.1...v1.1.0) (2026-10-05)
 
 
