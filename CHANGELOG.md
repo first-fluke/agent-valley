@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [2.1.0](https://github.com/first-fluke/agent-valley/compare/v2.0.0...v2.1.0) (2026-10-05)
+
+
+### Features
+
+* supervise container failures and verify service recovery ([f294799](https://github.com/first-fluke/agent-valley/commit/f294799993c99b8f9e77bce78a86cc0375684f63))
+
 ## [2.0.0](https://github.com/first-fluke/agent-valley/compare/v1.1.0...v2.0.0) (2026-10-05)
 
 
