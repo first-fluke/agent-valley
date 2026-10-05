@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [1.1.0](https://github.com/first-fluke/agent-valley/compare/v1.0.1...v1.1.0) (2026-10-05)
+
+
+### Features
+
+* supervise continuous chief improvement operations ([e05e511](https://github.com/first-fluke/agent-valley/commit/e05e511176fb74667cf21c7787c846c90a003bb8))
+
 ## [1.0.1](https://github.com/first-fluke/agent-valley/compare/v1.0.0...v1.0.1) (2026-10-05)
 
 
