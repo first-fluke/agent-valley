@@ -36,7 +36,7 @@ describe("AV authenticated Streamable HTTP", () => {
         requestInit: { headers: { Authorization: `Bearer ${token}` } },
       }),
     )
-    expect((await client.listTools()).tools).toHaveLength(6)
+    expect((await client.listTools()).tools).toHaveLength(11)
     expect(
       (await client.callTool({ name: "av_status", arguments: { missionId: "test-mission" } })).structuredContent,
     ).toMatchObject({ status: "waiting" })

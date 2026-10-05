@@ -2,7 +2,7 @@
 
 Chief Director에게 서비스 개선·리팩토링·사용성·매출 성장 목표를 줍니다. Chief Director가 설치된 OMA 스킬과 Technical Director·Design Director·Marketing Director 페르소나를 활용해 스킬 선택·작업 분담·검토·수정·재계획을 결정하고 목표 달성을 검증합니다. 결정 사항과 이유, 실행 결과, 검증 근거는 보고서로 전달합니다. Actor는 격리된 Git worktree에서 일하며, Linear/GitHub 이슈를 통한 대기열·병렬 작업도 지원합니다.
 
-상시 개선은 `av operate "사용성·안정성·매출을 계속 개선해"`로 시작합니다. Chief가 검증된 변경, 이전 보고서, 관측 지표와 사용 가능한 도구를 보고 다음 목표를 정합니다. `av operations`로 진행 상황을 확인하고, Ctrl-C로 멈춘 뒤 `av operate --resume ID`로 이어갑니다. 실행 한도와 클라우드·MCP 접근, 복구 방법은 [상시 운영 가이드](./docs/guides/chief-continuous.md)에 있습니다.
+기본 명령은 상시 운영입니다. `av order "사용성·안정성·매출을 계속 개선해"`로 시작합니다. 한 목표만 완료하고 종료하려면 `--once`를 붙입니다. Chief가 검증된 변경, 이전 보고서, 관측 지표와 사용 가능한 도구를 보고 다음 목표를 정합니다. `av operations`로 진행 상황을 확인하고, Ctrl-C로 멈춘 뒤 `av order --resume ID`로 이어갑니다. 실행 한도와 클라우드·MCP 접근, 복구 방법은 [상시 운영 가이드](./docs/guides/chief-continuous.md)에 있습니다.
 
 > Read in: [English](./README.md)
 
@@ -51,9 +51,9 @@ av order "Fix the login failure"
 
 기본 위자드에서 작업 레포와 Chief Director 벤더·모델을 설정하고, 필요한 경우 검증 명령을 저장합니다. 선택한 Chief Director의 CLI 설치와 로그인을 진행하고 작업 레포의 최신 OMA CLI·스킬 준비도 기본 선택됩니다. 실패하면 재시도하거나 나중에 준비할 수 있습니다. 브라우저 로그인과 일부 인증 상태 확인은 사용자 입력이 필요합니다. 레포에는 커밋이 있어야 합니다. 설정을 저장하면 이후에는 목표만 전달하면 됩니다. [설치·첫 작업·복구 가이드](./docs/guides/environment-setup.md)를 참고하세요.
 
-Chief Director가 Technical Director·Design Director·Marketing Director의 자문을 동시에 받아 목표를 성공 기준과 실행 가능한 검사로 구체화하고, 세 참모를 포함한 4~8명의 Actor와 사용 가능한 지원 CLI·설치된 OMA 스킬을 선택합니다. 독립된 Actor 최대 3명이 별도 worktree에서 병렬로 일하고, 검토를 통과한 변경을 통합한 뒤 후속 작업과 최종 검증을 진행합니다. `--parallel 1`은 순차 실행합니다. Technical Director는 비용·재사용·스택과 의존성 관리를, Design Director는 사용성·사용자 테스트·데이터와 다크패턴을 즐겨 사용하는 이탈 억제 전략을, Marketing Director는 홍보·고객 획득·매출·ROI를 맡습니다. 작업 결과를 검토하며 실패하면 수정·재배정·재계획을 판단합니다. 주문마다 쉬운 설명, 검증 결과, 남은 한계를 담은 보고서를 작성합니다. 트래커와 데몬 없이 실행됩니다. `--actor`와 `--model`은 해당 주문의 Chief Director 설정을 덮어쓰고, `--actors`는 직접 만든 팀을 사용합니다. 자세한 사용법은 [Chief Director 명령 가이드](./docs/guides/chief-missions.md)에 있습니다.
+Chief Director가 Technical Director·Design Director·Marketing Director의 자문을 동시에 받아 목표를 성공 기준과 실행 가능한 검사로 구체화하고, 세 참모를 포함한 4~8명의 Actor와 사용 가능한 지원 CLI·설치된 OMA 스킬을 선택합니다. 독립된 Actor 최대 3명이 별도 worktree에서 병렬로 일하고, 검토를 통과한 변경을 통합한 뒤 후속 작업과 최종 검증을 진행합니다. `--parallel 1`은 순차 실행합니다. Technical Director는 비용·재사용·스택과 의존성 관리를, Design Director는 사용성·사용자 테스트·데이터와 다크패턴을 즐겨 사용하는 이탈 억제 전략을, Marketing Director는 홍보·고객 획득·매출·ROI를 맡습니다. 작업 결과를 검토하며 실패하면 수정·재배정·재계획을 판단합니다. 각 개선 미션마다 쉬운 설명, 검증 결과, 남은 한계를 담은 보고서를 작성합니다. 트래커와 데몬 없이 실행됩니다. `--actor`와 `--model`은 해당 주문의 Chief Director 설정을 덮어쓰고, `--actors`는 직접 만든 팀을 사용합니다. 자세한 사용법은 [Chief Director 명령 가이드](./docs/guides/chief-missions.md)에 있습니다.
 
-`--verify`와 저장된 검증 명령이 없으면 Chief Director가 원래 성공 기준에 연결된 파일·JSON·명시적인 테스트 검사를 설계합니다. 제공한 명령은 유지됩니다. 기본 감독 프로세스가 저장된 한도 안에서 작업 프로세스의 비정상 종료와 예약된 재시도를 복구합니다. `--no-supervise`는 직접 실행하며, 감독 프로세스나 컴퓨터가 멈춘 뒤에는 `av missions --watch`로 대상 주문을 이어갑니다. 인증 문제와 결과가 불명확한 외부 작업은 점검을 위해 멈춥니다. 재개 시 `--runs`, `--duration`, `--rounds`, 설정 가격에 따른 추정 비용 한도 `--cost`를 늘릴 수 있고 이미 사용한 예산은 유지됩니다. 비용 한도를 설정했는데 비용을 확인할 수 없으면 추가 호출을 멈춥니다. 실행 중인 호출이나 구독 요금까지 정확한 청구 상한을 보장하지는 않습니다.
+`--verify`와 저장된 검증 명령이 없으면 Chief Director가 원래 성공 기준에 연결된 파일·JSON·명시적인 테스트 검사를 설계합니다. 제공한 명령은 유지됩니다. 기본 감독 프로세스가 저장된 한도 안에서 작업 프로세스의 비정상 종료와 예약된 재시도를 복구합니다. `--once --no-supervise`는 직접 실행하며, 감독 프로세스나 컴퓨터가 멈춘 뒤에는 `av missions --watch`로 대상 주문을 이어갑니다. 인증 문제와 결과가 불명확한 외부 작업은 점검을 위해 멈춥니다. 단일 미션 재개 시 `--runs`, `--duration`, `--rounds`, 설정 가격에 따른 추정 비용 한도 `--cost`를 늘릴 수 있고 이미 사용한 예산은 유지됩니다. 상시 운영은 원래 하위 미션 설정을 유지하며, 활성 판단 체크포인트의 호출·시간·비용 조정은 상시 운영 가이드를 따릅니다. 비용 한도를 설정했는데 비용을 확인할 수 없으면 추가 호출을 멈춥니다. 실행 중인 호출이나 구독 요금까지 정확한 청구 상한을 보장하지는 않습니다.
 
 실행 방법과 감독은 Chief Director가 판단하고, 목표와 실행 결과에 대한 운영 책임은 사용자가 갖습니다. Chief Director는 실제 행동과 검증 근거를 보고서에 남깁니다.
 

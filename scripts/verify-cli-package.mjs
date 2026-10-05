@@ -108,7 +108,7 @@ async function verifyPausedResume(cli, nativeLog) {
   for (const supervise of [true, false]) {
     const result = spawnSync(
       process.execPath,
-      [cli, "order", "--resume", mission.id, ...(supervise ? [] : ["--no-supervise"])],
+      [cli, "order", "--once", "--resume", mission.id, ...(supervise ? [] : ["--no-supervise"])],
       {
         cwd: project,
         env,
@@ -202,7 +202,6 @@ async function verifyMcp(cli, version) {
       "av_report",
       "av_resume",
       "av_cancel",
-      "av_operate",
       "av_operations",
       "av_operation_status",
       "av_operation_report",
@@ -213,6 +212,8 @@ async function verifyMcp(cli, version) {
         tools.tools.some((tool) => tool.name === name),
         `${name} is missing from the distributed MCP server`,
       )
+    assert.equal(tools.tools.length, 11, "The distributed MCP server must expose one order submission tool")
+    assert(!tools.tools.some((tool) => tool.name === "av_operate"), "Use av_order for both execution modes")
     const missions = await request("tools/call", { name: "av_missions", arguments: {} })
     assert(!missions.isError, "Read-only MCP listing must succeed outside the monorepo")
     assert.deepEqual(missions.structuredContent.missions, [], "Smoke checks must never launch a mission")
@@ -332,7 +333,7 @@ else { console.error('The package smoke must not execute an actor task.'); proce
         "Node Kimi TOML discovery",
         "client assets",
         "plugin export and licenses",
-        "MCP initialize, tools and read-only missions",
+        "MCP initialize, unified order tools and read-only missions/operations",
         "Node supervised and direct paused resume with preserved checkpoint and released locks",
       ],
     }),

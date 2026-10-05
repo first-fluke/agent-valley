@@ -10,6 +10,7 @@ import { digest, MissionJobs } from "../mission-jobs"
 let root: string
 let api: MissionApi
 let store: MissionStore
+const order = (input: Parameters<MissionApi["order"]>[0]) => api.order({ ...input, once: true })
 let dependencies: MissionApiDependencies &
   Required<Pick<MissionApiDependencies, "launch" | "liveness" | "signal" | "validateOrder">>
 beforeEach(async () => {
@@ -30,6 +31,105 @@ afterEach(async () => {
 })
 
 describe("durable mission API", () => {
+  it("defaults to continuous supervision with an operation identity, control flags and durable replay", async () => {
+    const input = {
+      goal: "Keep improving the service",
+      requestId: "continuous-default",
+      cycles: 2,
+      interval: 60,
+      cost: 5,
+    }
+    const first = await api.order(input)
+    expect(first).toMatchObject({
+      accepted: true,
+      status: "starting",
+      replayed: false,
+      operationId: expect.any(String),
+    })
+    expect(first.missionId).toBeUndefined()
+    expect((await api.operations()).operations).toEqual([expect.objectContaining({ operationId: first.operationId })])
+    expect((await api.list()).missions).toEqual([])
+    const launch = vi.mocked(dependencies.launch).mock.calls[0]?.[0]
+    expect(launch?.args).toEqual([
+      "order",
+      "--operation-id",
+      first.operationId,
+      "--workspace",
+      root,
+      "--cycles",
+      "2",
+      "--interval",
+      "60",
+      "--cost",
+      "5",
+      "--",
+      input.goal,
+    ])
+    await api.close()
+    api = await MissionApi.create(root, dependencies)
+    expect(await api.order({ ...input, once: false })).toMatchObject({ operationId: first.operationId, replayed: true })
+    expect(dependencies.launch).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects cross-mode requestId reuse in either direction without launching another supervisor", async () => {
+    const input = { goal: "Improve quality", requestId: "shared-mode-identity" }
+    await api.order(input)
+    await expect(api.order({ ...input, once: true })).rejects.toThrow("order mode")
+    await api.order({ ...input, requestId: "single-mode", once: true })
+    await expect(api.order({ ...input, requestId: "single-mode" })).rejects.toThrow("order mode")
+    expect(dependencies.launch).toHaveBeenCalledTimes(2)
+  })
+
+  it("protects a shared requestId across simultaneous API instances using different order modes", async () => {
+    const second = await MissionApi.create(root, dependencies)
+    try {
+      const input = { goal: "Improve the product", requestId: "two-api-mode-race" }
+      const results = await Promise.allSettled([api.order(input), second.order({ ...input, once: true })])
+      const accepted = results.filter((result) => result.status === "fulfilled")
+      const rejected = results.filter((result) => result.status === "rejected")
+      expect(accepted).toHaveLength(1)
+      expect(rejected).toHaveLength(1)
+      expect(rejected[0]?.status === "rejected" ? rejected[0].reason.message : "").toMatch(
+        /order-entry.*already running|order mode/,
+      )
+      const losingIndex = results.findIndex((result) => result.status === "rejected")
+      const losingApi = losingIndex === 0 ? api : second
+      const losingInput = losingIndex === 0 ? input : { ...input, once: true }
+      await expect(losingApi.order(losingInput)).rejects.toThrow("order mode")
+      expect(dependencies.launch).toHaveBeenCalledTimes(1)
+    } finally {
+      await Promise.all([api.close(), second.close()])
+    }
+  })
+
+  it("replays the same continuous request across two independently connected API instances", async () => {
+    const second = await MissionApi.create(root, dependencies)
+    try {
+      const input = { goal: "Keep improving the product", requestId: "two-api-replay" }
+      const first = await api.order(input)
+      expect(await second.order(input)).toMatchObject({ operationId: first.operationId, replayed: true })
+      expect(dependencies.launch).toHaveBeenCalledTimes(1)
+    } finally {
+      await Promise.all([api.close(), second.close()])
+    }
+  })
+
+  it("serializes simultaneous continuous submissions and refuses continuous-only flags in once mode", async () => {
+    const input = { goal: "Maintain the product", requestId: "continuous-retry" }
+    const [one, two] = await Promise.all([api.order(input), api.order(input)])
+    expect(two.operationId).toBe(one.operationId)
+    expect(dependencies.launch).toHaveBeenCalledTimes(1)
+    await expect(api.order({ goal: "One goal", once: true, cycles: 1 })).rejects.toThrow("cycles")
+    await expect(api.order({ goal: "One goal", once: true, interval: 30 })).rejects.toThrow("interval")
+    expect(dependencies.launch).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses explicit --once for new single missions as well as saved mission resumes", async () => {
+    const result = await api.order({ goal: "Complete one goal", once: true })
+    expect(result).toMatchObject({ missionId: expect.any(String) })
+    expect(result.operationId).toBeUndefined()
+    expect(vi.mocked(dependencies.launch).mock.calls[0]?.[0].args.slice(0, 2)).toEqual(["order", "--once"])
+  })
   it("binds work to the configured target while retaining project configuration and mission state in their original directory", async () => {
     const target = join(root, "selected-repository")
     await mkdir(target)
@@ -37,7 +137,7 @@ describe("durable mission API", () => {
     await api.close()
     api = await MissionApi.create(root, dependencies)
     expect(api.targetWorkspace).toBe(target)
-    const result = await api.order({
+    const result = await order({
       goal: "Fix the selected repository",
       workspace: target,
       requestId: "selected-target",
@@ -55,17 +155,17 @@ describe("durable mission API", () => {
     vi.mocked(dependencies.liveness).mockReturnValue("stopped")
     await api.resume({ missionId: mission.id, retry: true, requestId: "resume-selected-target" })
     expect(vi.mocked(dependencies.launch).mock.calls[1]?.[0].workspace).toBe(root)
-    await expect(api.order({ goal: "Wrong repository", workspace: root })).rejects.toThrow("bound")
+    await expect(order({ goal: "Wrong repository", workspace: root })).rejects.toThrow("bound")
   })
 
   it("returns a durable ID before initialization, retains it on retry after reconnection, and never claims completion", async () => {
-    const first = await api.order({ goal: "Fix login", requestId: "client-request-1" })
+    const first = await order({ goal: "Fix login", requestId: "client-request-1" })
     expect(first).toMatchObject({ accepted: true, status: "starting", replayed: false, supervisor: "running" })
     expect((await api.list()).missions).toEqual([expect.objectContaining({ missionId: first.missionId })])
     await expect(api.report(String(first.missionId))).rejects.toThrow()
     await api.close()
     api = await MissionApi.create(root, dependencies)
-    const repeated = await api.order({ goal: "Fix login", requestId: "client-request-1" })
+    const repeated = await order({ goal: "Fix login", requestId: "client-request-1" })
     expect(repeated).toMatchObject({ missionId: first.missionId, replayed: true })
     expect(dependencies.launch).toHaveBeenCalledTimes(1)
     const receipt = JSON.parse(
@@ -76,23 +176,23 @@ describe("durable mission API", () => {
 
   it("serializes simultaneous retry requests and rejects reuse with different intent", async () => {
     const input = { goal: "Review usability", requestId: "same-request" }
-    const [one, two] = await Promise.all([api.order(input), api.order(input)])
+    const [one, two] = await Promise.all([order(input), order(input)])
     expect(two.missionId).toBe(one.missionId)
     expect(dependencies.launch).toHaveBeenCalledTimes(1)
-    await expect(api.order({ ...input, goal: "Publish campaign" })).rejects.toThrow("different inputs")
+    await expect(order({ ...input, goal: "Publish campaign" })).rejects.toThrow("different inputs")
   })
 
   it("bounds caller input and binds tools to one repository before launch", async () => {
-    await expect(api.order({ goal: "" })).rejects.toThrow()
-    await expect(api.order({ goal: "Test", parallel: 9 })).rejects.toThrow()
-    await expect(api.order({ goal: "Test", workspace: tmpdir() })).rejects.toThrow("bound")
+    await expect(order({ goal: "" })).rejects.toThrow()
+    await expect(order({ goal: "Test", parallel: 9 })).rejects.toThrow()
+    await expect(order({ goal: "Test", workspace: tmpdir() })).rejects.toThrow("bound")
     await expect(api.status("../../outside")).rejects.toThrow()
     expect(dependencies.launch).not.toHaveBeenCalled()
   })
 
   it("passes goals as one positional argument after option termination", async () => {
     const goal = "--actor codex $(never-run) `never-run`"
-    await api.order({ goal, requestId: "literal-goal", verify: "node verify.js", parallel: 2, cost: 5 })
+    await order({ goal, requestId: "literal-goal", verify: "node verify.js", parallel: 2, cost: 5 })
     expect(dependencies.launch).toHaveBeenCalledWith(
       expect.objectContaining({
         workspace: root,
@@ -105,8 +205,8 @@ describe("durable mission API", () => {
 
   it("records failed startup without inventing a mission or replaying it", async () => {
     vi.mocked(dependencies.launch).mockRejectedValue(new Error("No executable"))
-    await expect(api.order({ goal: "Fix login", requestId: "bad-runtime" })).rejects.toThrow("No executable")
-    const repeated = await api.order({ goal: "Fix login", requestId: "bad-runtime" })
+    await expect(order({ goal: "Fix login", requestId: "bad-runtime" })).rejects.toThrow("No executable")
+    const repeated = await order({ goal: "Fix login", requestId: "bad-runtime" })
     expect(repeated).toMatchObject({ accepted: false, status: "failed-to-start", replayed: true })
     expect(dependencies.launch).toHaveBeenCalledTimes(1)
     expect(await store.list()).toEqual([])
@@ -126,7 +226,7 @@ describe("durable mission API", () => {
         createdAt: new Date().toISOString(),
       }),
     )
-    expect(await api.order({ goal: "Fix login", requestId: "uncertain" })).toMatchObject({
+    expect(await order({ goal: "Fix login", requestId: "uncertain" })).toMatchObject({
       status: "launch-uncertain",
       replayed: true,
     })
@@ -134,7 +234,7 @@ describe("durable mission API", () => {
   })
 
   it("reports persisted evidence and cancellation intent separately from completion", async () => {
-    const started = await api.order({ goal: "Fix login", requestId: "evidence" })
+    const started = await order({ goal: "Fix login", requestId: "evidence" })
     const mission = missionFixture()
     mission.id = String(started.missionId)
     mission.repositoryRoot = root
@@ -154,7 +254,7 @@ describe("durable mission API", () => {
   })
 
   it("never signals an unknown or reused process identity", async () => {
-    const started = await api.order({ goal: "Fix login" })
+    const started = await order({ goal: "Fix login" })
     vi.mocked(dependencies.liveness).mockReturnValue("unknown")
     await expect(api.cancel(String(started.missionId))).rejects.toThrow("identity")
     vi.mocked(dependencies.liveness).mockReturnValue("stopped")
@@ -163,7 +263,7 @@ describe("durable mission API", () => {
   })
 
   it("requires the existing supervisor to stop before resume and retains the original mission and spend", async () => {
-    const started = await api.order({ goal: "Fix login", requestId: "original" })
+    const started = await order({ goal: "Fix login", requestId: "original" })
     const mission = missionFixture()
     mission.id = String(started.missionId)
     mission.repositoryRoot = root
@@ -179,6 +279,7 @@ describe("durable mission API", () => {
     })
     expect(vi.mocked(dependencies.launch).mock.calls[1]?.[0].args).toEqual([
       "order",
+      "--once",
       "--runs",
       "300",
       "--resume",
@@ -194,14 +295,14 @@ describe("durable mission API", () => {
   it("blocks recursive delegation from AV-managed Actors", async () => {
     await api.close()
     api = await MissionApi.create(root, { ...dependencies, env: { AGENT_VALLEY_MANAGED_RUN: "1" } })
-    await expect(api.order({ goal: "Fix login" })).rejects.toThrow("already managed")
+    await expect(order({ goal: "Fix login" })).rejects.toThrow("already managed")
     await expect(api.resume({ missionId: "existing", retry: true })).rejects.toThrow("already managed")
     expect(dependencies.launch).not.toHaveBeenCalled()
   })
 
   it("rejects a symlink control directory before writing receipts", async () => {
     await symlink(tmpdir(), join(root, ".agent-valley"))
-    await expect(api.order({ goal: "Fix login" })).rejects.toThrow("real directory")
+    await expect(order({ goal: "Fix login" })).rejects.toThrow("real directory")
     expect(dependencies.launch).not.toHaveBeenCalled()
   })
 })

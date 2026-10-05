@@ -1,6 +1,6 @@
 # Use AV from an agent client
 
-Codex, Claude Code, Cursor, Qwen Code, and Antigravity can delegate a repository goal to AV through the project `av` skill and a local stdio MCP server. The client submits the goal; AV's Chief Director supervises Actors, reviews the work, runs checks, and saves the mission and report. [Native plugins](./native-plugins.md) package the same skill and tools. [Web MCP](./web-mcp.md) connects ChatGPT or Claude to a running AV server through OAuth.
+Codex, Claude Code, Cursor, Qwen Code, and Antigravity can delegate a repository goal to AV through the project `av` skill and a local stdio MCP server. The client submits the goal through `av_order`; AV continues improvement by default. Set `once: true` to complete one goal and stop. The Chief Director supervises Actors, reviews the work, runs checks, and saves mission and operation reports. [Native plugins](./native-plugins.md) package the same skill and tools. [Web MCP](./web-mcp.md) connects ChatGPT or Claude to a running AV server through OAuth.
 
 For an authorized agent-led installation, follow [AGENT_SETUP.md](../../AGENT_SETUP.md). The user-facing initiating agent becomes the Chief Director, prepares OMA and project MCP, and checks setup readiness without a mission. It carries its confirmed active model or explicitly saves the native default when the exact model is unknown; an installer worker preserves that identity. Login and client reload/trust may remain pending.
 
@@ -38,20 +38,25 @@ Keep `av` on the client's PATH; a desktop client may inherit a different PATH fr
 
 Restart or reload the client after installing. Codex discovers repository skills from `.agents/skills` and loads project configuration only for a trusted project; its stdio MCP table uses `mcp_servers`, `command`, and `args`. See [Codex skills](https://developers.openai.com/codex/skills), [MCP](https://developers.openai.com/codex/mcp), and [project configuration](https://developers.openai.com/codex/config-basic). Claude Code reads project servers from `.mcp.json` and normally asks you to approve them in interactive sessions; check its `/mcp` view. See [Claude Code MCP](https://code.claude.com/docs/en/mcp). Qwen Code reads project `mcpServers` entries from `.qwen/settings.json`; restart it and inspect `/mcp`. See [Qwen Code MCP](https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp/).
 
-To check a live connection, read `av_missions` and compare `project` with the AV configuration directory and `workspace` with the intended working repository. For the A/B case above, both `project=A` and `workspace=B` must match. This read-only check does not start work. If the current client cannot load the new integration until reload, report that step as pending. An `av_order` test would start a real mission and is outside setup verification.
+To check a live connection, read `av_missions` and compare `project` with the AV configuration directory and `workspace` with the intended working repository. For the A/B case above, both `project=A` and `workspace=B` must match. This read-only check does not start work. If the current client cannot load the new integration until reload, report that step as pending. An `av_order` test would start real work and is outside setup verification.
 
-Ask the client, for example: “Use AV to implement the checkout goal in this repository, verify it, and explain the result.” The skill carries your constraints into `av_order`. It can inspect existing missions, read status and reports, resume authorized work, and cancel a mission when asked.
+Ask the client, for example: “Use AV to implement the checkout goal in this repository, verify it, and explain the result.” The skill carries your constraints into `av_order`. For one task only, explicitly ask for a single-goal run; the client sets `once: true`. It can inspect saved operations and missions, read status and reports, resume authorized work, and cancel when asked.
 
 | MCP tool | Purpose |
 |---|---|
-| `av_order` | Submit a goal; optional workspace, stable request ID, trusted verification command, parallelism and run/time/cost limits |
+| `av_order` | Start continuous improvement; `once: true` runs one goal. Optional workspace, stable request ID, trusted verification, cycles/interval and run/time/cost limits |
+| `av_operations` | List continuous operations |
+| `av_operation_status` | Inspect an operation and its current child mission |
+| `av_operation_report` | Read decisions, progress and child evidence references |
+| `av_operation_resume` | Resume the saved operating charter |
+| `av_operation_cancel` | Stop the continuous operation and its active work |
 | `av_missions` | List saved missions in the bound repository |
 | `av_status` | Inspect progress, actual state, and blockers by mission ID |
 | `av_report` | Read the saved report and evidence |
 | `av_resume` | Continue an existing mission; optional retry, request ID, and authorized budget/round overrides |
 | `av_cancel` | Stop the specified mission |
 
-`av_order` and `av_resume` accept work asynchronously: an accepted or `starting` response is still incomplete. Keep the returned mission ID and inspect its status. Generate and retain a `requestId` before the first submission; reuse that ID and identical input on retries. A new request ID represents a new submission. If a response is uncertain, inspect saved missions before creating another order. Reconnecting to MCP does not restart or cancel the independently supervised mission; inspect or resume the saved mission rather than submitting the goal again.
+`av_order` and `av_resume` accept work asynchronously: an accepted or `starting` response is still incomplete. Keep the returned `operationId` for default continuous work or `missionId` for `once: true`, and inspect the corresponding status/report tools. Generate and retain a `requestId` before the first submission; reuse that ID and identical input on retries. A new request ID represents a new submission. If a response is uncertain, inspect saved operations and missions before creating another order. Reconnecting to MCP does not restart or cancel independently supervised work; inspect or resume the saved operation or mission rather than submitting the goal again.
 
 `waiting` includes pending observations or scheduled work; `paused` and `failed` require the recorded next action. The client should report success only after `completed` and the actual verification report, and identify the mission ID if its session ends while work remains. Report delivery needs the provider's confirmed receipt.
 

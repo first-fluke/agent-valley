@@ -435,7 +435,7 @@ describe("public OAuth MCP gateway", () => {
         requestInit: { headers: { Authorization: `Bearer ${token.access_token}` } },
       }),
     )
-    expect((await client.listTools()).tools).toHaveLength(6)
+    expect((await client.listTools()).tools).toHaveLength(11)
     expect(
       (await client.callTool({ name: "av_status", arguments: { missionId: "test-mission" } })).structuredContent,
     ).toMatchObject({ status: "waiting" })

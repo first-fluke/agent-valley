@@ -12,14 +12,31 @@ const budgets = {
   duration: z.number().int().min(1).max(604_800).optional(),
   cost: z.number().finite().positive().optional(),
 }
-export const mcpOrderSchema = z.strictObject({
-  workspace: z.string().min(1).max(4_096).optional(),
-  goal: z.string().trim().min(1).max(32_000),
-  requestId,
-  verify: z.string().max(32_000).optional(),
-  parallel: z.number().int().min(1).max(8).optional(),
-  ...budgets,
-})
+const continuousControls = {
+  cycles: z.number().int().min(1).max(1_000_000).optional(),
+  interval: z.number().int().min(1).max(86_400).optional(),
+}
+export const mcpOrderSchema = z
+  .strictObject({
+    workspace: z.string().min(1).max(4_096).optional(),
+    goal: z.string().trim().min(1).max(32_000),
+    requestId,
+    verify: z.string().max(32_000).optional(),
+    parallel: z.number().int().min(1).max(8).optional(),
+    once: z.boolean().optional(),
+    ...continuousControls,
+    ...budgets,
+  })
+  .superRefine((input, context) => {
+    if (input.once)
+      for (const key of ["cycles", "interval"] as const)
+        if (input[key] !== undefined)
+          context.addIssue({
+            code: "custom",
+            message: `${key} applies to continuous orders. Omit it when once is true.`,
+            path: [key],
+          })
+  })
 export const mcpResumeSchema = z.strictObject({
   missionId: missionIdSchema,
   requestId,
@@ -32,8 +49,7 @@ export type McpResumeInput = z.infer<typeof mcpResumeSchema>
 export const mcpOperateSchema = z.strictObject({
   charter: z.string().trim().min(1).max(32_000),
   requestId,
-  cycles: z.number().int().min(1).max(1_000_000).optional(),
-  interval: z.number().int().min(1).max(86_400).optional(),
+  ...continuousControls,
   verify: z.string().max(32_000).optional(),
   parallel: z.number().int().min(1).max(8).optional(),
   ...budgets,

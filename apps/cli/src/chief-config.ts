@@ -17,6 +17,7 @@ import { type AgentAvailability, discoverAgents } from "./agent-discovery"
 import { AGENT_TYPES } from "./doctor-checks"
 
 export interface OrderOptions {
+  once?: boolean
   workspace?: string
   verify?: string
   agent?: string

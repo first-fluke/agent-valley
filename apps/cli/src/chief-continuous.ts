@@ -95,7 +95,7 @@ async function newOperation(
     throw new Error("Use --resume <operation-id> to reconcile an active decision run's observed cost.")
   if (!charter?.trim() || charter.length > 32_000)
     throw new Error(
-      'Give a nonempty operating charter up to 32 KB: av operate "Keep improving service quality and revenue" --workspace /repo.',
+      'Give a nonempty goal up to 32 KB: av order "Keep improving service quality and revenue" --workspace /repo.',
     )
   const config = await resolveOrderConfig(root, options)
   const chief = config.personas.find((actor) => actor.id === config.chiefId)
@@ -156,7 +156,7 @@ export async function initializeOperation(
       if (error.code === "ENOENT") return undefined
       throw error
     })
-    if (existing) throw new Error(`Operation ${id} already exists. Use av operate --resume ${id}.`)
+    if (existing) throw new Error(`Operation ${id} already exists. Use av order --resume ${id}.`)
     const operation = await newOperation(charter, options, root, id)
     await storage.save(operation)
     return operation
@@ -190,7 +190,7 @@ export function renderOperationReport(operation: ContinuousOperation): string {
     lines.push("", `## ${entry.goal}`, "", entry.reason, `Verified child: ${entry.missionId}`)
     if (entry.evidence.length) lines.push(`Evidence: ${entry.evidence.join("; ")}`)
   }
-  lines.push("", `Resume: av operate --resume ${operation.id}`, "")
+  lines.push("", `Resume: av order --resume ${operation.id}`, "")
   return lines.join("\n")
 }
 
@@ -293,7 +293,7 @@ export async function runOperation(
     }
     await storage.save(operation)
     await saveOperationReport(root, operation)
-    console.log(`Operation ${id}\nCharter: ${operation.charter}\nResume: av operate --resume ${id}`)
+    console.log(`Operation ${id}\nCharter: ${operation.charter}\nResume: av order --resume ${id}`)
     const missions = new MissionStore(join(root, ".agent-valley", "missions"))
     return await runContinuousOperation(operation, {
       signal: controller.signal,
@@ -316,9 +316,10 @@ export async function runOperation(
           return superviseOrder(
             saved ? undefined : goal,
             saved
-              ? { resume: missionId }
+              ? { resume: missionId, once: true }
               : {
                   ...(current.settings as OrderOptions),
+                  once: true,
                   missionId,
                   baselineWorkspace: baselinePath,
                   operationId: current.id,
@@ -354,8 +355,8 @@ export async function runOperation(
 
 export function registerContinuousCommands(program: Command): void {
   program
-    .command("operate [charter]")
-    .description("Continuously select, verify and measure improvements under a saved operating charter")
+    .command("operate [charter]", { hidden: true })
+    .description("Deprecated alias for av order; resume existing operating charters")
     .option("--workspace <path>", "Target Git repository (defaults to av.yaml)")
     .option("--verify <command>", "Trusted completion check for each improvement")
     .option("--actor <type>", "Pinned Chief Director CLI")
@@ -393,7 +394,7 @@ export function registerContinuousCommands(program: Command): void {
         return
       }
       const operations = await storage.list()
-      if (!operations.length) console.log("No operations yet. Run av operate --help.")
+      if (!operations.length) console.log("No operations yet. Run av order --help.")
       for (const operation of operations) {
         console.log(
           `${operation.id}  ${operation.phase}  ${operation.completedCycles} completed  ${operation.charter.slice(0, 100)}`,

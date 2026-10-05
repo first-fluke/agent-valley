@@ -6,7 +6,6 @@ import { z } from "zod"
 import {
   type AvMcpOptions,
   type MissionApiPort,
-  mcpOperateSchema,
   mcpOperationResumeSchema,
   mcpOrderSchema,
   mcpResumeSchema,
@@ -38,7 +37,7 @@ export function createAvMcpServer(api: MissionApiPort, options: AvMcpOptions): M
     {
       maxToolInputElements: 100,
       instructions:
-        "Submit single goals to av_order. For ongoing service improvement, use av_operate and inspect av_operations, av_operation_status and av_operation_report. Execution is asynchronous. Reports describe actual evidence and blockers. Each server is bound to one workspace; managed Actors cannot start or resume nested orders or operations.",
+        "Submit goals to av_order for continuous Chief supervision by default and inspect av_operations, av_operation_status and av_operation_report. Set once:true to verify one goal and inspect av_missions, av_status and av_report. Execution is asynchronous. Reports describe actual evidence and blockers. Each server is bound to one workspace; managed Actors cannot start or resume nested orders or operations.",
     },
   )
   const assertManaged = () => {
@@ -51,7 +50,7 @@ export function createAvMcpServer(api: MissionApiPort, options: AvMcpOptions): M
     "av_order",
     {
       description:
-        "Start a durable Chief Director mission in the configured repository and return its identity immediately. requestId deduplicates repeated submissions. verify is an optional trusted completion command executed by the mission.",
+        "Start continuous Chief Director supervision by default and return operationId immediately. The Chief selects successive goals, executes, verifies and reports them until stopped or paused; cycles optionally bounds verified improvements. Set once:true to complete one goal and return missionId. Budgets apply to each mission and decision, not a global spending cap. requestId deduplicates submissions. verify is an optional trusted completion command.",
       inputSchema: mcpOrderSchema,
       annotations: write,
     },
@@ -136,28 +135,13 @@ export function createAvMcpServer(api: MissionApiPort, options: AvMcpOptions): M
       return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: report.markdown }] }
     },
   )
-  const operate = api.operate?.bind(api)
   const operations = api.operations?.bind(api)
   const operationStatus = api.operationStatus?.bind(api)
   const operationReport = api.operationReport?.bind(api)
   const operationResume = api.operationResume?.bind(api)
   const operationCancel = api.operationCancel?.bind(api)
-  if (operate && operations && operationStatus && operationReport && operationResume && operationCancel) {
+  if (operations && operationStatus && operationReport && operationResume && operationCancel) {
     const operationIdentity = z.strictObject({ operationId: missionIdSchema })
-    server.registerTool(
-      "av_operate",
-      {
-        description:
-          "Start continued service improvement under a durable charter. The Chief chooses successive goals, executes and verifies them, and reports decisions. Default runs until stopped or paused; cycles optionally bounds verified improvements. Budgets apply to each mission and decision, not a global spending cap. requestId deduplicates submissions.",
-        inputSchema: mcpOperateSchema,
-        annotations: write,
-      },
-      (input) =>
-        toolResult(async () => {
-          assertManaged()
-          return operate(input)
-        }),
-    )
     server.registerTool(
       "av_operations",
       {

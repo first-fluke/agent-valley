@@ -1,11 +1,15 @@
 # Continuous Chief operation
 
-Use `av operate` to keep improving a service under an operating charter. The Chief selects a concrete goal, supervises Actors and Director reviews, verifies the result, then uses the accepted code and observed outcomes to choose the next improvement. `av order` still completes one goal and exits.
+Use `av order` to keep improving a service under an operating charter. The Chief selects a concrete goal, supervises Actors and Director reviews, verifies the result, then uses the accepted code and observed outcomes to choose the next improvement. Add `--once` to complete one goal and exit.
+
+When upgrading scripts that expected the previous single-goal default, add `--once`; MCP callers use `once: true`. Replace calls to the former `av_operate` MCP tool with `av_order`, passing the charter as `goal`. Saved mission and operation records retain their execution mode on resume.
 
 ```bash
-av operate "Improve usability, reliability and revenue; measure results and report each decision"
+av order "Improve usability, reliability and revenue; measure results and report each decision"
 # Optionally stop after two verified improvements:
-av operate "Improve maintainability" --cycles 2
+av order "Improve maintainability" --cycles 2
+# Complete one goal and stop:
+av order "Fix the login failure" --once
 av operations
 av operations --report OPERATION_ID
 ```
@@ -45,19 +49,19 @@ Cloudflare, Clarity, Google Analytics, Sentry and other services can supply evid
 Ctrl-C or SIGTERM stops the operation and active runtimes, retaining its current child and checkpoints. Resume from the same project directory:
 
 ```bash
-av operate --resume OPERATION_ID
+av order --resume OPERATION_ID
 # Extend a completed bounded operation to five total improvements:
-av operate --resume OPERATION_ID --cycles 5
+av order --resume OPERATION_ID --cycles 5
 ```
 
-A paused or failed child is not replaced with a new mission. Inspect its error, repair the blocker and explicitly resume that child, then resume the operation:
+`av order --resume ID` detects whether the saved record is an operation or a single mission. Existing mission IDs keep their saved execution mode. `--once --resume ID` explicitly selects a mission. A paused or failed child is not replaced with a new mission. Inspect its error, repair the blocker and explicitly resume that child, then resume the operation:
 
 ```bash
 av order --resume CHILD_ID --retry
-av operate --resume OPERATION_ID
+av order --resume OPERATION_ID
 ```
 
-If the active goal-selection checkpoint itself reached a limit, `av operate --resume OPERATION_ID --runs 400 --duration 172800` can increase that decision's limits while retaining prior spending. `--cost`, or the pair `--account-run RUN_ID --account-cost USD`, can resolve its cost limit or a provider charge you have inspected. These flags apply only when a decision checkpoint is active; future child settings stay as originally saved. Child limits and uncertain effects use the child resume controls above. The operation report includes its active decision ID, whose usage record is in the decision checkpoint directory.
+If the active goal-selection checkpoint itself reached a limit, `av order --resume OPERATION_ID --runs 400 --duration 172800` can increase that decision's limits while retaining prior spending. `--cost`, or the pair `--account-run RUN_ID --account-cost USD`, can resolve its cost limit or a provider charge you have inspected. These flags apply only when a decision checkpoint is active; future child settings stay as originally saved. Child limits and uncertain effects use the child resume controls above. The operation report includes its active decision ID, whose usage record is in the decision checkpoint directory.
 
 For interrupted external effects, inspect the destination and [reconcile the original child](./chief-missions.md#inspect-and-resume) before retrying. Resuming an operation does not resolve uncertainty or reset child budgets. Repeated goal/evidence decisions wait. Malformed decisions, unavailable credentials, corrupted records and mismatched snapshots pause with the cause. Live locks prevent concurrent runners.
 
@@ -65,6 +69,6 @@ Verified changes are carried to the next improvement using private Git snapshots
 
 ## MCP clients
 
-The AV MCP server exposes `av_operate`, `av_operations`, `av_operation_status`, `av_operation_report`, `av_operation_resume` and `av_operation_cancel`. Submit a charter to `av_operate`; it returns an operation ID immediately. Use a stable `requestId` to deduplicate repeated submissions. Disconnecting the client leaves the detached operation running. Cancellation is asynchronous: poll until the operation is paused and its supervisor has stopped.
+Submit the operating charter as `goal` to `av_order`; it returns an operation ID immediately. Set `once: true` on the same tool to complete one goal and receive a mission ID. `av_operations`, `av_operation_status`, `av_operation_report`, `av_operation_resume` and `av_operation_cancel` inspect and control continuous operations. Use a stable `requestId` to deduplicate repeated submissions. Disconnecting the client leaves the detached operation running. Cancellation is asynchronous: poll until the operation is paused and its supervisor has stopped.
 
 Managed Actors cannot recursively start or resume operations. They return their findings to the supervising Chief. Use existing `av_status` and `av_report` with child mission IDs for detailed evidence. Operation resume retains the original charter and settings; CLI `--cycles` can extend a bounded operation.

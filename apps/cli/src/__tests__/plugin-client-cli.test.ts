@@ -46,7 +46,6 @@ it("uses an exported plugin's project binding when the client launches from anot
   expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
     "av_cancel",
     "av_missions",
-    "av_operate",
     "av_operation_cancel",
     "av_operation_report",
     "av_operation_resume",

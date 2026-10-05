@@ -107,7 +107,7 @@ describe("durable order worker supervision", () => {
     const result = await superviseOrder(undefined, { resume: current.id }, root, { runWorker: worker, delay })
     expect(result.status).toBe("completed")
     expect(worker).toHaveBeenCalledTimes(2)
-    expect(worker.mock.calls[1]?.[0]).toEqual(["order", "--worker", "--resume", current.id])
+    expect(worker.mock.calls[1]?.[0]).toEqual(["order", "--once", "--worker", "--resume", current.id])
     expect(result.history.filter((event) => event.stage === "worker-restart")).toHaveLength(1)
     expect(delay).toHaveBeenCalledWith(1_000, expect.any(AbortSignal))
   })
@@ -137,7 +137,7 @@ describe("durable order worker supervision", () => {
       .mockResolvedValueOnce(2)
       .mockImplementation(async (args) => {
         expect(Date.now()).toBeGreaterThanOrEqual(now + 65_000)
-        expect(args).toEqual(["order", "--worker", "--resume", current.id])
+        expect(args).toEqual(["order", "--once", "--worker", "--resume", current.id])
         const restored = await store.load(current.id)
         expect(restored.tasks[0]?.status).toBe("completed")
         expect(restored.execution?.runsStarted).toBe(4)
@@ -314,7 +314,7 @@ describe("durable order worker supervision", () => {
     )
     expect(worker).toHaveBeenCalledTimes(1)
     expect(worker.mock.calls[0]?.[0]).toEqual(
-      expect.arrayContaining(["order", "Fix onboarding", "--worker", "--mission-id"]),
+      expect.arrayContaining(["order", "Fix onboarding", "--once", "--worker", "--mission-id"]),
     )
   })
 
@@ -353,6 +353,7 @@ describe("worker arguments and cancellable scheduler waits", () => {
       ),
     ).toEqual([
       "order",
+      "--once",
       "--worker",
       "--workspace",
       "/repo with spaces",

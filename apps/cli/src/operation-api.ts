@@ -9,8 +9,10 @@ import { assertNotManagedRun } from "./managed-run"
 import {
   type McpOperateInput,
   type McpOperationResumeInput,
+  type McpOrderInput,
   mcpOperateSchema,
   mcpOperationResumeSchema,
+  mcpOrderSchema,
   missionIdSchema,
 } from "./mcp-contract"
 import type { MissionApiDependencies } from "./mission-api"
@@ -48,6 +50,12 @@ export class OperationApi {
   ) {
     this.store = new ContinuousOperationStore(join(root, ".agent-valley/operations"))
     this.jobs = new MissionJobs(root, "operation-jobs")
+  }
+  order(raw: McpOrderInput): Promise<Record<string, unknown>> {
+    const input = mcpOrderSchema.parse(raw)
+    if (input.once) throw new Error("Use the mission API's order entry with once:true for a single goal.")
+    const { goal, once: _once, workspace: _workspace, ...options } = input
+    return this.operate({ charter: goal, ...options })
   }
   operate(raw: McpOperateInput): Promise<Record<string, unknown>> {
     assertNotManagedRun(this.dependencies.env)
@@ -102,7 +110,7 @@ export class OperationApi {
       const operation = await this.load(id)
       const job = await this.jobs.latest(id)
       if (operation && ["completed", "paused"].includes(operation.phase)) return this.status(id)
-      if (!job) throw new Error("No API launch receipt exists. Stop the original av operate process.")
+      if (!job) throw new Error("No API launch receipt exists. Stop the original av order process.")
       const current = (this.dependencies.liveness ?? jobLiveness)(job)
       if (current === "unknown")
         throw new Error("Operation process identity is uncertain. Inspect the original process; no signal was sent.")
@@ -137,7 +145,7 @@ export class OperationApi {
       const previous = await this.jobs.latest(id)
       if (previous && (this.dependencies.liveness ?? jobLiveness)(previous) !== "stopped")
         throw new Error("Operation has an active or uncertain supervisor. Inspect av_operation_status before resuming.")
-      const args = ["operate"]
+      const args = ["order"]
       if (resuming) {
         const operation = await this.load(id)
         if (!operation) throw new Error("Operation was not found. Use av_operations first.")

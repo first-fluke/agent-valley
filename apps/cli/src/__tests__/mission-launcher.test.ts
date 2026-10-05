@@ -45,7 +45,7 @@ describe("detached AV supervisor launch", () => {
         }
       },
     })
-    const started = await api.order({ goal: "Literal $(unused) goal", requestId: "fake-launch" })
+    const started = await api.order({ goal: "Literal $(unused) goal", requestId: "fake-launch", once: true })
     await api.close()
     const child = owned
     if (!child?.identity) throw new Error("Expected owned process identity")

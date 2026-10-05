@@ -41,7 +41,6 @@ describe("installed AV MCP command", () => {
     expect(catalog.tools.map((tool) => tool.name).sort()).toEqual([
       "av_cancel",
       "av_missions",
-      "av_operate",
       "av_operation_cancel",
       "av_operation_report",
       "av_operation_resume",

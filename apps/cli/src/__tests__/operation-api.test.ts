@@ -27,7 +27,7 @@ describe("asynchronous operation API", () => {
     const first = await api.operate(input)
     expect(first).toMatchObject({ accepted: true, status: "starting", replayed: false })
     expect(launch.mock.calls[0]?.[0].args).toEqual([
-      "operate",
+      "order",
       "--operation-id",
       first.operationId,
       "--workspace",
@@ -61,6 +61,14 @@ describe("asynchronous operation API", () => {
     expect(await api.cancel(id)).toMatchObject({ cancelRequested: true })
     expect(signal).toHaveBeenCalledWith(12345)
   })
+  it("uses order as the continuous entry and refuses single-goal mode rather than ignoring it", async () => {
+    const { api, launch } = fixture()
+    const first = await api.order({ goal: "Improve conversion", requestId: "unified-order", cycles: 2 })
+    expect(first).toMatchObject({ operationId: expect.any(String), accepted: true })
+    expect(launch.mock.calls[0]?.[0].args[0]).toBe("order")
+    expect(() => api.order({ goal: "One goal", once: true })).toThrow("once:true")
+    expect(launch).toHaveBeenCalledTimes(1)
+  })
   it("resumes original saved state and refuses uncertain live owners", async () => {
     const { api, launch, liveness } = fixture()
     const first = await api.operate({ charter: "Improve maintainability" })
@@ -85,7 +93,7 @@ describe("asynchronous operation API", () => {
       accepted: true,
       operationId: id,
     })
-    expect(launch.mock.calls[1]?.[0].args).toEqual(["operate", "--resume", id])
+    expect(launch.mock.calls[1]?.[0].args).toEqual(["order", "--resume", id])
     expect(await api.report(id)).toMatchObject({ markdown: expect.stringContaining("Improve maintainability") })
   })
   it("rejects recursive operations and invalid inputs before dispatch", async () => {

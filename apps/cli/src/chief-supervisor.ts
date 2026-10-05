@@ -11,8 +11,8 @@ import { orderExitCode } from "./chief-outcome"
 import { assertNotManagedRun } from "./managed-run"
 
 export function orderWorkerArgs(goal: string | undefined, options: OrderOptions, id: string): string[] {
-  const args = ["order", "--worker"]
-  const excluded = new Set(["worker", "missionId", "supervise"])
+  const args = ["order", "--once", "--worker"]
+  const excluded = new Set(["once", "worker", "missionId", "supervise"])
   for (const [key, value] of Object.entries(options)) {
     if (excluded.has(key) || value === undefined || value === false) continue
     const flag = `--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`

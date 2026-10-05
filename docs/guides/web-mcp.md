@@ -58,6 +58,6 @@ For ChatGPT development, [Secure MCP Tunnel](https://developers.openai.com/api/d
 
 ## Verify the connection
 
-List the tools, inspect `av_missions`, and confirm the advertised project and workspace before ordering work. AV supplies six tools: `av_order`, `av_missions`, `av_status`, `av_report`, `av_resume`, and `av_cancel`. The shared skill supports web clients without a local environment tool by checking the server's execution context.
+List the tools, inspect `av_missions`, and confirm the advertised project and workspace before ordering work. AV supplies eleven tools: `av_order`, `av_missions`, `av_status`, `av_report`, `av_resume`, `av_cancel`, `av_operations`, `av_operation_status`, `av_operation_report`, `av_operation_resume`, and `av_operation_cancel`. `av_order` starts continuous improvement by default; `once: true` runs one goal. Keep its returned operation or mission ID and inspect the corresponding status/report tools. The shared skill supports web clients without a local environment tool by checking the server's execution context.
 
 The repository's tests exercise discovery, signed tokens, rejection paths, and MCP requests with a temporary identity provider. They do not establish that a particular deployed endpoint, real identity provider, or ChatGPT/Claude account is connected. Marketplace listing, account connection, and deployment require their respective external configuration and provider review.

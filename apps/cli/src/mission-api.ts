@@ -15,6 +15,7 @@ import {
   type McpReportResult,
   type McpResumeInput,
   type MissionApiPort,
+  mcpOperateSchema,
   mcpOrderSchema,
   mcpResumeSchema,
   missionIdSchema,
@@ -48,7 +49,7 @@ function orderOptions(input: McpOrderInput | McpResumeInput): OrderOptions {
 
 function launchArgs(goal: string | undefined, options: OrderOptions, missionId: string): string[] {
   // Always terminate option parsing before a caller-controlled goal.
-  const args = ["order"]
+  const args = ["order", "--once"]
   for (const [key, value] of Object.entries(options)) {
     if (value === undefined || value === false) continue
     args.push(`--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`)
@@ -80,6 +81,8 @@ export class MissionApi implements MissionApiPort {
   private readonly store: MissionStore
   private readonly jobs: MissionJobs
   private readonly operationApi: OperationApi
+  private readonly operationJobs: MissionJobs
+  private orders: Promise<unknown> = Promise.resolve()
   private submissions: Promise<unknown> = Promise.resolve()
   private closed = false
 
@@ -91,6 +94,7 @@ export class MissionApi implements MissionApiPort {
     this.store = new MissionStore(join(projectRoot, ".agent-valley/missions"))
     this.jobs = new MissionJobs(projectRoot)
     this.operationApi = new OperationApi(projectRoot, workspace, dependencies)
+    this.operationJobs = new MissionJobs(projectRoot, "operation-jobs")
   }
 
   static async create(workspace: string, dependencies: MissionApiDependencies = {}): Promise<MissionApi> {
@@ -106,7 +110,8 @@ export class MissionApi implements MissionApiPort {
   }
 
   operate(input: McpOperateInput) {
-    return this.operationApi.operate(input)
+    const { charter, ...options } = mcpOperateSchema.parse(input)
+    return this.order({ goal: charter, ...options })
   }
   operations() {
     return this.operationApi.list()
@@ -131,8 +136,19 @@ export class MissionApi implements MissionApiPort {
       throw new Error(
         "This AV server is bound to another workspace. Start av mcp --workspace for the target repository.",
       )
-    const options = { ...orderOptions(input), workspace: this.workspace }
-    return this.submit("order", input, options, randomUUID(), input.goal)
+    return this.serializeOrder(async () => {
+      if (input.requestId) {
+        const other = await (input.once ? this.operationJobs : this.jobs).findRequest(input.requestId)
+        if (other)
+          throw new Error(
+            "requestId already belongs to different inputs or order mode. Reuse the original mode and inputs or choose a new requestId.",
+          )
+      }
+      if (!input.once) return this.operationApi.order(input)
+      const { once: _once, cycles: _cycles, interval: _interval, ...single } = input
+      const options = { ...orderOptions(single), workspace: this.workspace }
+      return this.submit("order", single, options, randomUUID(), input.goal)
+    })
   }
 
   async resume(raw: McpResumeInput): Promise<Record<string, unknown>> {
@@ -225,6 +241,7 @@ export class MissionApi implements MissionApiPort {
   }
 
   async close(): Promise<void> {
+    await this.orders.catch(() => {})
     await this.submissions.catch(() => {})
     await this.operationApi.close()
     this.closed = true
@@ -304,6 +321,21 @@ export class MissionApi implements MissionApiPort {
     this.assertOpen()
     const result = this.submissions.then(() => this.jobs.locked(operation))
     this.submissions = result.catch(() => {})
+    return result
+  }
+
+  private serializeOrder<T>(operation: () => Promise<T>): Promise<T> {
+    this.assertOpen()
+    const result = this.orders.then(async () => {
+      const directory = await ensureAvDirectory(this.projectRoot, ["control", "jobs"])
+      const release = await new MissionStore(directory).lock("order-entry")
+      try {
+        return await operation()
+      } finally {
+        await release()
+      }
+    })
+    this.orders = result.catch(() => {})
     return result
   }
 

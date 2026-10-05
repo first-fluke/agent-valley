@@ -172,6 +172,44 @@ process.stdin.on('end', () => {
 }
 
 describe("source order CLI outcome", () => {
+  it("resumes a completed continuing order through the public order command without starting native work", () => {
+    const repository = join(root, "target-repository")
+    mkdirSync(repository)
+    const directory = join(root, ".agent-valley", "operations")
+    mkdirSync(directory, { recursive: true })
+    const id = "completed-continuing-order"
+    const now = new Date().toISOString()
+    const operation = {
+      id,
+      repositoryRoot: repository,
+      charter: "Improve usability and revenue",
+      settings: { workspace: repository, actor: "codex", model: "chosen-model" },
+      phase: "completed",
+      completedCycles: 1,
+      cycleLimit: 1,
+      waitIntervalSec: 300,
+      history: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    writeFileSync(join(directory, `${id}.json`), JSON.stringify({ version: 1, operation }))
+    const child = spawnSync(bun, [entry, "order", "--resume", id], {
+      cwd: root,
+      env,
+      encoding: "utf8",
+      timeout: 10_000,
+    })
+    expect(child.error).toBeUndefined()
+    expect(child.status, child.stderr + child.stdout).toBe(0)
+    expect(child.stdout).toContain(`Order ${id}: completed; 1 verified improvements.`)
+    expect(child.stdout).toContain(`Resume: av order --resume ${id}`)
+    expect(existsSync(join(root, ".agent-valley", "missions"))).toBe(false)
+    expect(existsSync(join(root, "calls.jsonl"))).toBe(false)
+    expect(JSON.parse(readFileSync(join(directory, `${id}.json`), "utf8")).operation.settings).toEqual(
+      operation.settings,
+    )
+  }, 15_000)
+
   it.each([true, false])(
     "reports a paused checkpoint and exit 2 with supervision=%s",
     (supervise) => {

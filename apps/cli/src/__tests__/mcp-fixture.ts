@@ -3,7 +3,20 @@ import type { MissionApiPort } from "../mcp-contract"
 
 export function missionApiFixture() {
   return {
-    order: vi.fn<MissionApiPort["order"]>().mockResolvedValue({ missionId: "test-mission", status: "queued" }),
+    order: vi
+      .fn<MissionApiPort["order"]>()
+      .mockImplementation(async (input) =>
+        input.once
+          ? { missionId: "test-mission", status: "queued" }
+          : { operationId: "test-operation", status: "queued" },
+      ),
+    operations: vi.fn().mockResolvedValue({ operations: [] }),
+    operationStatus: vi.fn().mockResolvedValue({ operationId: "test-operation", status: "waiting" }),
+    operationReport: vi
+      .fn()
+      .mockResolvedValue({ operationId: "test-operation", markdown: "# Actual operation report" }),
+    operationResume: vi.fn().mockResolvedValue({ operationId: "test-operation", status: "running" }),
+    operationCancel: vi.fn().mockResolvedValue({ operationId: "test-operation", cancelRequested: true }),
     list: vi
       .fn<MissionApiPort["list"]>()
       .mockResolvedValue({ missions: [{ missionId: "test-mission", status: "waiting" }] }),

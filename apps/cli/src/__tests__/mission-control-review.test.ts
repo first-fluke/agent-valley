@@ -54,7 +54,7 @@ describe("independent mission control boundary regressions", () => {
   it.each(["stopped", "unknown"] as const)(
     "rechecks supervisor identity after storing cancellation when it becomes %s",
     async (afterSave) => {
-      const order = await api.order({ goal: "Observe actual evidence", requestId: "identity-race" })
+      const order = await api.order({ goal: "Observe actual evidence", requestId: "identity-race", once: true })
       let liveness: JobLiveness = "running"
       if (!dependencies.liveness) throw new Error("Expected mocked process identity port")
       vi.mocked(dependencies.liveness).mockImplementation(() => liveness)
@@ -75,7 +75,7 @@ describe("independent mission control boundary regressions", () => {
       if (job.phase === "started") throw new Error("Injected disk failure after spawn")
       await save.call(this, job)
     })
-    const input = { goal: "Observe actual evidence", requestId: "spawn-receipt-failure" }
+    const input = { goal: "Observe actual evidence", requestId: "spawn-receipt-failure", once: true }
     await expect(api.order(input)).rejects.toThrow("disk failure after spawn")
     const receipt = JSON.parse(
       await readFile(join(workspace, ".agent-valley", "control", "jobs", `${digest(input.requestId)}.json`), "utf8"),

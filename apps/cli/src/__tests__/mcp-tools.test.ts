@@ -32,10 +32,10 @@ async function connect(env: NodeJS.ProcessEnv = {}) {
 
 describe("AV MCP mission tools", () => {
   it("exposes continuous operation tools with async identity and managed recursion guards", async () => {
-    const operate = vi.fn().mockResolvedValue({ operationId: "continuous-one", status: "starting", accepted: true })
+    const order = vi.fn().mockResolvedValue({ operationId: "continuous-one", status: "starting", accepted: true })
     const operationResume = vi.fn().mockResolvedValue({ operationId: "continuous-one", status: "running" })
     Object.assign(api, {
-      operate,
+      order,
       operationResume,
       operations: vi.fn().mockResolvedValue({ operations: [] }),
       operationStatus: vi.fn().mockResolvedValue({ operationId: "continuous-one", status: "waiting" }),
@@ -43,22 +43,23 @@ describe("AV MCP mission tools", () => {
       operationCancel: vi.fn().mockResolvedValue({ cancelRequested: true }),
     })
     await connect()
-    expect((await client.listTools()).tools).toHaveLength(12)
-    const input = { charter: "Improve service continuously", cycles: 2, requestId: "operation-one" }
-    expect((await client.callTool({ name: "av_operate", arguments: input })).structuredContent).toMatchObject({
+    expect((await client.listTools()).tools).toHaveLength(11)
+    expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain("av_operate")
+    const input = { goal: "Improve service continuously", cycles: 2, requestId: "operation-one" }
+    expect((await client.callTool({ name: "av_order", arguments: input })).structuredContent).toMatchObject({
       operationId: "continuous-one",
       accepted: true,
     })
-    expect(operate).toHaveBeenCalledWith(input)
-    expect((await client.callTool({ name: "av_operate", arguments: { ...input, cycles: 0 } })).isError).toBe(true)
+    expect(order).toHaveBeenCalledWith({ ...input, workspace })
+    expect((await client.callTool({ name: "av_order", arguments: { ...input, cycles: 0 } })).isError).toBe(true)
     await client.close()
     await server.close()
     await connect({ AGENT_VALLEY_MANAGED_RUN: "1" })
-    expect((await client.callTool({ name: "av_operate", arguments: input })).isError).toBe(true)
+    expect((await client.callTool({ name: "av_order", arguments: input })).isError).toBe(true)
     expect(
       (await client.callTool({ name: "av_operation_resume", arguments: { operationId: "continuous-one" } })).isError,
     ).toBe(true)
-    expect(operate).toHaveBeenCalledTimes(1)
+    expect(order).toHaveBeenCalledTimes(1)
     expect(operationResume).not.toHaveBeenCalled()
     expect((await client.callTool({ name: "av_operations", arguments: {} })).isError).not.toBe(true)
   })
@@ -66,12 +67,17 @@ describe("AV MCP mission tools", () => {
     await connect()
     expect(client.getServerVersion()).toEqual({ name: "agent-valley", version: "9.2.1-rc.4" })
   })
-  it("advertises exactly the six lifecycle tools and truthful read/write annotations", async () => {
+  it("advertises exactly eleven lifecycle tools with one order entry and truthful read/write annotations", async () => {
     await connect()
     const { tools } = await client.listTools()
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "av_cancel",
       "av_missions",
+      "av_operation_cancel",
+      "av_operation_report",
+      "av_operation_resume",
+      "av_operation_status",
+      "av_operations",
       "av_order",
       "av_report",
       "av_resume",
@@ -100,8 +106,17 @@ describe("AV MCP mission tools", () => {
       verify: "bun test",
     }
     const result = await client.callTool({ name: "av_order", arguments: arguments_ })
-    expect(result.structuredContent).toEqual({ missionId: "test-mission", status: "queued" })
+    expect(result.structuredContent).toEqual({ operationId: "test-operation", status: "queued" })
     expect(api.order).toHaveBeenCalledWith({ ...arguments_, goal: "Improve onboarding", workspace })
+  })
+  it("uses once:true for a single mission while preserving the same public entry", async () => {
+    await connect()
+    const input = { goal: "Fix one bug", once: true, requestId: "once-mode" }
+    expect((await client.callTool({ name: "av_order", arguments: input })).structuredContent).toEqual({
+      missionId: "test-mission",
+      status: "queued",
+    })
+    expect(api.order).toHaveBeenCalledWith({ ...input, workspace })
   })
   it.each([
     { goal: " " },
@@ -110,6 +125,10 @@ describe("AV MCP mission tools", () => {
     { goal: "Goal", duration: -1 },
     { goal: "Goal", cost: -2 },
     { goal: "Goal", command: "arbitrary shell" },
+    { goal: "Goal", cycles: 0 },
+    { goal: "Goal", interval: 0 },
+    { goal: "Goal", once: true, cycles: 1 },
+    { goal: "Goal", once: true, interval: 30 },
   ])("rejects invalid order input before any mission is started: %j", async (input) => {
     await connect()
     const result = await client.callTool({ name: "av_order", arguments: input })
