@@ -123,7 +123,8 @@ async function verifyPausedResume(cli, nativeLog) {
     assert.equal(result.status, 2, result.stderr + result.stdout)
     assert(result.stdout.includes("Order paused"))
     assert(result.stdout.includes(reason))
-    assert(result.stdout.includes(`av order --resume ${mission.id} --retry`))
+    assert(result.stdout.includes(`Report: .agent-valley/reports/${mission.id}.md`))
+    assert(!result.stdout.includes("--retry"), "Paused reports must not require the user to choose a retry")
     const saved = JSON.parse(await readFile(path, "utf8"))
     assert.equal(saved.version, 1)
     assert.deepEqual(
