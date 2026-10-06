@@ -1,12 +1,15 @@
-/** OMA 15.0.15 receipt adapter. Strict mode is opt-in in av.yaml. */
+/** OMA v1 receipt adapter. Strict mode verifies the installed CLI's actual contract. */
 import { spawnSync } from "node:child_process"
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { getCachedTriggerTable, routeIssue } from "../config/workflow-router"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import { ensureLatestOmaCli, type OmaLatestCliIO, parseOmaCliVersion } from "./latest-cli"
 
-export const SUPPORTED_OMA_VERSION = "15.0.15"
+export { parseOmaCliVersion } from "./latest-cli"
+
+export const OMA_RECEIPT_SCHEMA_VERSION = 1
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HASH = /^[a-f0-9]{64}$/
 
@@ -66,7 +69,10 @@ function shellQuote(value: string): string {
 
 /** Valley writes the acceptance contract before the agent starts. The agent
  * may write its claim, but cannot choose or weaken required checks. */
-export async function prepareOmaAttempt(request: Omit<OmaEvidenceRequest, "kind">): Promise<string> {
+export async function prepareOmaAttempt(
+  request: Omit<OmaEvidenceRequest, "kind">,
+  dependencies: { latestCliIO?: OmaLatestCliIO } = {},
+): Promise<string> {
   if (!request.verifyCommand.trim()) {
     throw new Error("oma.mode: strict requires verify.command in av.yaml or a routing verify_command")
   }
@@ -79,6 +85,7 @@ export async function prepareOmaAttempt(request: Omit<OmaEvidenceRequest, "kind"
     const file = join(request.workspace.path, ".agents", "workflows", `${workflow}.md`)
     if (!existsSync(file)) throw new Error(`OMA workflow file missing in target worktree: ${file}`)
   }
+  await ensureLatestOmaCli({ io: dependencies.latestCliIO })
   const path = join(request.workspace.path, ".agents", "results", `plan-${request.attempt.id}.json`)
   const plan = {
     session_id: request.attempt.id,
@@ -141,11 +148,13 @@ export function buildOmaGuidance(request: Omit<OmaEvidenceRequest, "kind">): str
 export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidenceIO = defaultIO): OmaEvidenceResult {
   const root = resolve(request.workspace.path)
   if (!request.verifyCommand.trim()) return fail("Strict OMA mode has no configured verify command")
+  let cliVersion: string | null
   try {
     const version = io.runCli(["--version"], root)
-    if (version.exitCode !== 0 || version.stdout.trim() !== SUPPORTED_OMA_VERSION) {
+    cliVersion = parseOmaCliVersion(version.stdout)
+    if (version.exitCode !== 0 || !cliVersion) {
       return fail(
-        `OMA CLI ${SUPPORTED_OMA_VERSION} is required. Run npm install -g oh-my-agent@${SUPPORTED_OMA_VERSION}, then confirm oma --version.`,
+        "OMA CLI is unavailable or returned a malformed version. Run npm install -g oh-my-agent@latest, then confirm oma --version and rerun the receipt verification.",
       )
     }
   } catch (err) {
@@ -168,8 +177,13 @@ export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidence
     .sort((a, b) => Number(a.sequence) - Number(b.sequence))
   const run = forAttempt.at(-1)
   if (!run) return fail("No OMA receipt is bound to this Valley attempt")
-  if (run.schemaVersion !== 1 || run.taskId !== request.attempt.id || !RUN_ID.test(String(run.runId))) {
-    return fail("OMA receipt schema or task identity is incompatible")
+  if (run.schemaVersion !== OMA_RECEIPT_SCHEMA_VERSION) {
+    return fail(
+      `OMA CLI ${cliVersion} returned an unsupported receipt schema. AV requires agent-run schema v${OMA_RECEIPT_SCHEMA_VERSION}; update AV and OMA (npm install -g oh-my-agent@latest), then generate and verify a compatible receipt.`,
+    )
+  }
+  if (run.taskId !== request.attempt.id || !RUN_ID.test(String(run.runId))) {
+    return fail("OMA receipt task identity is incompatible")
   }
   if (run.workspace !== root || run.artifactRoot !== root || run.status !== "completed" || run.exitCode !== 0) {
     return fail("OMA receipt has the wrong workspace or did not complete")
@@ -269,6 +283,10 @@ export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidence
   try {
     const status = io.runCli(["agent", "status", request.attempt.id, request.agentId, "--project-root", root], root)
     if (status.exitCode !== 0 || status.stdout.trim() !== `${request.agentId}:completed`) {
+      if (status.stdout.trim() !== `${request.agentId}:stale`)
+        return fail(
+          `OMA CLI ${cliVersion} did not provide the required native <agent>:completed status proof. Update AV and OMA (npm install -g oh-my-agent@latest), then rerun verification; unknown status output cannot establish completion.`,
+        )
       return fail("OMA CLI did not confirm current completed evidence")
     }
   } catch (err) {

@@ -3,18 +3,29 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, test } from "vitest"
+import { afterEach, beforeAll, describe, expect, test } from "vitest"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import type { OmaLatestCliIO } from "../oma/latest-cli"
 import {
+  OMA_RECEIPT_SCHEMA_VERSION,
   type OmaEvidenceRequest,
+  parseOmaCliVersion,
   prepareOmaAttempt,
-  SUPPORTED_OMA_VERSION,
   validateOmaEvidence,
 } from "../oma/receipt-adapter"
 import { intermediateVerifyCommand } from "./runtime"
 
 const installed = spawnSync("oma", ["--version"], { encoding: "utf-8", timeout: 5_000 })
-const available = installed.status === 0 && installed.stdout.trim() === SUPPORTED_OMA_VERSION
+const available = installed.status === 0 && !!parseOmaCliVersion(installed.stdout)
+const required = !!process.env.CI && process.env.CI !== "false" && process.env.CI !== "0"
+const latestCliIO: OmaLatestCliIO = {
+  run: async (command, args) => {
+    if (command === "oma") return { exitCode: installed.status, stdout: installed.stdout }
+    if (command === "npm" && args[0] === "view")
+      return { exitCode: 0, stdout: JSON.stringify(parseOmaCliVersion(installed.stdout)) }
+    throw new Error("Native Chief task-gate fixtures must not install packages or contact the registry")
+  },
+}
 const directories: string[] = []
 
 function execute(command: string, args: string[], cwd: string) {
@@ -59,7 +70,7 @@ async function fixture() {
     verifyCommand: await intermediateVerifyCommand(root),
     kind: "code",
   }
-  await prepareOmaAttempt(request)
+  await prepareOmaAttempt(request, { latestCliIO })
   const begin = JSON.parse(
     run("oma", ["agent", "begin", "engineer", attemptId, attemptId, "--project-root", root, "--workspace", root], root),
   ) as { runId: string; claimPath: string }
@@ -71,7 +82,13 @@ afterEach(() => {
 })
 
 /** Native receipt and Git commands only: no model calls or skill execution. */
-describe.skipIf(!available)(`chief intermediate OMA ${SUPPORTED_OMA_VERSION} gate`, () => {
+describe.skipIf(!available && !required)(`chief intermediate OMA v${OMA_RECEIPT_SCHEMA_VERSION} gate`, () => {
+  beforeAll(() => {
+    if (!available)
+      throw new Error(
+        "CI requires the installed OMA CLI for native Chief task-gate tests. Run npm install -g oh-my-agent@latest and confirm oma --version is available on PATH.",
+      )
+  })
   test("accepts a committed partial task before a downstream goal artifact exists", async () => {
     const { root, base, request, begin } = await fixture()
     expect(request.verifyCommand).toBe(`git diff --check ${base} --`)

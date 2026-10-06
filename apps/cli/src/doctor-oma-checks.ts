@@ -2,7 +2,7 @@
 import { join } from "node:path"
 import { parseTriggerTable } from "@agent-valley/core/config/workflow-router"
 import type { ProjectConfig } from "@agent-valley/core/config/yaml-loader"
-import { SUPPORTED_OMA_VERSION } from "@agent-valley/core/oma/receipt-adapter"
+import { OMA_RECEIPT_SCHEMA_VERSION, parseOmaCliVersion } from "@agent-valley/core/oma/receipt-adapter"
 import type { CheckResult, DoctorDeps } from "./doctor-checks"
 
 export function checkOma(project: ProjectConfig | null, deps: DoctorDeps): CheckResult[] {
@@ -74,28 +74,26 @@ export function checkOma(project: ProjectConfig | null, deps: DoctorDeps): Check
   let version: string | null = null
   if (omaPath) {
     try {
-      version = deps.getOmaVersion?.() ?? null
+      version = parseOmaCliVersion(deps.getOmaVersion?.() ?? "") ?? null
     } catch {
       // Probe failures become a concrete compatibility check failure below.
     }
   }
   results.push(
-    version === SUPPORTED_OMA_VERSION
+    version !== null
       ? {
           id: "oma.cli",
-          name: "OMA CLI compatibility",
+          name: "OMA CLI availability",
           status: "pass",
-          message: `${omaPath} (${version})`,
+          message: `${omaPath} (${version}); receipt schema v${OMA_RECEIPT_SCHEMA_VERSION} and current evidence are checked for each task`,
           critical: false,
         }
       : {
           id: "oma.cli",
-          name: "OMA CLI compatibility",
+          name: "OMA CLI availability",
           status: "fail",
-          message: omaPath
-            ? `OMA CLI version ${version ?? "unknown"}; expected ${SUPPORTED_OMA_VERSION}`
-            : "oma not found on PATH",
-          fix: `Run npm install -g oh-my-agent@${SUPPORTED_OMA_VERSION}, verify with oma --version, then rerun av doctor.`,
+          message: omaPath ? "OMA CLI did not return a valid version" : "oma not found on PATH",
+          fix: "Run npm install -g oh-my-agent@latest, verify with oma --version, then rerun av doctor.",
           critical: true,
         },
   )

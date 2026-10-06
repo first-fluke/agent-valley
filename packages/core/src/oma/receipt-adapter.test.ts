@@ -1,20 +1,40 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { projectConfigSchema } from "../config/yaml-loader"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import type { OmaLatestCliIO } from "./latest-cli"
 import {
   buildOmaGuidance,
+  OMA_RECEIPT_SCHEMA_VERSION,
   type OmaEvidenceIO,
   type OmaEvidenceRequest,
+  parseOmaCliVersion,
   prepareOmaAttempt,
-  SUPPORTED_OMA_VERSION,
   validateOmaEvidence,
 } from "./receipt-adapter"
 
 const RUN_ID = "11111111-1111-4111-8111-111111111111"
 const ATTEMPT_ID = "22222222-2222-4222-8222-222222222222"
+
+const unavailableLatestIO: OmaLatestCliIO = {
+  run: async () => {
+    throw new Error("Unexpected registry access before trusted configuration validation")
+  },
+}
+
+function strictRequest(root: string): OmaEvidenceRequest {
+  const req = request()
+  req.workspace.path = root
+  const hooks = join(root, ".agents", "hooks", "core")
+  mkdirSync(hooks, { recursive: true })
+  writeFileSync(
+    join(hooks, "triggers.json"),
+    JSON.stringify({ workflows: {}, skills: {}, informationalPatterns: {}, excludedWorkflows: [] }),
+  )
+  return req
+}
 
 function request(kind: "code" | "analysis" = "code"): OmaEvidenceRequest {
   const issue = { id: "issue-1", identifier: "AV-1", title: "Fix bug" } as Issue
@@ -71,14 +91,12 @@ function receipt(req: OmaEvidenceRequest): Record<string, unknown> {
   }
 }
 
-function fakeIO(run: Record<string, unknown> | null, status = "codex:completed"): OmaEvidenceIO {
+function fakeIO(run: Record<string, unknown> | null, status = "codex:completed", version = "15.7.1"): OmaEvidenceIO {
   return {
     listRunFiles: () => (run ? [`${RUN_ID}.json`] : []),
     readReceipt: () => JSON.stringify(run),
     runCli: (args) =>
-      args[0] === "--version"
-        ? { exitCode: 0, stdout: `${SUPPORTED_OMA_VERSION}\n` }
-        : { exitCode: 0, stdout: `${status}\n` },
+      args[0] === "--version" ? { exitCode: 0, stdout: `${version}\n` } : { exitCode: 0, stdout: `${status}\n` },
   }
 }
 
@@ -167,11 +185,50 @@ describe("OMA receipt adapter", () => {
     expect(validateOmaEvidence(req, fakeIO(run)).ok).toBe(false)
   })
 
-  test("fails closed on unsupported CLI version", () => {
+  test.each(["15.7.1", "15.7.2", "15.8.0", "16.0.0", "17.0.0-rc.1+build.2"])(
+    "accepts actual v1 evidence from OMA %s without a release pin",
+    (version) => {
+      const req = request()
+      expect(validateOmaEvidence(req, fakeIO(receipt(req), "codex:completed", version))).toEqual({
+        ok: true,
+        runId: RUN_ID,
+      })
+    },
+  )
+
+  test.each(["", "latest", "OMA 16.0.0", "16.0", "16.0.0\nextra output", "016.0.0", "16.0.0-01"])(
+    "fails closed on malformed CLI version %j",
+    (version) => {
+      const req = request()
+      expect(parseOmaCliVersion(version)).toBeNull()
+      expect(validateOmaEvidence(req, fakeIO(receipt(req), "codex:completed", version))).toMatchObject({
+        ok: false,
+        reason: expect.stringContaining("oh-my-agent@latest"),
+      })
+    },
+  )
+
+  test("normalizes native semantic version output without claiming protocol compatibility", () => {
+    expect(parseOmaCliVersion("16.0.0\n")).toBe("16.0.0")
+    expect(parseOmaCliVersion("16.0.0-beta.1+abc.00")).toBe("16.0.0-beta.1+abc.00")
+  })
+
+  test.each([2, undefined, "1"])("rejects incompatible receipt schema %j even from a newer CLI", (schemaVersion) => {
     const req = request()
-    const io = fakeIO(receipt(req))
-    io.runCli = () => ({ exitCode: 0, stdout: "16.0.0" })
-    expect(validateOmaEvidence(req, io).ok).toBe(false)
+    const actual = receipt(req)
+    expect(actual.schemaVersion).toBe(OMA_RECEIPT_SCHEMA_VERSION)
+    actual.schemaVersion = schemaVersion
+    expect(validateOmaEvidence(req, fakeIO(actual, "codex:completed", "16.0.0"))).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("OMA CLI 16.0.0 returned an unsupported receipt schema"),
+    })
+  })
+
+  test("does not infer native completion proof from a newer CLI's JSON status", () => {
+    const req = request()
+    expect(
+      validateOmaEvidence(req, fakeIO(receipt(req), '{"agent":"codex","status":"completed"}', "16.0.0")),
+    ).toMatchObject({ ok: false, reason: expect.stringContaining("unknown status output cannot establish completion") })
   })
 
   test("rejects malformed receipt JSON and absent CLI", () => {
@@ -189,20 +246,20 @@ describe("OMA receipt adapter", () => {
   test("writes trusted required checks and guidance for the exact attempt", async () => {
     const root = mkdtempSync(join(tmpdir(), "av-oma-plan-"))
     try {
-      const req = request()
-      req.workspace.path = root
-      const hooks = join(root, ".agents", "hooks", "core")
-      mkdirSync(hooks, { recursive: true })
-      writeFileSync(
-        join(hooks, "triggers.json"),
-        JSON.stringify({
-          workflows: {},
-          skills: {},
-          informationalPatterns: {},
-          excludedWorkflows: [],
-        }),
-      )
-      const path = await prepareOmaAttempt(req)
+      const req = strictRequest(root)
+      let installedVersion = "15.7.1"
+      const readiness = vi.fn<OmaLatestCliIO["run"]>(async (command, args) => {
+        expect(existsSync(join(root, ".agents", "results", `plan-${req.attempt.id}.json`))).toBe(false)
+        if (command === "oma") return { exitCode: 0, stdout: installedVersion }
+        if (args[0] === "view") return { exitCode: 0, stdout: JSON.stringify("15.7.2") }
+        if (args[0] === "install") {
+          installedVersion = "15.7.2"
+          return { exitCode: 0, stdout: "" }
+        }
+        throw new Error("Unexpected readiness command")
+      })
+      const path = await prepareOmaAttempt(req, { latestCliIO: { run: readiness } })
+      expect(readiness.mock.calls.some(([command, args]) => command === "npm" && args[0] === "install")).toBe(true)
       const plan = JSON.parse(readFileSync(path, "utf-8")) as {
         tasks: Array<{ required_checks: Array<{ command: string[] }> }>
       }
@@ -215,16 +272,27 @@ describe("OMA receipt adapter", () => {
     }
   })
 
+  test("leaves the strict attempt unprepared when fresh latest readiness fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "av-oma-unavailable-latest-"))
+    try {
+      const req = strictRequest(root)
+      await expect(prepareOmaAttempt(req, { latestCliIO: unavailableLatestIO })).rejects.toThrow()
+      expect(existsSync(join(root, ".agents", "results", `plan-${req.attempt.id}.json`))).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("strict preparation rejects a missing or incompatible target-workspace trigger table", async () => {
     const root = mkdtempSync(join(tmpdir(), "av-oma-missing-table-"))
     try {
       const req = request()
       req.workspace.path = root
-      await expect(prepareOmaAttempt(req)).rejects.toThrow("target worktree")
+      await expect(prepareOmaAttempt(req, { latestCliIO: unavailableLatestIO })).rejects.toThrow("target worktree")
       const hooks = join(root, ".agents", "hooks", "core")
       mkdirSync(hooks, { recursive: true })
       writeFileSync(join(hooks, "triggers.json"), JSON.stringify({ schemaVersion: 2, workflows: {} }))
-      await expect(prepareOmaAttempt(req)).rejects.toThrow("target worktree")
+      await expect(prepareOmaAttempt(req, { latestCliIO: unavailableLatestIO })).rejects.toThrow("target worktree")
       writeFileSync(
         join(hooks, "triggers.json"),
         JSON.stringify({
@@ -234,7 +302,9 @@ describe("OMA receipt adapter", () => {
           excludedWorkflows: [],
         }),
       )
-      await expect(prepareOmaAttempt(req)).rejects.toThrow("workflow file missing")
+      await expect(prepareOmaAttempt(req, { latestCliIO: unavailableLatestIO })).rejects.toThrow(
+        "workflow file missing",
+      )
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

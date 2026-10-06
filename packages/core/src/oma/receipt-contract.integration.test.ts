@@ -3,17 +3,28 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "vitest"
+import { beforeAll, describe, expect, test } from "vitest"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import type { OmaLatestCliIO } from "./latest-cli"
 import {
+  OMA_RECEIPT_SCHEMA_VERSION,
   type OmaEvidenceRequest,
+  parseOmaCliVersion,
   prepareOmaAttempt,
-  SUPPORTED_OMA_VERSION,
   validateOmaEvidence,
 } from "./receipt-adapter"
 
 const installed = spawnSync("oma", ["--version"], { encoding: "utf-8", timeout: 5_000 })
-const available = installed.status === 0 && installed.stdout.trim() === SUPPORTED_OMA_VERSION
+const available = installed.status === 0 && !!parseOmaCliVersion(installed.stdout)
+const required = !!process.env.CI && process.env.CI !== "false" && process.env.CI !== "0"
+const latestCliIO: OmaLatestCliIO = {
+  run: async (command, args) => {
+    if (command === "oma") return { exitCode: installed.status, stdout: installed.stdout }
+    if (command === "npm" && args[0] === "view")
+      return { exitCode: 0, stdout: JSON.stringify(parseOmaCliVersion(installed.stdout)) }
+    throw new Error("Native receipt fixtures must not install packages or contact the registry")
+  },
+}
 
 function run(command: string, args: string[], cwd: string): string {
   const result = spawnSync(command, args, { cwd, encoding: "utf-8", timeout: 10_000 })
@@ -23,7 +34,13 @@ function run(command: string, args: string[], cwd: string): string {
 }
 
 /** Uses only native receipt commands and local git; never invokes an agent or skill. */
-describe.skipIf(!available)(`OMA ${SUPPORTED_OMA_VERSION} native receipt contract`, () => {
+describe.skipIf(!available && !required)(`OMA v${OMA_RECEIPT_SCHEMA_VERSION} native receipt contract`, () => {
+  beforeAll(() => {
+    if (!available)
+      throw new Error(
+        "CI requires the installed OMA CLI for native receipt contract tests. Run npm install -g oh-my-agent@latest and confirm oma --version is available on PATH.",
+      )
+  })
   test.each(["code", "analysis"] as const)(
     "validates real %s receipts and rejects modified evidence",
     async (kind) => {
@@ -61,7 +78,7 @@ describe.skipIf(!available)(`OMA ${SUPPORTED_OMA_VERSION} native receipt contrac
           ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-qm", "Initial fixture"],
           root,
         )
-        await prepareOmaAttempt(request)
+        await prepareOmaAttempt(request, { latestCliIO })
         const begin = JSON.parse(
           run(
             "oma",
