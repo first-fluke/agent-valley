@@ -60,12 +60,40 @@ function completedMission(id: string, goal: string, workspace: Mission["workspac
     timeoutSec: 10,
     maxRepairs: 1,
     status: "completed",
-    tasks: [],
+    goalBrief: { interpretation: goal, assumptions: [], successCriteria: ["Verified improvement"] },
+    plan: {
+      tasks: [
+        {
+          id: "work",
+          title: "Improve",
+          personaId: "chief-director",
+          instructions: goal,
+          acceptance: ["Verified improvement"],
+          dependencies: [],
+        },
+      ],
+    },
+    fingerprint: "verified",
+    tasks: [
+      {
+        id: "work",
+        reviewerId: "reviewer",
+        status: "completed",
+        attempts: 1,
+        fingerprint: "approved-task",
+        review: { passed: true, summary: "Actual files inspected", findings: [] },
+      },
+    ],
     history: [],
     createdAt: now,
     updatedAt: now,
     verification: { ok: true, fingerprint: "verified", output: "checked" },
-    finalReview: { passed: true, summary: "verified", findings: [] },
+    finalReview: {
+      passed: true,
+      summary: "verified",
+      findings: [],
+      criteria: [{ criterion: "Verified improvement", passed: true, evidence: "Actual files and checks passed" }],
+    },
   }
 }
 
@@ -98,6 +126,7 @@ describe("continuous operation CLI", () => {
       }
       const mission = completedMission(id, goal, workspace)
       mission.verification = { ok: true, fingerprint: await fingerprintWorkspace(workspace.path) }
+      mission.fingerprint = mission.verification.fingerprint
       await new MissionStore(join(root, ".agent-valley", "missions")).save(mission)
       return mission
     })
@@ -209,6 +238,7 @@ describe("continuous operation CLI", () => {
     const repaired = await store.load(paused.currentMissionId ?? "")
     repaired.status = "completed"
     repaired.verification = { ok: true, fingerprint: await fingerprintWorkspace(repaired.workspace.path) }
+    repaired.fingerprint = repaired.verification.fingerprint
     delete repaired.error
     await store.save(repaired)
     const completed = await runOperation(undefined, { resume: paused.id }, root, {

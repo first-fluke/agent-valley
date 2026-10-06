@@ -1,3 +1,4 @@
+import { automaticMissionRecovery } from "@agent-valley/core/chief/continuous-recovery"
 import {
   executionPolicySchema,
   executionState,
@@ -100,5 +101,15 @@ export function applyResumeOptions(mission: Mission, goal: string | undefined, o
       message:
         "Operator resumed the original goal with reconciled effects or adjusted execution limits; prior decisions and checks were retained.",
     })
+  } else if (mission.status === "paused" || mission.status === "failed") {
+    const recovery = automaticMissionRecovery(mission)
+    if (recovery.retry && (!recovery.waitUntil || Date.parse(recovery.waitUntil) <= Date.now())) {
+      mission.status = "pending"
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "chief-resume",
+        message: `Continuing the Chief's saved recovery without changing its limits or spent usage: ${recovery.reason}`,
+      })
+    }
   }
 }

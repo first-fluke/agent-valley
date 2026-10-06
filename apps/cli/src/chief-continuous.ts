@@ -189,6 +189,13 @@ export function renderOperationReport(operation: ContinuousOperation): string {
   if (operation.baseline) lines.push(`Accepted workspace: ${operation.baseline.path}`)
   if (operation.decision) lines.push(`Latest decision: ${operation.decision.action} — ${operation.decision.reason}`)
   if (operation.nextRunAt) lines.push(`Next decision: ${operation.nextRunAt}`)
+  if (operation.recovery) {
+    lines.push(
+      `Recovery disposition: ${operation.recovery.disposition}; ${operation.recovery.target} ${operation.recovery.checkpointId}; ${operation.recovery.attempts} attempts.`,
+    )
+    lines.push(`Recovery evidence: ${markdown(operation.recovery.reason, 16_000)}`)
+    if (operation.recovery.nextRunAt) lines.push(`Next recovery: ${operation.recovery.nextRunAt}`)
+  }
   if (operation.error) lines.push(`Paused reason: ${operation.error}`)
   lines.push(
     ...containerObservationLines(operation.containerObservationPolicy, operation.containerObservation).map((line) =>
@@ -278,6 +285,7 @@ export async function runOperation(
           for (const key of decisionBudgetKeys) if (options[key] !== undefined) adjustments[key] = options[key]
           applyResumeOptions(decision, undefined, adjustments)
           await decisions.save(decision)
+          operation.recovery = undefined
         } finally {
           await unlockDecision()
         }

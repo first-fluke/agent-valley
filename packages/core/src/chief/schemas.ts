@@ -1,5 +1,18 @@
+import { parseJson, validatePlan } from "./plan-validation"
+import { validateOriginalAcceptance } from "./supervision-contract"
+
+export { parseJson, validatePlan } from "./plan-validation"
+
+export {
+  parseSupervisionResponse,
+  type SupervisionResponse,
+  supervisionResponseSchema,
+  validateOriginalAcceptance,
+} from "./supervision-contract"
+
 import {
   advisoryReviewSchema,
+  refineChiefWaitSchedule,
   reviewSchema,
   supervisionSchema,
   taskStateSchema,
@@ -10,9 +23,7 @@ export { reviewSchema } from "./mission-state-schema"
 
 import { isAbsolute } from "node:path"
 import { z } from "zod"
-import { detectCycles } from "../domain/dag"
-import type { DagNode } from "../domain/models"
-import { actorSchema, actorTaskSchema, normalizeActorAssignment } from "./actor-contract"
+import { actorSchema, actorTaskSchema } from "./actor-contract"
 import { capturePolicySchema, captureResultSchema } from "./capture"
 import { containerObservationPolicySchema, containerObservationSnapshotSchema } from "./container-observation-policy"
 import { refineMissionContainerState } from "./container-observation-state"
@@ -145,6 +156,7 @@ export const missionSchema = z
   })
   .superRefine((mission, ctx) => {
     refineMissionContainerState(mission, ctx)
+    refineChiefWaitSchedule(mission, ctx)
     if (!mission.verifyCommand.trim() && mission.verificationMode !== "chief")
       ctx.addIssue({
         code: "custom",
@@ -152,48 +164,6 @@ export const missionSchema = z
         message: "Set an operator verification command or select Chief-generated verification.",
       })
   })
-
-function parseJson(source: string, stage: string): unknown {
-  if (source.length > 128_000) throw new Error(`${stage} response exceeds 128 KB. Return only the requested JSON.`)
-  const content = source.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, "$1")
-  try {
-    return JSON.parse(content)
-  } catch {
-    throw new Error(`${stage} response is not valid JSON. Return one JSON object matching the requested schema.`)
-  }
-}
-
-export function validatePlan(plan: ChiefPlan, personas: Persona[]): void {
-  const ids = new Set<string>()
-  const personaIds = new Set(personas.map((persona) => persona.id))
-  for (const task of plan.tasks) {
-    if (ids.has(task.id)) throw new Error(`Duplicate task id ${task.id}. Give every plan task a unique id.`)
-    ids.add(task.id)
-    if (!personaIds.has(task.personaId))
-      throw new Error(`Unknown Actor ${task.personaId}. Assign a configured Actor id.`)
-  }
-  const nodes: Record<string, DagNode> = Object.create(null)
-  for (const task of plan.tasks) {
-    for (const dependency of task.dependencies) {
-      if (!ids.has(dependency))
-        throw new Error(`Task ${task.id} depends on unknown task ${dependency}. Correct the plan.`)
-    }
-    if (new Set(task.dependencies).size !== task.dependencies.length) {
-      throw new Error(`Task ${task.id} repeats a dependency. Remove duplicate dependencies.`)
-    }
-    nodes[task.id] = {
-      issueId: task.id,
-      identifier: task.id,
-      status: "waiting",
-      parentId: null,
-      children: [],
-      blockedBy: task.dependencies,
-      blocks: [],
-    }
-  }
-  if (detectCycles(nodes).length > 0)
-    throw new Error("Chief Director plan contains a dependency cycle. Return an acyclic plan.")
-}
 
 export function parsePlan(source: string, personas: Persona[]): ChiefPlan {
   const plan = planSchema.parse(parseJson(source, "Planning"))
@@ -443,55 +413,4 @@ export function validateMission(input: Mission): Mission {
   }
   if (mission.supervision && mission.finalReview) parseFinalReview(JSON.stringify(mission.finalReview), mission)
   return mission
-}
-
-export const supervisionResponseSchema = z.discriminatedUnion("action", [
-  z.strictObject({ action: z.literal("repair"), reason: text, instructions: text, taskId: id.optional() }),
-  z.strictObject({ action: z.literal("reassign"), reason: text, instructions: text, taskId: id, personaId: id }),
-  z.strictObject({ action: z.literal("replan"), reason: text, tasks: planSchema.shape.tasks }),
-  z.strictObject({ action: z.literal("stop"), reason: text }),
-])
-
-export type SupervisionResponse = z.infer<typeof supervisionResponseSchema>
-
-export function validateOriginalAcceptance(plan: ChiefPlan, mission: Mission): void {
-  const acceptance = new Set(plan.tasks.flatMap((task) => task.acceptance))
-  if (mission.supervision?.originalAcceptance?.some((criterion) => !acceptance.has(criterion)))
-    throw new Error(
-      "The Chief Director replan weakens an original acceptance obligation. Retain every original acceptance criterion verbatim in the new tasks.",
-    )
-  for (const task of mission.plan?.tasks ?? []) {
-    const effect = mission.tasks.find((state) => state.id === task.id)?.effectState
-    if (
-      task.effectScope === "external" &&
-      effect &&
-      effect !== "not-started" &&
-      !plan.tasks.some((entry) => entry.id === task.id && entry.effectScope === "external")
-    )
-      throw new Error(
-        "Replanning must retain recorded external-effect task identities and scopes. Reconcile uncertain actions before replacing them.",
-      )
-  }
-}
-
-export function parseSupervisionResponse(source: string, mission: Mission): SupervisionResponse {
-  if (source.length > 8_000)
-    throw new Error("Chief Director supervision response exceeds 8,000 characters. Return a concise recovery decision.")
-  const decision = supervisionResponseSchema.parse(normalizeActorAssignment(parseJson(source, "Supervision")))
-  if (decision.action === "replan") {
-    const plan = { tasks: decision.tasks }
-    validatePlan(plan, mission.personas)
-    validateOriginalAcceptance(plan, mission)
-  } else if (decision.action !== "stop") {
-    const taskId = decision.taskId ?? mission.supervision?.pendingRecovery?.taskId
-    const task = mission.plan?.tasks.find((entry) => entry.id === taskId)
-    if (taskId && !task) throw new Error(`Unknown recovery task ${taskId}. Select an existing mission task.`)
-    if (decision.action === "reassign") {
-      if (!mission.personas.some((persona) => persona.id === decision.personaId))
-        throw new Error(`Unknown recovery Actor ${decision.personaId}. Select an existing mission Actor.`)
-      if (task?.personaId === decision.personaId)
-        throw new Error("Reassignment must choose a different Actor. Use repair to keep the current Actor.")
-    }
-  }
-  return decision
 }

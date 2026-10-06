@@ -81,6 +81,21 @@ export const operationSchema = z
       .regex(/^[a-f0-9]{64}$/)
       .optional(),
     nextRunAt: timestampSchema.optional(),
+    recovery: z
+      .strictObject({
+        target: z.enum(["child", "decision"]),
+        checkpointId: operationIdSchema,
+        attempts: z.number().int().min(0).max(2000),
+        failedAttempts: z.number().int().min(0).max(2000).optional(),
+        waitContinuationKey: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        disposition: z.enum(["retrying", "waiting", "unresolved", "protected"]),
+        reason: z.string().max(16_000),
+        nextRunAt: timestampSchema.optional(),
+      })
+      .optional(),
     resumePhase: z.enum(["deciding", "running", "accepting", "waiting"]).optional(),
     error: z.string().max(16_000).optional(),
     history: z.array(historyEntrySchema).max(20),
@@ -139,6 +154,16 @@ export const operationSchema = z
         code: "custom",
         message: "A saved child requires its original execution decision.",
         path: ["decision"],
+      })
+    if (
+      operation.recovery &&
+      operation.recovery.checkpointId !==
+        (operation.recovery.target === "child" ? operation.currentMissionId : operation.decisionId)
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["recovery"],
+        message: "Recovery must retain the original child or decision checkpoint identity.",
       })
   })
 export type Operation = z.infer<typeof operationSchema>

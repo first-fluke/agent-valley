@@ -174,7 +174,7 @@ export function createAvMcpServer(api: MissionApiPort, options: AvMcpOptions): M
       "av_operation_resume",
       {
         description:
-          "Resume the saved operating charter. Paused or failed child missions must first be repaired and explicitly resumed using av_resume or the CLI; this call does not reconcile unknown external effects.",
+          "Resume the saved operating charter. The Chief continues eligible recovery for the same child within its saved limits and reports unresolved outcomes. Unknown external effects remain protected until verified; this call does not invent reconciliation evidence.",
         inputSchema: mcpOperationResumeSchema,
         annotations: write,
       },

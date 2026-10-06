@@ -220,3 +220,73 @@ describe("operator resume without weakening acceptance or resetting spend", () =
     expect(() => assertExecutionBudget(current)).toThrow("cost limit")
   })
 })
+
+describe("Chief recovery without an operator decision", () => {
+  function recoverable() {
+    const current = mission()
+    if (!current.execution || !current.executionPolicy || !current.supervision) throw new Error("Expected policy")
+    current.executionPolicy.maxRuns = 30
+    current.execution.failureKind = "environment"
+    current.execution.pauseReason = "Worker dependency unavailable"
+    delete current.execution.nextRunAt
+    current.supervision.pendingRecovery = { reason: "Worker dependency unavailable", taskId: "login" }
+    current.supervision.stalledRounds = 1
+    return current
+  }
+
+  it.each(["paused", "failed"] as const)("continues a %s recovery with no retry flag or accounting reset", (status) => {
+    const current = recoverable()
+    current.status = status
+    const before = structuredClone(current)
+    applyResumeOptions(current, undefined, { resume: current.id })
+    expect(current.status).toBe("pending")
+    expect(current.execution).toEqual(before.execution)
+    expect(current.executionPolicy).toEqual(before.executionPolicy)
+    expect(current.supervision).toEqual(before.supervision)
+    expect(current.goal).toBe(before.goal)
+    expect(current.personas).toEqual(before.personas)
+    expect(current.tasks).toEqual(before.tasks)
+    expect(current.verifyCommand).toBe(before.verifyCommand)
+    expect(current.history.at(-1)?.stage).toBe("chief-resume")
+    expect(current.execution?.interventionAt).toBeUndefined()
+  })
+
+  it.each(["unknown-effect", "interrupted", "budget"] as const)("retains a protected %s checkpoint", (kind) => {
+    const current = recoverable()
+    if (!current.execution) throw new Error("Expected execution")
+    current.execution.failureKind = kind
+    const before = structuredClone(current)
+    applyResumeOptions(current, undefined, { resume: current.id })
+    expect(current).toEqual(before)
+  })
+
+  it("honors the Chief's stop decision and disabled automatic recovery", () => {
+    for (const stopped of [true, false]) {
+      const current = recoverable()
+      if (!current.executionPolicy || !current.supervision) throw new Error("Expected policy")
+      if (stopped)
+        current.supervision.decisions.push({
+          round: 2,
+          at: new Date(now).toISOString(),
+          action: "stop",
+          reason: "No authorized recovery is available",
+          fingerprint: "same",
+        })
+      else current.executionPolicy.autoResume = false
+      const before = structuredClone(current)
+      applyResumeOptions(current, undefined, { resume: current.id })
+      expect(current).toEqual(before)
+    }
+  })
+
+  it("leaves a scheduled Chief wait intact for the supervisor to honor", () => {
+    const current = recoverable()
+    if (!current.execution) throw new Error("Expected execution")
+    current.status = "waiting"
+    current.execution.failureKind = "chief-wait"
+    current.execution.nextRunAt = new Date(now + 60_000).toISOString()
+    const before = structuredClone(current)
+    applyResumeOptions(current, undefined, { resume: current.id })
+    expect(current).toEqual(before)
+  })
+})

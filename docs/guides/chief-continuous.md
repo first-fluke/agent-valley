@@ -2,6 +2,8 @@
 
 Use `av order` to keep improving a service under an operating charter. The Chief selects a concrete goal, supervises Actors and Director reviews, verifies the result, then uses the accepted code and observed outcomes to choose the next improvement. Add `--once` to complete one goal and exit.
 
+The Chief interprets the charter and business context, identifies opportunities, compares strategies and synthesizes Technical Director, Design Director and Marketing Director advice before choosing the next goal. It acts on its judgment, evaluates real outcomes and adjusts the strategy. Actors return evidence and blockers to the Chief. The user receives decisions, reasons, results, lessons and next actions. This judgment stays within the original charter, available permissions and saved limits. Missing authorization, credentials or trustworthy external-effect evidence are reported unmet prerequisites, never invented permissions or success.
+
 When upgrading scripts that expected the previous single-goal default, add `--once`; MCP callers use `once: true`. Replace calls to the former `av_operate` MCP tool with `av_order`, passing the charter as `goal`. Saved mission and operation records retain their execution mode on resume.
 
 ```bash
@@ -24,7 +26,7 @@ The Chief inspects the latest accepted product snapshot, previous mission report
 
 Each improvement keeps its own acceptance contract, independent review, measured-outcome requirements and report. Missing or stale observations do not count as business success. Source-collected measurements retain their attribution and measurement windows; they do not establish causation. When an authoritative metric source is needed, configure it through setup or [metric-source settings](./chief-integrations.md#automatic-business-metric-sources). A Chief may instead select an integration or inspection goal when access is missing; it cannot invent a successful measurement.
 
-Optional [container observation](./chief-containers.md) collects Docker/OrbStack or Kubernetes state and bounded logs from configured targets. New failure evidence can wake an idle operation before its usual next decision. Enabled target health is checked again before a child completes; failed observations return to recovery, and unavailable observations remain unresolved. The collector reads runtime evidence; the Chief delegates repairs and delivery within the charter.
+Optional [container observation](./chief-containers.md) collects Docker/OrbStack or Kubernetes state and bounded logs from configured targets. New failure evidence can wake an idle operation before its usual next decision. Enabled target health is checked again before a child completes. Unhealthy or unavailable observations return to the Chief for an authorized repair, bounded wait or explained stop; missing evidence remains unresolved. The collector reads runtime evidence; the Chief delegates repairs and delivery within the charter.
 
 Reports explain decisions and results in plain language. Child reports and Aside screenshots/videos use existing [attachment delivery](./chief-integrations.md#replaceable-reporting-channels). `av operations --report` shows the charter, state, accepted workspace and recent child IDs. Read those child reports for checks and limitations. Operation state lives in `.agent-valley/operations/`, reports in `.agent-valley/operation-reports/`, and decision checkpoints in `.agent-valley/operation-decisions/`. Recent decision context is bounded; child records and snapshot receipts remain available for recovery.
 
@@ -56,7 +58,9 @@ av order --resume OPERATION_ID
 av order --resume OPERATION_ID --cycles 5
 ```
 
-`av order --resume ID` detects whether the saved record is an operation or a single mission. Existing mission IDs keep their saved execution mode. `--once --resume ID` explicitly selects a mission. A paused or failed child is not replaced with a new mission. Inspect its error, repair the blocker and explicitly resume that child, then resume the operation:
+Recoverable child or decision failures continue through bounded recovery using the original checkpoint, charter, selected Chief and spent budgets. A Chief-selected wait retains the same child and automatically resumes at its saved `nextRunAt`; completed external actions remain preserved. A stopped or unresolved child is never replaced with a new mission to evade its evidence or limits.
+
+`av order --resume ID` detects whether the saved record is an operation or a single mission. Existing mission IDs keep their saved execution mode. `--once --resume ID` explicitly selects a mission. After a user stop or an externally repaired prerequisite, the following advanced manual controls can resume the original child and operation:
 
 ```bash
 av order --resume CHILD_ID --retry
@@ -65,7 +69,7 @@ av order --resume OPERATION_ID
 
 If the active goal-selection checkpoint itself reached a limit, `av order --resume OPERATION_ID --runs 400 --duration 172800` can increase that decision's limits while retaining prior spending. `--cost`, or the pair `--account-run RUN_ID --account-cost USD`, can resolve its cost limit or a provider charge you have inspected. These flags apply only when a decision checkpoint is active; future child settings stay as originally saved. Child limits and uncertain effects use the child resume controls above. The operation report includes its active decision ID, whose usage record is in the decision checkpoint directory.
 
-For interrupted external effects, inspect the destination and [reconcile the original child](./chief-missions.md#inspect-and-resume) before retrying. Resuming an operation does not resolve uncertainty or reset child budgets. Repeated goal/evidence decisions wait. Malformed decisions, unavailable credentials, corrupted records and mismatched snapshots pause with the cause. Live locks prevent concurrent runners.
+Interrupted external effects remain evidence-gated on the original child. Without trustworthy destination evidence, the Chief can wait or report an unmet prerequisite; it cannot guess the effect's outcome or repeat it. AV does not provide a generic destination observer. [Advanced manual reconciliation](./chief-missions.md#advanced-manual-controls) is available when an operator has independently checked the destination. Resuming an operation does not resolve uncertainty or reset child budgets. Repeated goal/evidence decisions wait. Unavailable selected Chief access, corrupt records, mismatched snapshots and exhausted recovery limits pause with the cause. Live locks prevent concurrent runners.
 
 Verified changes are carried to the next improvement using private Git snapshots, including uncommitted product changes. The original checkout and index are preserved. Workspaces retain the original delivery remote; publishing, pushing and deployment still need to be within the operating charter and available permissions. Snapshots do not automatically merge into the original branch.
 

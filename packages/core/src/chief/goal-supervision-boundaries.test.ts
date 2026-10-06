@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { coordinate } from "./coordinator"
 import { brief, fixture, passed, plan, rejected } from "./goal-supervision.fixture"
-import { reviewPrompt } from "./prompts"
+import { CHIEF_DIRECTOR_ROLE, planPrompt, reviewPrompt, supervisePrompt, workPrompt } from "./prompts"
 import {
   finalCriteria,
   parseFinalReview,
@@ -34,6 +34,27 @@ function finalReview(mission: Mission) {
 }
 
 describe("Chief Director goal supervision boundaries", () => {
+  it("keeps execution choices with Chief and returns Actor blockers without weakening evidence boundaries", () => {
+    const mission = savedMission()
+    for (const prompt of [planPrompt(mission), supervisePrompt(mission), reviewPrompt(mission)]) {
+      expect(prompt).toContain(CHIEF_DIRECTOR_ROLE)
+      expect(prompt).toContain("The user supplies intent and receives reports")
+      expect(prompt).toContain("original charter, available permissions and saved limits")
+      expect(prompt).toContain("never invent them or claim completion without evidence")
+    }
+    const task = mission.plan?.tasks[0]
+    const state = mission.tasks[0]
+    const actor = mission.personas.find((entry) => entry.id === task?.personaId)
+    if (!task || !state || !actor) throw new Error("Expected assigned task and Actor")
+    expect(workPrompt(mission, task, state, actor)).toContain(
+      "Return blockers, failed attempts and evidence to the supervising Chief Director",
+    )
+    expect(supervisePrompt(mission)).toContain('"action":"wait"')
+    expect(supervisePrompt(mission)).toContain("integer from 1 through 86400")
+    expect(supervisePrompt(mission)).toContain("unknown external effect permits only wait or stop")
+    expect(supervisePrompt(mission)).toContain("completed external action must not be replayed")
+  })
+
   it("requires interpretation, assumptions and observable criteria in the first planning response", async () => {
     const { mission, ports, runAgent } = fixture()
     runAgent.mockImplementationOnce(async () => JSON.stringify(plan))

@@ -176,7 +176,7 @@ export async function runOrder(
         () =>
           abortController.abort(
             new MissionPause(
-              "Mission wall-time limit reached. Increase --duration on resume to continue the original goal.",
+              "Mission wall-time limit reached. The Chief retained the unresolved outcome within the saved execution limits.",
               "budget",
             ),
           ),

@@ -33,7 +33,7 @@ describe("Director and Actor contract compatibility", () => {
     expect(CTO_ROLE).toBe(TECHNICAL_DIRECTOR_ROLE)
     expect(CDO_ROLE).toBe(DESIGN_DIRECTOR_ROLE)
     expect(CMO_ROLE).toBe(MARKETING_DIRECTOR_ROLE)
-    expect(CHIEF_DIRECTOR_ROLE).toContain("Chief Director")
+    expect(CHIEF_DIRECTOR_ROLE).toContain("autonomous executive")
     expect(TECHNICAL_DIRECTOR_ROLE).toContain("total cost")
     expect(DESIGN_DIRECTOR_ROLE).toContain("enjoys and frequently uses dark patterns")
     expect(MARKETING_DIRECTOR_ROLE).toContain("maniacal profit fanatic")

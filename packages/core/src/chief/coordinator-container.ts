@@ -3,7 +3,7 @@ import {
   containersHealthy,
   validateContainerObservation,
 } from "./container-observation-state"
-import { classifyFailure, MissionPause } from "./execution"
+import { MissionPause } from "./execution"
 import type { ChiefPorts, Mission } from "./types"
 
 export async function refreshMissionContainers(mission: Mission, ports: ChiefPorts): Promise<void> {
@@ -34,18 +34,11 @@ export function missionContainerRecovery(mission: Mission): { healthy: boolean; 
   const reason = containerObservationLines(mission.containerObservationPolicy, mission.containerObservation)
     .join("\n")
     .slice(0, 16_000)
-  if (
-    !mission.containerObservation ||
-    mission.containerObservation.results.some(
-      (result) => result.status === "unavailable" || result.logsAvailable === false || result.statsAvailable === false,
-    )
-  ) {
-    const kind = classifyFailure(reason) === "authentication" ? "authentication" : "environment"
+  if (!mission.containerObservation)
     throw new MissionPause(
-      `Code checks passed, but service recovery is unresolved because configured container evidence is unavailable. Restore source access and use --resume with --retry.\n${reason}`,
-      kind,
+      "The configured container observer returned no validated evidence. Service recovery remains unresolved.",
+      "environment",
     )
-  }
   const healthy = containersHealthy(mission.containerObservationPolicy, mission.containerObservation)
   if (healthy) mission.containerObservationVerifiedFingerprint = mission.containerObservation.fingerprint
   return { healthy, reason }

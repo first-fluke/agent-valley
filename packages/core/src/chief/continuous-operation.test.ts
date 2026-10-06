@@ -1,92 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
-import {
-  type ContinuousBaseline,
-  continuousDecisionSchema,
-  type Operation,
-  operationSchema,
-  parseContinuousDecision,
-} from "./continuous-contract"
-import { type ContinuousOperationPorts, runContinuousOperation } from "./continuous-operation"
-import type { Mission } from "./types"
-
-const timestamp = "2026-10-05T00:00:00.000Z"
-function operation(overrides: Partial<Operation> = {}): Operation {
-  return {
-    id: "operation",
-    repositoryRoot: "/repo",
-    charter: "Keep improving usability and revenue",
-    settings: { actor: "codex", model: "pinned-model" },
-    phase: "deciding",
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    completedCycles: 0,
-    waitIntervalSec: 300,
-    history: [],
-    ...overrides,
-  }
-}
-function baseline(missionId?: string): ContinuousBaseline {
-  return {
-    version: 1,
-    operationId: "operation",
-    repositoryRoot: "/repo",
-    sourceWorkspacePath: missionId ? `/child/${missionId}` : "/repo",
-    missionId,
-    path: `/baseline/${missionId ?? "initial"}`,
-    branch: "snapshot",
-    baselineHead: "a".repeat(40),
-    baselineTree: "b".repeat(40),
-    commit: "c".repeat(40),
-  }
-}
-function mission(id: string, goal: string, status: Mission["status"] = "completed"): Mission {
-  return {
-    id,
-    repositoryRoot: "/repo",
-    goal,
-    chiefId: "chief",
-    personas: [],
-    workspace: { issueId: id, key: id, path: `/child/${id}`, branch: id, status: "idle", createdAt: timestamp },
-    verifyCommand: "true",
-    timeoutSec: 5,
-    maxRepairs: 0,
-    status,
-    verification: { ok: true, fingerprint: "verified" },
-    finalReview: { passed: true, summary: "Verified", findings: [] },
-    tasks: [],
-    history: [],
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }
-}
-function fixture(record = operation()) {
-  let clock = Date.parse(timestamp)
-  const saved: Operation[] = []
-  const children = new Map<string, Mission>()
-  const ports: ContinuousOperationPorts = {
-    save: vi.fn(async (value) => {
-      saved.push(operationSchema.parse(value))
-    }),
-    now: () => new Date(clock),
-    delay: vi.fn(async (milliseconds) => {
-      clock += milliseconds
-    }),
-    accept: vi.fn(async (_parent, child) => baseline(child?.id)),
-    findMission: vi.fn(async (id) => children.get(id)),
-    decide: vi.fn(async (value) => ({
-      action: "execute" as const,
-      goal: `Improve ${value.completedCycles + 1}`,
-      reason: "Measured product gap",
-      evidence: [`metric-window-${value.completedCycles + 1}`],
-    })),
-    runMission: vi.fn(async (_parent, id, goal) => {
-      const child = mission(id, goal)
-      children.set(id, child)
-      return child
-    }),
-  }
-  return { record, ports, children, saved }
-}
+import { continuousDecisionSchema, operationSchema, parseContinuousDecision } from "./continuous-contract"
+import { runContinuousOperation } from "./continuous-operation"
+import { baseline, fixture, mission, operation, timestamp } from "./continuous-operation.fixture"
+import { executionPolicySchema } from "./execution"
 
 describe("continuous Chief operations", () => {
   it("runs two distinct verified goals from successive accepted baselines with IDs saved before dispatch", async () => {
@@ -191,7 +107,7 @@ describe("continuous Chief operations", () => {
     },
   )
 
-  it("pauses on malformed decisions with a durable checkpoint and no automatic paid retry", async () => {
+  it("bounds malformed decision correction on the same durable checkpoint", async () => {
     const { record, ports } = fixture()
     ports.decide = vi.fn(async () => ({
       action: "execute" as const,
@@ -203,8 +119,159 @@ describe("continuous Chief operations", () => {
     await runContinuousOperation(record, ports)
     expect(record.phase).toBe("paused")
     expect(record.decisionId).toBeDefined()
-    expect(ports.decide).toHaveBeenCalledTimes(1)
+    expect(ports.decide).toHaveBeenCalledTimes(3)
+    expect(new Set(vi.mocked(ports.decide).mock.calls.map((call) => call[1])).size).toBe(1)
+    expect(record.recovery).toMatchObject({ target: "decision", attempts: 3, disposition: "unresolved" })
+    await runContinuousOperation(record, ports)
+    expect(ports.decide).toHaveBeenCalledTimes(3)
     expect(ports.runMission).not.toHaveBeenCalled()
+  })
+
+  it("corrects transient and malformed selection without replacing the pinned decision or settings", async () => {
+    const { record, ports, saved } = fixture(operation({ cycleLimit: 1 }))
+    const choose = ports.decide
+    ports.decide = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("503 temporarily unavailable"))
+      .mockResolvedValueOnce({ action: "execute", goal: "x", reason: "x", evidence: [] })
+      .mockImplementation(async (parent, id) => {
+        expect(saved.at(-1)).toMatchObject({ decisionId: id, recovery: { attempts: 3, disposition: "retrying" } })
+        expect(parent.settings).toEqual({ actor: "codex", model: "pinned-model" })
+        return choose(parent, id)
+      })
+    await runContinuousOperation(record, ports)
+    expect(record.phase).toBe("completed")
+    expect(new Set(vi.mocked(ports.decide).mock.calls.map((call) => call[1])).size).toBe(1)
+    expect(ports.runMission).toHaveBeenCalledOnce()
+  })
+
+  it("continues the same recoverable child through its Chief and accepts it once", async () => {
+    const decision = { action: "execute" as const, goal: "Repair service", reason: "Metric", evidence: ["repository"] }
+    const { record, ports, children, saved } = fixture(
+      operation({ baseline: baseline(), phase: "running", currentMissionId: "child", decision, cycleLimit: 1 }),
+    )
+    const child = mission("child", decision.goal, "paused")
+    child.executionPolicy = executionPolicySchema.parse({ maxRuns: 10 })
+    child.execution = { startedAt: timestamp, runsStarted: 4, retries: 1 }
+    child.supervision = {
+      originalAcceptance: ["Verified improvement"],
+      maxRounds: 4,
+      rounds: 1,
+      stalledRounds: 0,
+      decisions: [],
+      pendingRecovery: { reason: "Missing dependency needs Chief recovery" },
+    }
+    children.set("child", child)
+    ports.runMission = vi.fn(async (parent, id, goal, path) => {
+      expect(saved.at(-1)).toMatchObject({
+        currentMissionId: "child",
+        recovery: { target: "child", checkpointId: "child", attempts: 1, disposition: "retrying" },
+      })
+      expect([id, goal, path]).toEqual(["child", decision.goal, parent.baseline?.path])
+      expect(children.get(id)?.execution).toMatchObject({ runsStarted: 4, retries: 1, startedAt: timestamp })
+      const completed = { ...child, status: "completed" as const }
+      children.set(id, completed)
+      return completed
+    })
+    await runContinuousOperation(record, ports)
+    expect(record).toMatchObject({ phase: "completed", completedCycles: 1 })
+    expect(ports.runMission).toHaveBeenCalledOnce()
+    expect(ports.decide).not.toHaveBeenCalled()
+    expect(ports.accept).toHaveBeenCalledOnce()
+  })
+
+  it("bounds repeated unresolved child recovery across operation resumes", async () => {
+    const decision = { action: "execute" as const, goal: "Repair service", reason: "Metric", evidence: ["repository"] }
+    const { record, ports, children } = fixture(
+      operation({ baseline: baseline(), phase: "running", currentMissionId: "child", decision }),
+    )
+    const child = mission("child", decision.goal, "paused")
+    child.executionPolicy = executionPolicySchema.parse({ maxRuns: 10 })
+    child.execution = { startedAt: timestamp, runsStarted: 2, retries: 1 }
+    child.supervision = {
+      originalAcceptance: ["Verified improvement"],
+      maxRounds: 10,
+      rounds: 1,
+      stalledRounds: 0,
+      decisions: [],
+      pendingRecovery: { reason: "Unresolved implementation" },
+    }
+    children.set("child", child)
+    ports.runMission = vi.fn(async () => child)
+    await runContinuousOperation(record, ports)
+    await runContinuousOperation(record, ports)
+    expect(ports.runMission).toHaveBeenCalledTimes(3)
+    expect(record.recovery).toMatchObject({ target: "child", attempts: 3, disposition: "unresolved" })
+    expect(record.currentMissionId).toBe("child")
+    expect(ports.decide).not.toHaveBeenCalled()
+    expect(ports.accept).not.toHaveBeenCalled()
+  })
+
+  it("routes a completed external effect with failed review through the same Chief without replaying its effect", async () => {
+    const decision = {
+      action: "execute" as const,
+      goal: "Publish service",
+      reason: "Metric",
+      evidence: ["destination"],
+    }
+    const { record, ports, children } = fixture(
+      operation({ baseline: baseline(), phase: "running", currentMissionId: "child", decision, cycleLimit: 1 }),
+    )
+    const child = mission("child", decision.goal)
+    child.executionPolicy = executionPolicySchema.parse({ maxRuns: 10 })
+    child.execution = { startedAt: timestamp, runsStarted: 4, retries: 1 }
+    child.supervision = {
+      originalAcceptance: ["Verified improvement"],
+      maxRounds: 4,
+      rounds: 1,
+      stalledRounds: 0,
+      decisions: [],
+    }
+    child.plan = {
+      tasks: [
+        {
+          id: "publish",
+          title: "Publish",
+          personaId: "worker",
+          instructions: "Publish once",
+          acceptance: ["Verified improvement", "Destination verified"],
+          dependencies: [],
+          effectScope: "external",
+        },
+      ],
+    }
+    child.tasks = [
+      {
+        id: "publish",
+        reviewerId: "reviewer",
+        status: "completed",
+        attempts: 1,
+        effectState: "completed",
+        fingerprint: "approved-destination",
+        review: { passed: false, summary: "Destination evidence missing", findings: ["Collect evidence"] },
+      },
+    ]
+    child.finalReview = { passed: false, summary: "Unresolved", findings: ["Review the destination"] }
+    children.set("child", child)
+    ports.runMission = vi.fn(async (_parent, id) => {
+      expect(id).toBe("child")
+      expect(child.tasks[0]).toMatchObject({ attempts: 1, effectState: "completed" })
+      const task = child.tasks[0]
+      if (!task) throw new Error("Expected completed effect checkpoint")
+      child.tasks[0] = { ...task, review: { passed: true, summary: "Actual destination observed", findings: [] } }
+      child.finalReview = {
+        passed: true,
+        summary: "Observed",
+        findings: [],
+        criteria: [{ criterion: "Verified improvement", passed: true, evidence: "Actual destination observed" }],
+      }
+      return child
+    })
+    await runContinuousOperation(record, ports)
+    expect(record.phase).toBe("completed")
+    expect(ports.runMission).toHaveBeenCalledOnce()
+    expect(ports.decide).not.toHaveBeenCalled()
+    expect(child.tasks[0]?.attempts).toBe(1)
   })
 
   it("has no default cycle ceiling and abort retains the next checkpoint and completed count", async () => {

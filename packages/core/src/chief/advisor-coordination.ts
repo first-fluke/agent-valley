@@ -10,6 +10,7 @@ export async function consultDirectors(
   hooks: {
     run(actor: Persona, prompt: string, stage: ChiefStage): Promise<string>
     save(stage: string, message: string): Promise<void>
+    unavailable?(actor: Persona, stage: ChiefStage, error: unknown): Promise<boolean>
   },
 ): Promise<void> {
   const entries = [
@@ -44,7 +45,13 @@ export async function consultDirectors(
     if (saved?.planKey === planKey && saved.reviewerId === actor.id && saved.fingerprint === fingerprint) return
     mission.status = "planning"
     await hooks.save(entry.stage, `${actor.id} is providing advice before the Chief Director chooses a plan.`)
-    const review = parseReview(await hooks.run(actor, entry.prompt(mission), entry.stage))
+    let review: ReturnType<typeof parseReview>
+    try {
+      review = parseReview(await hooks.run(actor, entry.prompt(mission), entry.stage))
+    } catch (error) {
+      if (hooks.unavailable && (await hooks.unavailable(actor, entry.stage, error))) return
+      throw error
+    }
     mission[entry.field] = { planKey, reviewerId: actor.id, fingerprint, review }
     await hooks.save(entry.stage, review.summary)
   }

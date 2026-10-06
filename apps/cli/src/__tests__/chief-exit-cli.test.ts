@@ -226,7 +226,8 @@ describe("source order CLI outcome", () => {
       expect(child.status).toBe(2)
       expect(child.stdout).toContain("Order paused")
       expect(child.stdout).toContain(mission.error)
-      expect(child.stdout).toContain(`av order --resume ${mission.id} --retry`)
+      expect(child.stdout).toContain(`Report: .agent-valley/reports/${mission.id}.md`)
+      expect(child.stdout).not.toContain("--retry")
       const saved = loadCheckpoint(mission.id)
       expect(saved.status).toBe("paused")
       expect(saved.execution?.runsStarted).toBe(4)
@@ -261,7 +262,7 @@ describe("source order CLI outcome", () => {
   )
 
   it.each([true, false])(
-    "returns exit 1 with the verifier failure and recovery command with supervision=%s",
+    "returns exit 1 with the verifier failure and saved report with supervision=%s",
     async (supervise) => {
       const mission = await nativeCheckpoint("failed")
       const child = spawnSync(bun, cliArgs(mission.id, supervise), {
@@ -274,7 +275,9 @@ describe("source order CLI outcome", () => {
       expect(child.error).toBeUndefined()
       expect(child.status).toBe(1)
       expect(child.stdout).toContain("Order failed")
-      expect(child.stdout).toContain(`av order --resume ${mission.id} --retry`)
+      expect(child.stdout).toContain("The operator's verification command failed")
+      expect(child.stdout).toContain(`Report: .agent-valley/reports/${mission.id}.md`)
+      expect(child.stdout).not.toContain("--retry")
       expect(loadCheckpoint(mission.id).status).toBe("failed")
       expect(loadCheckpoint(mission.id).verification?.ok).toBe(false)
     },
@@ -352,7 +355,7 @@ describe("source order CLI outcome", () => {
         child.kill("SIGTERM")
         expect(await stopped, output).toBe(2)
         expect(output).toContain("Order paused")
-        expect(output).toContain(`av order --resume ${mission.id} --retry`)
+        expect(output).toContain(`Report: .agent-valley/reports/${mission.id}.md`)
         expect(loadCheckpoint(mission.id).execution?.failureKind).toBe("interrupted")
         expect(readdirSync(join(root, ".agent-valley", "missions"))).toEqual([`${mission.id}.json`])
         const { pid } = JSON.parse(readFileSync(join(root, "calls.jsonl"), "utf8").trim())

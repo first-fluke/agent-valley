@@ -110,7 +110,9 @@ describe("durable Chief Director goal supervision", () => {
       }
       return (await original?.(...args)) ?? ""
     })
-    await expect(coordinate(mission, ports)).rejects.toThrow("Chief Director disconnected")
+    expect((await coordinate(mission, ports)).status).toBe("paused")
+    expect(mission.execution?.failureKind).toBe("chief-unavailable")
+    expect(mission.error).toContain("Chief Director disconnected")
     expect(mission.supervision).toMatchObject({
       rounds: 1,
       decisions: [],
@@ -135,11 +137,14 @@ describe("durable Chief Director goal supervision", () => {
     runAgent.mockImplementation(async (...args) =>
       args[3] === "review" ? rejected : ((await original?.(...args)) ?? ""),
     )
-    await expect(coordinate(mission, ports)).rejects.toThrow("exhausted 1 rounds")
+    expect((await coordinate(mission, ports)).status).toBe("paused")
+    expect(mission.error).toContain("exhausted 1 rounds")
     expect(mission.supervision?.rounds).toBe(1)
     expect(mission.report).toBeDefined()
     runAgent.mockClear()
-    await expect(coordinate(validateMission(structuredClone(mission)), ports)).rejects.toThrow("exhausted 1 rounds")
+    const resumed = await coordinate(validateMission(structuredClone(mission)), ports)
+    expect(resumed.execution?.failureKind).toBe("budget")
+    expect(resumed.error).toContain("exhausted 1 rounds")
     expect(runAgent.mock.calls.every((call) => call[3] === "report")).toBe(true)
   })
 
@@ -153,14 +158,15 @@ describe("durable Chief Director goal supervision", () => {
           ? rejected
           : ((await original?.(...args)) ?? ""),
     )
-    await expect(coordinate(mission, ports)).rejects.toThrow("stalled for three rounds")
+    expect((await coordinate(mission, ports)).status).toBe("paused")
+    expect(mission.error).toContain("stalled for three rounds")
     expect(mission.supervision?.stalledRounds).toBe(3)
     expect(mission.supervision?.rounds).toBe(3)
     expect(runAgent.mock.calls.filter((call) => call[3] === "supervise")).toHaveLength(2)
     runAgent.mockClear()
-    await expect(coordinate(validateMission(structuredClone(mission)), ports)).rejects.toThrow(
-      "stalled for three rounds",
-    )
+    const resumed = await coordinate(validateMission(structuredClone(mission)), ports)
+    expect(resumed.execution?.failureKind).toBe("budget")
+    expect(resumed.error).toContain("stalled for three rounds")
     expect(runAgent.mock.calls.every((call) => call[3] === "report")).toBe(true)
   })
 
@@ -196,6 +202,13 @@ describe("durable Chief Director goal supervision", () => {
         return (await original?.(...args)) ?? ""
       })
       await coordinate(mission, ports)
+      if (stage === "final-review") {
+        expect(mission.execution?.failureKind).toBe("chief-unavailable")
+        expect(mission.supervision?.decisions).toEqual([])
+        expect(verify).toHaveBeenCalledOnce()
+        expect(mission.status).toBe("paused")
+        return
+      }
       expect(mission.supervision?.decisions[0]?.action).toBe("repair")
       expect(verify).toHaveBeenCalledTimes(2)
       expect(mission.status).toBe("completed")

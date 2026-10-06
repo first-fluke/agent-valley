@@ -5,32 +5,28 @@ import {
   verifyMissionContainers,
 } from "./coordinator-container"
 import { performParallelWave } from "./coordinator-parallel"
+import { createChiefRecovery } from "./coordinator-recovery"
 import { createMissionReporter } from "./coordinator-report"
 import { CheckpointError, createMissionRun, ReadOnlyViolation } from "./coordinator-run"
 import { ContractViolation, createMissionContract, resetTaskApprovals } from "./coordinator-state"
 import {
   assertExecutionDeadline,
+  chiefRecoveryStopped,
+  classifyFailure,
   executionState,
   finalizeAbandonedRuns,
   MissionPause,
   pauseForFailure,
-  progressKey,
   recordPause,
 } from "./execution"
 import { readyTaskWave } from "./parallel"
 import { ParallelIntegrationConflict } from "./parallel-workspace"
-import { planPrompt, reviewPrompt, supervisePrompt, workPrompt } from "./prompts"
+import { planPrompt, reviewPrompt, workPrompt } from "./prompts"
 import { fallbackReport } from "./reports"
 import { selectTaskReviewer } from "./review-routing"
 import { recordTaskVerdict } from "./routing"
-import {
-  parseFinalReview,
-  parsePlanningResponse,
-  parseReview,
-  parseSupervisionResponse,
-  validateMission,
-} from "./schemas"
-import { applyRecovery, assignTaskStates, recordDecision } from "./supervision"
+import { parseFinalReview, parsePlanningResponse, parseReview, validateMission } from "./schemas"
+import { assignTaskStates } from "./supervision"
 import type { ChiefPorts, ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
 import { goalVerificationContractDigest } from "./verification"
 
@@ -71,6 +67,10 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     error instanceof ReadOnlyViolation ||
     error instanceof ContractViolation ||
     error instanceof CheckpointError
+  const protectedFailure = (error: unknown) =>
+    fatal(error) ||
+    (error instanceof MissionPause &&
+      (Boolean(error.nextRunAt) || ["budget", "interrupted", "chief-unavailable"].includes(error.kind)))
   const invalidate = () => {
     resetTaskApprovals(mission, { preserveUnfinished: true })
     delete mission.finalReview
@@ -78,56 +78,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
   }
   const run = createMissionRun(mission, ports, assertContract, checkAbort)
   const generateReport = createMissionReporter(mission, ports, run, persona, fatal)
-  const requestRecovery = async (reason: string, taskId?: string): Promise<void> => {
-    const supervision = mission.supervision
-    if (!supervision) throw new Error(reason)
-    checkAbort()
-    supervision.pendingRecovery = { reason: bounded(reason), ...(taskId ? { taskId } : {}) }
-    await save("recovery-requested", reason, taskId)
-    const fingerprint = await ports.fingerprint(mission)
-    const progress = progressKey(mission, fingerprint)
-    const priorProgress = mission.execution?.progressKey
-    if (priorProgress && priorProgress !== progress) supervision.stalledRounds = 0
-    if (mission.executionPolicy) executionState(mission).progressKey = progress
-    pauseForFailure(mission, reason, taskId)
-    if (supervision.stalledRounds >= 3)
-      throw new Error(
-        "Chief Director supervision stalled for three rounds without changed evidence. The goal remains unresolved; inspect the recorded blocker before resuming.",
-      )
-    if (supervision.rounds >= supervision.maxRounds)
-      throw new Error(
-        `Chief Director supervision exhausted ${supervision.maxRounds} rounds. The goal remains unresolved: ${reason}`,
-      )
-    supervision.stalledRounds = (
-      priorProgress
-        ? priorProgress === progress
-        : supervision.lastFingerprint === fingerprint
-    )
-      ? supervision.stalledRounds + 1
-      : 0
-    supervision.lastFingerprint = fingerprint
-    supervision.rounds += 1
-    mission.status = "planning"
-    // Consume and checkpoint the budget before the Chief Director call; interruption cannot reset it.
-    await save("supervise", `Chief Director recovery round ${supervision.rounds}/${supervision.maxRounds}.`, taskId)
-    if (supervision.stalledRounds >= 3)
-      throw new Error(
-        "Chief Director supervision stalled for three rounds without changed evidence. The goal remains unresolved; inspect the recorded blocker before resuming.",
-      )
-    const response = parseSupervisionResponse(
-      await run(persona(mission.chiefId), supervisePrompt(mission), "supervise"),
-      mission,
-    )
-    recordDecision(mission, response, fingerprint)
-    if (response.action === "stop") {
-      delete supervision.pendingRecovery
-      await save("supervise-stop", response.reason, taskId)
-      throw new Error(`Chief Director stopped before achieving the goal: ${response.reason}`)
-    }
-    applyRecovery(mission, response)
-    delete supervision.pendingRecovery
-    await save("supervise", response.reason, taskId)
-  }
+  const requestRecovery = createChiefRecovery(mission, ports, { run, persona, save, checkAbort })
   const taskReview = async (task: ChiefTask, state: ChiefTaskState) => {
     const reviewer = selectTaskReviewer(mission, task, state)
     state.status = "reviewing"
@@ -142,19 +93,16 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     while (state.status !== "completed") {
       checkAbort()
       state.status = "running"
-      state.attempts += 1
+      if (task.effectScope !== "external" || state.effectState !== "completed") state.attempts += 1
+      if (task.effectScope === "external") state.effectState ??= "not-started"
       mission.status = "executing"
       await save("work", `Running ${task.id} with ${task.personaId}, attempt ${state.attempts}.`, task.id)
       try {
         if (task.effectScope === "external" && state.effectState === "unknown")
           throw new MissionPause(
-            `Inspect and reconcile the external effect for ${task.id} before repeating it.`,
+            `External effect ${task.id} has no established destination outcome and will not be repeated.`,
             "unknown-effect",
           )
-        if (task.effectScope === "external" && state.effectState !== "completed") {
-          state.effectState = "running"
-          await save("effect-started", `External effect ${task.id} checkpointed before execution.`, task.id)
-        }
         if (task.effectScope !== "external" || state.effectState !== "completed") {
           state.output = bounded(
             await run(
@@ -170,9 +118,10 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         await taskReview(task, state)
       } catch (error) {
         recordTaskVerdict(mission, task.id, false, error instanceof Error ? error.message : String(error))
-        if (error instanceof MissionPause || !mission.supervision || fatal(error)) throw error
+        if (!mission.supervision || protectedFailure(error)) throw error
         state.status = "pending"
-        pauseForFailure(mission, error instanceof Error ? error.message : String(error), task.id)
+        if (state.effectState !== "unknown")
+          pauseForFailure(mission, error instanceof Error ? error.message : String(error), task.id)
         await requestRecovery(error instanceof Error ? error.message : String(error), task.id)
         return
       }
@@ -181,11 +130,13 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         await save("task-completed", `Task ${task.id} passed independent review.`, task.id)
         continue
       }
-      if (task.effectScope === "external")
-        throw new MissionPause(
-          `External action ${task.id} finished but failed review. Inspect the destination and request --retry after preparing a repair that does not repeat the action.`,
-          "unknown-effect",
+      if (task.effectScope === "external") {
+        await requestRecovery(
+          `External action ${task.id} completed but failed independent review: ${state.review?.findings.join("; ")}. Preserve its completed effect; any new external repair requires a separate task.`,
+          task.id,
         )
+        return
+      }
       if ((state.repairRound ?? 0) >= mission.maxRepairs) {
         if (mission.supervision) {
           await requestRecovery(
@@ -223,6 +174,12 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     finalizeAbandonedRuns(mission)
     checkAbort()
     assertExecutionDeadline(mission)
+    if (mission.execution?.failureKind === "chief-wait") {
+      if (Date.parse(mission.execution.nextRunAt ?? "") > Date.now()) return mission
+      delete mission.execution.nextRunAt
+      delete mission.execution.pauseReason
+      delete mission.execution.failureKind
+    }
     const current = await ports.fingerprint(mission)
     mission.initialFingerprint ??= current
     if (mission.supervision) {
@@ -242,20 +199,20 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         if (task.effectState === "running") task.effectState = "unknown"
         task.status = "pending"
       }
-      if (task.effectState === "unknown")
+      if (
+        task.effectState === "unknown" &&
+        !(mission.supervision?.pendingRecovery && mission.supervision.decisions.at(-1)?.action === "wait")
+      )
         throw new MissionPause(
-          `External effect ${task.id} was interrupted. Inspect the destination and reconcile it with --resolve-effect before resuming.`,
+          `External effect ${task.id} was interrupted. No trustworthy destination proof establishes its outcome; its evidence is retained and it will not be repeated.`,
           "unknown-effect",
         )
     }
     await save("resume", "Mission checkpoint loaded.")
     const stopped = mission.supervision?.decisions.at(-1)
-    if (
-      stopped?.action === "stop" &&
-      (!mission.execution?.interventionAt || mission.execution.interventionAt <= stopped.at)
-    )
+    if (chiefRecoveryStopped(mission))
       throw new Error(
-        `Chief Director stopped before achieving the goal: ${stopped.reason}. Start a new mission after resolving this blocker.`,
+        `Chief Director stopped before achieving the goal: ${stopped?.reason}. The original goal remains unresolved.`,
       )
     if (!mission.plan) {
       await refreshMissionContainers(mission, ports)
@@ -300,18 +257,19 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
             run,
             save,
             review: taskReview,
-            fatal: (error) => error instanceof MissionPause || fatal(error),
+            fatal: protectedFailure,
           })
-          const unrecoverable = failures.find(
-            (failure) => failure.error instanceof MissionPause || fatal(failure.error),
-          )
+          const unrecoverable = failures.find((failure) => protectedFailure(failure.error))
           if (unrecoverable) throw unrecoverable.error
           for (const failure of failures) {
             recordTaskVerdict(mission, failure.taskId, false, failure.reason)
             pauseForFailure(mission, failure.reason, failure.taskId)
             const state = mission.tasks.find((task) => task.id === failure.taskId)
             if (!state) throw new Error("Recovery task disappeared. Restore the recorded plan.")
-            if (failure.error instanceof ParallelIntegrationConflict) {
+            if (
+              failure.error instanceof ParallelIntegrationConflict ||
+              ["environment", "authentication", "provider", "rate-limit"].includes(classifyFailure(failure.reason))
+            ) {
               await requestRecovery(failure.reason, failure.taskId)
               break
             }
@@ -344,7 +302,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         result = await ports.verify(mission)
         assertContract()
       } catch (error) {
-        if (error instanceof MissionPause || !mission.supervision || fatal(error)) throw error
+        if (!mission.supervision || protectedFailure(error)) throw error
         await requestRecovery(`Verification process failed: ${error instanceof Error ? error.message : String(error)}`)
         continue
       }
@@ -409,7 +367,8 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
           mission,
         )
       } catch (error) {
-        if (error instanceof MissionPause || !mission.supervision || fatal(error)) throw error
+        if (!mission.supervision || protectedFailure(error)) throw error
+        pauseForFailure(mission, error instanceof Error ? error.message : String(error))
         await requestRecovery(
           `Final review could not complete: ${error instanceof Error ? error.message : String(error)}`,
         )
@@ -469,6 +428,8 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     }
     mission.status = "failed"
     mission.error = bounded(error instanceof Error ? error.message : String(error))
+    if (error instanceof ReadOnlyViolation || error instanceof ContractViolation || error instanceof CheckpointError)
+      executionState(mission).failureKind = "integrity"
     if (error instanceof ReadOnlyViolation) invalidate()
     await save("failed", mission.error)
     if (mission.supervision) {
@@ -479,6 +440,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         } catch (reportError) {
           mission.report = fallbackReport(mission)
           if (reportError instanceof ReadOnlyViolation) {
+            executionState(mission).failureKind = "integrity"
             invalidate()
             mission.error = bounded(`${mission.error}\n${reportError.message}`)
             mission.report = fallbackReport(mission)

@@ -48,6 +48,91 @@ const stages = (runAgent: ReturnType<typeof fixture>["runAgent"], stage: string)
   runAgent.mock.calls.filter((call) => call[3] === stage)
 
 describe("Chief resumable execution without duplicate work", () => {
+  it.each([
+    ["HTTP 503 temporarily unavailable", "provider"],
+    ["HTTP 429 rate limit reached", "rate-limit"],
+  ])("honors the saved delay for final-review failure %s before another selected-Chief call", async (reason, kind) => {
+    const value = fixture()
+    value.mission.executionPolicy = executionPolicySchema.parse({ retryDelayMs: 1_000 })
+    const base = value.runAgent.getMockImplementation()
+    let failed = false
+    value.runAgent.mockImplementation(async (...args) => {
+      if (args[3] === "final-review" && !failed) {
+        failed = true
+        throw new Error(reason)
+      }
+      return (await base?.(...args)) ?? ""
+    })
+    expect((await coordinate(value.mission, value.ports)).status).toBe("waiting")
+    expect(value.mission.execution).toMatchObject({
+      failureKind: kind,
+      retries: 1,
+      runsStarted: 4,
+      nextRunAt: new Date(now + 1_000).toISOString(),
+    })
+    expect(stages(value.runAgent, "supervise")).toHaveLength(0)
+    expect(value.mission.supervision?.rounds).toBe(0)
+    vi.advanceTimersByTime(1_000)
+    expect((await coordinate(value.mission, value.ports)).status).toBe("completed")
+    expect(
+      stages(value.runAgent, "final-review").map((call) => [call[0].id, call[0].agentType, call[0].model]),
+    ).toEqual([
+      ["chief", "codex", "operator-model"],
+      ["chief", "codex", "operator-model"],
+    ])
+    expect(stages(value.runAgent, "work")).toHaveLength(1)
+    expect(value.mission.execution?.retries).toBe(1)
+    expect(value.mission.execution?.runsStarted).toBe(value.runAgent.mock.calls.length)
+  })
+
+  it.each([
+    ["HTTP 503 temporarily unavailable", "provider"],
+    ["HTTP 429 rate limit reached", "rate-limit"],
+  ])(
+    "backs off selected Chief failure %s and retries the same model with spent usage retained",
+    async (reason, kind) => {
+      const value = fixture()
+      value.mission.executionPolicy = executionPolicySchema.parse({ retryDelayMs: 1_000 })
+      value.runAgent.mockRejectedValueOnce(new Error(reason))
+      expect((await coordinate(value.mission, value.ports)).status).toBe("waiting")
+      expect(value.mission.execution).toMatchObject({
+        failureKind: kind,
+        retries: 1,
+        runsStarted: 1,
+        nextRunAt: new Date(now + 1_000).toISOString(),
+      })
+      expect(value.runAgent).toHaveBeenCalledOnce()
+      expect(value.snapshots.at(-1)?.execution?.retries).toBe(1)
+      vi.advanceTimersByTime(1_000)
+      expect((await coordinate(value.mission, value.ports)).status).toBe("completed")
+      expect(stages(value.runAgent, "plan").map((call) => [call[0].id, call[0].agentType, call[0].model])).toEqual([
+        ["chief", "codex", "operator-model"],
+        ["chief", "codex", "operator-model"],
+      ])
+      expect(value.mission.execution?.retries).toBe(1)
+      expect(value.mission.execution?.runsStarted).toBe(value.runAgent.mock.calls.length)
+    },
+  )
+
+  it.each(["HTTP 401 Chief token expired", "ENOENT Chief CLI missing"])(
+    "reports selected Chief source failure %s without a scheduled retry or another model",
+    async (reason) => {
+      const value = fixture()
+      value.mission.executionPolicy = executionPolicySchema.parse({})
+      value.runAgent.mockRejectedValueOnce(new Error(reason))
+      expect((await coordinate(value.mission, value.ports)).status).toBe("paused")
+      expect(value.mission.execution).toMatchObject({ failureKind: "chief-unavailable", retries: 0, runsStarted: 1 })
+      expect(value.mission.execution?.nextRunAt).toBeUndefined()
+      expect(value.runAgent).toHaveBeenCalledOnce()
+      expect(value.runAgent.mock.calls[0]?.[0]).toMatchObject({
+        id: "chief",
+        agentType: "codex",
+        model: "operator-model",
+      })
+      expect(value.mission.report?.summary).toContain("미완료")
+    },
+  )
+
   it.each(["verification", "final-review"])(
     "persists a budget pause from %s without consuming a Chief recovery round",
     async (stage) => {
@@ -73,7 +158,7 @@ describe("Chief resumable execution without duplicate work", () => {
   )
 
   it.each(["HTTP 401 authentication expired", "ENOENT actor CLI missing"])(
-    "pauses infrastructure failure %s without asking Chief to rewrite product code",
+    "lets Chief schedule source recovery for %s without automatic provider retries",
     async (reason) => {
       const value = fixture()
       value.mission.executionPolicy = executionPolicySchema.parse({})
@@ -81,11 +166,21 @@ describe("Chief resumable execution without duplicate work", () => {
       if (!base) throw new Error("Expected fixture Actor implementation")
       value.runAgent.mockImplementation(async (actor, prompt, mission, stage, context) => {
         if (stage === "work") throw new Error(reason)
+        if (stage === "supervise") {
+          expect(prompt).toContain(reason)
+          expect(actor).toMatchObject({ id: "chief", model: "operator-model" })
+          return JSON.stringify({
+            action: "wait",
+            reason: "Source access remains unavailable; wait for a new observation.",
+            retryAfterSec: 60,
+          })
+        }
         return base(actor, prompt, mission, stage, context)
       })
-      expect((await coordinate(value.mission, value.ports)).status).toBe("paused")
-      expect(stages(value.runAgent, "supervise")).toHaveLength(0)
-      expect(value.mission.supervision?.rounds).toBe(0)
+      expect((await coordinate(value.mission, value.ports)).status).toBe("waiting")
+      expect(stages(value.runAgent, "supervise")).toHaveLength(1)
+      expect(value.mission.supervision?.rounds).toBe(1)
+      expect(value.mission.execution?.failureKind).toBe("chief-wait")
       expect(value.mission.execution?.retries).toBe(0)
     },
   )

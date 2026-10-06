@@ -15,6 +15,5 @@ export function printOrderOutcome(mission: Mission): void {
   console.log(`Reason: ${reason ?? "The goal has not reached verified completion."}`)
   if (mission.status === "waiting" && mission.execution?.nextRunAt)
     console.log(`Next attempt: ${mission.execution.nextRunAt}`)
-  const retry = mission.status === "paused" || mission.status === "failed" ? " --retry" : ""
-  console.log(`Resume: av order --resume ${mission.id}${retry}`)
+  console.log(`Report: .agent-valley/reports/${mission.id}.md`)
 }

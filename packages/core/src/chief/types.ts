@@ -161,7 +161,8 @@ export interface GoalBrief {
 export interface SupervisionDecision {
   round: number
   at: string
-  action: "repair" | "reassign" | "replan" | "stop"
+  action: "repair" | "reassign" | "replan" | "stop" | "wait"
+  retryAfterSec?: number
   reason: string
   fingerprint: string
   taskId?: string

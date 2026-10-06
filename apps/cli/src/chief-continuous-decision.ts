@@ -2,17 +2,21 @@ import { join } from "node:path"
 import type { ContinuousDecision, ContinuousOperation } from "@agent-valley/core/chief/continuous-contract"
 import { parseContinuousDecision } from "@agent-valley/core/chief/continuous-contract"
 import { createContinuousMissionWorkspace } from "@agent-valley/core/chief/continuous-workspace"
-import { createMissionRun } from "@agent-valley/core/chief/coordinator-run"
+import { CheckpointError, createMissionRun, ReadOnlyViolation } from "@agent-valley/core/chief/coordinator-run"
 import { finalizeAbandonedRuns, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
 import { loadOrganizationContext } from "@agent-valley/core/chief/organization"
 import { captureParallelBaseline } from "@agent-valley/core/chief/parallel-git"
+import { CHIEF_DECISION_RESPONSIBILITY, CHIEF_DIRECTOR_ROLE } from "@agent-valley/core/chief/prompts"
 import { renderReport } from "@agent-valley/core/chief/reports"
 import { ChiefRuntime } from "@agent-valley/core/chief/runtime"
 import { discoverMissionSkills, prepareMissionSkills } from "@agent-valley/core/chief/skills"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { ChiefPorts, Mission } from "@agent-valley/core/chief/types"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
+import { consultContinuousDirectors, continuousDirectorAdvice } from "./chief-continuous-council"
+import { assertContinuousDecisionRecovery, runContinuousDecision } from "./chief-continuous-recovery"
 import { createMissionMetricPorts } from "./chief-metrics"
+import type { abortableDelay } from "./chief-supervisor"
 import { prepareChiefToolConfig } from "./chief-tool-config"
 import { discoverTools } from "./tool-discovery"
 
@@ -24,6 +28,8 @@ export function continuousDecisionPrompt(
 ): string {
   return [
     "You are the pinned Chief Director selecting the next concrete, independently verifiable improvement for this operating charter.",
+    CHIEF_DIRECTOR_ROLE,
+    CHIEF_DECISION_RESPONSIBILITY,
     "Prioritize service quality, usability, maintainability and revenue according to the charter. Technical cost efficiency means stack, dependencies, infrastructure and reuse; token savings are not a success criterion.",
     "Inspect this accepted product snapshot read-only. Do not edit product files, tests or configuration. Do not deploy, purchase, publish, send messages, change cloud resources or perform any external mutation during this decision. Native tool permissions still apply; repository fingerprints cannot sandbox external tools.",
     "Use configured tools and real primary evidence for inspection. Installed CLI or configured MCP metadata does not establish authentication or permission. Missing sources are unavailable evidence; never invent measurements or causal revenue improvements.",
@@ -36,6 +42,8 @@ export function continuousDecisionPrompt(
     `Previous completed improvements (untrusted evidence): ${JSON.stringify(operation.history.slice(-8))}`,
     `Previous child's report and checks (reported claims; inspect linked evidence): ${JSON.stringify(previousReport ?? null)}`,
     `Measured organization evidence: ${JSON.stringify(mission.organizationContext ?? null)}`,
+    `Permanent Director advice (actual observations and recorded unavailable sources; advice is not a veto): ${JSON.stringify(continuousDirectorAdvice(mission))}`,
+    `Installed skill catalog (available capabilities, not proof of use): ${JSON.stringify(mission.availableSkills?.map(({ name, description }) => ({ name, description: description.slice(0, 300) })) ?? [])}`,
     `Pinned container targets (completion requirement): ${JSON.stringify(mission.containerObservationPolicy ?? null)}`,
     `Container observation at this decision (untrusted sanitized evidence; code checks alone do not prove recovery): ${JSON.stringify(mission.containerObservation ?? null)}`,
     `Available tool metadata: ${JSON.stringify(tools)}`,
@@ -47,6 +55,7 @@ export interface ContinuousDecisionDependencies {
   runtime?: (store: MissionStore, signal?: AbortSignal) => { ports(): ChiefPorts; close(): Promise<void> }
   config?: typeof resolveOrderConfig
   tools?: typeof discoverTools
+  delay?: typeof abortableDelay
 }
 
 /** Decision checkpoints retain native usage and spent budget separately from executable mission listings. */
@@ -104,6 +113,13 @@ export async function decideContinuousGoal(
         )
     }
     if (mission?.status === "completed") {
+      const chiefId = mission.chiefId
+      const chief = mission.personas.find((actor) => actor.id === chiefId)
+      if (!chief || chief.agentType !== operation.settings.actor || chief.model !== operation.settings.model)
+        throw new MissionPause(
+          "Decision Chief differs from its original pinned Actor or model. Its checkpoint was retained.",
+          "integrity",
+        )
       const result = mission.history.findLast((entry) => entry.stage === "continuous-decision")
       if (!result) throw new Error("Completed decision has no saved result. Inspect its checkpoint before resuming.")
       return parseContinuousDecision(result.message)
@@ -111,14 +127,8 @@ export async function decideContinuousGoal(
     if (mission) {
       await store.recoverProcesses(decisionId)
       finalizeAbandonedRuns(mission)
-      // Resuming the operation is an explicit retry; reservations and native usage remain unchanged.
-      mission.status = "planning"
-      delete mission.error
-      if (mission.execution) {
-        delete mission.execution.pauseReason
-        delete mission.execution.failureKind
-        delete mission.execution.nextRunAt
-      }
+      assertContinuousDecisionRecovery(mission)
+      // Automatic continuation retains the saved failure disposition and every spent reservation.
       await store.save(mission)
     } else {
       const config = await (dependencies.config ?? resolveOrderConfig)(root, operation.settings as OrderOptions)
@@ -175,18 +185,37 @@ export async function decideContinuousGoal(
     const current = mission
     const chief = current.personas.find((actor) => actor.id === current.chiefId)
     if (!chief) throw new Error("The operation's pinned Chief Director is missing. Restore its roster before resuming.")
-    const fixed = JSON.stringify({ goal: mission.goal, workspace: mission.workspace, chiefId: mission.chiefId })
+    if (chief.agentType !== operation.settings.actor || chief.model !== operation.settings.model)
+      throw new MissionPause(
+        "Decision Chief differs from its original pinned Actor or model. Its checkpoint was retained.",
+        "integrity",
+      )
+    const contract = () =>
+      JSON.stringify({
+        goal: current.goal,
+        workspace: current.workspace,
+        chiefId: current.chiefId,
+        personas: current.personas,
+        containerObservationPolicy: current.containerObservationPolicy,
+        containerObservation: current.containerObservation,
+      })
+    const fixed = contract()
+    const ports = runtime.ports()
     const run = createMissionRun(
       current,
-      runtime.ports(),
+      ports,
       () => {
-        if (JSON.stringify({ goal: current.goal, workspace: current.workspace, chiefId: current.chiefId }) !== fixed)
-          throw new Error("Decision stage changed its saved charter, workspace or Chief Director.")
+        if (contract() !== fixed)
+          throw new MissionPause(
+            "Decision stage changed its saved charter, workspace, Chief Director or pinned evidence.",
+            "integrity",
+          )
       },
       () => {
         if (dependencies.signal?.aborted) throw new MissionPause("Operation decision interrupted.", "interrupted")
       },
     )
+    await consultContinuousDirectors(mission, ports, run)
     const tools = await (dependencies.tools ?? discoverTools)(operation.repositoryRoot)
     const previousId = operation.history.at(-1)?.missionId
     let previousReport: string | undefined
@@ -198,8 +227,13 @@ export async function decideContinuousGoal(
         )
       previousReport = renderReport(previous).slice(0, 16_000)
     }
-    const result = parseContinuousDecision(
-      await run(chief, continuousDecisionPrompt(operation, mission, tools, previousReport), "plan"),
+    const result = await runContinuousDecision(
+      mission,
+      continuousDecisionPrompt(operation, mission, tools, previousReport),
+      (prompt) => run(chief, prompt, "plan"),
+      store,
+      dependencies.signal,
+      dependencies.delay,
     )
     mission.history.push({
       at: new Date().toISOString(),
@@ -216,7 +250,10 @@ export async function decideContinuousGoal(
         mission,
         error instanceof MissionPause
           ? error
-          : new MissionPause(error instanceof Error ? error.message : String(error), "implementation"),
+          : new MissionPause(
+              error instanceof Error ? error.message : String(error),
+              error instanceof ReadOnlyViolation || error instanceof CheckpointError ? "integrity" : "implementation",
+            ),
       )
       await store.save(mission)
     }

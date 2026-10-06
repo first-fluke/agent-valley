@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { type ContainerObservationSnapshot, containerObservationPolicySchema } from "./container-observation-policy"
 import { type Operation, operationSchema } from "./continuous-contract"
 import { type ContinuousOperationPorts, runContinuousOperation } from "./continuous-operation"
+import { mission as completedMission } from "./continuous-operation.fixture"
 import type { Mission } from "./types"
 
 const start = Date.parse("2026-10-06T00:00:00.000Z")
@@ -63,11 +64,11 @@ function fixture() {
     runMission: vi.fn(async (current, id, goal) => {
       const observed = snapshot(clock)
       const mission: Mission = {
+        ...completedMission(id, goal),
         id,
         goal,
         repositoryRoot: "/repo",
         chiefId: "chief",
-        personas: [],
         workspace: {
           issueId: id,
           key: id,
@@ -81,8 +82,6 @@ function fixture() {
         maxRepairs: 0,
         status: "completed",
         verification: { ok: true, fingerprint: "verified" },
-        finalReview: { passed: true, summary: "Verified", findings: [] },
-        tasks: [],
         history: [],
         createdAt: new Date(clock).toISOString(),
         updatedAt: new Date(clock).toISOString(),

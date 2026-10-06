@@ -233,6 +233,14 @@ describe("configured service recovery completion", () => {
       }
       const original = runAgent.getMockImplementation()
       runAgent.mockImplementation(async (...args) => {
+        if (args[3] === "supervise") {
+          expect(args[1]).toContain("Docker context access unavailable")
+          return JSON.stringify({
+            action: "wait",
+            reason: "Required source access is unavailable; retain checks and wait.",
+            retryAfterSec: 60,
+          })
+        }
         if (args[3] === "report") {
           clock += 60_000
           return JSON.stringify(fallbackReport({ ...args[2], status: "completed" }))
@@ -240,7 +248,7 @@ describe("configured service recovery completion", () => {
         return (await original?.(...args)) ?? ""
       })
       await coordinate(mission, ports)
-      expect(mission).toMatchObject({ status: "paused", execution: { failureKind: "environment" } })
+      expect(mission).toMatchObject({ status: "waiting", execution: { failureKind: "chief-wait" } })
       expect(saved).not.toContain("completed")
       expect(mission.report?.summary).toContain("미완료")
       expect(mission.containerObservationVerifiedFingerprint).toBeUndefined()
@@ -262,29 +270,43 @@ describe("configured service recovery completion", () => {
     expect(renderReport(mission)).toContain("Container observation:")
   })
 
-  it("routes observed unhealthy service back to Chief recovery and verifies the same original goal after repair", async () => {
-    const { mission, ports, runAgent } = fixture()
-    let observations = 0
-    ports.observeContainers = vi.fn(async () => snapshot(++observations < 3 ? "unhealthy" : "healthy"))
-    await coordinate(mission, ports)
-    expect(mission.status).toBe("completed")
-    expect(mission.goal).toBe("Restore API service")
-    expect(mission.supervision?.rounds).toBe(1)
-    expect(runAgent.mock.calls.filter((call) => call[3] === "work")).toHaveLength(2)
-    expect(ports.verify).toHaveBeenCalledTimes(2)
-    expect(mission.containerObservation?.results[0]?.health).toBe("healthy")
-  })
+  it.each(["unhealthy", "unavailable"] as const)(
+    "routes observed %s service evidence to Chief recovery and verifies the same original goal after repair",
+    async (state) => {
+      const { mission, ports, runAgent } = fixture()
+      let observations = 0
+      ports.observeContainers = vi.fn(async () => snapshot(++observations < 3 ? state : "healthy"))
+      await coordinate(mission, ports)
+      expect(mission.status).toBe("completed")
+      expect(mission.goal).toBe("Restore API service")
+      expect(mission.supervision?.rounds).toBe(1)
+      expect(runAgent.mock.calls.filter((call) => call[3] === "work")).toHaveLength(2)
+      expect(ports.verify).toHaveBeenCalledTimes(2)
+      expect(mission.containerObservation?.results[0]?.health).toBe("healthy")
+    },
+  )
 
-  it("pauses unavailable service evidence despite passing code checks without provider auto retry", async () => {
+  it("lets Chief wait on actual unavailable service evidence despite passing code checks", async () => {
     const { mission, ports, runAgent } = fixture()
     ports.observeContainers = vi.fn(async () => snapshot("unavailable"))
+    const original = runAgent.getMockImplementation()
+    runAgent.mockImplementation(async (...args) =>
+      args[3] === "supervise"
+        ? JSON.stringify({
+            action: "wait",
+            reason: "Service evidence is unavailable; retain verified code and wait.",
+            retryAfterSec: 60,
+          })
+        : ((await original?.(...args)) ?? ""),
+    )
     await coordinate(mission, ports)
     expect(mission).toMatchObject({
-      status: "paused",
+      status: "waiting",
       verification: { ok: true },
-      execution: { failureKind: "environment" },
+      execution: { failureKind: "chief-wait" },
     })
-    expect(mission.execution?.nextRunAt).toBeUndefined()
+    expect(mission.execution?.nextRunAt).toBeDefined()
+    expect(mission.supervision?.decisions.at(-1)?.action).toBe("wait")
     expect(runAgent.mock.calls.some((call) => call[3] === "final-review")).toBe(false)
     expect(mission.containerObservationVerifiedFingerprint).toBeUndefined()
     expect(renderReport(mission)).toContain("코드 검증과 별도로")
@@ -296,8 +318,18 @@ describe("configured service recovery completion", () => {
     await coordinate(mission, ports)
     const priorWork = runAgent.mock.calls.filter((call) => call[3] === "work").length
     ports.observeContainers = vi.fn(async () => snapshot("unavailable"))
+    const original = runAgent.getMockImplementation()
+    runAgent.mockImplementation(async (...args) =>
+      args[3] === "supervise"
+        ? JSON.stringify({
+            action: "wait",
+            reason: "Fresh service access unavailable; retain prior work and wait.",
+            retryAfterSec: 60,
+          })
+        : ((await original?.(...args)) ?? ""),
+    )
     await coordinate(mission, ports)
-    expect(mission.status).toBe("paused")
+    expect(mission.status).toBe("waiting")
     expect(ports.observeContainers).toHaveBeenCalledOnce()
     expect(runAgent.mock.calls.filter((call) => call[3] === "work")).toHaveLength(priorWork)
     expect(mission.containerObservationVerifiedFingerprint).toBeUndefined()
@@ -310,6 +342,15 @@ describe("configured service recovery completion", () => {
     expect(mission).toMatchObject({ status: "paused", execution: { failureKind: "environment" } })
     expect(mission.error).toContain("stale")
     expect(runAgent).not.toHaveBeenCalled()
+  })
+
+  it("keeps a missing required observer protected instead of asking Chief to invent service evidence", async () => {
+    const { mission, ports, runAgent } = fixture()
+    delete ports.observeContainers
+    await coordinate(mission, ports)
+    expect(mission).toMatchObject({ status: "paused", execution: { failureKind: "environment" } })
+    expect(runAgent).not.toHaveBeenCalled()
+    expect(mission.containerObservationVerifiedFingerprint).toBeUndefined()
   })
 
   it("preserves unknown-effect protection before collecting or launching recovery", async () => {

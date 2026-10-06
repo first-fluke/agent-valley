@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
+import { automaticMissionRecovery } from "@agent-valley/core/chief/continuous-recovery"
 import { assertExecutionDeadline, executionState, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
 import { fallbackReport } from "@agent-valley/core/chief/reports"
 import { MissionStore } from "@agent-valley/core/chief/store"
@@ -106,9 +107,11 @@ export async function superviseOrder(
           `Order worker exited ${workerExit === null ? "by signal" : `with code ${workerExit}`} after saving ${mission.status} for ${id}. ` +
             (mission.status === "completed"
               ? `Verified work remains completed. Inspect .agent-valley/reports/${id}.md and the worker log; use av reports retry for pending deliveries.`
-              : `Inspect the worker error and saved checkpoint, then use av order --resume ${id} --retry after repairing the blocker.`),
+              : `The saved outcome remains unresolved. Checkpoint: .agent-valley/missions/${id}.json; report: .agent-valley/reports/${id}.md.`),
         )
-      if (controller.signal.aborted || terminal || !mission.executionPolicy?.autoResume) return mission
+      const recovery = automaticMissionRecovery(mission)
+      if (controller.signal.aborted || !mission.executionPolicy?.autoResume || (terminal && !recovery.retry))
+        return mission
       assertExecutionDeadline(mission)
       const remainingTime = () =>
         mission.executionPolicy && mission.execution
@@ -123,6 +126,7 @@ export async function superviseOrder(
           )
         }
       } else {
+        if (!recovery.retry) return mission
         const unlock = await store.lock(id)
         try {
           const latest = await store.load(id)
@@ -132,7 +136,7 @@ export async function superviseOrder(
             recordPause(
               latest,
               new MissionPause(
-                "Worker crashes exhausted automatic restart attempts. Inspect the recorded stage and resume with --retry.",
+                "Worker recovery exhausted automatic restart attempts. The original goal remains unresolved and its checkpoint was retained.",
                 "environment",
               ),
             )

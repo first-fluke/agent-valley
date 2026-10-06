@@ -119,7 +119,7 @@ function incompleteReasons(mission: Mission): string[] {
 }
 
 function decisionEvidence(mission: Mission): string[] {
-  const actions = { repair: "수정", reassign: "담당 교체", replan: "재계획", stop: "중단" }
+  const actions = { repair: "수정", reassign: "담당 교체", replan: "재계획", wait: "대기", stop: "중단" }
   return (mission.supervision?.decisions ?? [])
     .slice(-20)
     .map((decision) =>
@@ -229,6 +229,7 @@ export function reportPrompt(mission: Mission): string {
       : "Write all report prose in the language of the operator's goal; use Korean if the goal has no identifiable language.",
     "Include mandatory eli5: explain the concrete result and what it means for the user in easy everyday language. Use a simple analogy only if helpful; do not merely list technical terms or repeat the goal.",
     "Use the original operator goal and success criteria. State assumptions, the Chief Director's choices, real deliverable paths, actual checks, failures, and remaining limits. Never weaken criteria or replace evidence with a persuasive narrative.",
+    "Report the Chief Director's interpretation of the user's intent, strategy, opportunities considered, synthesis of Director advice, decisions made and reasons, observed results, lessons and next actions it owns. The user receives an executive account in plain language rather than a menu of decisions. Describe a scheduled wait with its actual reason and nextRunAt, and unavailable authorization, access or external-effect evidence as an unmet prerequisite. Do not guess an uncertain external action's outcome or claim an automatic destination observer exists.",
     "The operator retains final operating responsibility. The Chief Director owns execution judgment and supervision, and must account for the team's actual actions, choices, evidence, and remaining consequences. Do not make claims about legal liability.",
     "Explain the Chief Director's business choices, opportunities, costs and ROI tradeoffs in decisions using recorded facts. Distinguish assumptions and unknowns from measurements; never claim revenue, profit or ROI without data.",
     "The Technical Director is the standing technical adviser. Upfront technical advice and earlier rejection snapshots are historical evidence for the Chief Director's choices, not approval of the current files or a final veto. The Chief Director chooses execution means and business tradeoffs; completion still depends on current task reviews, verification and goal criteria.",
@@ -334,10 +335,10 @@ export function fallbackReport(mission: Mission): ChiefReport {
   return {
     summary: complete
       ? "작업, 독립 리뷰, 운영자 검증과 Chief Director 최종 리뷰를 통과했습니다."
-      : "목표는 미완료입니다. 보관된 작업과 실패 기록을 확인해야 합니다.",
+      : "목표는 미완료입니다. 확인된 미해결 조건과 보관된 실행 기록을 보고합니다.",
     eli5: complete
       ? `“${goal}”을 위한 결과물을 만들고, 다른 담당자의 점검과 지정한 확인 절차를 마쳤습니다. 결과물은 아래 작업 경로에 보관되어 있어 직접 확인할 수 있습니다.`
-      : `“${goal}”을 위해 작업했지만, 아직 모든 확인 절차를 통과한 결과는 아닙니다. ${bounded(reasons[0] ?? "완료 증거가 없습니다.", 350)} 이미 만든 작업은 아래 경로에서 확인할 수 있고, 남은 문제를 해결한 뒤 다시 점검해야 합니다.`,
+      : `“${goal}”을 위해 작업했지만, 아직 모든 확인 절차를 통과한 결과는 아닙니다. ${bounded(reasons[0] ?? "완료 증거가 없습니다.", 350)} 이미 만든 작업은 보관되어 있습니다. Chief Director가 기록한 판단과 다음 관측·재개 시각, 아직 충족되지 않은 조건을 아래에서 보고합니다.`,
     goalAssessment: complete
       ? "기록된 성공 기준에 대해 작업별 독립 리뷰와 운영자 검증이 통과했고, Chief Director가 최종 승인했습니다."
       : "성공 기준 전체의 충족을 확인하지 못했습니다. 일부 작업이나 검증이 통과했더라도 목표 달성으로 표시하지 않습니다.",
@@ -414,7 +415,7 @@ export function renderReport(mission: Mission): string {
     "### 가정",
     list([...new Set([...(mission.goalBrief?.assumptions ?? []), ...report.assumptions])]),
     "## Chief Director 판단과 팀",
-    "운영자가 최종 운영 책임을 맡습니다. Chief Director는 실행 판단과 감독을 맡고, 팀의 행동·선택·근거와 남은 영향을 설명합니다.",
+    "Chief Director가 사용자 의도와 사업 상황을 해석하고, 참모들의 의견을 종합해 전략과 행동을 결정합니다. 실제 결과·판단 근거·배운 점·다음 행동을 보고하며, 운영자가 최종 운영 책임을 맡습니다.",
     ...mission.personas.slice(0, 20).map(
       (persona) =>
         `- ${persona.id === mission.chiefId ? "Chief Director" : persona.id === mission.technicalLeadId ? "Technical Director" : persona.id === mission.designLeadId ? "Design Director" : persona.id === mission.marketingLeadId ? "Marketing Director" : "Actor"} ${markdown(persona.name)} (${markdown(persona.id)}): ${markdown(persona.role)} · CLI ${markdown(persona.agentType)} · 모델 ${persona.model ? markdown(persona.model) : "CLI 기본값 (실제 모델 미기록)"} · 선택한 스킬: ${

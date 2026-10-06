@@ -22,7 +22,7 @@ describe("order result contract", () => {
     expect(orderExitCode(mission)).toBe(exitCode)
   })
 
-  it("prints a checkpoint's failure reason and repair command without reusing an earlier approved review", () => {
+  it("reports a checkpoint's failure reason without handing repair decisions to the user", () => {
     const mission = missionFixture()
     mission.status = "failed"
     mission.error = "Acceptance command rejected the deliverable"
@@ -36,17 +36,18 @@ describe("order result contract", () => {
     printOrderOutcome(mission)
     const output = log.mock.calls.flat().join("\n")
     expect(output).toContain(mission.error)
-    expect(output).toContain(`av order --resume ${mission.id} --retry`)
+    expect(output).toContain(`Report: .agent-valley/reports/${mission.id}.md`)
+    expect(output).not.toContain("--retry")
     expect(output).not.toContain(mission.finalReview?.summary)
     expect(output).not.toContain("Earlier provider outage")
   })
 
-  it("explains an unresolved active checkpoint and resumes without resetting retry allowances", () => {
+  it("explains an unresolved active checkpoint and points to its report", () => {
     const mission = missionFixture()
     mission.status = "executing"
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
     printOrderOutcome(mission)
     expect(log.mock.calls.flat().join("\n")).toContain("The goal has not reached verified completion")
-    expect(log).toHaveBeenLastCalledWith(`Resume: av order --resume ${mission.id}`)
+    expect(log).toHaveBeenLastCalledWith(`Report: .agent-valley/reports/${mission.id}.md`)
   })
 })

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { executionState } from "./execution"
 import { CMO_ROLE } from "./marketing-lead"
 import { chiefReportSchema, fallbackReport, parseReport, renderReport, reportPrompt } from "./reports"
 import { marketingMission, mission, report } from "./reports.fixture"
@@ -230,6 +231,10 @@ describe("report evidence and language", () => {
     expect(prompt).toContain("operator retains final operating responsibility")
     expect(prompt).toContain("actual Actor execution evidence and verification")
     expect(prompt).toContain("goal explicitly requests it")
+    expect(prompt).toContain("The user receives an executive account in plain language")
+    expect(prompt).toContain("unmet prerequisite")
+    expect(prompt).toContain("actual reason and nextRunAt")
+    expect(prompt).toContain("Do not guess an uncertain external action's outcome")
     expect(evidence).toMatchObject({
       operatorGoal: "로그인 화면을 만들어 주세요",
       successCriteria: ["키보드로 로그인 가능", "정상 로그인 가능", "입력 오류가 화면에 표시됨"],
@@ -277,6 +282,35 @@ describe("report evidence and language", () => {
 })
 
 describe("evidence fallback and rendering", () => {
+  it("reports a Chief-selected wait and its saved next check as incomplete", () => {
+    const value = mission()
+    value.status = "waiting"
+    value.error = "Required container evidence is unavailable; retry the observation."
+    if (!value.supervision) throw new Error("Expected supervision")
+    value.supervision.decisions = [
+      {
+        round: 1,
+        at: "2026-10-06T00:00:00.000Z",
+        action: "wait",
+        reason: value.error,
+        retryAfterSec: 30,
+        fingerprint: "changed",
+      },
+    ]
+    const execution = executionState(value)
+    execution.nextRunAt = "2026-10-06T00:00:30.000Z"
+    execution.pauseReason = value.error
+    const evidence = JSON.parse(reportPrompt(value).split("Report evidence (JSON data):\n")[1] as string)
+    expect(evidence.verdict).toBe("incomplete")
+    expect(evidence.decisions[0]).toMatchObject({ action: "wait", reason: value.error })
+    expect(evidence.execution.nextRunAt).toBe(execution.nextRunAt)
+    const rendered = renderReport(value)
+    expect(rendered).toContain("**판정: 미완료**")
+    expect(rendered).toContain("1차 대기")
+    expect(rendered).toContain("다음 관측·재개 시각")
+    expect(rendered).not.toContain("undefined")
+  })
+
   it("provides schema-valid Korean ELI5, choices, worktree and actual checks", () => {
     const value = mission()
     const fallback = fallbackReport(value)

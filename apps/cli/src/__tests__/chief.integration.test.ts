@@ -88,7 +88,9 @@ process.stdin.on('end', async () => {
     result = isError ? 'Simulated CLI connection failure' : 'Wrote deliverable.txt. Inspect it and run the acceptance check.';
   } else if (stage === 'supervise') {
     isError = ${JSON.stringify(mode)} === 'interrupt' && calls.filter(call => call.stage === 'supervise').length === 0;
-    result = isError ? 'Simulated Chief Director connection failure' : JSON.stringify({ action: 'repair', reason: 'The worker connection failed before completing the file', taskId: 'write', instructions: 'Finish deliverable.txt containing accepted' });
+    result = isError ? 'Simulated Chief Director connection failure' : JSON.stringify(prompt.includes('Docker source access unavailable')
+      ? { action: 'wait', reason: 'Docker source access unavailable; recheck the same configured target', retryAfterSec: 30 }
+      : { action: 'repair', reason: 'The worker connection failed before completing the file', taskId: 'write', instructions: 'Finish deliverable.txt containing accepted' });
   } else if (stage === 'report') {
     const accepted = fs.existsSync('deliverable.txt') && fs.readFileSync('deliverable.txt', 'utf8') === 'accepted';
     result = JSON.stringify({ summary: accepted ? 'Verified requested file' : 'File remains incomplete', eli5: accepted ? 'The requested file is ready and passed its check.' : 'The file is unfinished; the Chief Director connection must recover before it can finish.', goalAssessment: accepted ? 'The saved success criterion is satisfied.' : 'The saved success criterion is not satisfied.', assumptions: [], decisions: [], deliverables: ['deliverable.txt'], checks: [accepted ? 'Acceptance command passed' : 'Acceptance command has not passed'], remaining: accepted ? [] : ['Resume the order after restoring the Chief Director connection'] });
@@ -226,10 +228,13 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     collect.mockClear()
     const resumed = await runOrder(undefined, { resume: mission.id }, root)
     expect(resumed).toMatchObject({
-      status: "paused",
+      status: "waiting",
       verification: { ok: true },
-      execution: { failureKind: "environment" },
+      execution: { failureKind: "chief-wait" },
     })
+    expect(Number.isFinite(Date.parse(resumed.execution?.nextRunAt ?? ""))).toBe(true)
+    expect(resumed.supervision?.decisions.at(-1)).toMatchObject({ action: "wait", retryAfterSec: 30 })
+    expect((await calls()).filter((call) => call.stage === "work")).toHaveLength(1)
     expect(resumed.containerObservationPolicy).toEqual(policy)
     expect(resumed.personas.find((actor) => actor.id === resumed.chiefId)?.model).toBe("selected-chief-model")
     expect(collect).toHaveBeenCalledOnce()
@@ -440,24 +445,36 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     20_000,
   )
 
-  it("retains a failed worktree and resumes interrupted work from durable state", async () => {
+  it("protects an unavailable Chief checkpoint and retains the worktree for explicit advanced resume", async () => {
     await fakeClaude("interrupt")
-    await expect(
-      runOrder(
-        "Create a verified deliverable",
-        { workspace: repo, verify, agent: "claude", repairs: "0", timeout: "10" },
-        root,
-      ),
-    ).rejects.toThrow("Simulated Chief Director connection failure")
+    const paused = await runOrder(
+      "Create a verified deliverable",
+      { workspace: repo, verify, agent: "claude", model: "selected-chief-model", repairs: "0", timeout: "10" },
+      root,
+    )
+    expect(paused.status).toBe("paused")
+    expect(paused.error).toContain("Simulated Chief Director connection failure")
+    expect(paused.execution?.failureKind).toBe("chief-unavailable")
     const store = new MissionStore(join(root, ".agent-valley/missions"))
     const [failed] = await store.list()
     if (!failed) throw new Error("Expected saved failed mission")
-    expect(failed.status).toBe("failed")
-    expect(failed.report?.eli5).toContain("unfinished")
-    expect(await readFile(join(root, ".agent-valley/reports", `${failed.id}.md`), "utf8")).toContain("미완료")
+    expect(failed.status).toBe("paused")
+    expect(failed.id).toBe(paused.id)
+    expect(failed.report?.eli5).toContain("Simulated Chief Director connection failure")
+    expect(await readFile(join(root, ".agent-valley/reports", `${failed.id}.md`), "utf8")).toContain(
+      "Simulated Chief Director connection failure",
+    )
     expect(await readFile(join(failed.workspace.path, "deliverable.txt"), "utf8")).toBe("partial")
-    const resumed = await runOrder(undefined, { resume: failed.id }, root)
+    const spent = structuredClone(failed.execution)
+    const beforeResume = await calls()
+    const protectedResume = await runOrder(undefined, { resume: failed.id }, root)
+    expect(protectedResume.status).toBe("paused")
+    expect(protectedResume.execution).toEqual(spent)
+    expect(await calls()).toEqual(beforeResume)
+    const resumed = await runOrder(undefined, { resume: failed.id, retry: true }, root)
     expect(resumed.status).toBe("completed")
+    expect(resumed.id).toBe(failed.id)
+    expect(resumed.personas.find((actor) => actor.id === resumed.chiefId)?.model).toBe("selected-chief-model")
     expect(resumed.workspace.path).toBe(failed.workspace.path)
     expect(resumed.tasks[0]?.attempts).toBe(2)
     expect(resumed.supervision?.rounds).toBe(2)

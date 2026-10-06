@@ -29,6 +29,9 @@ export const executionStateSchema = z.strictObject({
       "unknown-effect",
       "budget",
       "interrupted",
+      "chief-wait",
+      "chief-unavailable",
+      "integrity",
     ])
     .optional(),
   progressKey: z.string().optional(),
@@ -47,6 +50,15 @@ export const executionStateSchema = z.strictObject({
 })
 export type ExecutionState = z.infer<typeof executionStateSchema>
 export type FailureKind = NonNullable<ExecutionState["failureKind"]>
+
+/** A saved Chief stop persists until a later explicit intervention; invalid dates fail closed. */
+export function chiefRecoveryStopped(mission: Mission): boolean {
+  const decision = mission.supervision?.decisions.at(-1)
+  if (decision?.action !== "stop") return false
+  const stoppedAt = Date.parse(decision.at)
+  const intervenedAt = Date.parse(mission.execution?.interventionAt ?? "")
+  return !Number.isFinite(stoppedAt) || !Number.isFinite(intervenedAt) || intervenedAt <= stoppedAt
+}
 
 export class MissionPause extends Error {
   constructor(
@@ -102,17 +114,20 @@ export function assertExecutionBudget(mission: Mission, now = Date.now()): void 
   const state = executionState(mission)
   if (now - Date.parse(state.startedAt) >= policy.maxDurationSec * 1_000)
     throw new MissionPause(
-      "Mission time limit reached. Increase --duration on resume to continue the original goal.",
+      "Mission time limit reached. The original goal remains unresolved within its saved duration.",
       "budget",
     )
   if (state.runsStarted >= policy.maxRuns)
-    throw new MissionPause("Mission Actor call limit reached. Increase --runs on resume to continue.", "budget")
+    throw new MissionPause(
+      "Mission Actor call limit reached. The original goal remains unresolved within its saved call budget.",
+      "budget",
+    )
   if (policy.maxEstimatedCostUsd !== undefined) {
     const finished = mission.operations?.runs.filter((run) => run.finishedAt) ?? []
     const reconciled = new Map(state.costReconciliations?.map((entry) => [entry.runId, entry.costUsd]))
     if (finished.some((run) => run.costUsd === null && !reconciled.has(run.runId)))
       throw new MissionPause(
-        "Cost headroom is unknown. Inspect billing, then reconcile each unresolved run using --account-run <id> --account-cost <usd> on resume; no zero-cost assumption was made.",
+        "Cost headroom is unknown. Unresolved billing evidence prevents further calls; no zero-cost assumption was made.",
         "budget",
       )
     if (
@@ -120,7 +135,7 @@ export function assertExecutionBudget(mission: Mission, now = Date.now()): void 
       policy.maxEstimatedCostUsd
     )
       throw new MissionPause(
-        "Configured-price estimated cost limit reached. Increase --cost on resume to continue.",
+        "Configured-price estimated cost limit reached. The goal remains unresolved within its saved cost budget.",
         "budget",
       )
   }
@@ -132,7 +147,7 @@ export function assertExecutionDeadline(mission: Mission, now = Date.now()): voi
     now - Date.parse(executionState(mission).startedAt) >= mission.executionPolicy.maxDurationSec * 1_000
   )
     throw new MissionPause(
-      "Mission time limit reached. Increase --duration on resume to continue the original goal.",
+      "Mission time limit reached. The original goal remains unresolved within its saved duration.",
       "budget",
     )
 }
@@ -178,17 +193,21 @@ export function pauseForFailure(mission: Mission, reason: string, taskId?: strin
   if (task?.effectScope === "external" && state?.effectState === "running") {
     state.effectState = "unknown"
     throw new MissionPause(
-      `External effect for ${taskId} is uncertain. Inspect the destination, then resume with --resolve-effect ${taskId} --effect-result completed|not-applied.`,
+      `External effect for ${taskId} is uncertain. Its destination outcome has not been established; it will not be repeated.`,
       "unknown-effect",
     )
   }
   const kind = classifyFailure(reason)
-  if (kind === "authentication" || kind === "environment")
-    throw new MissionPause(`${reason} Restore the required service or CLI, then use --resume with --retry.`, kind)
+  if (kind === "authentication" || kind === "environment") {
+    if (mission.supervision) return
+    throw new MissionPause(`${reason} Required source access is unavailable; the goal remains unresolved.`, kind)
+  }
   if (kind !== "rate-limit" && kind !== "provider") return
   const execution = executionState(mission)
-  if (execution.retries >= mission.executionPolicy.maxRetries)
-    throw new MissionPause(`${reason} Automatic retries exhausted. Repair the provider and resume with --retry.`, kind)
+  if (execution.retries >= mission.executionPolicy.maxRetries) {
+    if (mission.supervision) return
+    throw new MissionPause(`${reason} Automatic retries exhausted; the goal remains unresolved.`, kind)
+  }
   execution.retries += 1
   const delay = Math.min(300_000, mission.executionPolicy.retryDelayMs * 2 ** (execution.retries - 1))
   throw new MissionPause(reason, kind, new Date(Date.now() + delay).toISOString())

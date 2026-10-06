@@ -9,6 +9,14 @@ import {
   type Operation,
   operationSchema,
 } from "./continuous-contract"
+import {
+  type AutomaticRecoveryContext,
+  automaticMissionRecovery,
+  automaticRecoveryLimit,
+  scheduledChiefWait,
+  verifiedMissionEvidence,
+} from "./continuous-recovery"
+import { assertExecutionDeadline, classifyFailure, MissionPause } from "./execution"
 import type { Mission } from "./types"
 
 export interface ContinuousOperationPorts {
@@ -77,6 +85,103 @@ export async function runContinuousOperation(
     await save()
     return previous !== operation.containerObservation.fingerprint
   }
+  const waitForRecovery = async (nextRunAt?: string, mission?: Mission) => {
+    while (nextRunAt && Date.parse(nextRunAt) > Date.parse(now()) && !ports.signal?.aborted) {
+      if (mission) assertExecutionDeadline(mission, Date.parse(now()))
+      const remaining =
+        mission?.executionPolicy && mission.execution
+          ? Date.parse(mission.execution.startedAt) + mission.executionPolicy.maxDurationSec * 1000 - Date.parse(now())
+          : Infinity
+      await ports.delay(Math.min(Date.parse(nextRunAt) - Date.parse(now()), remaining, 30_000), ports.signal)
+    }
+    if (mission) assertExecutionDeadline(mission, Date.parse(now()))
+    if (ports.signal?.aborted) throw new MissionPause("Operation recovery interrupted.", "interrupted")
+  }
+  const recoverChild = async (mission: Mission, context?: AutomaticRecoveryContext) => {
+    const disposition = automaticMissionRecovery(mission, Date.parse(now()), context)
+    const previous =
+      operation.recovery?.target === "child" && operation.recovery.checkpointId === mission.id
+        ? operation.recovery
+        : undefined
+    const prior = previous?.attempts ?? 0
+    const failedAttempts = previous?.failedAttempts ?? prior
+    const waitKey = scheduledChiefWait(mission)
+      ? createHash("sha256")
+          .update(
+            JSON.stringify({
+              decision: mission.supervision?.decisions.at(-1),
+              nextRunAt: mission.execution?.nextRunAt,
+            }),
+          )
+          .digest("hex")
+      : undefined
+    const continuation = !!waitKey && waitKey !== previous?.waitContinuationKey
+    operation.recovery = {
+      target: "child",
+      checkpointId: mission.id,
+      attempts: prior,
+      failedAttempts,
+      ...(waitKey || previous?.waitContinuationKey
+        ? { waitContinuationKey: waitKey ?? previous?.waitContinuationKey }
+        : {}),
+      disposition: disposition.retry ? "waiting" : "protected",
+      reason: disposition.reason,
+      ...(disposition.waitUntil ? { nextRunAt: disposition.waitUntil } : {}),
+    }
+    if (!disposition.retry) return false
+    if (!continuation && failedAttempts >= automaticRecoveryLimit) {
+      operation.recovery.disposition = "unresolved"
+      operation.recovery.reason =
+        "Bounded automatic child recovery exhausted its attempts; the original goal remains unresolved."
+      return false
+    }
+    await save()
+    await waitForRecovery(disposition.waitUntil, mission)
+    operation.recovery.attempts += 1
+    if (!continuation) operation.recovery.failedAttempts = failedAttempts + 1
+    operation.recovery.disposition = "retrying"
+    delete operation.recovery.nextRunAt
+    await save()
+    if (!operation.baseline) throw new Error("The original accepted baseline is missing from the recovery checkpoint.")
+    await ports.runMission(operation, mission.id, mission.goal, operation.baseline.path)
+    return true
+  }
+  const selectDecision = async (id: string): Promise<ContinuousDecision> => {
+    while (true) {
+      const prior =
+        operation.recovery?.target === "decision" && operation.recovery.checkpointId === id
+          ? operation.recovery.attempts
+          : 0
+      if (prior >= automaticRecoveryLimit)
+        throw new Error(
+          "Bounded automatic goal-selection recovery exhausted its attempts; the saved decision remains unresolved.",
+        )
+      await waitForRecovery(operation.recovery?.target === "decision" ? operation.recovery.nextRunAt : undefined)
+      operation.recovery = {
+        target: "decision",
+        checkpointId: id,
+        attempts: prior + 1,
+        disposition: "retrying",
+        reason: "Select or correct the original saved decision with its pinned evidence and Chief.",
+      }
+      await save()
+      try {
+        return continuousDecisionSchema.parse(await ports.decide(operation, id))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        const kind = error instanceof MissionPause ? error.kind : classifyFailure(reason)
+        const invalid =
+          error instanceof Error && (error.name === "ZodError" || reason.startsWith("Invalid Chief decision"))
+        const retry = !(error instanceof MissionPause) && (invalid || kind === "provider" || kind === "rate-limit")
+        operation.recovery.reason = reason.slice(0, 16_000)
+        operation.recovery.disposition = retry ? "unresolved" : "protected"
+        if (!retry || operation.recovery.attempts >= automaticRecoveryLimit) throw error
+        operation.recovery.disposition = "waiting"
+        operation.recovery.nextRunAt = new Date(Date.parse(now()) + Math.min(300_000, 1000 * 2 ** prior)).toISOString()
+        await save()
+      }
+    }
+  }
   if (operation.phase === "completed") return operation
   if (operation.phase === "paused") {
     operation.phase =
@@ -122,10 +227,16 @@ export async function runContinuousOperation(
         let mission = await ports.findMission(id)
         if (mission) {
           assertIdentity(mission)
-          if (mission.tasks.some((task) => task.effectState === "unknown"))
+          if (mission.tasks.some((task) => task.effectState === "unknown")) {
+            if (await recoverChild(mission)) continue
             return pause(
-              `Child ${id} has an unknown effect. Reconcile that mission's effect state before continuing this operation.`,
+              `Child ${id} has an unknown effect. ${operation.recovery?.reason} Its effects and checkpoint were retained.`,
             )
+          }
+          if (mission.status === "waiting") {
+            if (await recoverChild(mission)) continue
+            return pause(`Child ${id} is waiting and unresolved. ${operation.recovery?.reason}`)
+          }
         }
         if (!mission) {
           if (operation.phase === "accepting")
@@ -135,36 +246,47 @@ export async function runContinuousOperation(
           mission = await ports.runMission(operation, id, decision.goal, operation.baseline.path)
         }
         assertIdentity(mission)
-        if (mission.status !== "completed")
+        if (mission.status !== "completed") {
+          if (await recoverChild(mission)) continue
           return pause(
-            `Child ${id} is ${mission.status}. ${mission.error ?? "Inspect av status and reconcile or resume that mission before continuing this operation."}`,
+            `Child ${id} is unresolved (${mission.status}). ${mission.error ?? ""} ${operation.recovery?.reason ?? "Its original checkpoint was retained."}`,
           )
-        if (
-          !mission.verification?.ok ||
-          !mission.finalReview?.passed ||
-          mission.tasks.some((task) => task.effectState === "unknown")
-        )
+        }
+        if (!verifiedMissionEvidence(mission) || mission.tasks.some((task) => task.effectState === "unknown")) {
+          if (await recoverChild(mission)) continue
           return pause(
             `Completed child ${id} lacks a passing verification and final review or has an unknown effect. Restore and reconcile its verified mission record before accepting its snapshot.`,
           )
+        }
         if (operation.containerObservationPolicy?.enabled) {
           if (
             !containersHealthy(mission.containerObservationPolicy, mission.containerObservation) ||
             mission.containerObservationVerifiedFingerprint !== mission.containerObservation?.fingerprint
-          )
+          ) {
+            if (await recoverChild(mission)) continue
             return pause(
               `Child ${id} passed code checks but has no verified service recovery. Resume the child and collect fresh health evidence before accepting it.`,
             )
+          }
           validateContainerObservation(operation.containerObservationPolicy, mission.containerObservation)
           await observe()
           if (ports.signal?.aborted)
             return pause(
               "Operation interrupted during service observation. Its verified child was retained before acceptance.",
             )
-          if (!containersHealthy(operation.containerObservationPolicy, operation.containerObservation))
-            return pause(
-              `Child ${id} passed code checks and previously verified service recovery, but current service evidence is unresolved or unavailable. Restore service health before resuming this operation; its child and external effects were retained.`,
+          if (!containersHealthy(operation.containerObservationPolicy, operation.containerObservation)) {
+            if (
+              await recoverChild(mission, {
+                completionEvidenceUnavailable: true,
+                reason:
+                  "Fresh service evidence is unresolved or unavailable; the Chief must review the same child's recovery.",
+              })
             )
+              continue
+            return pause(
+              `Child ${id} passed code checks and previously verified service recovery, but current service evidence is unresolved or unavailable. ${operation.recovery?.reason} Its child and external effects were retained.`,
+            )
+          }
         }
         operation.phase = "accepting"
         await save()
@@ -196,6 +318,7 @@ export async function runContinuousOperation(
         operation.decisionObservation = undefined
         operation.decisionObservationRevision = undefined
         operation.nextRunAt = undefined
+        operation.recovery = undefined
         operation.phase = "deciding"
         await save()
       }
@@ -237,9 +360,9 @@ export async function runContinuousOperation(
         operation.decisionId = randomUUID()
         await save()
       }
-      const decision =
-        operation.decision ?? continuousDecisionSchema.parse(await ports.decide(operation, operation.decisionId))
+      const decision = operation.decision ?? (await selectDecision(operation.decisionId))
       operation.decision = decision
+      operation.recovery = undefined
       if (
         decision.action === "wait" ||
         continuousDecisionKey(
@@ -269,6 +392,10 @@ export async function runContinuousOperation(
       await save()
     }
   } catch (error) {
+    if (operation.recovery && error instanceof MissionPause) {
+      operation.recovery.disposition = "protected"
+      operation.recovery.reason = error.message.slice(0, 16_000)
+    }
     return pause(
       ports.signal?.aborted
         ? "Operation interrupted. Its current child and decision checkpoints were retained."

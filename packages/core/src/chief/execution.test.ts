@@ -186,6 +186,7 @@ describe("durable execution classification and limits", () => {
       expect(mission.status).toBe("waiting")
       expect(mission.execution?.nextRunAt).toBe(new Date(now + delay).toISOString())
     }
+    delete mission.supervision
     try {
       pauseForFailure(mission, "HTTP 503 temporarily unavailable")
     } catch (error) {
@@ -194,17 +195,19 @@ describe("durable execution classification and limits", () => {
     expect(mission.status).toBe("paused")
     expect(mission.execution?.retries).toBe(2)
     expect(mission.execution?.nextRunAt).toBeUndefined()
-    expect(mission.supervision?.rounds).toBe(0)
+    expect(mission.supervision).toBeUndefined()
   })
 
   it.each(["HTTP 401 Unauthorized", "ENOENT actor CLI missing"])(
-    "pauses %s until an explicit environment repair",
+    "leaves %s to Chief recovery without spending transient retries",
     (reason) => {
       const { mission } = fixture()
       mission.executionPolicy = executionPolicySchema.parse({})
-      expect(() => pauseForFailure(mission, reason)).toThrow("--retry")
+      expect(() => pauseForFailure(mission, reason)).not.toThrow()
       expect(mission.execution?.retries ?? 0).toBe(0)
       expect(() => pauseForFailure(mission, "Actual acceptance assertion failed")).not.toThrow()
+      delete mission.supervision
+      expect(() => pauseForFailure(mission, reason)).toThrow("unavailable")
     },
   )
 })
@@ -300,7 +303,7 @@ describe("external action reconciliation and observable progress", () => {
       { id: "onboarding", reviewerId: "reviewer", status: "running", attempts: 1, effectState: "running" },
     ]
     expect(() => pauseForFailure(mission, "503 connection closed after remote acceptance", "onboarding")).toThrow(
-      "--resolve-effect",
+      "destination outcome has not been established",
     )
     expect(mission.tasks[0]?.effectState).toBe("unknown")
     expect(mission.execution?.retries ?? 0).toBe(0)

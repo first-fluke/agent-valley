@@ -24,7 +24,7 @@ export function assignTaskStates(mission: Mission, plan: ChiefPlan, preserveEvid
 
 export function applyRecovery(mission: Mission, response: SupervisionResponse): void {
   if (!mission.plan) throw new Error("Chief Director recovery needs an existing plan. Restore the mission checkpoint.")
-  if (response.action === "stop") return
+  if (response.action === "stop" || response.action === "wait") return
   if (response.action === "replan") {
     const plan = { tasks: response.tasks }
     const tasks = assignTaskStates(mission, plan, true)
@@ -58,6 +58,7 @@ export function recordDecision(
     action: response.action,
     reason: response.reason,
     fingerprint,
+    ...(response.action === "wait" ? { retryAfterSec: response.retryAfterSec } : {}),
     ...("taskId" in response && response.taskId ? { taskId: response.taskId } : {}),
     ...("personaId" in response ? { personaId: response.personaId } : {}),
     ...("instructions" in response ? { instructions: response.instructions } : {}),

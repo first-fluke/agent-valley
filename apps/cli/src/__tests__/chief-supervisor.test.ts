@@ -29,6 +29,7 @@ afterEach(async () => {
 function checkpoint() {
   const mission = missionFixture()
   mission.status = "executing"
+  if (mission.supervision) mission.supervision.operatorGoal = mission.goal
   mission.executionPolicy = executionPolicySchema.parse({ maxRetries: 2, maxRuns: 10 })
   mission.execution = { startedAt: new Date(now - 10_000).toISOString(), runsStarted: 4, retries: 1 }
   return mission
@@ -123,7 +124,7 @@ describe("durable order worker supervision", () => {
     expect(result.status).toBe("paused")
     expect(result.execution).toMatchObject({ failureKind: "environment", crashRestarts: 3, runsStarted: 4 })
     expect(worker).toHaveBeenCalledTimes(3)
-    expect((await store.load(current.id)).error).toContain("--retry")
+    expect((await store.load(current.id)).error).toContain("remains unresolved")
   })
 
   it("waits until the saved metric/provider due time then resumes without initiating a new goal", async () => {
@@ -153,6 +154,67 @@ describe("durable order worker supervision", () => {
     expect(delay).toHaveBeenCalledTimes(3)
     expect(result.execution?.crashRestarts).toBeUndefined()
     expect(worker).toHaveBeenCalledTimes(2)
+  })
+
+  it("resumes a scheduled Chief wait without --retry and retains its choice, limits and spent usage", async () => {
+    const current = checkpoint()
+    current.status = "waiting"
+    if (!current.execution) throw new Error("Expected execution checkpoint")
+    current.execution.failureKind = "chief-wait"
+    current.execution.nextRunAt = new Date(now + 65_000).toISOString()
+    current.supervision = {
+      originalAcceptance: current.supervision?.originalAcceptance,
+      maxRounds: 5,
+      rounds: 2,
+      stalledRounds: 1,
+      decisions: [
+        {
+          round: 2,
+          at: new Date(now).toISOString(),
+          action: "wait",
+          reason: "Wait for service readiness",
+          fingerprint: "saved",
+          retryAfterSec: 65,
+        },
+      ],
+      pendingRecovery: { reason: "Service is unavailable" },
+    }
+    await store.save(current)
+    const worker = vi
+      .fn<Worker>()
+      .mockResolvedValueOnce(2)
+      .mockImplementation(async (args) => {
+        expect(args).toEqual(["order", "--once", "--worker", "--resume", current.id])
+        const saved = await store.load(current.id)
+        expect(saved.execution).toMatchObject({ runsStarted: 4, retries: 1, startedAt: current.execution?.startedAt })
+        expect(saved.executionPolicy).toEqual(current.executionPolicy)
+        expect(saved.personas).toEqual(current.personas)
+        expect(saved.supervision).toEqual(current.supervision)
+        saved.status = "completed"
+        await store.save(saved)
+        return 0
+      })
+    const delay = vi.fn<typeof abortableDelay>().mockImplementation(async (milliseconds) => {
+      vi.advanceTimersByTime(Math.min(milliseconds, 30_000))
+    })
+    expect((await superviseOrder(undefined, { resume: current.id }, root, { runWorker: worker, delay })).status).toBe(
+      "completed",
+    )
+    expect(worker).toHaveBeenCalledTimes(2)
+    expect(worker.mock.calls[1]?.[0]).not.toContain("--retry")
+  })
+
+  it("does not replay a crashed worker whose effect became unknown", async () => {
+    const current = checkpoint()
+    const task = current.tasks[0]
+    if (!task) throw new Error("Expected task checkpoint")
+    task.effectState = "unknown"
+    await store.save(current)
+    const worker = vi.fn<Worker>().mockResolvedValue(1)
+    const result = await superviseOrder(undefined, { resume: current.id }, root, { runWorker: worker })
+    expect(result.tasks[0]?.effectState).toBe("unknown")
+    expect(worker).toHaveBeenCalledOnce()
+    expect(result.execution?.crashRestarts).toBeUndefined()
   })
 
   it("counts a crashed waiting worker as a restart instead of a successful scheduled observation", async () => {
