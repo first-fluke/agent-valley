@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [2.2.1](https://github.com/first-fluke/agent-valley/compare/v2.2.0...v2.2.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **oma:** use latest CLI with strict receipt validation ([e6dc158](https://github.com/first-fluke/agent-valley/commit/e6dc15821b26d473459a42c825f36ffc24d790a9))
+
 ## [2.2.0](https://github.com/first-fluke/agent-valley/compare/v2.1.0...v2.2.0) (2026-10-06)
 
 
