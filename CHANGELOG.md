@@ -6,6 +6,18 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [2.2.0](https://github.com/first-fluke/agent-valley/compare/v2.1.0...v2.2.0) (2026-10-06)
+
+
+### Features
+
+* make the Chief own strategy and autonomous execution ([dc3945a](https://github.com/first-fluke/agent-valley/commit/dc3945a66cc5e19564d3f1de53f5928b60ce9ff5))
+
+
+### Bug Fixes
+
+* align node package checks with chief outcome reports ([e28cab8](https://github.com/first-fluke/agent-valley/commit/e28cab8b8c3496219da53395aa29203f25e97f0d))
+
 ## [2.1.0](https://github.com/first-fluke/agent-valley/compare/v2.0.0...v2.1.0) (2026-10-05)
 
 
