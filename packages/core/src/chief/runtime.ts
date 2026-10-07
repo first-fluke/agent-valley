@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto"
 import { join, resolve } from "node:path"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { buildOmaGuidance, prepareOmaAttempt, validateOmaEvidence } from "../oma/receipt-adapter"
+import {
+  assertCompatibleRoute,
+  inspectSkillCompatibility,
+  matrixRouteKey,
+  type SkillMatrixDeps,
+} from "../oma/skill-matrix-adapter"
 import { AgentRunnerService } from "../orchestrator/agent-runner"
 import { runVerificationGate } from "../orchestrator/verification-gate"
 import { runCommand } from "../workspace/worktree-lifecycle"
@@ -10,7 +16,7 @@ import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
 import { fingerprintWorkspace } from "./fingerprint"
 import { disposeTaskWorktree, integrateTaskWorktree, prepareTaskWorktree } from "./parallel-workspace"
-import { selectWorkActor } from "./routing"
+import { selectWorkActor, workActorCandidates } from "./routing"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
@@ -96,6 +102,7 @@ export class ChiefRuntime {
     private readonly store: MissionStore,
     private readonly signal?: AbortSignal,
     private readonly onStage: (stage: string, persona: Persona) => void = () => {},
+    private readonly skillMatrixDeps?: SkillMatrixDeps,
   ) {}
 
   ports(): ChiefPorts {
@@ -191,8 +198,35 @@ export class ChiefRuntime {
           }
     if (signal?.aborted)
       throw new Error("Order interrupted. Resume it with av order --resume followed by its mission ID.")
-    const route = stage === "work" ? selectWorkActor(mission, persona, context?.taskId) : undefined
+    const compatibilityPolicy = mission.operatingPolicy?.skillCompatibility
+    const compatibility =
+      stage === "work" && compatibilityPolicy
+        ? await inspectSkillCompatibility(
+            compatibilityPolicy,
+            workspace.path,
+            persona.skills,
+            workActorCandidates(mission, persona, compatibilityPolicy.mode === "require"),
+            this.skillMatrixDeps,
+            signal,
+          )
+        : undefined
+    const compatibleRoutes =
+      compatibilityPolicy?.mode === "require" && compatibility
+        ? new Set(compatibility.routes.filter((entry) => entry.status === "pass").map(matrixRouteKey))
+        : undefined
+    if (compatibility && compatibilityPolicy)
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "skill-compatibility",
+        message: `${compatibilityPolicy.mode}: ${compatibility.routes.map((entry) => `${entry.actorType}/${entry.model ?? "native default"} ${entry.status}: ${entry.reason}`).join("; ")} Scope: ${compatibility.scope}.`,
+        ...(context?.taskId ? { taskId: context.taskId } : {}),
+      })
+    const route = stage === "work" ? selectWorkActor(mission, persona, context?.taskId, compatibleRoutes) : undefined
     persona = route?.actor ?? persona
+    if (compatibility && compatibilityPolicy) {
+      if (compatibilityPolicy.mode === "require")
+        assertCompatibleRoute({ actorType: persona.agentType, model: persona.model }, compatibility)
+    }
     this.onStage(stage, persona)
     const attempt: RunAttempt = {
       id: randomUUID(),

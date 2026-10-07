@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { type SkillCompatibilityPolicy, skillCompatibilityPolicySchema } from "../oma/skill-matrix-schema"
 import type { MetricTarget } from "./organization"
 
 const actorType = z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/)
@@ -19,6 +20,7 @@ export interface ChiefOperatingPolicy {
   readyActors?: string[]
   memory: boolean
   metricTargets?: MetricTarget[]
+  skillCompatibility?: SkillCompatibilityPolicy
 }
 
 export const chiefOperatingPolicySchema = z.strictObject({
@@ -32,6 +34,7 @@ export const chiefOperatingPolicySchema = z.strictObject({
   reviewVendor: z.enum(["prefer", "require", "off"]),
   readyActors: z.array(actorType).max(20).optional(),
   memory: z.boolean(),
+  skillCompatibility: skillCompatibilityPolicySchema.optional(),
   metricTargets: z
     .array(
       z.strictObject({

@@ -40,3 +40,57 @@ After delivery succeeds, Valley persists a pending tracker finalization before a
 AV accepts only the exact `<agent>:completed` native status proof and checks the required verification receipts itself. Unknown schemas, malformed CLI version output, unknown status output or an unavailable CLI fail closed. Incompatible protocol errors include the installed CLI version and instructions to update AV and OMA before generating new verified evidence. The receipts are local evidence against accidental stale reuse, not a security boundary against an agent that deliberately edits its own records.
 
 The native-contract integration tests create temporary git repositories and exercise `begin → verify --required → finish → status` for both code and analysis. They also change code or report content after completion and require rejection. These tests run with the installed CLI, without an exact release guard, and do not invoke a model or skill. CI requires OMA to be available; missing or malformed CLI availability fails the suite rather than skipping native contract tests.
+
+## Cached skill read-reference checks
+
+Chief Director orders and continuous missions can consume OMA's installed-skill matrix. This is independent of `oma.mode` receipt validation. The default is disabled. It requires an OMA CLI implementing `oma-skill-matrix-v2`; updating a source checkout alone does not update an already installed `oma` executable. If a local plan reports unsupported options or an unsupported contract, install a compatible OMA CLI before enabling this setting.
+
+Generate a plan for the actual target repository first. A plan reads and hashes installed skill files without invoking a vendor or model:
+
+```sh
+oma skills matrix --project-root /absolute/target-repository \
+  --skills oma-debug,oma-qa --delivery injected --vendors claude,codex --json
+```
+
+Create a cached measurement explicitly when ready. Set `CLAUDE_MODEL_ID` and `CODEX_MODEL_ID` to the intended native model identifiers. Live runs can incur vendor charges; AV never starts them automatically. The report destination must be a new file in an existing directory.
+
+```sh
+oma skills matrix --project-root /absolute/target-repository \
+  --skills oma-debug,oma-qa --delivery injected --vendors claude,codex \
+  --claude-model "$CLAUDE_MODEL_ID" --codex-model "$CODEX_MODEL_ID" \
+  --live --yes --json --report /absolute/path/to/matrix-2026-10-07.json
+```
+
+Set this in the configuration project's `av.yaml`:
+
+```yaml
+oma:
+  skill_compatibility:
+    report_path: /absolute/path/to/matrix-2026-10-07.json
+    max_age_hours: 168
+    mode: warn
+```
+
+Relative `report_path` values resolve from the directory containing `av.yaml`, not from a mission worktree. The default maximum age is 168 hours. `warn` adds diagnostic results to `av doctor`, mission history and operation reports without changing routing. `require` permits work candidates only when all of that Actor's selected skills have current passing evidence. Existing price and measured success ranking runs after this filter. An explicit Actor/model fails rather than silently changing routes. Select exact model identifiers reported in `cells[].model`; a requested alias in `models` or an unpinned native default is not proof of the model used.
+
+For automatic routing, pin these measured model identifiers in `chief.routing.candidates` before changing the mode to `require`. For an explicit `--actors` roster, set each work Actor's `model` field. `actor.model` selects the Chief Director's model and does not pin automatic work candidates.
+
+```yaml
+chief:
+  routing:
+    candidates:
+      - actor_type: claude
+        model: "<exact Claude cells[].model value>"
+      - actor_type: codex
+        model: "<exact Codex cells[].model value>"
+```
+
+Every work dispatch rereads the cached report and runs a bounded local OMA plan against its actual mission or parallel task worktree, plus native CLI `--version` probes. It compares the selected skills' hashes and complete reference coverage, OMA version, platform, architecture, native CLI version and observed model. It requires a completed live installed report with injected delivery, the supported protocol, mandatory successful read checks and no missing or excluded references. A report may cover more skills than the current Actor selects. Synthetic probes, plans, stale results, changed files, incomplete coverage, unknown models and unsupported vendors do not satisfy `require`. Failed and unknown results remain distinct in diagnostics. An unknown required diagnostic makes `av doctor` exit nonzero. No selected skills means no skill compatibility claim is needed.
+
+`av doctor` checks the cached bundle against the configured `actor.type` and `actor.model`; it does not infer which skill subset a future mission will select. Work dispatch checks its own selected skills and routing candidates independently.
+
+The policy path, mode and age limit are saved with the mission. Resuming preserves that policy and rechecks current evidence; it does not preserve an earlier pass indefinitely. To refresh a saved mission's report, replace the file at its saved path with a newly generated report after reviewing it. OMA writes new report files, so generate a separate file first, then replace the configured cache file yourself.
+
+This evidence covers reading the installed `SKILL.md` and its audited direct literal references while its body is injected as AV injects selected skill bodies. It does not certify task quality, native skill activation or AV's complete execution environment. AV uses Codex `app-server`; the matrix uses `codex exec`. Their runtime settings differ. Claude and Codex are the supported measured vendors; the other six AV vendors remain unknown for this protocol. The filter applies only to Chief Director mission work dispatch, including parallel worktrees and resume. Chief planning, adviser and review stages, and tracker-orchestrator work without a selected-skill roster, are outside this filter. Existing completion checks still apply.
+
+AV reads bounded regular JSON files and never displays cached transcripts, file contents, environment values or credential errors. Reports are operator-controlled local evidence, not signed attestations. Tests use fixture reports and subprocesses; they do not establish that live vendor executions passed.

@@ -17,6 +17,12 @@ export function operationsEvidence(mission: Mission) {
       "Estimates from configured input/output prices and actual adapter-reported tokens; excludes unreported cache/reasoning/subagent usage and subscription billing.",
     routeQuality: routeEvidence(mission).slice(0, 20),
     reviewPolicy: mission.operatingPolicy?.reviewVendor ?? "legacy independent Actor",
+    skillCompatibility: mission.operatingPolicy?.skillCompatibility
+      ? {
+          mode: mission.operatingPolicy.skillCompatibility.mode,
+          recentChecks: mission.history.filter((entry) => entry.stage === "skill-compatibility").slice(-10),
+        }
+      : undefined,
     recentRuns: runs.slice(-20),
     crossVendorReviews: mission.operations?.reviewDecisions.slice(-20) ?? [],
     organizationContext: mission.organizationContext,
@@ -33,6 +39,12 @@ export function operationsReportLines(mission: Mission): string[] {
     `기록된 token·설정 단가 기반 부분 비용 추정 USD ${evidence.knownEstimatedCostUsd.toFixed(6)} / 비용 미확인 ${evidence.unknownCostRuns}회 / 전체 추정 ${evidence.totalEstimatedCostUsd === null ? "미확인" : `USD ${evidence.totalEstimatedCostUsd.toFixed(6)}`}`,
     `최근 독립 리뷰 배정: 다른 vendor ${evidence.crossVendorReviews.filter((review) => review.crossVendor).length}회 / 동일 vendor fallback ${evidence.crossVendorReviews.filter((review) => !review.crossVendor).length}회 / 실제 리뷰 통과 ${evidence.crossVendorReviews.filter((review) => review.outcome === "passed").length}회`,
     `vendor 리뷰 정책: ${evidence.reviewPolicy}`,
+    ...(evidence.skillCompatibility
+      ? [
+          `OMA 스킬 읽기·참조 정책: ${evidence.skillCompatibility.mode}; AV 실행 환경 또는 작업 품질 인증이 아닙니다.`,
+          ...evidence.skillCompatibility.recentChecks.map((entry) => `${entry.at}: ${entry.message}`),
+        ]
+      : []),
     ...(mission.organizationContext
       ? [
           `계획·리뷰에 제공한 조직 근거: 승인 memory ${mission.organizationContext.memories.length}개 / 과거 outcome ${mission.organizationContext.outcomes.length}개 / 기록된 metric sample ${mission.organizationContext.metrics.length}개`,

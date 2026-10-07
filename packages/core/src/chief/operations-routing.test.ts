@@ -3,7 +3,7 @@ import { fixture, plan } from "./goal-supervision.fixture"
 import type { ChiefOperatingPolicy, ChiefOperations, OperatingRun } from "./operations"
 import { operationsEvidence, operationsReportLines } from "./operations-report"
 import { selectTaskReviewer } from "./review-routing"
-import { routeEvidence, selectWorkActor } from "./routing"
+import { routeEvidence, routeKey, selectWorkActor, workActorCandidates } from "./routing"
 import { finalCriteria, missionSchema, parseFinalReview } from "./schemas"
 import { finishOperatingRun, startOperatingRun } from "./usage"
 
@@ -52,6 +52,27 @@ function run(overrides: Partial<OperatingRun> = {}): OperatingRun {
 }
 
 describe("measured work routing", () => {
+  it("filters compatibility before existing price and success ranking", () => {
+    const mission = setup()
+    const worker = fixtureActor(mission, "worker")
+    expect(workActorCandidates(mission, worker)).toHaveLength(2)
+    const compatible = new Set([routeKey({ actorType: "claude", model: "careful" })])
+    expect(selectWorkActor(mission, worker, "onboarding", compatible).actor.agentType).toBe("claude")
+    expect(() => selectWorkActor(mission, worker, "onboarding", new Set())).toThrow("no ready work candidate")
+  })
+  it("fails fixed Actor/model compatibility without silently rerouting", () => {
+    const mission = setup()
+    delete mission.availableAgents
+    const worker = fixtureActor(mission, "worker")
+    worker.model = "operator-model"
+    expect(workActorCandidates(mission, worker)).toEqual([{ actorType: worker.agentType, model: "operator-model" }])
+    expect(() => selectWorkActor(mission, worker, "onboarding", new Set())).toThrow("explicit Actors are not rerouted")
+    delete worker.model
+    expect(workActorCandidates(mission, worker, true)).toEqual([{ actorType: worker.agentType, model: undefined }])
+    expect(() =>
+      selectWorkActor(mission, worker, "onboarding", new Set([routeKey({ actorType: "claude", model: "careful" })])),
+    ).toThrow("explicit Actors are not rerouted")
+  })
   it("starts the lowest completely configured price while preserving the Chief choice", () => {
     const mission = setup()
     const worker = fixtureActor(mission, "worker")

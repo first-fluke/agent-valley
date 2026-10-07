@@ -29,6 +29,23 @@ afterEach(async () => {
 })
 
 describe("chief order configuration", () => {
+  it("pins the matrix policy path to the configuration root and validates its nested key", async () => {
+    await writeFile(
+      join(root, "av.yaml"),
+      JSON.stringify({ oma: { skill_compatibility: { report_path: "audit/matrix.json", mode: "require" } } }),
+    )
+    const resolved = await resolveOrderConfig(root, { workspace: root }, discover)
+    expect(resolved.operatingPolicy.skillCompatibility).toEqual({
+      reportPath: join(root, "audit/matrix.json"),
+      maxAgeHours: 168,
+      mode: "require",
+    })
+    await writeFile(join(root, "av.yaml"), JSON.stringify({ oma: { skill_compatibility: { mode: "require" } } }))
+    await expect(resolveOrderConfig(root, { workspace: root }, discover)).rejects.toThrow(
+      "oma.skill_compatibility.report_path",
+    )
+    await expect(resolveOrderConfig(root, { workspace: root }, discover)).rejects.toThrow(join(root, "av.yaml"))
+  })
   it("resolves inherited container observation and preserves an explicit disabled project override", async () => {
     const globalChief = chiefConfigSchema.parse({
       container_observation: { targets: [{ id: "api", kind: "docker", container: "app-api", context: "orbstack" }] },

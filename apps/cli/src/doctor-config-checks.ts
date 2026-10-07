@@ -26,6 +26,7 @@ import {
   type DoctorDeps,
 } from "./doctor-checks"
 import { checkOma } from "./doctor-oma-checks"
+import { checkSkillMatrix } from "./doctor-skill-matrix-checks"
 
 // ── Tunnel ───────────────────────────────────────────────────────────────────
 
@@ -327,12 +328,13 @@ export async function runDoctorChecks(deps: DoctorDeps, options: RunDoctorOption
   results.push(checkTunnel(project, deps))
   results.push(checkWebhookSecret(project))
   results.push(...checkOma(project, deps))
+  results.push(...(await checkSkillMatrix(project, global, deps)))
 
   return results
 }
 
 export function computeExitCode(results: CheckResult[]): number {
-  return results.some((r) => r.critical && r.status === "fail") ? 1 : 0
+  return results.some((r) => r.critical && (r.status === "fail" || r.status === "unknown")) ? 1 : 0
 }
 
 export function summarize(results: CheckResult[]): { passed: number; total: number } {

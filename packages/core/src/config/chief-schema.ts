@@ -7,6 +7,7 @@ import { type ChiefOperatingPolicy, chiefOperatingPolicySchema } from "../chief/
 import { metricTargetSchema } from "../chief/organization-types"
 import { reportDeliveryPolicySchema } from "../chief/report-delivery-contract"
 import { toolEnvKeysSchema } from "../chief/tool-environment"
+import type { SkillCompatibilityPolicy } from "../oma/skill-matrix-schema"
 
 const price = z.number().finite().nonnegative().optional()
 export const chiefConfigSchema = z.strictObject({
@@ -91,6 +92,7 @@ export function chiefOperatingPolicy(
   config: ChiefConfig,
   readyActors: string[],
   automatic = true,
+  skillCompatibility?: SkillCompatibilityPolicy,
 ): ChiefOperatingPolicy {
   return chiefOperatingPolicySchema.parse({
     routing: config.routing
@@ -111,6 +113,7 @@ export function chiefOperatingPolicy(
     memory: config.memory ?? true,
     metricTargets: config.metric_targets,
     readyActors,
+    skillCompatibility,
   })
 }
 export function chiefCapturePolicy(config: ChiefConfig): CapturePolicy | undefined {

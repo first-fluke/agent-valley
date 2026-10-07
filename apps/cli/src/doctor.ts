@@ -10,8 +10,8 @@
  * they are either best-effort probes or don't block the orchestrator
  * from starting.
  *
- * No real agent/LLM spawn happens here — every check is a filesystem
- * read or a PATH scan, so `av doctor` is fast and free to run.
+ * No real agent/LLM call happens here. Configured OMA checks may run local
+ * --version or matrix plan commands; they never pass --live.
  *
  * NOT YET WIRED into the commander `program` in index.ts — that file is
  * being edited concurrently by another agent. Call

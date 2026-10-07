@@ -24,6 +24,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { GlobalConfig, ProjectConfig } from "@agent-valley/core/config/yaml-loader"
 import { loadGlobalConfig, loadProjectConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
+import type { SkillMatrixDeps } from "@agent-valley/core/oma/skill-matrix-adapter"
 import { resolveBinaryPath } from "@agent-valley/core/sessions/sandbox-binary"
 import { isSandboxExecAvailable } from "@agent-valley/core/sessions/sandbox-darwin"
 import { isBwrapAvailable } from "@agent-valley/core/sessions/sandbox-linux"
@@ -63,6 +64,8 @@ export interface DoctorDeps {
   loadProjectConfig: (projectRoot?: string) => ProjectConfig | null
   /** Read-only local CLI version probe; used only when strict OMA is configured. */
   getOmaVersion?: () => string | null
+  /** Local cached matrix reads/plans/version probes; injectable without model calls. */
+  skillMatrix?: SkillMatrixDeps
 }
 
 export function defaultDoctorDeps(): DoctorDeps {

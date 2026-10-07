@@ -231,7 +231,18 @@ export async function resolveOrderConfig(
     timeoutSec,
     maxRepairs,
     maxRounds,
-    operatingPolicy: chiefOperatingPolicy(chiefConfig, readyActors, !profile),
+    operatingPolicy: chiefOperatingPolicy(
+      chiefConfig,
+      readyActors,
+      !profile,
+      project?.oma?.skill_compatibility
+        ? {
+            reportPath: resolve(root, project.oma.skill_compatibility.report_path),
+            maxAgeHours: project.oma.skill_compatibility.max_age_hours,
+            mode: project.oma.skill_compatibility.mode,
+          }
+        : undefined,
+    ),
     capturePolicy: chiefCapturePolicy(chiefConfig),
     executionPolicy,
     metricSourcePolicy: chiefConfig.metric_sources,

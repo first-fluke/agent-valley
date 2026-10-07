@@ -34,18 +34,47 @@ function price(candidate: RoutingCandidate): number {
     : Number.POSITIVE_INFINITY
 }
 
-export function selectWorkActor(mission: Mission, actor: Persona, taskId?: string): { actor: Persona; reason: string } {
+export function workActorCandidates(
+  mission: Mission,
+  actor: Persona,
+  preserveExplicit = false,
+): Array<{ actorType: string; model?: string }> {
   const routing = mission.operatingPolicy?.routing
-  if (!routing || actor.id === mission.chiefId || (!mission.availableAgents && actor.model))
+  if (!routing || actor.id === mission.chiefId || (!mission.availableAgents && (actor.model || preserveExplicit)))
+    return [{ actorType: actor.agentType, model: actor.model }]
+  const ready = mission.operatingPolicy?.readyActors ?? mission.availableAgents ?? []
+  return routing.candidates.filter((candidate) => ready.includes(candidate.actorType))
+}
+
+export function selectWorkActor(
+  mission: Mission,
+  actor: Persona,
+  taskId?: string,
+  compatibleRoutes?: ReadonlySet<string>,
+): { actor: Persona; reason: string } {
+  const routing = mission.operatingPolicy?.routing
+  if (!routing || actor.id === mission.chiefId || (!mission.availableAgents && (actor.model || compatibleRoutes))) {
+    if (compatibleRoutes && !compatibleRoutes.has(routeKey({ actorType: actor.agentType, model: actor.model })))
+      throw new Error(
+        "Skill compatibility required: the configured Actor/model has no current passing evidence. Refresh oma.skill_compatibility.report_path in av.yaml; explicit Actors are not rerouted.",
+      )
     return { actor, reason: "Preserved the configured Actor and explicit model." }
+  }
   const ready = mission.operatingPolicy?.readyActors ?? mission.availableAgents ?? []
   const candidates = routing.candidates.filter((candidate) => ready.includes(candidate.actorType))
   if (!candidates.length)
     throw new Error(
       "No configured work routing candidate is ready. Install/login a candidate CLI or update chief.routing.candidates in av.yaml.",
     )
+  const compatible = compatibleRoutes
+    ? candidates.filter((candidate) => compatibleRoutes.has(routeKey(candidate)))
+    : candidates
+  if (!compatible.length)
+    throw new Error(
+      "Skill compatibility required: no ready work candidate has current passing installed evidence. Refresh oma.skill_compatibility.report_path in av.yaml with explicit models before retrying.",
+    )
   const evidence = routeEvidence(mission)
-  const eligible = candidates.filter((candidate) => {
+  const eligible = compatible.filter((candidate) => {
     const observed = evidence.find((item) => routeKey(item) === routeKey(candidate))
     return (
       !observed ||

@@ -1,6 +1,7 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
+import { omaConfigSchema } from "../oma/skill-matrix-schema"
 import {
   actorDefaultsSchema,
   actorTypeSchema,
@@ -144,7 +145,7 @@ export const projectConfigSchema = z
     tunnel: tunnelProjectSchema,
     verify: verifyProjectSchema,
     task: taskSchema.optional(),
-    oma: z.object({ mode: z.enum(["off", "strict"]).default("off") }).optional(),
+    oma: omaConfigSchema.optional(),
     chief: chiefConfigSchema.optional(),
   })
   .strict()
@@ -223,7 +224,7 @@ const mergedConfigSchema = z
     tunnel: tunnelMergedSchema,
     verify: verifyMergedSchema,
     task: resolvedTaskSchema.optional(),
-    oma: z.object({ mode: z.enum(["off", "strict"]) }).optional(),
+    oma: omaConfigSchema.optional(),
     chief: chiefConfigSchema.optional(),
   })
   .superRefine((cfg, ctx) => {
@@ -411,7 +412,7 @@ function mergeConfigs(
       project?.task?.kind === "analysis"
         ? { kind: "analysis" as const, reportPath: project.task.report_path }
         : { kind: "code" as const },
-    oma: { mode: project?.oma?.mode ?? "off" },
+    oma: project?.oma ?? { mode: "off" },
     chief: global?.chief || project?.chief ? mergeChiefConfig(global?.chief, project?.chief) : undefined,
   }
 }
