@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [2.3.0](https://github.com/first-fluke/agent-valley/compare/v2.2.1...v2.3.0) (2026-10-07)
+
+
+### Features
+
+* **oma:** gate work actors with cached skill audits ([f2b619a](https://github.com/first-fluke/agent-valley/commit/f2b619a0d2c00d303e63605bb1d95e5a91f72dd0))
+
 ## [2.2.1](https://github.com/first-fluke/agent-valley/compare/v2.2.0...v2.2.1) (2026-10-06)
 
 
