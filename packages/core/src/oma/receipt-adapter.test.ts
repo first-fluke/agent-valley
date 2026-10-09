@@ -1,12 +1,22 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { describe, expect, test, vi } from "vitest"
 import { projectConfigSchema } from "../config/yaml-loader"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import type { OmaLatestCliIO } from "./latest-cli"
 import {
   buildOmaGuidance,
+  createOmaEvidenceIO,
   OMA_RECEIPT_SCHEMA_VERSION,
   type OmaEvidenceIO,
   type OmaEvidenceRequest,
@@ -14,6 +24,7 @@ import {
   prepareOmaAttempt,
   validateOmaEvidence,
 } from "./receipt-adapter"
+import { omaReceiptDirectories } from "./receipt-storage"
 
 const RUN_ID = "11111111-1111-4111-8111-111111111111"
 const ATTEMPT_ID = "22222222-2222-4222-8222-222222222222"
@@ -117,6 +128,76 @@ describe("OMA receipt adapter", () => {
     expect(validateOmaEvidence(req, io)).toEqual({ ok: true, runId: RUN_ID })
     expect(calls.at(-1)).toEqual(["agent", "status", ATTEMPT_ID, "codex", "--project-root", req.workspace.path])
   })
+
+  test.each([undefined, "2", 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid matching sequence %j",
+    (sequence) => {
+      const req = request()
+      expect(validateOmaEvidence(req, fakeIO({ ...receipt(req), sequence }))).toMatchObject({
+        ok: false,
+        reason: "OMA receipt sequence is malformed",
+      })
+    },
+  )
+
+  test("rejects ambiguous matching sequence instead of depending on directory order", () => {
+    const req = request()
+    const secondId = "33333333-3333-4333-8333-333333333333"
+    const io = fakeIO(receipt(req))
+    io.listRunFiles = () => [`${RUN_ID}.json`, `${secondId}.json`]
+    io.readReceipt = (path) => JSON.stringify({ ...receipt(req), runId: basename(path, ".json") })
+    expect(validateOmaEvidence(req, io)).toMatchObject({ ok: false, reason: expect.stringContaining("ambiguous") })
+  })
+
+  test.each([false, true])(
+    "selects newest matching run independently of foreign-store evidence and listing order: %s",
+    (reverse) => {
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "av-oma-stores-")))
+      try {
+        const root = join(directory, "workspace")
+        mkdirSync(root)
+        const options = { env: { OMA_STATE_HOME: join(directory, "state") } }
+        const [central, legacy] = omaReceiptDirectories(root, options)
+        if (!central || !legacy) throw new Error("Fixture storage directories are missing")
+        mkdirSync(central, { recursive: true })
+        mkdirSync(legacy, { recursive: true })
+        const req = request()
+        req.workspace.path = root
+        const newestId = "33333333-3333-4333-8333-333333333333"
+        const unrelatedId = "44444444-4444-4444-8444-444444444444"
+        writeFileSync(join(central, `${RUN_ID}.json`), JSON.stringify({ ...receipt(req), sequence: 1 }))
+        writeFileSync(
+          join(legacy, `${unrelatedId}.json`),
+          JSON.stringify({ ...receipt(req), runId: unrelatedId, sessionId: "unrelated", sequence: 100 }),
+        )
+        const newestPath = join(central, `${newestId}.json`)
+        const newest = { ...receipt(req), runId: newestId, sequence: 2 }
+        writeFileSync(newestPath, JSON.stringify(newest))
+        const io = createOmaEvidenceIO(options)
+        io.runCli = fakeIO(null, "codex:completed", "17.0.0").runCli
+        const list = io.listRunFiles
+        io.listRunFiles = (workspace) => (reverse ? list(workspace).reverse() : list(workspace))
+        expect(validateOmaEvidence(req, io)).toEqual({ ok: true, runId: newestId })
+        const collisionPath = join(legacy, `${RUN_ID}.json`)
+        writeFileSync(collisionPath, JSON.stringify({ ...receipt(req), sequence: 3 }))
+        expect(validateOmaEvidence(req, io)).toMatchObject({
+          ok: false,
+          reason: expect.stringContaining("multiple stores"),
+        })
+        rmSync(collisionPath)
+        writeFileSync(newestPath, JSON.stringify({ ...newest, status: "failed" }))
+        expect(validateOmaEvidence(req, io).ok).toBe(false)
+        rmSync(newestPath)
+        symlinkSync(join(central, `${RUN_ID}.json`), newestPath)
+        expect(validateOmaEvidence(req, io)).toMatchObject({
+          ok: false,
+          reason: expect.stringContaining("regular file"),
+        })
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+  )
 
   test("accepts analysis only with a bound report artifact", () => {
     const req = request("analysis")

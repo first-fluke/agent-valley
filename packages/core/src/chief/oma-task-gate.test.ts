@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, test } from "vitest"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import type { OmaLatestCliIO } from "../oma/latest-cli"
 import {
+  createOmaEvidenceIO,
   OMA_RECEIPT_SCHEMA_VERSION,
   type OmaEvidenceRequest,
   parseOmaCliVersion,
@@ -15,7 +16,11 @@ import {
 } from "../oma/receipt-adapter"
 import { intermediateVerifyCommand } from "./runtime"
 
-const installed = spawnSync("oma", ["--version"], { encoding: "utf-8", timeout: 5_000 })
+const installed = spawnSync("oma", ["--version"], {
+  env: { ...process.env, OMA_SKIP_VERSION_CHECK: "1" },
+  encoding: "utf-8",
+  timeout: 5_000,
+})
 const available = installed.status === 0 && !!parseOmaCliVersion(installed.stdout)
 const required = !!process.env.CI && process.env.CI !== "false" && process.env.CI !== "0"
 const latestCliIO: OmaLatestCliIO = {
@@ -28,14 +33,14 @@ const latestCliIO: OmaLatestCliIO = {
 }
 const directories: string[] = []
 
-function execute(command: string, args: string[], cwd: string) {
-  const result = spawnSync(command, args, { cwd, encoding: "utf-8", timeout: 10_000 })
+function execute(command: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) {
+  const result = spawnSync(command, args, { cwd, env, encoding: "utf-8", timeout: 10_000 })
   if (result.error) throw result.error
   return result
 }
 
-function run(command: string, args: string[], cwd: string): string {
-  const result = execute(command, args, cwd)
+function run(command: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): string {
+  const result = execute(command, args, cwd, env)
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")}: ${result.stderr || result.stdout}`)
   return result.stdout
 }
@@ -46,8 +51,17 @@ function commit(root: string, message: string): void {
 }
 
 async function fixture() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "av-chief-oma-")))
-  directories.push(root)
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "av-chief-oma-")))
+  directories.push(directory)
+  const root = join(directory, "workspace")
+  const env = {
+    ...process.env,
+    OMA_STATE_HOME: join(directory, "state"),
+    OMA_PROFILE: "8",
+    OMA_SKIP_VERSION_CHECK: "1",
+  }
+  const io = createOmaEvidenceIO({ env })
+  mkdirSync(root)
   mkdirSync(join(root, ".agents/hooks/core"), { recursive: true })
   writeFileSync(
     join(root, ".agents/hooks/core/triggers.json"),
@@ -72,9 +86,14 @@ async function fixture() {
   }
   await prepareOmaAttempt(request, { latestCliIO })
   const begin = JSON.parse(
-    run("oma", ["agent", "begin", "engineer", attemptId, attemptId, "--project-root", root, "--workspace", root], root),
+    run(
+      "oma",
+      ["agent", "begin", "engineer", attemptId, attemptId, "--project-root", root, "--workspace", root],
+      root,
+      env,
+    ),
   ) as { runId: string; claimPath: string }
-  return { root, base, request, begin }
+  return { root, base, request, begin, env, io }
 }
 
 afterEach(() => {
@@ -90,23 +109,25 @@ describe.skipIf(!available && !required)(`chief intermediate OMA v${OMA_RECEIPT_
       )
   })
   test("accepts a committed partial task before a downstream goal artifact exists", async () => {
-    const { root, base, request, begin } = await fixture()
+    const { root, base, request, begin, env, io } = await fixture()
     expect(request.verifyCommand).toBe(`git diff --check ${base} --`)
     writeFileSync(join(root, "input.txt"), "First stage implemented\n")
     commit(root, "Deliver first stage")
     expect(execute("sh", ["-c", "test -s downstream.txt"], root).status).toBe(1)
-    const checks = JSON.parse(run("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root))
+    const checks = JSON.parse(
+      run("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root, env),
+    )
     expect(checks).toMatchObject([{ checkId: "valley-verify", exitCode: 0 }])
     writeFileSync(
       begin.claimPath,
       JSON.stringify({ status: "completed", changedFiles: ["input.txt"], unresolved: [], artifacts: [] }),
     )
     const receipt = JSON.parse(
-      run("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root),
+      run("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root, env),
     )
     expect(receipt).toMatchObject({ status: "completed", exitCode: 0 })
     request.attempt.finishedAt = new Date().toISOString()
-    expect(validateOmaEvidence(request)).toEqual({ ok: true, runId: begin.runId })
+    expect(validateOmaEvidence(request, io)).toEqual({ ok: true, runId: begin.runId })
     expect(execute("sh", ["-c", "test -s downstream.txt"], root).status).toBe(1)
   }, 25_000)
 
@@ -116,25 +137,25 @@ describe.skipIf(!available && !required)(`chief intermediate OMA v${OMA_RECEIPT_
   ])(
     "rejects committed %s using the saved task baseline",
     async (_name, content) => {
-      const { root, request, begin } = await fixture()
+      const { root, request, begin, env, io } = await fixture()
       writeFileSync(join(root, "input.txt"), content)
       commit(root, "Commit broken first stage")
       // An unbounded check would inspect an empty working diff after the required commit.
       expect(execute("git", ["diff", "--check"], root).status).toBe(0)
       expect(execute("sh", ["-c", request.verifyCommand], root).status).not.toBe(0)
-      execute("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root)
-      const { checks } = JSON.parse(
-        readFileSync(join(root, ".agents/state/agent-runs", `${begin.runId}.json`), "utf8"),
-      ) as { checks: { checkId: string; exitCode: number }[] }
+      execute("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root, env)
+      const { checks } = JSON.parse(readFileSync(begin.claimPath.replace(/\.claim\.json$/, ".json"), "utf8")) as {
+        checks: { checkId: string; exitCode: number }[]
+      }
       expect(checks[0]?.checkId).toBe("valley-verify")
       expect(checks[0]?.exitCode).not.toBe(0)
       writeFileSync(
         begin.claimPath,
         JSON.stringify({ status: "completed", changedFiles: ["input.txt"], unresolved: [], artifacts: [] }),
       )
-      execute("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root)
+      execute("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root, env)
       request.attempt.finishedAt = new Date().toISOString()
-      expect(validateOmaEvidence(request).ok).toBe(false)
+      expect(validateOmaEvidence(request, io).ok).toBe(false)
     },
     25_000,
   )

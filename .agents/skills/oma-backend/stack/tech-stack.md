@@ -5,7 +5,7 @@
 - **ORM**: SQLAlchemy 2.0 (async)
 - **Validation**: Pydantic v2
 - **Database**: PostgreSQL 16+, Redis 7+
-- **Auth**: python-jose (JWT), passlib (bcrypt)
+- **Auth**: python-jose (JWT), passlib[argon2] (Argon2id; bcrypt verify for legacy hashes)
 - **Testing**: pytest, httpx (async test client)
 - **Migrations**: Alembic
 
@@ -13,7 +13,7 @@
 - **Framework**: Express.js, NestJS, Hono
 - **ORM**: Prisma, Drizzle
 - **Validation**: Zod
-- **Auth**: jsonwebtoken, bcrypt
+- **Auth**: jsonwebtoken, argon2 (node-argon2)
 - **Testing**: Jest, Supertest
 
 ## Architecture
@@ -27,7 +27,7 @@ backend/
 ```
 
 ## Security Requirements
-- Password hashing: bcrypt (cost factor 10-12)
+- Password hashing: Argon2id (bcrypt cost 10-12 acceptable for legacy compatibility)
 - JWT: 15min access tokens, 7 day refresh tokens
 - Rate limiting on auth endpoints
 - Input validation with Pydantic/Zod
@@ -37,7 +37,9 @@ backend/
 - Cross-ORM operational rules and official vendor references: `resources/orm-reference.md`
 - Primary references covered there: Prisma, SQLAlchemy, TypeORM, Sequelize, Hibernate
 
-## Serena MCP Shortcuts
+## Optional Serena examples
+
+These examples apply only when Serena is the configured provider and its tools are available. Otherwise use the project-selected provider or native search under the shared code-intelligence contract.
 - `find_symbol("create_todo")`: Locate existing function
 - `get_symbols_overview("app/api")`: List all endpoints
 - `find_referencing_symbols("User")`: Find all usages of a model

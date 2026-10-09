@@ -1,16 +1,16 @@
 /** OMA v1 receipt adapter. Strict mode verifies the installed CLI's actual contract. */
 import { spawnSync } from "node:child_process"
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, lstatSync, readFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
-import { isAbsolute, join, relative, resolve, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { getCachedTriggerTable, routeIssue } from "../config/workflow-router"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { ensureLatestOmaCli, type OmaLatestCliIO, parseOmaCliVersion } from "./latest-cli"
+import { listOmaRunFiles, OMA_RUN_ID, type OmaReceiptStorageOptions, resolveOmaReceiptPath } from "./receipt-storage"
 
 export { parseOmaCliVersion } from "./latest-cli"
 
 export const OMA_RECEIPT_SCHEMA_VERSION = 1
-const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HASH = /^[a-f0-9]{64}$/
 
 export interface OmaEvidenceRequest {
@@ -31,24 +31,34 @@ export interface OmaEvidenceResult {
 
 export interface OmaEvidenceIO {
   listRunFiles: (workspacePath: string) => string[]
+  resolveRunFile?: (workspacePath: string, entry: string) => string
   readReceipt: (path: string) => string
   runCli: (args: string[], cwd: string) => { exitCode: number | null; stdout: string }
 }
 
-const defaultIO: OmaEvidenceIO = {
-  listRunFiles: (workspacePath) => {
-    const dir = join(workspacePath, ".agents", "state", "agent-runs")
-    return readdirSync(dir).filter((name) => RUN_ID.test(name.slice(0, -5)) && name.endsWith(".json"))
-  },
-  readReceipt: (path) => {
-    if (!lstatSync(path).isFile()) throw new Error("Receipt is not a regular file")
-    return readFileSync(path, "utf-8")
-  },
-  runCli: (args, cwd) => {
-    const result = spawnSync("oma", args, { cwd, encoding: "utf-8", timeout: 15_000, maxBuffer: 1024 * 1024 })
-    if (result.error) throw result.error
-    return { exitCode: result.status, stdout: result.stdout }
-  },
+export function createOmaEvidenceIO(options: OmaReceiptStorageOptions = {}): OmaEvidenceIO {
+  const env: NodeJS.ProcessEnv = { ...(options.env ?? process.env), OMA_SKIP_VERSION_CHECK: "1" }
+  if (options.home !== undefined && !env.OMA_HOME) env.OMA_HOME = join(options.home, ".oma")
+  const storage = { ...options, env }
+  return {
+    listRunFiles: (workspacePath) => listOmaRunFiles(workspacePath, storage),
+    resolveRunFile: (workspacePath, entry) => resolveOmaReceiptPath(workspacePath, entry, storage),
+    readReceipt: (path) => {
+      if (!lstatSync(path).isFile()) throw new Error("Receipt is not a regular file")
+      return readFileSync(path, "utf-8")
+    },
+    runCli: (args, cwd) => {
+      const result = spawnSync("oma", args, {
+        cwd,
+        env,
+        encoding: "utf-8",
+        timeout: 15_000,
+        maxBuffer: 1024 * 1024,
+      })
+      if (result.error) throw result.error
+      return { exitCode: result.status, stdout: result.stdout }
+    },
+  }
 }
 
 function fail(reason: string): OmaEvidenceResult {
@@ -145,7 +155,10 @@ export function buildOmaGuidance(request: Omit<OmaEvidenceRequest, "kind">): str
 /** Verify identity and check receipts, then ask OMA's read-only status command
  * to validate current workspace/contract/artifact hashes. A receipt file by
  * itself is never treated as proof. */
-export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidenceIO = defaultIO): OmaEvidenceResult {
+export function validateOmaEvidence(
+  request: OmaEvidenceRequest,
+  io: OmaEvidenceIO = createOmaEvidenceIO(),
+): OmaEvidenceResult {
   const root = resolve(request.workspace.path)
   if (!request.verifyCommand.trim()) return fail("Strict OMA mode has no configured verify command")
   let cliVersion: string | null
@@ -162,19 +175,30 @@ export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidence
   }
 
   let receipts: Record<string, unknown>[]
+  const locations = new Map<Record<string, unknown>, string>()
   try {
-    receipts = io.listRunFiles(root).map((name) => {
-      if (!RUN_ID.test(name.slice(0, -5)) || !name.endsWith(".json")) throw new Error("Invalid receipt filename")
-      const parsed: unknown = JSON.parse(io.readReceipt(join(root, ".agents", "state", "agent-runs", name)))
+    receipts = io.listRunFiles(root).map((entry) => {
+      const name = basename(entry)
+      const path = (io.resolveRunFile ?? resolveOmaReceiptPath)(root, entry)
+      if (!OMA_RUN_ID.test(name.slice(0, -5)) || !name.endsWith(".json")) throw new Error("Invalid receipt filename")
+      const parsed: unknown = JSON.parse(io.readReceipt(path))
       if (!isRecord(parsed) || parsed.runId !== name.slice(0, -5)) throw new Error("Malformed run receipt")
+      locations.set(parsed, dirname(path))
       return parsed
     })
   } catch (err) {
     return fail(`Missing or malformed OMA receipt: ${String(err)}`)
   }
-  const forAttempt = receipts
-    .filter((run) => run.sessionId === request.attempt.id && run.agentId === request.agentId)
-    .sort((a, b) => Number(a.sequence) - Number(b.sequence))
+  const forAttempt = receipts.filter((run) => run.sessionId === request.attempt.id && run.agentId === request.agentId)
+  if (forAttempt.some((run) => !Number.isSafeInteger(run.sequence) || Number(run.sequence) < 1))
+    return fail("OMA receipt sequence is malformed")
+  if (new Set(forAttempt.map((run) => run.sequence)).size !== forAttempt.length)
+    return fail("OMA receipt sequence is ambiguous across matching runs")
+  if (new Set(forAttempt.map((run) => locations.get(run))).size > 1)
+    return fail(
+      "Matching OMA receipts span multiple stores; generate current evidence in the active CLI's selected project/profile",
+    )
+  forAttempt.sort((a, b) => Number(a.sequence) - Number(b.sequence))
   const run = forAttempt.at(-1)
   if (!run) return fail("No OMA receipt is bound to this Valley attempt")
   if (run.schemaVersion !== OMA_RECEIPT_SCHEMA_VERSION) {
@@ -182,7 +206,7 @@ export function validateOmaEvidence(request: OmaEvidenceRequest, io: OmaEvidence
       `OMA CLI ${cliVersion} returned an unsupported receipt schema. AV requires agent-run schema v${OMA_RECEIPT_SCHEMA_VERSION}; update AV and OMA (npm install -g oh-my-agent@latest), then generate and verify a compatible receipt.`,
     )
   }
-  if (run.taskId !== request.attempt.id || !RUN_ID.test(String(run.runId))) {
+  if (run.taskId !== request.attempt.id || !OMA_RUN_ID.test(String(run.runId))) {
     return fail("OMA receipt task identity is incompatible")
   }
   if (run.workspace !== root || run.artifactRoot !== root || run.status !== "completed" || run.exitCode !== 0) {

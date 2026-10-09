@@ -115,7 +115,9 @@ async def get_current_user(
 ```python
 from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# argon2 (Argon2id) is the default; bcrypt stays verifiable so legacy hashes
+# re-hash to argon2 transparently on next successful login
+pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
