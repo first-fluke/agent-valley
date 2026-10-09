@@ -6,6 +6,18 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [2.3.1](https://github.com/first-fluke/agent-valley/compare/v2.3.0...v2.3.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **oma:** update to 17 and support centralized receipts ([68606b4](https://github.com/first-fluke/agent-valley/commit/68606b44956593b745ccbe47049b0e53608b2b77))
+
+
+### Tests
+
+* **installer:** use the probed python for pty fixtures ([4e64175](https://github.com/first-fluke/agent-valley/commit/4e641750851287da0b37cc2e1a3b428139c5c39b))
+
 ## [2.3.0](https://github.com/first-fluke/agent-valley/compare/v2.2.1...v2.3.0) (2026-10-07)
 
 

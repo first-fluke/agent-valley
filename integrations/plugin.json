@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "av",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Delegate repository goals to Agent Valley and inspect mission progress and verification evidence.",
   "author": {
     "name": "Agent Valley"
