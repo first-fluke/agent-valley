@@ -732,10 +732,10 @@ INSTALLER
 })
 
 test("curl-style piping reconnects the setup wizard to the terminal", () => {
-  const python = spawnSync("python3", ["-c", "import pty"], { encoding: "utf8" })
+  const python = spawnSync("python3", ["-c", "import pty, sys; print(sys.executable)"], { encoding: "utf8" })
   if (python.status !== 0) return
   const result = spawnSync(
-    "python3",
+    python.stdout.trim(),
     [
       "-c",
       `
