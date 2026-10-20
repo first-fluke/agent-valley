@@ -135,7 +135,7 @@ export function latestWorkRun(mission: Mission, taskId: string) {
 export function recordTaskVerdict(mission: Mission, taskId: string, passed: boolean, evidence: string): void {
   const run = latestWorkRun(mission, taskId)
   const decision = mission.operations?.reviewDecisions.findLast(
-    (entry) => entry.taskId === taskId && (!run || entry.runId === run.runId),
+    (entry) => !entry.gateId && entry.taskId === taskId && (!run || entry.runId === run.runId),
   )
   const reviewRun = mission.operations?.runs.findLast((entry) => entry.stage === "review" && entry.taskId === taskId)
   if (decision) decision.outcome = reviewRun?.outcome === "failed" ? "failed" : passed ? "passed" : "rejected"

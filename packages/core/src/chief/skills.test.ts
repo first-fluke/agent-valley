@@ -208,6 +208,70 @@ describe("mission skill bodies and persisted catalog boundaries", () => {
 })
 
 describe("installed harness preparation", () => {
+  it("copies installed agent definitions and their resources while preserving existing target definitions", async () => {
+    await install("oma-backend")
+    const agents = join(workspace, ".agents/agents")
+    await mkdir(join(agents, "resources"), { recursive: true })
+    await writeFile(join(agents, "backend.md"), "Installed backend definition.\n")
+    await writeFile(join(agents, "qa.md"), "Installed QA definition.\n")
+    await writeFile(join(agents, "resources/review.md"), "Agent reference bytes.\n")
+    const targetAgents = join(outside, ".agents/agents")
+    await mkdir(targetAgents, { recursive: true })
+    await writeFile(join(targetAgents, "backend.md"), "Committed target definition.\n")
+
+    await prepareMissionSkills(workspace, outside)
+    expect(await readFile(join(targetAgents, "backend.md"), "utf8")).toBe("Committed target definition.\n")
+    expect(await readFile(join(targetAgents, "qa.md"), "utf8")).toBe("Installed QA definition.\n")
+    expect(await readFile(join(targetAgents, "resources/review.md"), "utf8")).toBe("Agent reference bytes.\n")
+    expect(await readFile(join(agents, "backend.md"), "utf8")).toBe("Installed backend definition.\n")
+    expect((await discoverMissionSkills(outside)).map((skill) => skill.name)).toEqual(["oma-backend"])
+    await prepareMissionSkills(workspace, outside)
+    await prepareMissionSkills(workspace, workspace)
+    expect(await readFile(join(targetAgents, "backend.md"), "utf8")).toBe("Committed target definition.\n")
+  })
+
+  it("prepares agent definitions even when no skill directory is installed", async () => {
+    await mkdir(join(workspace, ".agents/agents"), { recursive: true })
+    await writeFile(join(workspace, ".agents/agents/backend.md"), "Backend definition.\n")
+    await prepareMissionSkills(workspace, outside)
+    expect(await readFile(join(outside, ".agents/agents/backend.md"), "utf8")).toBe("Backend definition.\n")
+    expect(await discoverMissionSkills(outside)).toEqual([])
+  })
+
+  it("omits agent secrets and escaping source links and rejects an escaping target agent directory", async () => {
+    const agents = join(workspace, ".agents/agents")
+    await mkdir(agents, { recursive: true })
+    await writeFile(join(agents, "backend.md"), "Backend definition.\n")
+    await writeFile(join(agents, ".env.local"), "Synthetic private configuration.")
+    await mkdir(join(agents, "results"))
+    await writeFile(join(agents, "results/generated.md"), "Generated output.")
+    await writeFile(join(workspace, "external.md"), "Outside agent tree.")
+    await mkdir(join(workspace, "external-agents"))
+    await writeFile(join(workspace, "external-agents/qa.md"), "Outside agent tree.")
+    await symlink(join(workspace, "external.md"), join(agents, "external.md"))
+    await symlink(join(workspace, "external-agents"), join(agents, "external-agents"))
+    await prepareMissionSkills(workspace, outside)
+    expect(await readFile(join(outside, ".agents/agents/backend.md"), "utf8")).toBe("Backend definition.\n")
+    for (const name of [".env.local", "results/generated.md", "external.md", "external-agents/qa.md"])
+      await expect(readFile(join(outside, ".agents/agents", name))).rejects.toThrow()
+
+    await rm(join(outside, ".agents/agents"), { recursive: true })
+    await symlink(agents, join(outside, ".agents/agents"))
+    await expect(prepareMissionSkills(workspace, outside)).rejects.toThrow("agent directory escapes")
+    expect(await readFile(join(agents, "backend.md"), "utf8")).toBe("Backend definition.\n")
+  })
+
+  it("shares the resource byte limit between skills and agent definitions", async () => {
+    const skill = await install("oma-safe")
+    await truncate(skill, 10_000_000)
+    await mkdir(join(workspace, ".agents/agents"), { recursive: true })
+    const agent = join(workspace, ".agents/agents/backend.md")
+    await writeFile(agent, "")
+    await truncate(agent, 10_000_001)
+    await expect(prepareMissionSkills(workspace, outside)).rejects.toThrow("exceed 20 MB")
+    await expect(readFile(join(outside, ".agents/agents/backend.md"))).rejects.toThrow()
+  })
+
   it("copies uncommitted installed skills and shared resources verbatim, preserving existing worktree files", async () => {
     const path = await install("oma-custom")
     await mkdir(join(workspace, ".agents/skills/_shared/core"), { recursive: true })

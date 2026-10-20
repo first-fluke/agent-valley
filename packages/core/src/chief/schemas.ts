@@ -32,9 +32,11 @@ import { executionPolicySchema, executionStateSchema } from "./execution"
 import { validateFinalReview } from "./goal-evidence"
 import { CMO_ROLE } from "./marketing-lead"
 import { metricSourcePolicySchema } from "./metric-source-policy"
+import { requiresOmaActor } from "./oma-actor"
 import { chiefOperatingPolicySchema, chiefOperationsSchema } from "./operations"
 import { organizationContextSchema } from "./organization"
 import { chiefReportSchema } from "./reports"
+import { gateReviewSchema } from "./review-gates"
 import { CTO_ROLE } from "./technical-lead"
 import { toolEnvKeysSchema } from "./tool-environment"
 import type { ChiefPlan, GoalBrief, Mission, Persona, Review } from "./types"
@@ -123,6 +125,8 @@ export const missionSchema = z
     oma: z.boolean().optional(),
     plan: planSchema.optional(),
     tasks: z.array(taskStateSchema).max(12),
+    gateReviews: z.array(gateReviewSchema).max(96).optional(),
+    gateReviewRefreshes: z.number().int().min(0).max(11).optional(),
     finalReview: reviewSchema.optional(),
     verification: verificationSchema.optional(),
     history: z.array(z.strictObject({ at: text, stage: text, message: text, taskId: id.optional() })),
@@ -180,8 +184,11 @@ export function parsePlanningResponse(
   goalBrief?: GoalBrief
   verificationContract?: import("./verification-contract").GoalVerificationContract
 } {
-  if (!mission.availableAgents && !mission.supervision)
-    return { personas: mission.personas, plan: parsePlan(source, mission.personas) }
+  if (!mission.availableAgents && !mission.supervision) {
+    const plan = parsePlan(source, mission.personas)
+    validateOmaAssignments(plan, mission.personas, mission)
+    return { personas: mission.personas, plan }
+  }
   if (source.length > 8_000)
     throw new Error(
       "Planning response exceeds 8,000 characters. Return a concise roster and plan within the transport limit.",
@@ -220,6 +227,7 @@ export function parsePlanningResponse(
   if (mission.availableAgents) validateAutomaticPersonas(personas, mission, true)
   const plan: ChiefPlan = { tasks: response.tasks }
   validatePlan(plan, personas)
+  validateOmaAssignments(plan, personas, mission)
   const chief = mission.personas.find((persona) => persona.id === mission.chiefId)
   const generatedChief = personas.find((persona) => persona.id === mission.chiefId)
   if (chief?.model && generatedChief) generatedChief.model = chief.model
@@ -230,6 +238,17 @@ export function parsePlanningResponse(
     plan,
     ...(response.goalBrief ? { goalBrief: response.goalBrief } : {}),
     ...(response.verificationContract ? { verificationContract: response.verificationContract } : {}),
+  }
+}
+
+function validateOmaAssignments(plan: ChiefPlan, personas: Persona[], mission: Mission): void {
+  if (!requiresOmaActor(mission)) return
+  for (const task of plan.tasks) {
+    const actor = personas.find((entry) => entry.id === task.personaId)
+    if (!actor?.skills.length)
+      throw new Error(
+        `Task ${task.id} requires an OMA-skilled Actor. Assign a relevant installed skill to Actor ${task.personaId} before dispatch.`,
+      )
   }
 }
 
@@ -393,6 +412,22 @@ export function validateMission(input: Mission): Mission {
   }
   if (!mission.plan && mission.tasks.length > 0)
     throw new Error("Mission has task state without a plan. Restore its saved plan.")
+  const gatePairs = new Set<string>()
+  for (const entry of mission.gateReviews ?? []) {
+    const pair = `${entry.gateId}:${entry.taskId}`
+    const task = mission.plan?.tasks.find((task) => task.id === entry.taskId)
+    if (
+      gatePairs.has(pair) ||
+      !mission.operatingPolicy?.reviewGates?.some((gate) => gate.id === entry.gateId) ||
+      !task ||
+      !personas.has(entry.reviewerId) ||
+      entry.reviewerId === task.personaId
+    )
+      throw new Error(
+        "Saved review gate evidence does not match its configured gate, task or independent reviewer. Restore the mission checkpoint.",
+      )
+    gatePairs.add(pair)
+  }
   if (mission.plan) {
     validatePlan(mission.plan, mission.personas)
     const tasks = new Map(mission.tasks.map((task) => [task.id, task]))

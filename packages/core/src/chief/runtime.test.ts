@@ -125,6 +125,11 @@ describe("chief runtime boundaries", () => {
       join(root, ".agents/skills/oma-test-skill/SKILL.md"),
       "---\nname: oma-test-skill\ndescription: Fixture check\n---\nFixture body",
     )
+    await mkdir(join(root, ".agents/agents"), { recursive: true })
+    await writeFile(
+      join(root, ".agents/agents/fixture.md"),
+      "---\nname: fixture\nskills: [oma-test-skill]\n---\nApply the fixture skill.",
+    )
     worker.skills = ["oma-test-skill"]
     worker.model = "measured"
     mission.operatingPolicy = {
@@ -182,6 +187,11 @@ describe("chief runtime boundaries", () => {
     await writeFile(
       join(task, ".agents/skills/oma-test-skill/SKILL.md"),
       "---\nname: oma-test-skill\ndescription: Fixture check\n---\nParallel body",
+    )
+    await mkdir(join(task, ".agents/agents"), { recursive: true })
+    await writeFile(
+      join(task, ".agents/agents/fixture.md"),
+      "---\nname: fixture\nskills: [oma-test-skill]\n---\nApply the fixture skill.",
     )
     const output = await runtime.ports().runAgent(worker, "Work", mission, "work", {
       workspace: { ...mission.workspace, path: task },

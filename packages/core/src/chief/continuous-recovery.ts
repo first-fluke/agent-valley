@@ -1,6 +1,7 @@
 import { containersHealthy } from "./container-observation-state"
 import { assertExecutionBudget, chiefRecoveryStopped, MissionPause } from "./execution"
 import { validateFinalReview } from "./goal-evidence"
+import { reviewGatesAreCurrent } from "./review-gates"
 import { validateMission } from "./schemas"
 import type { Mission } from "./types"
 
@@ -25,6 +26,7 @@ export function verifiedMissionEvidence(mission: Mission): boolean {
     !mission.verification?.ok ||
     !mission.fingerprint?.trim() ||
     mission.verification.fingerprint !== mission.fingerprint ||
+    !reviewGatesAreCurrent(mission, mission.fingerprint) ||
     mission.tasks.length !== plan.tasks.length ||
     review.criteria?.some((criterion) => !criterion.passed || !criterion.evidence.trim()) ||
     !mission.tasks.every(

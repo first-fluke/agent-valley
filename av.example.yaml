@@ -182,6 +182,10 @@ verify:
 #     auto_resume: true            # Foreground supervisor resumes scheduled retries
 #     # max_estimated_cost_usd: 10 # Configured-price estimate; unknown usage pauses calls
 #   review_vendor: prefer
+#   # Optional extra checks; each gate reviews every task before verification.
+#   # review_gates:
+#   #   - id: security
+#   #     instructions: Inspect changed code for authorization flaws and secret exposure.
 #   memory: true
 #   # metric_sources and metric_targets require real configured observations.
 #   # See the guide for stripe-revenue, http-json and json-file adapter settings.

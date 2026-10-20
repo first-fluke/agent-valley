@@ -1,4 +1,5 @@
 import { actorData, actorPlanData, actorTaskData } from "./actor-contract"
+import { requiresOmaActor } from "./oma-actor"
 import { operationsEvidence } from "./operations-report"
 import { finalCriteria } from "./schemas"
 import type { ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
@@ -68,6 +69,11 @@ export function planPrompt(mission: Mission): string {
     "Use 1-12 tasks with unique ids, concrete instructions, nonempty acceptance criteria, and acyclic dependencies.",
     "Keep the complete JSON response under 8,000 characters; use concise tasks so it fits the Actor transport.",
     "Every Actor must produce or update a material file deliverable, including research reports. Plan intermediate checks.",
+    ...(requiresOmaActor(mission)
+      ? [
+          "OMA is required: every task's Actor must have at least one relevant installed OMA skill. The runtime applies a matching installed OMA agent definition and all its declared skills before native execution. Empty skill assignments or missing agent definitions block dispatch; select a suitable skilled Actor rather than bypassing OMA. Additional native subagent delegation remains available when the assignment needs it.",
+        ]
+      : []),
     mission.verificationMode === "chief"
       ? 'Design verificationContract: {"version":1,"criteria":[{"criterion":"exact goalBrief success criterion","checks":[{"kind":"file","path":"report.md","minBytes":200,"contains":["required finding"]}]}]}. Cover every success criterion exactly once. File checks inspect actual relative regular files; JSON checks use {kind:"json",path:"package.json",pointer:"/engines/node",equals:">=26"}. Behavioral goals need explicit relevant tests: {kind:"command",program:"node",args:["node_modules/vitest/vitest.mjs","run","tests/login.test.ts"]}, or node --test / bun test with explicit test paths. No shell, scripts, build, install, publishing, absolute paths, globs or arbitrary flags. A report claiming success is insufficient for a behavioral criterion. Keep checks immutable during recovery; assign workers the needed test/report deliverables.'
       : "Verification command is fixed by the operator; do not propose or modify shell commands in the plan schema.",
@@ -122,6 +128,9 @@ export function workPrompt(mission: Mission, task: ChiefTask, state: ChiefTaskSt
       attempt: state.attempts,
       dependencies,
       repairFindings: state.review?.findings ?? [],
+      gateReviewFindings: mission.gateReviews
+        ?.filter((entry) => entry.taskId === task.id && !entry.review.passed)
+        .map(({ gateId, review }) => ({ gateId, findings: review.findings })),
       finalReviewFindings: mission.finalReview?.findings ?? [],
       verificationFailure: mission.verification?.ok === false ? mission.verification.output : undefined,
     })}`,
@@ -161,6 +170,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
       previousReview: task ? state?.review : mission.finalReview,
       verification: mission.verification,
       goalVerification: mission.goalVerification,
+      gateReviews: mission.gateReviews,
     })}`,
   ].join("\n\n")
 }
@@ -187,6 +197,7 @@ export function supervisePrompt(mission: Mission): string {
       taskEvidence: mission.tasks.map((state) => ({ ...state, output: state.output?.slice(-2_000) })),
       verification: mission.verification,
       finalReview: mission.finalReview,
+      gateReviews: mission.gateReviews,
       budget: {
         rounds: mission.supervision?.rounds,
         maxRounds: mission.supervision?.maxRounds,

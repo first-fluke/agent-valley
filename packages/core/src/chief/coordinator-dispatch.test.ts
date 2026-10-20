@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { coordinate } from "./coordinator"
 import { CheckpointError, createMissionRun } from "./coordinator-run"
 import { executionPolicySchema, executionState, MissionPause } from "./execution"
@@ -24,6 +24,52 @@ function externalFixture() {
 }
 
 describe("external dispatch checkpoints", () => {
+  it("rejects missing OMA prerequisites before spending a run or changing an external effect", async () => {
+    const value = externalFixture()
+    value.ports.prepareWork = vi.fn(async () => {
+      throw new Error("OMA agent profile is missing. Restore the installed profile before resuming.")
+    })
+    const run = createMissionRun(
+      value.mission,
+      value.ports,
+      () => {},
+      () => {},
+    )
+    await expect(run(value.actor, "Publish authorized artifact", "work", task.id)).rejects.toThrow("OMA agent")
+    expect(value.runAgent).not.toHaveBeenCalled()
+    expect(value.mission.execution?.runsStarted ?? 0).toBe(0)
+    expect(value.mission.tasks[0]?.effectState).toBe("not-started")
+    expect(value.snapshots).toHaveLength(0)
+  })
+
+  it("passes the preflight input to the same native dispatch after persisting its reservation", async () => {
+    const value = externalFixture()
+    const prepared = {
+      agentId: "backend-engineer",
+      skills: ["oma-backend"],
+      guidance: "Bound input",
+      digest: "a".repeat(64),
+    }
+    value.ports.prepareWork = vi.fn(async () => {
+      expect(value.mission.tasks[0]?.effectState).toBe("not-started")
+      expect(value.mission.execution?.runsStarted ?? 0).toBe(0)
+      return prepared
+    })
+    const run = createMissionRun(
+      value.mission,
+      value.ports,
+      () => {},
+      () => {},
+    )
+    await run(value.actor, "Publish authorized artifact", "work", task.id)
+    expect(value.runAgent).toHaveBeenCalledWith(value.actor, expect.any(String), value.mission, "work", {
+      taskId: task.id,
+      omaActor: prepared,
+    })
+    expect(value.mission.execution?.runsStarted).toBe(1)
+    expect(value.mission.tasks[0]?.effectState).toBe("completed")
+  })
+
   it("does not mark an external effect uncertain when its Actor budget prevents invocation", async () => {
     const value = externalFixture()
     if (value.mission.executionPolicy) value.mission.executionPolicy.maxRuns = 1

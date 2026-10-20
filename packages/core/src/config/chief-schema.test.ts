@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { chiefOperatingPolicySchema, operatingRunSchema } from "../chief/operations"
+import { gateReviewSchema } from "../chief/review-gates"
 import { chiefCapturePolicy, chiefConfigSchema, chiefOperatingPolicy, mergeChiefConfig } from "./chief-schema"
 import { globalConfigSchema, projectConfigSchema } from "./yaml-loader"
 
@@ -49,6 +51,88 @@ describe("Chief policy configuration", () => {
       }),
     ).toThrow("unique")
     expect(() => chiefConfigSchema.parse({ capture: { enabled: true } })).toThrow("target_url")
+  })
+
+  it("keeps review gates unset unless configured and allows project settings to replace inherited gates", () => {
+    const unset = chiefOperatingPolicy(chiefConfigSchema.parse({}), ["codex"])
+    expect(unset.reviewGates).toBeUndefined()
+    expect(JSON.parse(JSON.stringify(unset))).not.toHaveProperty("reviewGates")
+
+    const global = globalConfigSchema.parse({
+      chief: { review_gates: [{ id: "security", instructions: "Check authorization and secret handling." }] },
+    })
+    const inherited = chiefOperatingPolicy(mergeChiefConfig(global.chief, { memory: false }), ["codex"])
+    expect(inherited.reviewGates).toEqual(global.chief?.review_gates)
+    const project = projectConfigSchema.parse({ chief: { review_gates: [] } })
+    expect(chiefOperatingPolicy(mergeChiefConfig(global.chief, project.chief), ["codex"]).reviewGates).toEqual([])
+  })
+
+  it("maps configured review gates into a serializable immutable operating policy", () => {
+    const project = projectConfigSchema.parse({
+      chief: {
+        review_gates: [
+          { id: "security", instructions: "  Check authorization and secret handling.  " },
+          { id: "accessibility", instructions: "Check keyboard access." },
+        ],
+      },
+    })
+    const policy = chiefOperatingPolicy(mergeChiefConfig(undefined, project.chief), ["codex", "claude"])
+    expect(policy.reviewGates).toEqual([
+      { id: "security", instructions: "Check authorization and secret handling." },
+      { id: "accessibility", instructions: "Check keyboard access." },
+    ])
+    expect(chiefOperatingPolicySchema.parse(JSON.parse(JSON.stringify(policy)))).toEqual(policy)
+  })
+
+  it("accepts at most eight review gates with unique bounded IDs", () => {
+    const gates = Array.from({ length: 8 }, (_, index) => ({
+      id: `gate-${index}`,
+      instructions: "Inspect the result.",
+    }))
+    expect(chiefConfigSchema.parse({ review_gates: gates }).review_gates).toHaveLength(8)
+    expect(() =>
+      chiefConfigSchema.parse({ review_gates: [...gates, { id: "ninth", instructions: "Inspect." }] }),
+    ).toThrow()
+    expect(() => chiefConfigSchema.parse({ review_gates: [gates[0], gates[0]] })).toThrow("unique")
+    expect(() =>
+      chiefOperatingPolicySchema.parse({ reviewVendor: "prefer", memory: true, reviewGates: [gates[0], gates[0]] }),
+    ).toThrow("unique")
+    expect(
+      chiefConfigSchema.parse({ review_gates: [{ id: "a".repeat(64), instructions: "Inspect." }] }).review_gates,
+    ).toHaveLength(1)
+  })
+
+  it.each(["", "-security", "security/review", "security review", "a".repeat(65)])(
+    "rejects an invalid review gate ID %j at the configuration boundary",
+    (id) => {
+      const parsed = projectConfigSchema.safeParse({ chief: { review_gates: [{ id, instructions: "Inspect." }] } })
+      expect(parsed.success).toBe(false)
+      if (parsed.success) throw new Error("Invalid review gate ID unexpectedly accepted")
+      expect(parsed.error.issues[0]?.path).toEqual(["chief", "review_gates", 0, "id"])
+    },
+  )
+
+  it.each([" ", "x".repeat(32_001)])("rejects missing or oversized review gate instructions", (instructions) => {
+    expect(() => chiefConfigSchema.parse({ review_gates: [{ id: "security", instructions }] })).toThrow()
+  })
+
+  it("stores gate review evidence with the existing actionable-review contract and rejects unknown fields", () => {
+    const evidence = {
+      gateId: "security",
+      taskId: "fix-login",
+      reviewerId: "reviewer",
+      fingerprint: "a".repeat(64),
+      review: { passed: true, summary: "No security issues found.", findings: [] },
+    }
+    expect(gateReviewSchema.parse(JSON.parse(JSON.stringify(evidence)))).toEqual(evidence)
+    expect(operatingRunSchema.shape.stage.parse("gate-review")).toBe("gate-review")
+    expect(() =>
+      gateReviewSchema.parse({ ...evidence, review: { ...evidence.review, findings: ["Fix access control."] } }),
+    ).toThrow("unresolved findings")
+    expect(() =>
+      chiefConfigSchema.parse({ review_gates: [{ id: "security", instructions: "Inspect.", command: "run" }] }),
+    ).toThrow()
+    expect(() => gateReviewSchema.parse({ ...evidence, approved: true })).toThrow()
   })
 
   it("inherits container targets or replaces the entire policy with explicit project settings", () => {

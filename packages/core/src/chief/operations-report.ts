@@ -17,6 +17,7 @@ export function operationsEvidence(mission: Mission) {
       "Estimates from configured input/output prices and actual adapter-reported tokens; excludes unreported cache/reasoning/subagent usage and subscription billing.",
     routeQuality: routeEvidence(mission).slice(0, 20),
     reviewPolicy: mission.operatingPolicy?.reviewVendor ?? "legacy independent Actor",
+    reviewGates: mission.gateReviews,
     skillCompatibility: mission.operatingPolicy?.skillCompatibility
       ? {
           mode: mission.operatingPolicy.skillCompatibility.mode,
@@ -66,7 +67,7 @@ export function operationsReportLines(mission: Mission): string[] {
       ),
     ...evidence.crossVendorReviews.map(
       (review) =>
-        `${review.taskId}: 작업 ${review.workerActorType} → 리뷰 ${review.reviewerActorType}, ${review.crossVendor ? "다른 vendor" : "동일 vendor fallback"}, 결과 ${review.outcome ?? "배정만 기록"}; ${review.reason}`,
+        `${review.taskId}${review.gateId ? ` [${review.gateId}]` : ""}: 작업 ${review.workerActorType} → 리뷰 ${review.reviewerActorType}, ${review.crossVendor ? "다른 vendor" : "동일 vendor fallback"}, 결과 ${review.outcome ?? "배정만 기록"}; ${review.reason}`,
     ),
     ...(mission.organizationContext
       ? [

@@ -3,9 +3,11 @@ import type { CapturePolicy, CaptureResult } from "./capture"
 import type { ContainerObservationPolicy, ContainerObservationSnapshot } from "./container-observation-policy"
 import type { ExecutionPolicy, ExecutionState } from "./execution"
 import type { MetricSourcePolicy } from "./metric-source-policy"
+import type { PreparedOmaActor } from "./oma-actor"
 import type { ChiefOperatingPolicy, ChiefOperations } from "./operations"
 import type { OrganizationContext } from "./organization"
 import type { ChiefReport } from "./reports"
+import type { GateReview } from "./review-gates"
 import type { SkillDescriptor } from "./skills"
 import type { GoalVerificationContract, GoalVerificationResult } from "./verification"
 
@@ -92,6 +94,7 @@ export type ChiefStage =
   | "marketing-review"
   | "work"
   | "review"
+  | "gate-review"
   | "final-review"
   | "supervise"
   | "report"
@@ -126,6 +129,8 @@ export interface Mission {
   oma?: boolean
   plan?: ChiefPlan
   tasks: ChiefTaskState[]
+  gateReviews?: GateReview[]
+  gateReviewRefreshes?: number
   finalReview?: Review
   verification?: Verification
   history: MissionEvent[]
@@ -185,12 +190,18 @@ export interface MissionSupervision {
 }
 
 export interface ChiefPorts {
+  /** Validate and bind required OMA inputs before reserving a run or dispatching an external effect. */
+  prepareWork?(
+    persona: Persona,
+    mission: Mission,
+    context?: { workspace?: Workspace; signal?: AbortSignal },
+  ): Promise<PreparedOmaActor | undefined>
   runAgent(
     persona: Persona,
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal },
+    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal; omaActor?: PreparedOmaActor },
   ): Promise<string>
   verify(mission: Mission): Promise<{ ok: boolean; output?: string }>
   save(mission: Mission): Promise<void>

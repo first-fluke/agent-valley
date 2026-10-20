@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { type SkillCompatibilityPolicy, skillCompatibilityPolicySchema } from "../oma/skill-matrix-schema"
 import type { MetricTarget } from "./organization"
+import { type ReviewGate, reviewGatesSchema } from "./review-gates"
 
 const actorType = z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/)
 const text = z.string().trim().min(1).max(2_000)
@@ -17,6 +18,7 @@ export type RoutingCandidate = z.infer<typeof routingCandidateSchema>
 export interface ChiefOperatingPolicy {
   routing?: { candidates: RoutingCandidate[]; minSamples: number; minSuccessRate: number }
   reviewVendor: "prefer" | "require" | "off"
+  reviewGates?: ReviewGate[]
   readyActors?: string[]
   memory: boolean
   metricTargets?: MetricTarget[]
@@ -32,6 +34,7 @@ export const chiefOperatingPolicySchema = z.strictObject({
     })
     .optional(),
   reviewVendor: z.enum(["prefer", "require", "off"]),
+  reviewGates: reviewGatesSchema.optional(),
   readyActors: z.array(actorType).max(20).optional(),
   memory: z.boolean(),
   skillCompatibility: skillCompatibilityPolicySchema.optional(),
@@ -58,6 +61,7 @@ export const operatingRunSchema = z.strictObject({
     "marketing-review",
     "work",
     "review",
+    "gate-review",
     "final-review",
     "supervise",
     "report",
@@ -94,6 +98,7 @@ export type RouteEvidence = z.infer<typeof routeEvidenceSchema>
 
 export const reviewDecisionSchema = z.strictObject({
   taskId: text,
+  gateId: text.optional(),
   runId: text.optional(),
   workerActorType: actorType,
   reviewerId: text,

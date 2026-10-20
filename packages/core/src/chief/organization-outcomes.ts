@@ -13,6 +13,7 @@ import {
   type OrganizationOutcome,
   organizationOutcomeSchema,
 } from "./organization-types"
+import { reviewGatesAreCurrent } from "./review-gates"
 import type { Mission } from "./types"
 
 const evidenceInputSchema = memoryEvidenceSchema.partial({ sha256: true })
@@ -134,6 +135,10 @@ export async function recordMissionOrganizationOutcome(
 ): Promise<OrganizationOutcome> {
   if (!["completed", "failed"].includes(mission.status))
     throw new Error("Only terminal missions can be added to organization history.")
+  if (mission.status === "completed" && !reviewGatesAreCurrent(mission, mission.verification?.fingerprint))
+    throw new Error(
+      "Completed organization outcomes require current passing review gate evidence. Resume the mission to refresh its gates and verification.",
+    )
   const fingerprint = await fingerprintWorkspace(mission.workspace.path)
   const missionVersion = organizationRecordKey([
     mission.goal,

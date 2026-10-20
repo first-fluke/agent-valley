@@ -42,8 +42,12 @@ function excludedResource(name: string): boolean {
 
 /** Make uncommitted installed harness resources available in a new worktree, without editing the source. */
 export async function prepareMissionSkills(sourceRepositoryPath: string, workspacePath: string): Promise<void> {
-  const source = await skillRoot(sourceRepositoryPath).catch(() => undefined)
-  if (!source) return
+  const sources: Array<{ name: "skills" | "agents"; root: string }> = []
+  for (const name of ["skills", "agents"] as const) {
+    const root = await harnessResourceRoot(sourceRepositoryPath, name).catch(() => undefined)
+    if (root) sources.push({ name, root })
+  }
+  if (!sources.length) return
   const workspace = await realpath(workspacePath)
   const agents = join(workspace, ".agents")
   await mkdir(agents, { recursive: true })
@@ -51,24 +55,22 @@ export async function prepareMissionSkills(sourceRepositoryPath: string, workspa
     throw new Error(
       "The target .agents directory escapes the mission worktree. Fix its symlink before creating this order.",
     )
-  const target = join(agents, "skills")
-  await mkdir(target, { recursive: true })
-  const targetRoot = await skillRoot(workspace)
-  if (!targetRoot) throw new Error("Cannot prepare .agents/skills in the mission worktree. Restore that directory.")
-  if (source === targetRoot) return
-  const sourceRoot = source
-  const destinationRoot = targetRoot
   let bytes = 0
   let entries = 0
   const seen = new Set<string>()
-  async function copyMissing(sourceDirectory: string, targetDirectory: string): Promise<void> {
+  async function copyMissing(
+    sourceDirectory: string,
+    targetDirectory: string,
+    sourceRoot: string,
+    destinationRoot: string,
+  ): Promise<void> {
     if (seen.has(sourceDirectory)) return
     seen.add(sourceDirectory)
     for (const name of (await readdir(sourceDirectory)).sort()) {
       if (excludedResource(name)) continue
       if (++entries > MAX_HARNESS_ENTRIES)
         throw new Error(
-          "The installed skill resources exceed 5,000 entries. Remove unused resources before creating this order.",
+          "The installed harness resources exceed 5,000 entries. Remove unused resources before creating this order.",
         )
       const from = await realpath(join(sourceDirectory, name)).catch(() => undefined)
       if (!from || !inside(sourceRoot, from)) continue
@@ -81,14 +83,14 @@ export async function prepareMissionSkills(sourceRepositoryPath: string, workspa
         const directory = await realpath(to)
         if (!inside(destinationRoot, directory))
           throw new Error(
-            "A target skill resource escapes the mission worktree. Fix its symlink before creating this order.",
+            "A target harness resource escapes the mission worktree. Fix its symlink before creating this order.",
           )
-        await copyMissing(from, directory)
+        await copyMissing(from, directory, sourceRoot, destinationRoot)
       } else if (info.isFile() && !existing) {
         const parent = await realpath(targetDirectory)
         if (parent !== destinationRoot && !inside(destinationRoot, parent))
           throw new Error(
-            "A target skill resource escapes the mission worktree. Fix its symlink before creating this order.",
+            "A target harness resource escapes the mission worktree. Fix its symlink before creating this order.",
           )
         const file = await open(from, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
         try {
@@ -96,7 +98,7 @@ export async function prepareMissionSkills(sourceRepositoryPath: string, workspa
           if (!current.isFile()) continue
           if (bytes + current.size > MAX_HARNESS_BYTES)
             throw new Error(
-              "The installed skill resources exceed 20 MB. Remove unused resources before creating this order.",
+              "The installed harness resources exceed 20 MB. Remove unused resources before creating this order.",
             )
           const buffer = Buffer.alloc(current.size + 1)
           let length = 0
@@ -107,7 +109,7 @@ export async function prepareMissionSkills(sourceRepositoryPath: string, workspa
           }
           if (length !== current.size)
             throw new Error(
-              "An installed skill resource changed during preparation. Retry the order after its update finishes.",
+              "An installed harness resource changed during preparation. Retry the order after its update finishes.",
             )
           bytes += length
           try {
@@ -122,16 +124,28 @@ export async function prepareMissionSkills(sourceRepositoryPath: string, workspa
     }
     seen.delete(sourceDirectory)
   }
-  await copyMissing(sourceRoot, destinationRoot)
+  for (const source of sources) {
+    await mkdir(join(agents, source.name), { recursive: true })
+    const targetRoot = await harnessResourceRoot(workspace, source.name)
+    if (!targetRoot)
+      throw new Error(`Cannot prepare .agents/${source.name} in the mission worktree. Restore that directory.`)
+    if (source.root !== targetRoot) await copyMissing(source.root, targetRoot, source.root, targetRoot)
+  }
 }
 
 async function skillRoot(workspacePath: string): Promise<string | undefined> {
+  return harnessResourceRoot(workspacePath, "skills")
+}
+
+async function harnessResourceRoot(workspacePath: string, name: "skills" | "agents"): Promise<string | undefined> {
   const workspace = await realpath(workspacePath).catch(() => undefined)
   if (!workspace) return undefined
-  const root = await realpath(join(workspace, ".agents", "skills")).catch(() => undefined)
+  const root = await realpath(join(workspace, ".agents", name)).catch(() => undefined)
   if (!root) return undefined
   if (!inside(workspace, root))
-    throw new Error("The skill directory escapes the mission worktree. Install the OMA harness inside this repository.")
+    throw new Error(
+      `The ${name === "skills" ? "skill" : "agent"} directory escapes the mission worktree. Install the OMA harness inside this repository.`,
+    )
   if (!(await stat(root)).isDirectory()) return undefined
   return root
 }

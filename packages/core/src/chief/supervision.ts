@@ -41,6 +41,7 @@ export function applyRecovery(mission: Mission, response: SupervisionResponse): 
   }
   // Recovery can affect other tasks; every approval is refreshed against actual files.
   delete mission.finalReview
+  delete mission.gateReviews
   delete mission.verification
   delete mission.goalVerification
   delete mission.observationStartedAt

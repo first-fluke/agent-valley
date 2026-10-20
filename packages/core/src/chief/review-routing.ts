@@ -19,7 +19,7 @@ function addReviewer(mission: Mission, vendor: string): Persona {
   return reviewer
 }
 
-export function selectTaskReviewer(mission: Mission, task: ChiefTask, state: ChiefTaskState): Persona {
+export function selectTaskReviewer(mission: Mission, task: ChiefTask, state: ChiefTaskState, gateId?: string): Persona {
   const configured = mission.personas.find((actor) => actor.id === state.reviewerId)
   if (!configured) throw new Error("Restore the configured task reviewer before resuming.")
   const policy = mission.operatingPolicy
@@ -56,6 +56,7 @@ export function selectTaskReviewer(mission: Mission, task: ChiefTask, state: Chi
   mission.operations ??= { runs: [], routingEvidence: [], reviewDecisions: [] }
   mission.operations.reviewDecisions.push({
     taskId: task.id,
+    ...(gateId ? { gateId } : {}),
     ...(run ? { runId: run.runId } : {}),
     workerActorType: worker,
     reviewerId: reviewer.id,

@@ -50,6 +50,11 @@ beforeEach(async () => {
     )
   }
   mission.availableSkills = await discoverMissionSkills(root)
+  await mkdir(join(root, ".agents/agents"), { recursive: true })
+  await writeFile(
+    join(root, ".agents/agents/skill-worker.md"),
+    "---\nname: skill-worker\nskills: [oma-selected]\n---\nApply the selected skill to the assignment.",
+  )
   runtime = new ChiefRuntime(new MissionStore(join(root, "records")))
   vi.mocked(planSandboxedSpawn).mockImplementation(async () => ({
     command: process.execPath,
@@ -130,5 +135,8 @@ describe("Chief Director skill catalog guidance", () => {
     const output = await runtime.ports().runAgent(chief, "Plan.", mission, "plan")
     expect(output).toContain("oma-new-report-skill")
     expect(output).not.toContain("BODY_TOKEN_")
+    const saved = await new MissionStore(join(root, "records")).load(mission.id)
+    expect(saved.availableSkills?.map((skill) => skill.name)).toContain("oma-new-report-skill")
+    expect(saved.availableSkills).toEqual(mission.availableSkills)
   })
 })

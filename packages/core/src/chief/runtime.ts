@@ -15,6 +15,7 @@ import type { ActiveMissionProcess } from "./active-process"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
 import { fingerprintWorkspace } from "./fingerprint"
+import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
 import { disposeTaskWorktree, integrateTaskWorktree, prepareTaskWorktree } from "./parallel-workspace"
 import { selectWorkActor, workActorCandidates } from "./routing"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
@@ -108,6 +109,7 @@ export class ChiefRuntime {
   ports(): ChiefPorts {
     return {
       signal: this.signal,
+      prepareWork: (persona, mission, context) => this.prepareWork(persona, mission, context),
       save: (mission) => this.store.save(mission),
       fingerprint: async (mission) => {
         await assertMissionWorkspace(mission)
@@ -133,6 +135,31 @@ export class ChiefRuntime {
 
   async close(): Promise<void> {
     await Promise.allSettled([...this.runners].map((runner) => runner.killAll()))
+  }
+
+  private async prepareWork(
+    persona: Persona,
+    mission: Mission,
+    context?: { workspace?: Workspace; signal?: AbortSignal },
+  ): Promise<PreparedOmaActor | undefined> {
+    return withMissionDeadline(mission, context?.signal ?? this.signal, async (signal) => {
+      signal?.throwIfAborted()
+      const workspace = context?.workspace ?? mission.workspace
+      const savedCatalog =
+        workspace === mission.workspace
+          ? mission.availableSkills
+          : mission.availableSkills?.map((skill) => ({
+              ...skill,
+              path: join(workspace.path, ".agents", "skills", skill.name, "SKILL.md"),
+            }))
+      const catalog = savedCatalog ?? (await discoverMissionSkills(workspace.path))
+      if (!requiresOmaActor({ oma: mission.oma, availableSkills: catalog })) return undefined
+      await validateMissionSkills(workspace.path, catalog)
+      if (mission.availableAgents) await loadMissionSkillBodies(workspace.path, persona.skills, catalog)
+      const prepared = await prepareOmaActor(workspace.path, persona.skills)
+      signal?.throwIfAborted()
+      return prepared
+    })
   }
 
   private async verifyMission(mission: Mission, signal?: AbortSignal): Promise<{ ok: boolean; output?: string }> {
@@ -169,7 +196,7 @@ export class ChiefRuntime {
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal },
+    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal; omaActor?: PreparedOmaActor },
   ): Promise<string> {
     return withMissionDeadline(mission, context?.signal ?? this.signal, (signal) =>
       this.executeAgent(persona, prompt, mission, stage, { ...context, signal }),
@@ -181,10 +208,14 @@ export class ChiefRuntime {
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal },
+    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal; omaActor?: PreparedOmaActor },
   ): Promise<string> {
     const signal = context?.signal ?? this.signal
     const workspace = context?.workspace ?? mission.workspace
+    if (stage === "plan" && mission.availableSkills === undefined) {
+      signal?.throwIfAborted()
+      mission.availableSkills = await discoverMissionSkills(mission.workspace.path)
+    }
     const localMission =
       workspace === mission.workspace
         ? mission
@@ -198,6 +229,10 @@ export class ChiefRuntime {
           }
     if (signal?.aborted)
       throw new Error("Order interrupted. Resume it with av order --resume followed by its mission ID.")
+    const omaActor =
+      stage === "work"
+        ? (context?.omaActor ?? (await this.prepareWork(persona, mission, { workspace, signal })))
+        : undefined
     const compatibilityPolicy = mission.operatingPolicy?.skillCompatibility
     const compatibility =
       stage === "work" && compatibilityPolicy
@@ -241,7 +276,7 @@ export class ChiefRuntime {
       issue: missionIssue(mission.id, mission.goal),
       attempt,
       workspace,
-      agentId: persona.id,
+      agentId: omaActor?.agentId ?? persona.id,
       // A prerequisite task cannot satisfy the whole mission's final gate yet.
       // Receipts bind this intermediate check to its files; independent review
       // assesses task acceptance, and the coordinator runs the final command.
@@ -252,7 +287,7 @@ export class ChiefRuntime {
       await prepareOmaAttempt(evidence)
       prompt += `\n\n${buildOmaGuidance(evidence)}`
     }
-    prompt += await personaSkills(persona, localMission, stage)
+    prompt += omaActor ? `\n\n${omaActor.guidance}` : await personaSkills(persona, localMission, stage)
     if (mission.toolEnvKeys?.length)
       prompt += `\n\nThe operator explicitly forwards these tool environment variable names: ${JSON.stringify(mission.toolEnvKeys)}. Use only those needed for the assignment. Never print, write to product files, or include credential values in reports; do not dump the environment.`
     prompt +=
@@ -265,6 +300,21 @@ export class ChiefRuntime {
     const active = this.store.processGuard(mission.id, attempt.id)
     active.begin(stage)
     const entry = startOperatingRun(mission, persona, attempt, stage, context?.taskId, route?.reason)
+    if (omaActor)
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "oma-dispatch",
+        ...(context?.taskId ? { taskId: context.taskId } : {}),
+        message: JSON.stringify({
+          attemptId: attempt.id,
+          actorId: persona.id,
+          agentId: omaActor.agentId,
+          skills: omaActor.skills,
+          inputSha256: omaActor.digest,
+          actorType: persona.agentType,
+          model: persona.model ?? "native default",
+        }),
+      })
     let observed = attempt
     let failed = false
     try {

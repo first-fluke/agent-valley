@@ -14,6 +14,7 @@ import { discoverAgents } from "../agent-discovery"
 import { runOrder } from "../chief"
 import type { OrderOptions } from "../chief-config"
 import { initializeOperation, operationStore } from "../chief-continuous"
+import { installOmaFixture } from "./chief-oma.fixture"
 
 vi.mock("@agent-valley/core/sessions/sandbox", () => ({ planSandboxedSpawn: vi.fn() }))
 vi.mock("../agent-discovery", () => ({ discoverAgents: vi.fn() }))
@@ -393,14 +394,10 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     })
   }, 20_000)
 
-  it("selects an installed OMA skill without receipt enforcement and loads only its assigned body", async () => {
-    const path = join(repo, ".agents/skills/oma-fixture-helper")
-    await mkdir(path, { recursive: true })
-    await writeFile(
-      join(path, "SKILL.md"),
-      "---\nname: oma-fixture-helper\ndescription: Write a checked file deliverable\n---\n\nFixture helper instructions: inspect the actual file before reporting completion.\n",
-    )
+  it("requires an installed OMA profile and skill without receipt enforcement", async () => {
+    const path = await installOmaFixture(repo)
     const mission = await runOrder("Create a verified deliverable", { workspace: repo, verify, timeout: "10" }, root)
+    expect(mission.status).toBe("completed")
     expect(mission.oma).toBe(false)
     expect(mission.availableSkills).toEqual([
       {
@@ -414,6 +411,11 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     const stages = await calls()
     expect(stages.find((call) => call.stage === "plan")?.prompt).toContain("Write a checked file deliverable")
     expect(stages.find((call) => call.stage === "work")?.prompt).toContain("Fixture helper instructions")
+    expect(stages.find((call) => call.stage === "work")?.prompt).toContain("Installed OMA file writer")
+    expect(JSON.parse(mission.history.find((entry) => entry.stage === "oma-dispatch")?.message ?? "{}")).toMatchObject({
+      agentId: "file-writer",
+      skills: ["oma-fixture-helper"],
+    })
     expect(stages.find((call) => call.stage === "review")?.prompt).not.toContain("Fixture helper instructions")
     expect(await readFile(join(root, ".agent-valley/reports", `${mission.id}.md`), "utf8")).toMatch(
       /oma\\?-fixture\\?-helper/,

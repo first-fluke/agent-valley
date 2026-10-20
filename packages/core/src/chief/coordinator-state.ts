@@ -58,6 +58,9 @@ export function resetTaskApprovals(
 ): void {
   delete mission.observationStartedAt
   delete mission.containerObservationVerifiedFingerprint
+  if (options.keepReviews && mission.gateReviews) {
+    mission.gateReviews = mission.gateReviews.filter((entry) => !entry.review.passed)
+  } else delete mission.gateReviews
   for (const state of mission.tasks) {
     const preserve = options.preserveUnfinished && state.parallel && state.status !== "completed"
     state.status = "pending"

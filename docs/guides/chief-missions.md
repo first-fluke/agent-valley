@@ -50,7 +50,46 @@ Each mission and continuous decision checkpoint defaults to 200 Actor calls, 86,
 
 ## Plan, review, and completion
 
+LangGraph runs the mission's `resume → planning → tasks → verification → approval → report` stage graph. Verification or approval failures return to task execution; saved waiting states end the current invocation. Each invocation starts with resume checks, including completed missions. MissionStore remains the durable checkpoint authority. Graph nodes use the existing native Actor runner, required OMA inputs, saved budgets, independent reviews, and external-effect protections. LangGraph does not add automatic node retries or a second persistent checkpoint store.
+
+Graph execution is local. If `LANGSMITH_TRACING`, `LANGSMITH_TRACING_V2`, `LANGCHAIN_TRACING`, or `LANGCHAIN_TRACING_V2` enables remote tracing, AV pauses before entering the graph. Unset the enabled variables in AV's process environment and resume the saved mission. This avoids automatic SDK tracing outside AV's configured observability adapters.
+
+```mermaid
+flowchart LR
+  resume --> planning --> tasks --> verification --> approval --> report
+  verification --> tasks
+  approval --> tasks
+  report --> tasks
+  resume -->|waiting| endNode[End invocation]
+  approval -->|waiting| endNode
+  report -->|completed| endNode
+```
+
 The Chief Director consults its Technical Director, Design Director, and Marketing Director concurrently, then turns even a broad request, such as “make onboarding easier,” into a concrete interpretation, assumptions, success criteria, and verification checks. It plans at most 12 tasks with acceptance criteria and acyclic dependencies. Up to three independent Actors run in separate task worktrees by default; dependencies wait for reviewed and integrated prerequisites. The Chief Director integrates accepted changes, and conflicting changes return to repair. `--parallel 1` preserves serial execution in the mission worktree. A different Actor reviews each task. Advisory, planning, supervision, review, and reporting stages must leave product files unchanged.
+
+### Additional review gates
+
+Configure `chief.review_gates` in `av.yaml` to add checks such as a security review between task execution and verification:
+
+```yaml
+chief:
+  review_gates:
+    - id: security
+      instructions: >-
+        Inspect the changed files for authentication and authorization failures,
+        exposed secrets, injection risks, and unsafe handling of external input.
+        Cite the affected files and evidence for each finding.
+```
+
+Each configured gate reviews every task after ordinary task reviews and integration. The graph routes `tasks → review-gates → verification`; gate reviewers inspect the integrated mission worktree and must leave product files unchanged. These checks add to the original acceptance criteria and verification command. Without configured gates, new orders and legacy saved missions keep the existing flow shown above.
+
+Gate reviews use the saved `chief.review_vendor` policy and each task's actual worker vendor. A required cross-vendor review needs another ready CLI; a preferred cross-vendor review can use an independent Actor on the same vendor when no other vendor is ready. Gate findings are recorded separately from ordinary task reviews.
+
+A rejected gate saves its findings before returning work to the existing repair and Chief Director recovery flow. The Chief can repair, reassign, replan, wait, or stop within the saved limits. Provider failures follow the existing retry policy. A Chief-selected wait retains its timestamp and spent allowances on the same mission. A completed external action remains protected from replay during repair.
+
+Gate results are bound to the reviewed worktree fingerprint. Repairs, recovery, or changed files invalidate those results, and resume runs configured gates again. If verification changes the reviewed files, the graph returns to the gates before completion. These refreshes have a saved allowance of `maxRepairs + 1`; exhausting it returns repeated verification drift to bounded Chief recovery. Final approval, reporting, continuous-operation completion, and organization outcome recording require current passing gate evidence.
+
+Each gate review consumes the ordinary Actor call, elapsed-time, and estimated-cost budgets. A full pass over three tasks with two gates adds six reviewer calls; repairs and resume can add further calls. The saved gate policy and spent budgets survive resume.
 
 The Chief Director can repair a failed task, assign it to another configured Actor, revise the task plan, schedule a bounded wait, or stop with an explained unmet prerequisite. Worker authentication and environment failures and unavailable required observations return to the Chief to choose feasible authorized recovery. Rate limits and provider outages receive bounded delayed retries. Replanning must retain the original acceptance obligations. Recovery cannot replace the user's goal, weaken the saved success criteria or executable checks, switch the operator's Chief Director vendor/model, or change a supplied verification command. Recovery rounds are recorded before dispatch, so restarting does not reset them.
 
@@ -82,12 +121,12 @@ actors:
     name: Mina
     role: Research primary sources and write a cited report.
     actorType: claude
-    skills: []
+    skills: [oma-search]
   - id: jun
     name: Jun
     role: Implement changes and regression tests using the project's conventions.
     actorType: codex
-    skills: []
+    skills: [oma-backend]
 ```
 
 ```bash
@@ -101,7 +140,7 @@ Every actor needs a unique `id`, a `name`, a `role`, an `actorType`, and a `skil
 
 Legacy `chief`, `personas`, and `agentType` profile fields and the `--chief`, `--personas`, and `--agent` flags remain readable aliases. New examples and CLI help use Director and Actor names. Mission storage preserves existing identifiers so previously saved orders can resume.
 
-Skill names refer to `.agents/skills/<name>/SKILL.md` inside the target worktree. Keep `skills: []` when no installed skill is needed. Explicitly listed skills are loaded whether or not receipt enforcement is enabled.
+Skill names refer to `.agents/skills/<name>/SKILL.md` inside the target worktree. When an OMA catalog is installed, every task's Actor needs a relevant installed OMA skill and a matching installed agent definition. Planning rejects empty task skill assignments. Read-only Director and reviewer roles may keep `skills: []`. Explicitly listed skills are loaded whether or not receipt enforcement is enabled.
 
 ## OMA integration
 
@@ -115,9 +154,11 @@ bun av order --once "Fix the login failure and add a regression test" \
   --oma
 ```
 
-Installed `.agents/skills/oma-*/SKILL.md` files are discovered for every new order. Missing installed skill files and their resources are copied into the isolated worktree without overwriting its existing files, so a freshly installed harness does not require a commit before an order. The Chief Director receives skill names, descriptions, and verified paths and selects only relevant skills for its team. The catalog includes new skills as they are installed, without a fixed allowlist of skill names. For example, market, search, architecture, or design can be selected when present. Video and explainer can be selected if installed; missing skills are not invented. ELI5 reporting remains available without an explainer skill. Only selected instruction bodies are loaded. Resume checks saved skill paths and metadata again. Skills that need external tools, credentials, or services still require those dependencies.
+Installed `.agents/skills/oma-*/SKILL.md` files are discovered for every new order. Missing installed skill resources and `.agents/agents` definitions are copied into the isolated worktree without overwriting its existing files, so a freshly installed harness does not require a commit before an order. The Chief Director receives skill names, descriptions, and verified paths and selects only relevant skills for its team. The catalog includes new skills as they are installed, without a fixed allowlist of skill names. For example, market, search, architecture, or design can be selected when present. Video and explainer can be selected if installed; missing skills are not invented. ELI5 reporting remains available without an explainer skill. Resume checks saved skill paths and metadata again. Skills that need external tools, credentials, or services still require those dependencies.
 
-`--oma` additionally requires current OMA completion receipts for worker stages; skill selection does not require that flag. Each receipt uses `git diff --check <task-start-HEAD> --` for patch whitespace and conflict markers, with the starting commit fixed by the runtime. This checks the worker's changes even after committing. Workers also run checks relevant to their assignment and report the results for independent review. They commit changes before OMA verification and finish the exact run they started.
+For work stages with an installed OMA catalog, AV requires an assigned skill, selects a matching `.agents/agents/<name>.md` definition, and loads its full instructions and every declared or assigned skill before starting the native Actor. Missing, invalid, or unreadable definitions block execution before an Actor call is reserved or an external action is marked started. The prepared instructions are bound to the attempt with an `oma-dispatch` history entry containing the agent, skills, input SHA-256, and actual native CLI/model. This requirement also applies without `--oma`; that flag controls receipt verification. An order without an installed OMA catalog or `--oma` retains standalone execution. The assigned Actor runs as the OMA agent through the existing native runner; additional nested subagent calls are not required by this check.
+
+`--oma` additionally requires current OMA completion receipts for worker stages, bound to the selected installed OMA agent ID. Each receipt uses `git diff --check <task-start-HEAD> --` for patch whitespace and conflict markers, with the starting commit fixed by the runtime. This checks the worker's changes even after committing. Workers also run checks relevant to their assignment and report the results for independent review. They commit changes before OMA verification and finish the exact run they started.
 
 The receipt gate does not check language syntax or prove that the feature works. Final executable checks or the operator's `--verify` command run after reviewed task changes have been integrated, so intermediate tasks can finish before the whole goal is implemented. Completion still requires final verification and the Chief Director's approval. The flag is explicit for each new order; `oma.mode` in tracker configuration does not enable it automatically.
 

@@ -58,6 +58,11 @@ beforeEach(async () => {
   await runCommand("git", ["commit", "-m", "test baseline"], { cwd: root })
   await mkdir(join(root, ".agents/skills/oma-backend"), { recursive: true })
   await writeFile(join(root, ".agents/skills/oma-backend/SKILL.md"), skill)
+  await mkdir(join(root, ".agents/agents"), { recursive: true })
+  await writeFile(
+    join(root, ".agents/agents/backend-engineer.md"),
+    "---\nname: backend-engineer\nskills: [oma-backend]\n---\nApply the backend skill in this child worktree.",
+  )
   mission.availableSkills = await discoverMissionSkills(root)
   runtime = new ChiefRuntime(new MissionStore(join(root, ".agent-valley/missions")))
   vi.mocked(planSandboxedSpawn).mockImplementation(async () => ({
@@ -83,6 +88,9 @@ describe("Chief Runtime isolated Actor execution", () => {
     const child = await ports.parallel?.prepare(mission, "task-one", 1)
     if (!child) throw new Error("Expected child worktree")
     expect(await readFile(join(child.path, ".agents/skills/oma-backend/SKILL.md"), "utf8")).toBe(skill)
+    expect(await readFile(join(child.path, ".agents/agents/backend-engineer.md"), "utf8")).toContain(
+      "name: backend-engineer",
+    )
     const output = await ports.runAgent(actor, "Perform child work.", mission, "work", {
       taskId: "task-one",
       workspace: { ...mission.workspace, path: child.path, branch: child.branch },

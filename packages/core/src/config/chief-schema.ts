@@ -6,6 +6,7 @@ import { metricSourcePolicySchema } from "../chief/metric-source-policy"
 import { type ChiefOperatingPolicy, chiefOperatingPolicySchema } from "../chief/operations"
 import { metricTargetSchema } from "../chief/organization-types"
 import { reportDeliveryPolicySchema } from "../chief/report-delivery-contract"
+import { reviewGatesSchema } from "../chief/review-gates"
 import { toolEnvKeysSchema } from "../chief/tool-environment"
 import type { SkillCompatibilityPolicy } from "../oma/skill-matrix-schema"
 
@@ -43,6 +44,7 @@ export const chiefConfigSchema = z.strictObject({
     })
     .optional(),
   review_vendor: z.enum(["prefer", "require", "off"]).optional(),
+  review_gates: reviewGatesSchema.optional(),
   memory: z.boolean().optional(),
   metric_targets: z.array(metricTargetSchema).max(20).optional(),
   reporting: reportDeliveryPolicySchema.optional(),
@@ -110,6 +112,7 @@ export function chiefOperatingPolicy(
         ? { candidates: readyActors.map((actorType) => ({ actorType })), minSamples: 3, minSuccessRate: 0.8 }
         : undefined,
     reviewVendor: config.review_vendor ?? "prefer",
+    reviewGates: config.review_gates,
     memory: config.memory ?? true,
     metricTargets: config.metric_targets,
     readyActors,
