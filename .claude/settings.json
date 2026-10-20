@@ -18,11 +18,11 @@
           {
             "name": "oma-hook-PreToolUse",
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/oma-hook.sh\" --vendor 'claude' --event 'PreToolUse' --matcher 'Bash|Grep|Glob'",
-            "timeout": 15
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/oma-hook.sh\" --vendor 'claude' --event 'PreToolUse' --matcher 'Bash|Grep|Glob|Edit|Write|MultiEdit'",
+            "timeout": 26
           }
         ],
-        "matcher": "Bash|Grep|Glob"
+        "matcher": "Bash|Grep|Glob|Edit|Write|MultiEdit"
       }
     ],
     "Stop": [
@@ -55,11 +55,11 @@
           {
             "name": "oma-hook-PostToolUse",
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/oma-hook.sh\" --vendor 'claude' --event 'PostToolUse' --matcher 'Edit|Write|NotebookEdit'",
-            "timeout": 10
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/oma-hook.sh\" --vendor 'claude' --event 'PostToolUse' --matcher 'Edit|Write|NotebookEdit|MultiEdit'",
+            "timeout": 21
           }
         ],
-        "matcher": "Edit|Write|NotebookEdit"
+        "matcher": "Edit|Write|NotebookEdit|MultiEdit"
       }
     ]
   },

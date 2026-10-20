@@ -18,11 +18,11 @@
           {
             "name": "oma-hook-PreToolUse",
             "type": "command",
-            "command": "'.codex/hooks/oma-hook.sh' --vendor 'codex' --event 'PreToolUse' --matcher 'Bash'",
-            "timeout": 15
+            "command": "'.codex/hooks/oma-hook.sh' --vendor 'codex' --event 'PreToolUse' --matcher 'Bash|apply_patch|Edit|Write'",
+            "timeout": 26
           }
         ],
-        "matcher": "Bash"
+        "matcher": "Bash|apply_patch|Edit|Write"
       }
     ],
     "Stop": [
@@ -44,7 +44,7 @@
             "name": "oma-hook-PostToolUse",
             "type": "command",
             "command": "'.codex/hooks/oma-hook.sh' --vendor 'codex' --event 'PostToolUse' --matcher 'apply_patch|Edit|Write'",
-            "timeout": 10
+            "timeout": 21
           }
         ],
         "matcher": "apply_patch|Edit|Write"

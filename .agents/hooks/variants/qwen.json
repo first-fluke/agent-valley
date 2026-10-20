@@ -60,13 +60,14 @@
     ]
   },
   "statusLine": {
-    "hook": "hud.ts"
+    "hook": "hud.ts",
+    "options": {
+      "respectUserColors": true,
+      "hideContextIndicator": true
+    }
   },
   "statusLineKey": "ui",
   "extra": {
-    "hooksConfig": {
-      "enabled": true
-    },
     "permissions": {
       "allow": ["Bash(ls *)", "Bash(oma *)"]
     }
