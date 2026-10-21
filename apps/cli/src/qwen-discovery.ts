@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { getAgentAuthEnvKeys } from "@agent-valley/core/sessions/base-session"
 import { qwenProfilePath } from "@agent-valley/core/sessions/qwen-profile"
-import type { AgentAvailability, DiscoveryDeps } from "./agent-discovery"
+import type { AgentAvailability, DiscoveryDeps } from "./discovery-types"
 
 type Evidence = Pick<AgentAvailability, "readiness" | "reason">
 const PROTOCOLS = {

@@ -35,11 +35,12 @@ export function buildWorkSummary(
 }
 
 export function sortByIssueNumber(issues: Issue[]): void {
-  issues.sort((a, b) => {
-    const numA = Number.parseInt(a.identifier.split("-")[1] ?? "0", 10)
-    const numB = Number.parseInt(b.identifier.split("-")[1] ?? "0", 10)
-    return numA - numB
-  })
+  const issueNumber = (identifier: string): number => {
+    // Linear: PROJ-123, GitHub: owner/repo#123
+    const match = /(\d+)\s*$/.exec(identifier)
+    return match ? Number.parseInt(match[1] ?? "0", 10) : 0
+  }
+  issues.sort((a, b) => issueNumber(a.identifier) - issueNumber(b.identifier))
 }
 
 // Cache system metrics with TTL to avoid expensive syscalls on every SSE poll

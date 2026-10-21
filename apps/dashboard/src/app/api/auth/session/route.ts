@@ -14,7 +14,8 @@ export function GET(request: Request): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  if (!sameOrigin(request)) return Response.json({ error: "Forbidden", message: "Origin must match this dashboard." }, { status: 403 })
+  if (!sameOrigin(request))
+    return Response.json({ error: "Forbidden", message: "Origin must match this dashboard." }, { status: 403 })
   let body: unknown
   try {
     body = await request.json()
@@ -23,8 +24,10 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (!body || typeof body !== "object") return Response.json({ error: "BadRequest" }, { status: 400 })
   const { statusToken, interventionToken } = body as Record<string, unknown>
-  if ((statusToken !== undefined && typeof statusToken !== "string") ||
-      (interventionToken !== undefined && typeof interventionToken !== "string")) {
+  if (
+    (statusToken !== undefined && typeof statusToken !== "string") ||
+    (interventionToken !== undefined && typeof interventionToken !== "string")
+  ) {
     return Response.json({ error: "BadRequest", message: "Tokens must be strings." }, { status: 400 })
   }
   const scopes = [

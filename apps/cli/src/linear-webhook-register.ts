@@ -38,7 +38,7 @@ export async function registerLinearWebhook(root: string, tunnelUrl: string): Pr
   const webhookUrl = `${tunnelUrl}/api/webhook`
 
   try {
-    const { upsertWebhook } = await import("@agent-valley/core/tracker/linear-client")
+    const { upsertWebhook } = await import("@agent-valley/core/tracker/linear-webhook-client")
     const result = await upsertWebhook({
       apiKey: cfg.linearApiKey,
       teamId: cfg.linearTeamUuid,

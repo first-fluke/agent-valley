@@ -1,6 +1,12 @@
 # TypeScript Architecture Enforcement — dependency-cruiser
 
 > Automatically checks layer dependency direction rules (`docs/architecture/LAYERS.md`) in CI and pre-commit hooks.
+>
+> **This repository** uses the dependency-free `scripts/check-import-rules.mjs`
+> (`bun run check:imports`) instead of installing dependency-cruiser. It
+> enforces domain purity, adapter isolation, and acyclic imports. Existing
+> violations are frozen in `scripts/import-rules.baseline.json`; any new
+> violation fails CI. The configuration below documents the equivalent rules.
 
 ---
 

@@ -46,19 +46,23 @@ export function computeLayout(slotCount: number): OfficeLayout {
 
   // ── Bathroom bump — sticks out BELOW bottom-right (2 rows) ──
   const bathCol = cols - 2
-  furniture.push({ col: bathCol, row: OFFICE_ROWS - 1, type: "floor" })    // door (covers bottom wall)
-  furniture.push({ col: bathCol - 1, row: OFFICE_ROWS, type: "wall" })     // left wall
-  furniture.push({ col: bathCol, row: OFFICE_ROWS, type: "bathroom" })     // fixture
-  furniture.push({ col: bathCol + 1, row: OFFICE_ROWS, type: "wall" })     // right wall
+  furniture.push({ col: bathCol, row: OFFICE_ROWS - 1, type: "floor" }) // door (covers bottom wall)
+  furniture.push({ col: bathCol - 1, row: OFFICE_ROWS, type: "wall" }) // left wall
+  furniture.push({ col: bathCol, row: OFFICE_ROWS, type: "bathroom" }) // fixture
+  furniture.push({ col: bathCol + 1, row: OFFICE_ROWS, type: "wall" }) // right wall
   furniture.push({ col: bathCol - 1, row: OFFICE_ROWS + 1, type: "wall" }) // bottom-left
-  furniture.push({ col: bathCol, row: OFFICE_ROWS + 1, type: "wall" })     // bottom
+  furniture.push({ col: bathCol, row: OFFICE_ROWS + 1, type: "wall" }) // bottom
   furniture.push({ col: bathCol + 1, row: OFFICE_ROWS + 1, type: "wall" }) // bottom-right
-  interestPoints.push({ col: bathCol, row: OFFICE_ROWS - 1 })              // inside bathroom (door tile)
+  interestPoints.push({ col: bathCol, row: OFFICE_ROWS - 1 }) // inside bathroom (door tile)
 
   // Fill extra rows with wall (hide background, except bathroom bump)
   const bathBumpSet = new Set([
-    `${bathCol - 1},${OFFICE_ROWS}`, `${bathCol},${OFFICE_ROWS}`, `${bathCol + 1},${OFFICE_ROWS}`,
-    `${bathCol - 1},${OFFICE_ROWS + 1}`, `${bathCol},${OFFICE_ROWS + 1}`, `${bathCol + 1},${OFFICE_ROWS + 1}`,
+    `${bathCol - 1},${OFFICE_ROWS}`,
+    `${bathCol},${OFFICE_ROWS}`,
+    `${bathCol + 1},${OFFICE_ROWS}`,
+    `${bathCol - 1},${OFFICE_ROWS + 1}`,
+    `${bathCol},${OFFICE_ROWS + 1}`,
+    `${bathCol + 1},${OFFICE_ROWS + 1}`,
   ])
   for (let row = OFFICE_ROWS; row < OFFICE_ROWS + 2; row++) {
     for (let col = 0; col < cols; col++) {
@@ -106,7 +110,7 @@ export function computeLayout(slotCount: number): OfficeLayout {
   for (const f of furniture) blocked.add(`${f.col},${f.row}`)
   for (const d of desks) {
     blocked.add(`${d.col},${d.row - 1}`) // monitor
-    blocked.add(`${d.col},${d.row}`)     // desk
+    blocked.add(`${d.col},${d.row}`) // desk
     blocked.add(`${d.col},${d.row + 1}`) // chair
   }
   // Un-block bathroom door tile (floor furniture covers wall visually, but agents walk here)

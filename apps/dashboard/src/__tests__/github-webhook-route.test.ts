@@ -59,7 +59,9 @@ describe("POST /api/webhook/github", () => {
   })
 
   test("passes undefined deliveryId when X-GitHub-Delivery is missing (body-hash fallback preserved)", async () => {
-    await githubWebhookPOST(githubRequest({ action: "opened", issue: { number: 1 } }, { "x-hub-signature-256": "sha256=abc" }))
+    await githubWebhookPOST(
+      githubRequest({ action: "opened", issue: { number: 1 } }, { "x-hub-signature-256": "sha256=abc" }),
+    )
 
     expect(mockOrchestrator?.handleWebhook).toHaveBeenCalledTimes(1)
     const [, , deliveryId] = mockOrchestrator?.handleWebhook.mock.calls[0] ?? []

@@ -1,4 +1,5 @@
 import { getOrchestrator } from "@/lib/orchestrator-singleton"
+import { readBoundedBody } from "@/lib/request-body"
 
 /**
  * GitHub webhook receiver — mirrors /api/webhook structure, reads the
@@ -12,10 +13,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unsupported content type. Expected application/json" }, { status: 415 })
   }
 
-  const payload = await request.text()
-  if (payload.length > 1_048_576) {
-    return Response.json({ error: "Payload too large" }, { status: 413 })
+  const body = await readBoundedBody(request)
+  if (!body.ok) {
+    return Response.json({ error: "Payload too large" }, { status: body.status })
   }
+  const payload = body.text
 
   const signature = request.headers.get("x-hub-signature-256") ?? request.headers.get("X-Hub-Signature-256") ?? ""
   // GitHub's stable per-delivery id — threaded through so dedup keys on

@@ -20,11 +20,7 @@ function createCanvas(): OffscreenCanvas {
 
 // ── Body ──
 
-function drawBody(
-  ctx: OffscreenCanvasRenderingContext2D,
-  primary: string,
-  secondary: string,
-) {
+function drawBody(ctx: OffscreenCanvasRenderingContext2D, primary: string, secondary: string) {
   ctx.fillStyle = "#FFD5B8"
   ctx.fillRect(12, 4, 8, 8)
   ctx.fillStyle = primary
@@ -37,12 +33,7 @@ function drawBody(
   ctx.fillRect(18, 22, 4, 6)
 }
 
-function drawWalkingBody(
-  ctx: OffscreenCanvasRenderingContext2D,
-  primary: string,
-  secondary: string,
-  frame: number,
-) {
+function drawWalkingBody(ctx: OffscreenCanvasRenderingContext2D, primary: string, secondary: string, frame: number) {
   ctx.fillStyle = "#FFD5B8"
   ctx.fillRect(12, 4, 8, 8)
   ctx.fillStyle = primary
@@ -110,9 +101,15 @@ function drawAntigravityFeatures(ctx: OffscreenCanvasRenderingContext2D) {
 
 function drawDefaultSkin(ctx: OffscreenCanvasRenderingContext2D, agentType: AgentType) {
   switch (agentType) {
-    case "claude": drawClaudeFeatures(ctx); break
-    case "codex": drawCodexFeatures(ctx); break
-    case "antigravity": drawAntigravityFeatures(ctx); break
+    case "claude":
+      drawClaudeFeatures(ctx)
+      break
+    case "codex":
+      drawCodexFeatures(ctx)
+      break
+    case "antigravity":
+      drawAntigravityFeatures(ctx)
+      break
   }
 }
 
@@ -195,21 +192,27 @@ function drawSkinFeatures(
   primary: string,
 ) {
   switch (skin) {
-    case "default": drawDefaultSkin(ctx, agentType); break
-    case "ponytail": drawPonytailSkin(ctx, primary); break
-    case "plumber": drawPlumberSkin(ctx, primary); break
-    case "glasses": drawGlassesSkin(ctx, primary); break
-    case "mohawk": drawMohawkSkin(ctx, primary); break
+    case "default":
+      drawDefaultSkin(ctx, agentType)
+      break
+    case "ponytail":
+      drawPonytailSkin(ctx, primary)
+      break
+    case "plumber":
+      drawPlumberSkin(ctx, primary)
+      break
+    case "glasses":
+      drawGlassesSkin(ctx, primary)
+      break
+    case "mohawk":
+      drawMohawkSkin(ctx, primary)
+      break
   }
 }
 
 // ── Status overlay ──
 
-function drawStatusOverlay(
-  ctx: OffscreenCanvasRenderingContext2D,
-  status: WorkspaceStatus,
-  frame: number,
-) {
+function drawStatusOverlay(ctx: OffscreenCanvasRenderingContext2D, status: WorkspaceStatus, frame: number) {
   switch (status) {
     case "idle": {
       const yOffset = frame % 2 === 0 ? 0 : -1
@@ -303,7 +306,17 @@ function generateAgentSprite(
 const furnitureTextureCache = new Map<string, Texture>()
 
 export function getFurnitureTexture(
-  type: "desk" | "chair" | "monitor" | "coffee_machine" | "plant" | "server_rack" | "bathroom" | "gym" | "floor" | "wall",
+  type:
+    | "desk"
+    | "chair"
+    | "monitor"
+    | "coffee_machine"
+    | "plant"
+    | "server_rack"
+    | "bathroom"
+    | "gym"
+    | "floor"
+    | "wall",
 ): Texture {
   let texture = furnitureTextureCache.get(type)
   if (!texture) {
@@ -315,7 +328,17 @@ export function getFurnitureTexture(
 }
 
 function generateFurnitureSprite(
-  type: "desk" | "chair" | "monitor" | "coffee_machine" | "plant" | "server_rack" | "bathroom" | "gym" | "floor" | "wall",
+  type:
+    | "desk"
+    | "chair"
+    | "monitor"
+    | "coffee_machine"
+    | "plant"
+    | "server_rack"
+    | "bathroom"
+    | "gym"
+    | "floor"
+    | "wall",
 ): OffscreenCanvas {
   const canvas = createCanvas()
   const ctx = canvas.getContext("2d")!
@@ -757,4 +780,4 @@ export function getCoffeeCupTexture(frame: number): Texture {
   return texture
 }
 
-export { SPRITE_SIZE, PUPPY_SIZE, POOP_SIZE, COCKATOO_SIZE, COFFEE_CUP_SIZE }
+export { COCKATOO_SIZE, COFFEE_CUP_SIZE, POOP_SIZE, PUPPY_SIZE, SPRITE_SIZE }

@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from "node:crypto"
+import { createHash } from "node:crypto"
 import { constants } from "node:fs"
-import { mkdir, open, readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
+import { mkdir, open, readdir, readFile, realpath } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import { z } from "zod"
 import type { ReportAttachment } from "../domain/ports/report-channel"
+import { writeJsonAtomic } from "../util/atomic-json"
 import {
   MAX_REPORT_ATTACHMENTS,
   ReportDeliveryError,
@@ -92,14 +93,7 @@ export class ReportOutbox {
   async save(record: OutboxRecord): Promise<void> {
     outboxRecordSchema.parse(record)
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
-    const path = this.path(record.id)
-    const temporary = `${path}.${randomUUID()}.tmp`
-    try {
-      await writeFile(temporary, JSON.stringify(record, null, 2), { mode: 0o600, flag: "wx" })
-      await rename(temporary, path)
-    } finally {
-      await unlink(temporary).catch(() => {})
-    }
+    await writeJsonAtomic(this.path(record.id), record)
   }
 
   async list(): Promise<OutboxRecord[]> {

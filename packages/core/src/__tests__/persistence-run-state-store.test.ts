@@ -152,14 +152,19 @@ describe("RunStatePersistence", () => {
     ])
     await store.flush()
 
-    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(`${TEST_STORE}.tmp`, expect.any(String), "utf-8")
-    expect(vi.mocked(rename)).toHaveBeenCalledWith(`${TEST_STORE}.tmp`, TEST_STORE)
+    const tempPattern = new RegExp(`^${TEST_STORE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.[0-9a-f-]+\\.tmp$`)
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(expect.stringMatching(tempPattern), expect.any(String), {
+      flag: "wx",
+      mode: 0o600,
+    })
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(expect.stringMatching(tempPattern), TEST_STORE)
 
     // No leftover temp file after a successful write — rename() consumed it.
     const dir = TEST_STORE.replace(/\/[^/]+$/, "")
-    const tmpName = `${TEST_STORE.split("/").pop()}.tmp`
     const files = await readdir(dir)
-    expect(files).not.toContain(tmpName)
+    expect(files.some((file) => file.startsWith(`${TEST_STORE.split("/").pop()}.`) && file.endsWith(".tmp"))).toBe(
+      false,
+    )
   })
 
   test("a failed write to the .tmp file leaves an existing snapshot on disk untouched (no truncation)", async () => {

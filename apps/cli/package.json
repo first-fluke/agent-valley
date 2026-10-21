@@ -6,7 +6,7 @@
     "node": ">=26.10.0",
     "bun": ">=1.4.2"
   },
-  "description": "AI agent orchestrator — dispatch Linear issues to Claude, Codex, and Gemini agents in isolated git worktrees",
+  "description": "AI agent orchestrator — dispatch Linear or GitHub issues to Claude, Codex, Qwen, Antigravity, Cursor, Grok, Kimi, and OpenCode agents in isolated git worktrees",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
@@ -18,9 +18,10 @@
     "agent",
     "orchestrator",
     "linear",
+    "github",
     "claude",
     "codex",
-    "gemini",
+    "qwen",
     "cli"
   ],
   "bin": {

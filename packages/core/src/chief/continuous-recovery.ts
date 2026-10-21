@@ -1,7 +1,7 @@
 import { containersHealthy } from "./container-observation-state"
 import { assertExecutionBudget, chiefRecoveryStopped, MissionPause } from "./execution"
 import { validateFinalReview } from "./goal-evidence"
-import { reviewGatesAreCurrent } from "./review-gates"
+import { reviewGatesAreCurrent } from "./review-gate-check"
 import { validateMission } from "./schemas"
 import type { Mission } from "./types"
 

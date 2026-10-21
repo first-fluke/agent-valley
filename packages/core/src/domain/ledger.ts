@@ -2,13 +2,15 @@
  * Ledger Domain Types — Event sourcing types for team dashboard broadcasting.
  * No external dependencies. No business logic.
  *
- * Design doc: docs/plans/team-dashboard-design.md
+ * Design: docs/guides/team-ledger.md
  */
 
 // ── Agent Types ──────────────────────────────────────────────────────────────
 
-export const AGENT_TYPES = ["claude", "codex", "qwen", "antigravity", "cursor", "grok", "kimi", "opencode"] as const
-export type AgentType = (typeof AGENT_TYPES)[number]
+import type { AgentType } from "./agent"
+
+export { AGENT_IDS as AGENT_TYPES } from "./agent"
+export type { AgentType }
 
 // ── Ledger Event (Discriminated Union) ───────────────────────────────────────
 

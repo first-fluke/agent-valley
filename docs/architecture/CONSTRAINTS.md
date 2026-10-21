@@ -177,8 +177,9 @@ Error: WORKSPACE_ROOT must be an absolute path.
 
 | Stack | Tool | Configuration docs |
 |---|---|---|
-| TypeScript | dependency-cruiser | `docs/architecture/enforcement/typescript.md` |
+| TypeScript | `scripts/check-import-rules.mjs` (dependency-cruiser equivalent) | `docs/architecture/enforcement/typescript.md` |
 | Python | import-linter + Ruff | `docs/architecture/enforcement/python.md` |
 | Go | golangci-lint + go vet | `docs/architecture/enforcement/go.md` |
 
-`scripts/harness/validate.sh` runs these tools automatically in CI.
+CI runs these tools automatically (see `.github/workflows/ci.yml`); the
+TypeScript import gate runs as `bun run check:imports`.

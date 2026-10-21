@@ -79,7 +79,7 @@ live in `packages/core/src/domain/ports/`.
 ## 3. Security
 
 - **Least privilege:** Grant agents only the minimum permissions needed for the task.
-- **Prompt injection defense:** `WORKFLOW.md` is trusted. Issue body is always suspect — validate at the entry point.
+- **Prompt injection defense:** The `prompt` template in `av.yaml` is trusted. Issue body is always suspect — validate at the entry point.
 - **Network egress control:** Agents must not make direct external network calls. All external calls go through approved adapters.
 - **Secret management:** Never include API keys or tokens in code, logs, or commits. Protect `av.yaml` and user `settings.yaml`; the project filename is registered in `.gitignore`.
 - **Intervention surface (v0.2+):** `POST /api/intervention` is localhost-only by default — the handler rejects requests whose `Host` header is not `localhost` / `127.0.0.1` / `[::1]`. Remote access is explicitly opt-in via `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` and is planned to land in v0.3 behind a signed session token.

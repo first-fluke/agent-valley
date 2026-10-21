@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { mkdir, realpath, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, realpath, rm, writeFile } from "node:fs/promises"
 import { join, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
+import { writeJsonAtomic } from "../util/atomic-json"
 import type { ParallelBaseline } from "./parallel-contract"
 
 const exec = promisify(execFile)
@@ -55,13 +56,7 @@ export function assertParallelPath(root: string, path: string): void {
     throw new Error("Parallel task artifacts must remain within the mission's private parallel directory.")
 }
 export async function writeParallelJson(path: string, value: unknown): Promise<void> {
-  const temporary = `${path}.${randomUUID()}.tmp`
-  try {
-    await writeFile(temporary, JSON.stringify(value), { flag: "wx", mode: 0o600 })
-    await rename(temporary, path)
-  } finally {
-    await rm(temporary, { force: true })
-  }
+  await writeJsonAtomic(path, value, { pretty: false })
 }
 /** A private index includes tracked changes, deletions, executable bits and nonignored untracked files. */
 export async function captureParallelBaseline(workspace: string): Promise<ParallelBaseline> {

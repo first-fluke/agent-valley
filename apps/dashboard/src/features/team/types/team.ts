@@ -3,8 +3,9 @@
  * Reuses AgentType and ActiveIssue from domain. Adds serializable TeamNode (array-based).
  */
 
-export type { AgentType, ActiveIssue } from "@agent-valley/core/domain/ledger"
-import type { AgentType, ActiveIssue } from "@agent-valley/core/domain/ledger"
+export type { ActiveIssue, AgentType } from "@agent-valley/core/domain/ledger"
+
+import type { ActiveIssue, AgentType } from "@agent-valley/core/domain/ledger"
 
 export interface TeamNode {
   nodeId: string

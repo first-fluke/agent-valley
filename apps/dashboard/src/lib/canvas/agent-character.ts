@@ -1,8 +1,8 @@
 import { Container, Sprite, type Ticker } from "pixi.js"
-import { getAgentTexture, getCoffeeCupTexture } from "@/lib/canvas/sprite-generator"
+import type { AgentType, CharacterSkin, WorkspaceStatus } from "@/features/office/types/agent"
 import { STATE_ANIMATION_MAP } from "@/features/office/utils/animations"
 import { TILE_SIZE } from "@/features/office/utils/office-layout"
-import type { AgentType, CharacterSkin, WorkspaceStatus } from "@/features/office/types/agent"
+import { getAgentTexture, getCoffeeCupTexture } from "@/lib/canvas/sprite-generator"
 
 const WANDER_SPEED = 1.2
 const RETURN_SPEED = 2.0
@@ -231,7 +231,7 @@ export class AgentCharacter {
       this.targetX = exitWp.col * TILE_SIZE
       this.targetY = exitWp.row * TILE_SIZE
       this.pendingFinalTarget = { x: finalX, y: finalY }
-    // Check if entering a special area (e.g. entering bathroom)
+      // Check if entering a special area (e.g. entering bathroom)
     } else {
       const entryWp = this.getWaypoint?.(tile.col, tile.row)
       if (entryWp) {

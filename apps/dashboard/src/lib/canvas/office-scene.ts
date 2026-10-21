@@ -1,16 +1,16 @@
 import { Application, Container, Sprite, Text, TextStyle, type Ticker } from "pixi.js"
 import {
-  TILE_SIZE,
-  OFFICE_ROWS,
-  computeLayout,
-  type OfficeLayout,
-} from "@/features/office/utils/office-layout"
-import { getFurnitureTexture, getPoopTexture } from "@/lib/canvas/sprite-generator"
+  type AgentType,
+  CHARACTER_SKINS,
+  type CharacterSkin,
+  type OrchestratorState,
+} from "@/features/office/types/agent"
+import { computeLayout, OFFICE_ROWS, type OfficeLayout, TILE_SIZE } from "@/features/office/utils/office-layout"
 import { AgentCharacter } from "@/lib/canvas/agent-character"
-import { OfficePuppy } from "@/lib/canvas/office-puppy"
-import { OfficeCockatoo } from "@/lib/canvas/office-cockatoo"
 import { IssueBubble } from "@/lib/canvas/issue-bubble"
-import { CHARACTER_SKINS, type AgentType, type CharacterSkin, type OrchestratorState } from "@/features/office/types/agent"
+import { OfficeCockatoo } from "@/lib/canvas/office-cockatoo"
+import { OfficePuppy } from "@/lib/canvas/office-puppy"
+import { getFurnitureTexture, getPoopTexture } from "@/lib/canvas/sprite-generator"
 
 // S-8: Named constants for layout offsets
 const MONITOR_Y_OFFSET = -10
@@ -289,9 +289,10 @@ export class OfficeScene {
     this.characterLayer.addChild(this.puppy.container)
 
     // Cockatoo — perches on plant furniture
-    const plantPositions = this.layout!.furniture
-      .filter((f) => f.type === "plant")
-      .map((f) => ({ col: f.col, row: f.row }))
+    const plantPositions = this.layout!.furniture.filter((f) => f.type === "plant").map((f) => ({
+      col: f.col,
+      row: f.row,
+    }))
     if (plantPositions.length >= 2) {
       this.cockatoo = new OfficeCockatoo(plantPositions, this.app.ticker)
       this.characterLayer.addChild(this.cockatoo.container)
@@ -346,7 +347,10 @@ export class OfficeScene {
   private updateBathroomSemaphore() {
     if (this.bathroomOccupant === null) return
     const character = this.characters.get(this.bathroomOccupant)
-    if (!character) { this.bathroomOccupant = null; return }
+    if (!character) {
+      this.bathroomOccupant = null
+      return
+    }
     const bx = this.bathroomCol * TILE_SIZE
     const by = this.bathroomRow * TILE_SIZE
     const dx = Math.abs(character.container.x - bx)

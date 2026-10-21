@@ -15,9 +15,9 @@
  * Reference: docs/plans/v0-2-bigbang-design.md § 4.5, § 6.4 (E16-E19).
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
-import { dirname } from "node:path"
+import { readFile } from "node:fs/promises"
 import { logger } from "../observability/logger"
+import { writeJsonAtomic } from "../util/atomic-json"
 
 export interface BudgetUsageCounter {
   tokens: number
@@ -124,13 +124,8 @@ export class BudgetUsagePersistence implements BudgetUsagePort {
     recordedAttemptIds?: string[]
   }): Promise<void> {
     try {
-      await mkdir(dirname(this.storePath), { recursive: true })
       const full: BudgetUsageSnapshot = { version: 1, updatedAt: new Date().toISOString(), ...snapshot }
-      // Atomic write: a crash mid-write can only leave a stray `.tmp`; the
-      // live snapshot is never truncated (matches RunStatePersistence).
-      const tmpPath = `${this.storePath}.tmp`
-      await writeFile(tmpPath, JSON.stringify(full, null, 2), "utf-8")
-      await rename(tmpPath, this.storePath)
+      await writeJsonAtomic(this.storePath, full)
     } catch (err) {
       logger.error("budget-persistence", "Failed to save budget-usage snapshot", { error: String(err) })
     }

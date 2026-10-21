@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto"
-import { mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import { z } from "zod"
+import { writeJsonAtomicSync } from "../util/atomic-json"
 import { isProcessAlive, processIdentity } from "./process-identity"
 
 const markerSchema = z.strictObject({
@@ -149,12 +150,6 @@ export class ActiveMissionProcess {
 
   private write(marker: ProcessMarker): void {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 })
-    const temporary = `${this.path}.${randomUUID()}.tmp`
-    try {
-      writeFileSync(temporary, JSON.stringify(marker), { mode: 0o600, flag: "wx" })
-      renameSync(temporary, this.path)
-    } finally {
-      rmSync(temporary, { force: true })
-    }
+    writeJsonAtomicSync(this.path, marker, { pretty: false })
   }
 }

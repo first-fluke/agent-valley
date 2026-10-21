@@ -5,6 +5,7 @@
  * Community/custom sessions can be registered at runtime.
  */
 
+import { AGENT_IDS, type AgentType } from "../domain/agent"
 import type { AgentSession } from "./agent-session"
 
 type SessionConstructor = () => AgentSession
@@ -62,14 +63,17 @@ export class SessionRegistry {
     const { KimiSession } = await import("./kimi-session")
     const { OpencodeSession } = await import("./opencode-session")
 
-    this.register("codex", () => new CodexSession())
-    this.register("claude", () => new ClaudeSession())
-    this.register("qwen", () => new QwenSession())
-    this.register("antigravity", () => new AgySession())
-    this.register("cursor", () => new CursorSession())
-    this.register("grok", () => new GrokSession())
-    this.register("kimi", () => new KimiSession())
-    this.register("opencode", () => new OpencodeSession())
+    const builtins: Record<AgentType, () => AgentSession> = {
+      codex: () => new CodexSession(),
+      claude: () => new ClaudeSession(),
+      qwen: () => new QwenSession(),
+      antigravity: () => new AgySession(),
+      cursor: () => new CursorSession(),
+      grok: () => new GrokSession(),
+      kimi: () => new KimiSession(),
+      opencode: () => new OpencodeSession(),
+    }
+    for (const id of AGENT_IDS) this.register(id, builtins[id])
   }
 }
 

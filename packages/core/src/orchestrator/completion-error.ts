@@ -3,7 +3,7 @@ import type { Issue, RunAttempt } from "../domain/models"
 import type { ObservabilityHooks } from "../observability/hooks"
 import { logger } from "../observability/logger"
 import type { RunCallbacks } from "./agent-runner"
-import type { CompletionDeps } from "./completion-handler"
+import type { CompletionDeps } from "./completion-deps"
 
 export async function handleAgentFailure(
   deps: CompletionDeps,

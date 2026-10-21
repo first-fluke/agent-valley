@@ -59,6 +59,18 @@ describe("Actor configuration normalization", () => {
     expect(config).toMatchObject({ agentType: "codex", agentTimeout: 240, maxParallel: 1 })
   })
 
+  it("maps GitHub state labels onto workflowStates so transitions use valid ids", () => {
+    const project = projectConfigSchema.parse(projectBase)
+    const config = resolveConfig(null, project, { GITHUB_TOKEN: "synthetic" })
+    expect(config.trackerKind).toBe("github")
+    expect(config.workflowStates).toEqual({
+      todo: "todo",
+      inProgress: "doing",
+      done: "done",
+      cancelled: "cancelled",
+    })
+  })
+
   it("also supports directly supplied canonical blocks when resolving runtime configuration", () => {
     const config = resolveConfig(
       { actor: { timeout: 240 } },

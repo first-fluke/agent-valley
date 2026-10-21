@@ -1,55 +1,14 @@
 import { createHash } from "node:crypto"
-import { z } from "zod"
+import { type ExecutionState, executionPolicySchema, executionStateSchema, type FailureKind } from "./contracts"
 import type { Mission } from "./types"
 
-export const executionPolicySchema = z.strictObject({
-  maxParallel: z.number().int().min(1).max(8).default(3),
-  maxDurationSec: z.number().int().min(1).max(604_800).default(86_400),
-  maxRuns: z.number().int().min(1).max(2_000).default(200),
-  maxEstimatedCostUsd: z.number().finite().positive().optional(),
-  maxRetries: z.number().int().min(0).max(10).default(3),
-  retryDelayMs: z.number().int().min(10).max(300_000).default(1_000),
-  autoResume: z.boolean().default(true),
-})
-export type ExecutionPolicy = z.infer<typeof executionPolicySchema>
-export const executionStateSchema = z.strictObject({
-  startedAt: z.iso.datetime(),
-  runsStarted: z.number().int().nonnegative(),
-  retries: z.number().int().nonnegative(),
-  crashRestarts: z.number().int().nonnegative().optional(),
-  nextRunAt: z.iso.datetime().optional(),
-  pauseReason: z.string().max(32_000).optional(),
-  failureKind: z
-    .enum([
-      "authentication",
-      "rate-limit",
-      "provider",
-      "environment",
-      "implementation",
-      "unknown-effect",
-      "budget",
-      "interrupted",
-      "chief-wait",
-      "chief-unavailable",
-      "integrity",
-    ])
-    .optional(),
-  progressKey: z.string().optional(),
-  interventionAt: z.iso.datetime().optional(),
-  costReconciliations: z
-    .array(
-      z.strictObject({
-        runId: z.string().min(1).max(2_000),
-        costUsd: z.number().finite().nonnegative(),
-        at: z.iso.datetime(),
-        authority: z.literal("operator-recorded"),
-      }),
-    )
-    .max(2_000)
-    .optional(),
-})
-export type ExecutionState = z.infer<typeof executionStateSchema>
-export type FailureKind = NonNullable<ExecutionState["failureKind"]>
+export {
+  type ExecutionPolicy,
+  type ExecutionState,
+  executionPolicySchema,
+  executionStateSchema,
+  type FailureKind,
+} from "./contracts"
 
 /** A saved Chief stop persists until a later explicit intervention; invalid dates fail closed. */
 export function chiefRecoveryStopped(mission: Mission): boolean {

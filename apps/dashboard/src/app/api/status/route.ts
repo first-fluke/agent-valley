@@ -9,5 +9,5 @@ export function GET(request: Request) {
   if (!orchestrator) {
     return Response.json({ error: "Orchestrator not initialized" }, { status: 503 })
   }
-  return Response.json(orchestrator.getStatus())
+  return Response.json(orchestrator.getStatus(), { headers: { "Cache-Control": "no-store" } })
 }

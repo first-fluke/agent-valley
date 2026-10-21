@@ -18,7 +18,7 @@ Linear Issue (Todo)
 
 트래커 모드는 상태 전환(Todo → In Progress → Done/Cancelled)을 관리하고 검증된 변경을 전달합니다. Chief Director 명령은 목표에 대한 계획, 작업별 검토, 검증 결과를 로컬에 저장합니다.
 
-**TypeScript + Bun**으로 구축되었습니다. AgentSession 인터페이스로 **Claude Code, Codex, Antigravity, Cursor, Grok, Kimi, OpenCode**를 지원합니다.
+**TypeScript + Bun**으로 구축되었습니다. AgentSession 인터페이스로 **Claude Code, Codex, Qwen Code, Antigravity, Cursor, Grok, Kimi, OpenCode**를 지원합니다.
 
 사용자별 운용 과정, 수정 사항, 검증 범위와 남은 제약은 [운용 점검 보고서](./docs/reports/operability-audit-2026-10-03.md)에 있습니다.
 

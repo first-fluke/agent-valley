@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto"
-import { lstat, mkdir, readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
+import { lstat, mkdir, readdir, readFile, realpath } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { writeJsonAtomic } from "../util/atomic-json"
 import { type Operation, operationIdSchema, operationSchema } from "./continuous-contract"
 import { MissionStore } from "./store"
 
@@ -31,13 +31,7 @@ export class ContinuousOperationStore {
   private async persist(operation: Operation): Promise<void> {
     const path = this.path(operation.id)
     await this.ensureDirectory()
-    const temporary = `${path}.${randomUUID()}.tmp`
-    try {
-      await writeFile(temporary, JSON.stringify({ version: 1, operation }, null, 2), { mode: 0o600, flag: "wx" })
-      await rename(temporary, path)
-    } finally {
-      await unlink(temporary).catch(() => {})
-    }
+    await writeJsonAtomic(path, { version: 1, operation })
   }
 
   async load(id: string): Promise<Operation> {

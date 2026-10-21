@@ -56,7 +56,7 @@ export class WorkspaceManager {
   }
 
   autoCommit(workspace: Workspace): Promise<WorkspaceValidationResult> {
-    return autoCommit(workspace)
+    return autoCommit(workspace, this.rootPath)
   }
 
   getDiffStat(workspace: Workspace): Promise<string | null> {

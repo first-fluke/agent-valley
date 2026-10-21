@@ -1,6 +1,6 @@
 import { z } from "zod"
-import { taskWorktreeRecordSchema } from "./parallel-workspace"
-import type { Mission } from "./types"
+import type { ExecutionState, MissionSupervision } from "./contracts"
+import { taskWorktreeRecordSchema } from "./parallel-contract"
 
 const id = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/)
 const text = z.string().trim().min(1).max(32_000)
@@ -98,7 +98,7 @@ export const supervisionSchema = z.strictObject({
 })
 
 export function refineChiefWaitSchedule(
-  mission: Pick<Mission, "supervision" | "execution">,
+  mission: { supervision?: MissionSupervision; execution?: ExecutionState },
   ctx: z.RefinementCtx,
 ): void {
   if (mission.execution?.failureKind !== "chief-wait") return

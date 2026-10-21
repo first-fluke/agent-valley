@@ -339,7 +339,7 @@ info "Check 4/5: File length cap (CONSTRAINTS.md §5: max 500 lines per file)"
 VIOLATIONS_BEFORE_4="${VIOLATIONS}"
 MAX_LINES=500
 
-# Grandfathered files: pre-existing violations tracked in docs/plans/architecture-debt.md.
+# Grandfathered files: pre-existing violations tracked by this list.
 # Each entry is "path:ceiling" — fail only if the file grows above its ceiling.
 # Shrink the ceiling as you split these files; delete the entry when it drops under MAX_LINES.
 # (Currently empty — all prior entries were split below the 500-line cap.)

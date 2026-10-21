@@ -6,7 +6,7 @@ import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
 import { MissionPause, pauseForFailure, recordPause } from "./execution"
 import { reviewPrompt } from "./prompts"
 import { fallbackReport } from "./reports"
-import { reviewGatesAreCurrent } from "./review-gates"
+import { reviewGatesAreCurrent } from "./review-gate-check"
 import { parseFinalReview } from "./schemas"
 
 export async function verifyMission(context: CoordinatorContext): Promise<StageTransition> {

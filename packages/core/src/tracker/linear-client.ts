@@ -428,11 +428,9 @@ export async function fetchIssueByIdentifier(
 
 // ── Webhook Management ──────────────────────────────────────────────
 //
-// Implementation lives in `linear-webhook-client.ts` (kept separate to
+// Webhook registration lives in `linear-webhook-client.ts` (kept separate to
 // respect the 500-line file limit in docs/architecture/CONSTRAINTS.md).
-// Re-exported here so callers can keep importing everything Linear-related
-// from a single `tracker/linear-client` entry point.
-
-export { upsertWebhook, WEBHOOK_LABEL } from "./linear-webhook-client"
+// Import `upsertWebhook` / `WEBHOOK_LABEL` from there directly; re-exporting
+// here created a module cycle (linear-client ↔ linear-webhook-client).
 
 // ── Helpers ─────────────────────────────────────────────────────────

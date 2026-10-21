@@ -5,13 +5,13 @@
  *   - capabilities() returns a readable list for the default agent types.
  *   - spawn() returns a handle whose identity fields match the input.
  *   - send(unsupported) rejects with `InterventionUnsupportedError`.
- *   - onEvent() receives at least one `started` event for a fresh spawn.
+ *   - onEvent() returns a working unsubscribe function.
  *
  * Design: docs/plans/v0-2-bigbang-design.md § 4.4 / § 4.6 (PR4).
  */
 
 import { describe, expect, test } from "vitest"
-import type { AgentRunEvent, AgentRunnerPort, SpawnInput } from "../../domain/ports/agent-runner"
+import type { AgentRunnerPort, SpawnInput } from "../../domain/ports/agent-runner"
 import { InterventionUnsupportedError } from "../../domain/ports/agent-runner"
 
 export interface AgentRunnerContractHarness {
@@ -66,21 +66,14 @@ export function runAgentRunnerContract(label: string, makeHarness: () => Promise
       }
     })
 
-    test("spawn emits a `started` event on the handle stream", async () => {
+    test("handle exposes a working event subscription", async () => {
       const h = await makeHarness()
       try {
-        const received: AgentRunEvent[] = []
-        const handle = await h.runner.spawn(h.buildSpawnInput({ attemptId: "att-contract-started" }))
-        const unsub = handle.onEvent((e) => received.push(e))
-        // The fake emits synchronously on spawn; the real adapter emits
-        // immediately after the underlying service.spawn resolves.
-        // Accept either by subscribing after spawn but tolerating zero:
-        // the fake replay is observable only post-subscribe, so emit
-        // again from the handle if it supports it is not part of the
-        // contract — we instead assert the handle is structurally alive.
-        unsub()
+        const handle = await h.runner.spawn(h.buildSpawnInput({ attemptId: "att-contract-events" }))
+        const unsubscribe = handle.onEvent(() => {})
+        expect(typeof unsubscribe).toBe("function")
+        unsubscribe()
         expect(typeof handle.isAlive()).toBe("boolean")
-        expect(received.length).toBeGreaterThanOrEqual(0)
       } finally {
         await h.cleanup?.()
       }

@@ -1,6 +1,6 @@
 import type { Config } from "@agent-valley/core/config/yaml-loader"
 import { createIssueRelation, ensureIssueLabelId, updateIssueState } from "@agent-valley/core/tracker/linear-client"
-import type { BreakdownResult } from "./breakdown"
+import type { BreakdownResult } from "./breakdown-types"
 import { type CreatedLinearIssue, createLinearIssueInState, findDraftState } from "./linear-issue"
 
 export function validateBreakdown(result: BreakdownResult): void {

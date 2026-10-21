@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 @keyframes stripe-slide {
-  from { background-position: 0 0; }
-  to { background-position: 16px 0; }
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 16px 0;
+  }
 }
 
 .bar-stripe {

@@ -21,6 +21,13 @@
 import type { RetryCategory, RetryEntry } from "../domain/models"
 import { logger } from "../observability/logger"
 
+/** Prior-attempt context handed to a retry dispatch. */
+export interface RetryContext {
+  attemptCount: number
+  lastError: string
+  category?: RetryCategory
+}
+
 /** Ceiling on the (pre-jitter) exponential delay, so a high attemptCount can't grow the wait unboundedly. */
 const DEFAULT_MAX_BACKOFF_SEC = 3600
 

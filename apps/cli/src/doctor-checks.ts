@@ -22,16 +22,18 @@ import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { agentBinary } from "@agent-valley/core/agent-registry"
 import type { GlobalConfig, ProjectConfig } from "@agent-valley/core/config/yaml-loader"
 import { loadGlobalConfig, loadProjectConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
+import { AGENT_IDS, type AgentType } from "@agent-valley/core/domain/agent"
 import type { SkillMatrixDeps } from "@agent-valley/core/oma/skill-matrix-adapter"
 import { resolveBinaryPath } from "@agent-valley/core/sessions/sandbox-binary"
 import { isSandboxExecAvailable } from "@agent-valley/core/sessions/sandbox-darwin"
 import { isBwrapAvailable } from "@agent-valley/core/sessions/sandbox-linux"
 
-export type AgentType = "claude" | "codex" | "qwen" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
+export type { AgentType }
 
-export const AGENT_TYPES: AgentType[] = ["claude", "codex", "qwen", "antigravity", "cursor", "grok", "kimi", "opencode"]
+export const AGENT_TYPES: AgentType[] = [...AGENT_IDS]
 
 export type CheckStatus = "pass" | "fail" | "warn" | "unknown"
 
@@ -91,16 +93,10 @@ export function defaultDoctorDeps(): DoctorDeps {
 
 // ── Agent CLI metadata ───────────────────────────────────────────────────────
 
-export const AGENT_BINARY: Record<AgentType, string> = {
-  claude: "claude",
-  codex: "codex",
-  qwen: "qwen",
-  antigravity: "agy",
-  cursor: "cursor-agent",
-  grok: "grok",
-  kimi: "kimi",
-  opencode: "opencode",
-}
+export const AGENT_BINARY = Object.fromEntries(AGENT_IDS.map((id) => [id, agentBinary(id)])) as Record<
+  AgentType,
+  string
+>
 
 export const AGENT_INSTALL_HINT: Record<AgentType, string> = {
   qwen: "Install: npm install -g @qwen-code/qwen-code (see https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/)",

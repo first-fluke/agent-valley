@@ -22,11 +22,15 @@ describe("InterventionPanel is mounted on the dashboard page", () => {
   })
 
   test("imports InterventionPanel", () => {
-    expect(pageSource).toMatch(/import\s*\{\s*InterventionPanel\s*\}\s*from\s*"@\/features\/orchestrator\/components\/intervention-panel"/)
+    expect(pageSource).toMatch(
+      /import\s*\{\s*InterventionPanel\s*\}\s*from\s*"@\/features\/orchestrator\/components\/intervention-panel"/,
+    )
   })
 
   test("imports ActiveAgentsPanel", () => {
-    expect(pageSource).toMatch(/import\s*\{\s*ActiveAgentsPanel\s*\}\s*from\s*"@\/features\/orchestrator\/components\/active-agents-panel"/)
+    expect(pageSource).toMatch(
+      /import\s*\{\s*ActiveAgentsPanel\s*\}\s*from\s*"@\/features\/orchestrator\/components\/active-agents-panel"/,
+    )
   })
 
   test("renders <InterventionPanel /> with the selected attempt and a close handler", () => {
@@ -56,10 +60,7 @@ describe("InterventionPanel accessibility (focus management + keyboard close)", 
   let panelSource: string
 
   beforeAll(() => {
-    const filePath = resolve(
-      import.meta.dirname,
-      "../features/orchestrator/components/intervention-panel.tsx",
-    )
+    const filePath = resolve(import.meta.dirname, "../features/orchestrator/components/intervention-panel.tsx")
     panelSource = readFileSync(filePath, "utf-8")
   })
 

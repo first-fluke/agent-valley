@@ -1,19 +1,17 @@
 import { getOrchestrator } from "@/lib/orchestrator-singleton"
+import { readBoundedBody } from "@/lib/request-body"
 
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type") ?? ""
   if (!contentType.includes("application/json")) {
-    return Response.json(
-      { error: "Unsupported content type. Expected application/json" },
-      { status: 415 },
-    )
+    return Response.json({ error: "Unsupported content type. Expected application/json" }, { status: 415 })
   }
 
-  const payload = await request.text()
-
-  if (payload.length > 1_048_576) {
-    return Response.json({ error: "Payload too large" }, { status: 413 })
+  const body = await readBoundedBody(request)
+  if (!body.ok) {
+    return Response.json({ error: "Payload too large" }, { status: body.status })
   }
+  const payload = body.text
 
   const signature = request.headers.get("linear-signature") ?? ""
 

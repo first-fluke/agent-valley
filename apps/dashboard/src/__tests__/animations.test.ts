@@ -1,6 +1,6 @@
-import { describe, test, expect } from "vitest"
-import { STATE_ANIMATION_MAP } from "../features/office/utils/animations"
+import { describe, expect, test } from "vitest"
 import type { WorkspaceStatus } from "../features/office/types/agent"
+import { STATE_ANIMATION_MAP } from "../features/office/utils/animations"
 
 describe("STATE_ANIMATION_MAP", () => {
   const statuses: WorkspaceStatus[] = ["idle", "running", "done", "failed"]

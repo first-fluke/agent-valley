@@ -17,14 +17,11 @@ import { buildOmaGuidance, prepareOmaAttempt } from "../oma/receipt-adapter"
 import { formatBudgetBlockComment } from "./budget-service"
 import { createCompletionCallbacks } from "./completion-handler"
 import type { OrchestratorCore } from "./orchestrator-core"
+import type { RetryContext } from "./retry-queue"
 import { analyzeScoreInBackground } from "./scoring-service"
 import { resolveVerifyCommand } from "./verification-gate"
 
-export interface RetryContext {
-  attemptCount: number
-  lastError: string
-  category?: RetryCategory
-}
+export type { RetryContext }
 
 export class IssueLifecycle {
   constructor(private readonly core: OrchestratorCore) {}

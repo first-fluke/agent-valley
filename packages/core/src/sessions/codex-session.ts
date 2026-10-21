@@ -5,11 +5,9 @@
  * Lifecycle: initialize → thread/start → turn/start → events → turn/completed
  */
 
-import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
+import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
-import { planSandboxedSpawn } from "./sandbox"
 
 interface JsonRpcRequest {
   jsonrpc: "2.0"
@@ -60,26 +58,21 @@ export class CodexSession extends BaseSession {
     // from trusting the flag. planSandboxedSpawn() fails closed when no
     // sandbox is available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set —
     // let that rejection propagate so callers see a clear start() failure.
-    const plan = await planSandboxedSpawn({
+    const spawned = await this.spawnSandboxed({
       agentType: "codex",
       command: "codex",
       args,
-      workspacePath: config.workspacePath,
-    })
-
-    this.process = spawn(plan.command, plan.args, {
-      detached: process.platform !== "win32",
-      cwd: config.workspacePath,
-      env: buildAgentEnv("codex", config.env) as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
+      rethrowSandboxError: true,
     })
+    if (!spawned) return
 
     this.readStream()
 
     await this.rpc("initialize", {
       clientInfo: { name: "symphony-orchestrator", version: "1.0" },
     })
-    this.process.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized" })}\n`)
+    this.process?.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized" })}\n`)
   }
 
   async execute(prompt: string): Promise<void> {

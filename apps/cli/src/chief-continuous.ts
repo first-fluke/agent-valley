@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { mkdir, realpath, rename, unlink, writeFile } from "node:fs/promises"
+import { mkdir, realpath } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { promisify } from "node:util"
 import { collectContainerObservation } from "@agent-valley/core/chief/container-observation"
@@ -14,6 +14,7 @@ import { clearedGitEnvironment } from "@agent-valley/core/chief/parallel-git"
 import { markdown } from "@agent-valley/core/chief/reports"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
+import { writeTextAtomic } from "@agent-valley/core/util/atomic-json"
 import { type Command, Option } from "commander"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { decideContinuousGoal } from "./chief-continuous-decision"
@@ -215,14 +216,7 @@ export function renderOperationReport(operation: ContinuousOperation): string {
 async function saveOperationReport(root: string, operation: ContinuousOperation): Promise<void> {
   const directory = join(root, ".agent-valley", "operation-reports")
   await mkdir(directory, { recursive: true, mode: 0o700 })
-  const path = join(directory, `${operation.id}.md`)
-  const temporary = `${path}.${randomUUID()}.tmp`
-  try {
-    await writeFile(temporary, renderOperationReport(operation), { mode: 0o600, flag: "wx" })
-    await rename(temporary, path)
-  } finally {
-    await unlink(temporary).catch(() => {})
-  }
+  await writeTextAtomic(join(directory, `${operation.id}.md`), renderOperationReport(operation))
 }
 
 export interface ContinuousRunDependencies {

@@ -6,42 +6,17 @@ import { stripVTControlCharacters } from "node:util"
 import { buildAgentEnv, getAgentAuthEnvKeys } from "@agent-valley/core/sessions/base-session"
 import { resolveBinaryPath } from "@agent-valley/core/sessions/sandbox-binary"
 import { parseClientToml } from "./client-toml"
+import type {
+  AgentAvailability,
+  AgentReadiness,
+  AuthProbeOptions,
+  AuthProbeResult,
+  DiscoveryDeps,
+} from "./discovery-types"
 import { AGENT_BINARY, AGENT_INSTALL_HINT, AGENT_LOGIN_HINT, AGENT_TYPES, type AgentType } from "./doctor-checks"
 import { qwenAuth } from "./qwen-discovery"
 
-export type AgentReadiness = "ready" | "unknown" | "unavailable" | "unauthenticated"
-
-export interface AgentAvailability {
-  agentType: AgentType
-  binaryPath?: string
-  readiness: AgentReadiness
-  reason: string
-}
-
-export interface AuthProbeResult {
-  exitCode: number | null
-  stdout: string
-  stderr: string
-}
-
-export interface AuthProbeOptions {
-  env: NodeJS.ProcessEnv
-  timeoutMs: number
-  maxOutputBytes: number
-  signal: AbortSignal
-}
-
-export interface DiscoveryDeps {
-  home: string
-  env: NodeJS.ProcessEnv
-  now: () => number
-  resolveBinary: (name: string) => string | null
-  isExecutableFile: (path: string) => boolean
-  fileInfo: (path: string) => { isFile: boolean; size: number } | null
-  readFile: (path: string) => string
-  parseToml: (content: string) => unknown
-  probe: (path: string, args: readonly string[], options: AuthProbeOptions) => Promise<AuthProbeResult>
-}
+export type { AgentAvailability, AgentReadiness, AuthProbeOptions, AuthProbeResult, DiscoveryDeps }
 
 const PROBE_TIMEOUT_MS = 5_000
 const MAX_OUTPUT_BYTES = 16_384

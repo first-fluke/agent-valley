@@ -7,12 +7,11 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 5.7 (C) and § 6.3 (E12).
  *
  * Capability-driven: buttons are disabled when the agent type does not
- * advertise support. The capability mapping mirrors the core's
- * `CAPABILITY_TABLE` (packages/core/src/sessions/adapters/spawn-agent-runner.ts)
- * so the dashboard can pre-filter actions without an extra round-trip.
- * When the core adds new agent types, extend both tables.
+ * advertise support. Capabilities come from the core agent registry, so the
+ * dashboard cannot drift from the port's `CAPABILITY_TABLE`.
  */
 
+import { capabilitiesFor } from "@agent-valley/core/agent-registry"
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -22,16 +21,6 @@ export interface ActiveAttempt {
   attemptId: string
   issueKey: string
   agentType: string
-}
-
-const CAPS_BY_AGENT: Record<string, InterventionKind[]> = {
-  claude: ["append_prompt", "abort"],
-  codex: ["pause", "resume", "append_prompt", "abort"],
-  antigravity: ["append_prompt", "abort"],
-}
-
-function capabilitiesFor(agentType: string): InterventionKind[] {
-  return CAPS_BY_AGENT[agentType] ?? ["append_prompt", "abort"]
 }
 
 interface InterventionPanelProps {
@@ -57,6 +46,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
   // Focus management: move focus into the drawer on open, restore it to
   // whatever triggered the drawer (e.g. the Active Actors list item) on
   // close — required so keyboard/screen-reader users don't lose their place.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset local input state when the selected attempt changes
   useEffect(() => {
     setPromptText("")
     setToast(null)

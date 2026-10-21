@@ -52,11 +52,9 @@
  * drop the length guard.
  */
 
-import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
+import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
-import { planSandboxedSpawn } from "./sandbox"
 
 export const CURSOR_COMMAND = "cursor-agent"
 
@@ -115,36 +113,21 @@ export class CursorSession extends BaseSession {
     args.push(prompt)
 
     // Containment for --force comes from the OS sandbox wrapping this
-    // spawn, not from trusting the flag itself. planSandboxedSpawn() fails
-    // closed (throws) when no sandbox is available unless
-    // SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
-    let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
-    try {
-      plan = await planSandboxedSpawn({
-        agentType: "cursor",
-        command: CURSOR_COMMAND,
-        args,
-        workspacePath: this.config.workspacePath,
-      })
-    } catch (err) {
-      this.emitError("CRASH", `${err}`, false)
-      return
-    }
-
-    // CURSOR_API_KEY is not (yet) in base-session.ts's AGENT_ENV_KEYS map
-    // for agentType "cursor" — that wiring belongs to the orchestrator per
-    // the task boundary, not this file. Forward it here via buildAgentEnv's
-    // `extra` param so auth still works standalone; never logged.
+    // spawn, not from trusting the flag itself. spawnSandboxed() fails closed
+    // when no sandbox is available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
+    // CURSOR_API_KEY is forwarded so auth still works standalone; never logged.
     const extraEnv: Record<string, string> = { ...this.config.env }
     const apiKey = process.env.CURSOR_API_KEY
     if (apiKey) extraEnv.CURSOR_API_KEY = apiKey
 
-    this.process = spawn(plan.command, plan.args, {
-      detached: process.platform !== "win32",
-      cwd: this.config.workspacePath,
-      env: buildAgentEnv("cursor", extraEnv) as NodeJS.ProcessEnv,
+    const spawned = await this.spawnSandboxed({
+      agentType: "cursor",
+      command: CURSOR_COMMAND,
+      args,
       stdio: ["ignore", "pipe", "pipe"],
+      extraEnv,
     })
+    if (!spawned) return
 
     await this.readStream()
   }

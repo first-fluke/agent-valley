@@ -346,21 +346,27 @@ function mergeConfigs(
   // GitHub: resolve token from named env var. Empty string fails validation
   // later via the trackerKind=github refinement.
   let githubMerged: Record<string, unknown> | undefined
+  let githubWorkflowStates: Config["workflowStates"] | null = null
   if (trackerKind === "github" && project?.github) {
     const envName = project.github.token_env ?? "GITHUB_TOKEN"
     const token = env[envName] ?? ""
+    const labels = {
+      todo: project.github.labels?.todo ?? "",
+      inProgress: project.github.labels?.in_progress ?? "",
+      done: project.github.labels?.done ?? "",
+      cancelled: project.github.labels?.cancelled ?? "",
+    }
     githubMerged = {
       token,
       owner: project.github.owner ?? "",
       repo: project.github.repo ?? "",
       webhookSecret: project.github.webhook_secret ?? "",
-      labels: {
-        todo: project.github.labels?.todo ?? "",
-        inProgress: project.github.labels?.in_progress ?? "",
-        done: project.github.labels?.done ?? "",
-        cancelled: project.github.labels?.cancelled ?? "",
-      },
+      labels,
     }
+    // GitHub state identifiers are label names. The orchestrator passes
+    // workflowStates.* straight to IssueTracker.updateIssueState, so mirror
+    // the labels here instead of leaving the Linear UUIDs empty.
+    githubWorkflowStates = labels
   }
 
   // Build merged config: project > global > defaults
@@ -370,7 +376,7 @@ function mergeConfigs(
     linearTeamId: project?.linear?.team_id ?? "",
     linearTeamUuid: project?.linear?.team_uuid ?? "",
     linearWebhookSecret: project?.linear?.webhook_secret ?? "",
-    workflowStates: {
+    workflowStates: githubWorkflowStates ?? {
       todo: project?.linear?.workflow_states?.todo ?? "",
       inProgress: project?.linear?.workflow_states?.in_progress ?? "",
       done: project?.linear?.workflow_states?.done ?? "",

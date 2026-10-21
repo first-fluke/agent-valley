@@ -81,7 +81,7 @@ export default function DashboardPage() {
   const [showCredentials, setShowCredentials] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       const response = await fetch("/api/auth/session", { cache: "no-store", signal: AbortSignal.timeout(10_000) })
       if (!response.ok)
@@ -93,12 +93,12 @@ export default function DashboardPage() {
         cause instanceof Error ? cause.message : "Cannot reach the dashboard. Check that av up is running, then retry.",
       )
     }
-  }
+  }, [])
   useEffect(() => {
     void refresh()
     const timer = setInterval(() => void refresh(), 60_000)
     return () => clearInterval(timer)
-  }, [])
+  }, [refresh])
 
   const login = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

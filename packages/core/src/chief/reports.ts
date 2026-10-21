@@ -5,18 +5,9 @@ import { finalCriteria } from "./goal-evidence"
 import { operationsEvidence, operationsReportLines } from "./operations-report"
 import { assessMetricTargets } from "./organization"
 import { verificationIncompleteReasons } from "./report-verification"
-import type { Mission, Review, Verification } from "./types"
+import type { ChiefReport, Mission, Review, Verification } from "./types"
 
-export interface ChiefReport {
-  summary: string
-  eli5: string
-  goalAssessment: string
-  assumptions: string[]
-  decisions: string[]
-  deliverables: string[]
-  checks: string[]
-  remaining: string[]
-}
+export type { ChiefReport }
 
 const prose = z.string().trim().min(1).max(1_200)
 const entries = z.array(z.string().trim().min(1).max(500)).max(20)

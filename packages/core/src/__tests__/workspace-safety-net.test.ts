@@ -4,6 +4,7 @@
  */
 
 import { execSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -252,6 +253,49 @@ describe("getDiffStat", () => {
 
     expect(result).not.toBeNull()
     expect(result).toContain("2 files changed")
+  })
+})
+
+describe("agent-writable git metadata", () => {
+  test("does not execute repository hooks during auto-commit", async () => {
+    const marker = join(repoDir, "hook-ran.txt")
+    await mkdir(join(repoDir, ".git", "hooks"), { recursive: true })
+    await writeFile(join(repoDir, ".git", "hooks", "pre-commit"), `#!/bin/sh\necho ran > ${JSON.stringify(marker)}\n`, {
+      mode: 0o755,
+    })
+    await writeFile(join(worktreeDir, "change.ts"), "export const x = 1\n")
+
+    const result = await manager.autoCommit(makeWorkspace())
+
+    expect(result.ok).toBe(true)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  test("rejects a .git pointer to a repository outside the configured root", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "symphony-outside-git-"))
+    const fakeGitDir = join(outside, "worktrees", "TEST-1")
+    await mkdir(fakeGitDir, { recursive: true })
+    await rm(join(worktreeDir, ".git"), { force: true })
+    await writeFile(join(worktreeDir, ".git"), `gitdir: ${fakeGitDir}\n`)
+    await writeFile(join(worktreeDir, "change.ts"), "export const x = 1\n")
+
+    const result = await manager.autoCommit(makeWorkspace())
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("outside the configured repository")
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  test("rejects a .git file that points inside the workspace", async () => {
+    const fakeGitDir = join(worktreeDir, "fake-git")
+    await mkdir(join(fakeGitDir, "worktrees", "TEST-1"), { recursive: true })
+    await rm(join(worktreeDir, ".git"), { force: true })
+    await writeFile(join(worktreeDir, ".git"), `gitdir: ${join(fakeGitDir, "worktrees", "TEST-1")}\n`)
+
+    const result = await manager.autoCommit(makeWorkspace())
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain("points inside the agent-writable workspace")
   })
 })
 

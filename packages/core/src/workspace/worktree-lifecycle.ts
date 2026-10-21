@@ -26,10 +26,20 @@ export interface RunCommandOptions {
   env?: Record<string, string | undefined>
 }
 
+/**
+ * Git config overrides applied to every Git invocation made by the
+ * orchestrator. Agent workspaces are writable by the agent, so `.git` (and
+ * repo-local config) must be treated as untrusted: a planted hook, signing
+ * program, or fsmonitor command would otherwise execute on the host outside
+ * the sandbox during auto-commit/rebase.
+ */
+const GIT_SAFETY_ARGS = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false"]
+
 /** Run a command and return its exit code, stdout, and stderr. */
 export function runCommand(cmd: string, args: string[], options: RunCommandOptions = {}): Promise<CommandResult> {
+  const argv = cmd === "git" ? [...GIT_SAFETY_ARGS, ...args] : args
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, {
+    const proc = spawn(cmd, argv, {
       cwd: options.cwd ?? process.cwd(),
       stdio: options.ignoreStdio ? "ignore" : ["ignore", "pipe", "pipe"],
       env: options.env ? { ...process.env, ...options.env } : undefined,

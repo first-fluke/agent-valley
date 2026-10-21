@@ -17,7 +17,6 @@ export interface MetricsEndpointConfig {
 }
 
 declare global {
-  // biome-ignore lint: global augmentation for singleton
   var __agent_valley_metrics__: MetricsEndpointConfig | undefined
 }
 

@@ -1,9 +1,5 @@
-import { describe, test, expect } from "vitest"
-import {
-  TILE_SIZE,
-  OFFICE_ROWS,
-  computeLayout,
-} from "../features/office/utils/office-layout"
+import { describe, expect, test } from "vitest"
+import { computeLayout, OFFICE_ROWS, TILE_SIZE } from "../features/office/utils/office-layout"
 
 describe("Office Layout", () => {
   test("dimensions are consistent", () => {

@@ -1,6 +1,6 @@
 import { Container, Sprite, type Ticker } from "pixi.js"
-import { getCockatooTexture } from "@/lib/canvas/sprite-generator"
 import { TILE_SIZE } from "@/features/office/utils/office-layout"
+import { getCockatooTexture } from "@/lib/canvas/sprite-generator"
 
 const FLY_SPEED = 1.8
 const FLY_FRAME_INTERVAL = 150
@@ -22,10 +22,7 @@ export class OfficeCockatoo {
   private perchRemaining: number
   private currentPlantIndex = 0
 
-  constructor(
-    plantPositions: { col: number; row: number }[],
-    ticker: Ticker,
-  ) {
+  constructor(plantPositions: { col: number; row: number }[], ticker: Ticker) {
     this.plantPositions = plantPositions
     this.ticker = ticker
     this.container = new Container()

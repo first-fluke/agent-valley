@@ -10,11 +10,10 @@ import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner
 import type { AgentRunnerService } from "./agent-runner"
 import type { BudgetService } from "./budget-service"
 import { createNoopBudgetService } from "./budget-service"
-import type { CompletionDeps } from "./completion-handler"
+import type { CompletionDeps } from "./completion-deps"
 import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
 import type { InterventionBus } from "./intervention-bus"
-import type { RetryContext } from "./issue-lifecycle"
 import { PendingFinalizationManager } from "./pending-finalization"
 import { decideRecovery } from "./persistence/recovery"
 import {
@@ -25,6 +24,7 @@ import {
 } from "./persistence/recovery-apply"
 import type { PersistedAttempt, RunStatePort } from "./persistence/run-state-store"
 import { RunStatePersistence } from "./persistence/run-state-store"
+import type { RetryContext } from "./retry-queue"
 import { CAPACITY_WAIT_REASON, RetryQueue } from "./retry-queue"
 import { fillVacantSlots } from "./slot-filler"
 

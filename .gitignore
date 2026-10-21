@@ -38,9 +38,13 @@ logs/
 *.tmp
 .cache/
 
-# Planning (local only)
+# Planning: local drafts stay untracked; shipped design docs are tracked.
 PLAN.md
-docs/plans/
+docs/plans/*
+!docs/plans/v0-2-bigbang-design.md
+!docs/plans/domain-ports-di-seam-design.md
+!docs/plans/config-layer-split-design.md
+!docs/plans/dag-scheduling-design.md
 
 # Tool internals
 .serena/

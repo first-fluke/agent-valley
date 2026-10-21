@@ -59,6 +59,18 @@ describe("sortByIssueNumber", () => {
     // NaN handling - NaN compares as 0
     expect(issues).toHaveLength(2)
   })
+
+  test("sorts GitHub identifiers by their trailing issue number", () => {
+    const issues = [
+      makeIssue("owner/repo#10"),
+      makeIssue("owner/repo#2"),
+      makeIssue("owner/repo#1"),
+      makeIssue("owner/repo#5"),
+    ]
+    sortByIssueNumber(issues)
+
+    expect(issues.map((i) => i.identifier)).toEqual(["owner/repo#1", "owner/repo#2", "owner/repo#5", "owner/repo#10"])
+  })
 })
 
 // ── buildParentSummary ──────────────────────────────────────────────

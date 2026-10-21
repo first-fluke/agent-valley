@@ -1,4 +1,4 @@
-import { reviewGatesAreCurrent } from "./review-gates"
+import { reviewGatesAreCurrent } from "./review-gate-check"
 import type { Mission } from "./types"
 import { validateGoalVerificationResult } from "./verification"
 

@@ -29,7 +29,7 @@ vi.mock("@agent-valley/core/config/yaml-loader", () => ({
   loadConfig: (...args: unknown[]) => state.loadConfigImpl.apply(null, args as []),
 }))
 
-vi.mock("@agent-valley/core/tracker/linear-client", () => ({
+vi.mock("@agent-valley/core/tracker/linear-webhook-client", () => ({
   upsertWebhook: (...args: unknown[]) => state.upsertWebhookMock(...args),
 }))
 

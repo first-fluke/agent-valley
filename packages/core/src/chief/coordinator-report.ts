@@ -1,6 +1,6 @@
 import type { createMissionRun } from "./coordinator-run"
 import { fallbackReport, parseReport, reportPrompt } from "./reports"
-import { reviewGatesAreCurrent } from "./review-gates"
+import { reviewGatesAreCurrent } from "./review-gate-check"
 import type { ChiefPorts, Mission, Persona } from "./types"
 
 export function createMissionReporter(

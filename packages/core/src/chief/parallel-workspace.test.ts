@@ -166,7 +166,7 @@ describe("isolated parallel Actor worktrees", () => {
     for (const workspace of workspaces) await integrateTaskWorktree(mission, workspace)
     expect(await readFile(join(mission.workspace.path, "a.txt"), "utf8")).toBe("a output\n")
     expect(await readFile(join(mission.workspace.path, "b.txt"), "utf8")).toBe("b output\n")
-  })
+  }, 30_000)
 
   it("delivers binary edits, executable modes, deletions, symlinks and unusual untracked names while retaining operator changes", async () => {
     const root = mission.workspace.path

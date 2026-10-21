@@ -7,6 +7,7 @@
  * Reference: docs/plans/v0-2-bigbang-design.md § 3.1 (D), § 5.8
  */
 
+import { genAiSystemFor } from "../agent-registry"
 import type { OtelExporter } from "./otel-exporter"
 import { createNoopOtelExporter, SPAN_KIND } from "./otel-exporter"
 import type { PromMetrics } from "./prom-metrics"
@@ -77,27 +78,12 @@ const GEN_AI_OPERATION_NAME = "invoke_agent"
  * Maps agent-valley's internal agent type to the stable GenAI semconv
  * `gen_ai.system` registry value (the LLM *provider*, not the CLI tool)
  * — see https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/.
- * Falls back to the raw agentType string for any future agent type not
- * yet mapped here, so a new agent type degrades gracefully (a
- * non-registry value, but never a missing/crashing attribute) rather
- * than throwing.
+ * The mapping lives in `agent-registry.ts`. Unknown/custom agent types fall
+ * back to their own name (a non-registry value, but never a missing or
+ * crashing attribute).
  */
-const GEN_AI_SYSTEM_BY_AGENT_TYPE: Record<string, string> = {
-  claude: "anthropic",
-  codex: "openai",
-  qwen: "qwen-code",
-  antigravity: "gcp.antigravity",
-  cursor: "cursor",
-  grok: "xai",
-  kimi: "moonshotai",
-  // opencode routes to 75+ providers per-invocation, so there is no single
-  // upstream LLM provider to name here — "opencode" is the honest
-  // gen_ai.system value rather than picking one provider arbitrarily.
-  opencode: "opencode",
-}
-
 function mapAgentTypeToGenAiSystem(agentType: string): string {
-  return GEN_AI_SYSTEM_BY_AGENT_TYPE[agentType] ?? agentType
+  return genAiSystemFor(agentType)
 }
 
 /**

@@ -6,18 +6,16 @@
  * 2. Uses pure derivation (useMemo) instead of side effects (useEffect)
  * 3. Accepts pre-fetched SSE data instead of a URL
  */
-import { describe, expect, test, beforeAll } from "vitest"
+
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { beforeAll, describe, expect, test } from "vitest"
 
 describe("useLocalOrchestrator — no EventSource leak", () => {
   let source: string
 
   beforeAll(() => {
-    const filePath = resolve(
-      import.meta.dirname,
-      "../features/team/hooks/use-local-orchestrator.ts",
-    )
+    const filePath = resolve(import.meta.dirname, "../features/team/hooks/use-local-orchestrator.ts")
     source = readFileSync(filePath, "utf-8")
   })
 

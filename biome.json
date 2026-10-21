@@ -52,7 +52,7 @@
       "!**/node_modules",
       "!**/dist",
       "!**/bun.lock",
-      "!**/apps/dashboard",
+      "!**/next-env.d.ts",
       "!.agents",
       "!.claude",
       "!.codex",

@@ -26,11 +26,14 @@ describe("Qwen native profile sandbox access", () => {
     expect(access.active).toEqual(["/custom/profile"])
     expect(access.inactive).toContain("/home/test/.qwen")
   })
-  it("expands native tilde syntax but cannot confirm relative paths across worktrees", () => {
-    expect(qwenProfilePath("/home/test", { QWEN_HOME: "~" })).toBe("/home/test")
+  it("expands native tilde syntax but rejects paths that would widen the sandbox", () => {
+    expect(qwenProfilePath("/home/test", { QWEN_HOME: "~" })).toBeNull()
+    expect(qwenProfilePath("/home/test", { QWEN_HOME: "/" })).toBeNull()
+    expect(qwenProfilePath("/home/test", { QWEN_HOME: "/home" })).toBeNull()
     expect(qwenProfilePath("/home/test", { QWEN_HOME: "~/custom" })).toBe("/home/test/custom")
     expect(qwenProfilePath("/home/test", { QWEN_HOME: "~\\custom" })).toBe("/home/test/custom")
     expect(qwenProfilePath("/home/test", { QWEN_HOME: "relative" })).toBeNull()
     expect(agentHomeAccess("qwen", "/home/test", { QWEN_HOME: "relative" }).active).toEqual([])
+    expect(agentHomeAccess("qwen", "/home/test", { QWEN_HOME: "~" }).active).toEqual([])
   })
 })

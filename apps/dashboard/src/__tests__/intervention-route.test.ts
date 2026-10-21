@@ -66,10 +66,7 @@ describe("POST /api/intervention", () => {
   test("remote request with correct SYMPHONY_INTERVENTION_TOKEN is allowed without the remote flag", async () => {
     process.env.SYMPHONY_INTERVENTION_TOKEN = "secret-token"
     const res = await interventionPOST(
-      remoteRequest(
-        { attemptId: "a", command: { kind: "pause" } },
-        { authorization: "Bearer secret-token" },
-      ),
+      remoteRequest({ attemptId: "a", command: { kind: "pause" } }, { authorization: "Bearer secret-token" }),
     )
     expect(res.status).toBe(200)
     expect(mockOrchestrator?.intervention.send).toHaveBeenCalledWith("a", { kind: "pause" })
@@ -111,10 +108,7 @@ describe("POST /api/intervention", () => {
     process.env.SYMPHONY_ALLOW_REMOTE_INTERVENTION = "1"
     process.env.SYMPHONY_INTERVENTION_TOKEN = "secret-token"
     const res = await interventionPOST(
-      remoteRequest(
-        { attemptId: "a", command: { kind: "pause" } },
-        { authorization: "Bearer secret-token" },
-      ),
+      remoteRequest({ attemptId: "a", command: { kind: "pause" } }, { authorization: "Bearer secret-token" }),
     )
     expect(res.status).toBe(200)
     expect(mockOrchestrator?.intervention.send).toHaveBeenCalledWith("a", { kind: "pause" })
@@ -141,9 +135,7 @@ describe("POST /api/intervention", () => {
   })
 
   test("rejects append_prompt with empty text at the route layer", async () => {
-    const res = await interventionPOST(
-      localRequest({ attemptId: "a", command: { kind: "append_prompt", text: "" } }),
-    )
+    const res = await interventionPOST(localRequest({ attemptId: "a", command: { kind: "append_prompt", text: "" } }))
     expect(res.status).toBe(400)
   })
 

@@ -15,7 +15,7 @@ import {
   mcpOrderSchema,
   missionIdSchema,
 } from "./mcp-contract"
-import type { MissionApiDependencies } from "./mission-api"
+import type { MissionApiDependencies } from "./mission-api-types"
 import { digest, ensureAvDirectory, jobLiveness, type MissionJob, MissionJobs } from "./mission-jobs"
 import { launchMission } from "./mission-launcher"
 

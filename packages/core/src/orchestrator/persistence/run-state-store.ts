@@ -13,10 +13,10 @@
  * never mutates OrchestratorCore's Maps itself.
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
-import { dirname } from "node:path"
+import { readFile } from "node:fs/promises"
 import type { RetryCategory } from "../../domain/models"
 import { logger } from "../../observability/logger"
+import { writeJsonAtomic } from "../../util/atomic-json"
 
 /**
  * A single in-flight (or just-crashed) agent run, as last known before
@@ -169,12 +169,9 @@ export class RunStatePersistence implements RunStatePort {
    * losing the entire active-attempts + retry-queue snapshot.
    */
   private async saveSnapshot(): Promise<void> {
-    const tmpPath = `${this.storePath}.tmp`
     try {
-      await mkdir(dirname(this.storePath), { recursive: true })
       this.snapshot.updatedAt = new Date().toISOString()
-      await writeFile(tmpPath, JSON.stringify(this.snapshot, null, 2), "utf-8")
-      await rename(tmpPath, this.storePath)
+      await writeJsonAtomic(this.storePath, this.snapshot)
       this.lastWriteError = null
     } catch (err) {
       logger.error("run-state-persistence", "Failed to save run-state snapshot", { error: String(err) })

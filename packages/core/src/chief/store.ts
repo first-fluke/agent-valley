@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, open, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
+import { mkdir, open, readdir, readFile, unlink } from "node:fs/promises"
 import { join } from "node:path"
+import { writeJsonAtomic } from "../util/atomic-json"
 import { ActiveMissionProcess } from "./active-process"
 import { missionSchema } from "./schemas"
 import type { Mission } from "./types"
@@ -40,13 +41,7 @@ export class MissionStore {
     const path = this.path(mission.id)
     missionSchema.parse(mission)
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
-    const temporary = `${path}.${randomUUID()}.tmp`
-    try {
-      await writeFile(temporary, JSON.stringify({ version: 1, mission }, null, 2), { mode: 0o600, flag: "wx" })
-      await rename(temporary, path)
-    } finally {
-      await unlink(temporary).catch(() => {})
-    }
+    await writeJsonAtomic(path, { version: 1, mission })
   }
 
   async load(id: string): Promise<Mission> {

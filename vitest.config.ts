@@ -10,11 +10,13 @@ export default defineConfig({
     // Git/process integration suites spawn several children per worker.
     // CPU-count fanout exhausts process/IO capacity on large developer hosts.
     maxWorkers: 4,
-    // Retry flaky tests: several suites create real git worktrees under the OS
-    // tmpdir and can race on parallel-worker teardown (ENOTEMPTY / transient
-    // git state) under load. The race is infrastructural, not a logic defect
-    // (each passes in isolation), so a bounded retry stabilizes CI/pre-push.
-    retry: 2,
+    // Local iteration tolerates the known worktree-teardown race; CI must not:
+    // a retried pass hides a real failure and masks the isolation defect.
+    retry: process.env.CI ? 0 : 2,
+    // Git worktree suites run real `git` commands; 5s is too tight under a
+    // coverage-instrumented full run on a loaded machine.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     projects: [
       defineProject({
         test: { name: "scripts", include: ["scripts/**/*.test.ts"] },
@@ -49,7 +51,8 @@ export default defineConfig({
         },
         test: {
           name: "dashboard",
-          include: ["apps/dashboard/src/**/*.test.ts"],
+          include: ["apps/dashboard/src/**/*.test.{ts,tsx}"],
+          environment: "jsdom",
         },
       }),
     ],
@@ -69,18 +72,24 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "text-summary", "lcov", "html"],
       reportsDirectory: "coverage",
-      include: ["packages/core/src/**/*.ts", "apps/cli/src/**/*.ts"],
+      include: [
+        "packages/core/src/**/*.ts",
+        "apps/cli/src/**/*.ts",
+        // Dashboard server-side surface (auth, relay, webhooks, SSE) is
+        // testable without a browser and is part of the shipped product.
+        "apps/dashboard/src/lib/**/*.ts",
+        "apps/dashboard/src/app/api/**/route.ts",
+      ],
       exclude: [
         "**/__tests__/**",
         "**/*.test.ts",
+        "**/*.test.tsx",
         "**/*.d.ts",
         "**/node_modules/**",
         "**/dist/**",
         "**/build/**",
         // Contract helpers + fakes are test infrastructure, not production code.
         "packages/core/src/__tests__/**",
-        // Barrel/index re-exports contribute no logic but 0% function coverage.
-        "**/index.ts",
         // Domain port files are pure TypeScript interfaces / type aliases with
         // no runtime statements — v8 still reports 0% coverage on them.
         "packages/core/src/domain/ports/**",
@@ -111,10 +120,10 @@ export default defineConfig({
         "apps/cli/src/setup/ui.ts",
         "apps/cli/src/setup/workspace-step.ts",
         "apps/cli/src/setup/types.ts",
-        // Dashboard UI is out of scope for the v0.2 coverage gate (no browser
-        // test runtime). It is already excluded via `include` but listed here
-        // for explicitness.
-        "apps/dashboard/**",
+        // Canvas/WebGL renderer is visual code driven by PixiJS; it has no
+        // meaningful statement-level assertions and is covered by the
+        // dashboard build + office-layout tests.
+        "apps/dashboard/src/lib/canvas/**",
       ],
       // Thresholds are enforced on the aggregate global numbers. Per-file
       // thresholds are intentionally not set in v0.2 — they would block

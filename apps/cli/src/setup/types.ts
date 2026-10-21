@@ -7,6 +7,7 @@
  */
 
 import type { ChiefConfig } from "@agent-valley/core/config/chief-schema"
+import type { AgentType } from "@agent-valley/core/domain/agent"
 
 export interface LinearTeam {
   id: string
@@ -26,7 +27,7 @@ export type StepResult = typeof BACK | typeof CANCEL | undefined
 
 export type TrackerKind = "none" | "linear" | "github"
 
-export type AgentType = "claude" | "codex" | "qwen" | "antigravity" | "cursor" | "grok" | "kimi" | "opencode"
+export type { AgentType }
 
 export interface LinearSetupValues {
   apiKey: string

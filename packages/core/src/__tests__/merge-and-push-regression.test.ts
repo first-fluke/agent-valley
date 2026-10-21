@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "vitest"
@@ -178,32 +178,24 @@ describe("mergeAndPush local Git regressions", () => {
     }
   })
 
-  test("failed merge conflict never reports success or loses either branch", async () => {
+  test("ignores repository hooks planted in the workspace during delivery", async () => {
     const f = await fixture()
     try {
-      // The feature changes the same file that a checkout hook advances on
-      // trunk between a successful rebase and the merge.
       writeFileSync(join(f.workspace.path, "base.txt"), "feature version\n")
       git(f.workspace.path, "add", "base.txt")
       git(f.workspace.path, "commit", "-qm", "feature version")
+
+      // An agent can write the workspace, including `.git`; delivery must not
+      // execute code a hook would have planted there.
       const hook = join(f.root, ".git", "hooks", "post-checkout")
-      writeFileSync(
-        hook,
-        "#!/bin/sh\n" +
-          'if [ "$(git symbolic-ref --quiet --short HEAD)" = "trunk" ] && [ ! -f .git/review-hook-ran ]; then\n' +
-          "  touch .git/review-hook-ran\n" +
-          "  printf 'concurrent version\\n' > base.txt\n" +
-          "  git add base.txt\n" +
-          "  git -c user.name=Test -c user.email=test@example.invalid commit -qm concurrent\n" +
-          "fi\n",
-      )
+      writeFileSync(hook, "#!/bin/sh\ntouch .git/review-hook-ran\n")
       chmodSync(hook, 0o755)
 
       const result = await mergeAndPush(f.workspace, f.root)
-      expect(result.ok).toBe(false)
-      expect(result.error).toContain("Merge of")
-      expect(git(f.root, "show", "trunk:base.txt")).toBe("concurrent version")
-      expect(git(f.root, "show", `${f.workspace.branch}:base.txt`)).toBe("feature version")
+
+      expect(result.ok).toBe(true)
+      expect(existsSync(join(f.root, ".git", "review-hook-ran"))).toBe(false)
+      expect(git(f.root, "show", "trunk:base.txt")).toBe("feature version")
     } finally {
       rmSync(f.dir, { recursive: true, force: true })
     }

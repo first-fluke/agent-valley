@@ -26,9 +26,7 @@ function Bar({ value, max, color }: { value: number; max: number; color: string 
 export function SystemMetricsPanel({ metrics }: SystemMetricsPanelProps) {
   if (!metrics) return null
 
-  const memPct = metrics.memoryTotal > 0
-    ? Math.round((metrics.memoryRss / metrics.memoryTotal) * 100)
-    : 0
+  const memPct = metrics.memoryTotal > 0 ? Math.round((metrics.memoryRss / metrics.memoryTotal) * 100) : 0
 
   const cpuPct = metrics.cpuUser
 
@@ -65,7 +63,6 @@ export function SystemMetricsPanel({ metrics }: SystemMetricsPanelProps) {
             color={cpuPct > 85 ? "bg-red-500" : cpuPct > 60 ? "bg-yellow-500" : "bg-blue-500"}
           />
         </div>
-
       </div>
     </div>
   )

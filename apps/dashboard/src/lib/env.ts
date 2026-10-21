@@ -3,9 +3,9 @@
  * Replaces the previous @t3-oss/env-nextjs approach.
  */
 
-import { loadConfig, type Config } from "@agent-valley/core/config/yaml-loader"
+import { type Config, loadConfig } from "@agent-valley/core/config/yaml-loader"
 
-export { type Config }
+export type { Config }
 
 /** Load config from settings.yaml (global) + av.yaml (project root). */
 export function toOrchestratorConfig(projectRoot?: string): Config {

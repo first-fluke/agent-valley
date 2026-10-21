@@ -17,10 +17,7 @@ describe("ActiveAgentsPanel", () => {
   let source: string
 
   beforeAll(() => {
-    const filePath = resolve(
-      import.meta.dirname,
-      "../features/orchestrator/components/active-agents-panel.tsx",
-    )
+    const filePath = resolve(import.meta.dirname, "../features/orchestrator/components/active-agents-panel.tsx")
     source = readFileSync(filePath, "utf-8")
   })
 

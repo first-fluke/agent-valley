@@ -18,10 +18,8 @@
  * explicitly confirmed there is called out individually below.
  */
 
-import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
-import { planSandboxedSpawn } from "./sandbox"
+import { BaseSession, waitForStreamCompletion } from "./base-session"
 
 // ── CLI surface (verified against `agy --help` v1.1.3) ─────────────────────
 
@@ -145,31 +143,17 @@ export class AgySession extends BaseSession {
 
     // Containment for --dangerously-skip-permissions comes from the OS
     // sandbox wrapping this spawn, not from trusting the flag itself.
-    // planSandboxedSpawn() fails closed (throws) when no sandbox is
-    // available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
-    let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
-    try {
-      plan = await planSandboxedSpawn({
-        agentType: "antigravity",
-        command: AGY_COMMAND,
-        args,
-        workspacePath: config.workspacePath,
-      })
-    } catch (err) {
-      this.emitError("CRASH", `${err}`, false)
-      return
-    }
-
-    this.process = spawn(plan.command, plan.args, {
-      detached: process.platform !== "win32",
-      cwd: config.workspacePath,
-      env: buildAgentEnv("antigravity", config.env) as NodeJS.ProcessEnv,
+    // spawnSandboxed() fails closed when no sandbox is available unless
+    // SYMPHONY_ALLOW_UNSANDBOXED=1 is set. The prompt is passed via argv
+    // (AGY_FLAG_PRINT), so stdin closes immediately to avoid blocking.
+    const spawned = await this.spawnSandboxed({
+      agentType: "antigravity",
+      command: AGY_COMMAND,
+      args,
       stdio: ["pipe", "pipe", "pipe"],
+      closeStdin: true,
     })
-
-    // Prompt is passed via argv (see AGY_FLAG_PRINT above), not stdin.
-    // Close stdin immediately so agy never blocks waiting for input.
-    this.process.stdin?.end()
+    if (!spawned) return
 
     try {
       await this.readStream()

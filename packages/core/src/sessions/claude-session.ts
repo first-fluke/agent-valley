@@ -9,11 +9,9 @@
  * The "session" manages process lifecycle and event normalization.
  */
 
-import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
+import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
-import { planSandboxedSpawn } from "./sandbox"
 
 export class ClaudeSession extends BaseSession {
   protected filesChanged: string[] = []
@@ -66,31 +64,17 @@ export class ClaudeSession extends BaseSession {
     const args = this.buildArgs()
     // Containment for --dangerously-skip-permissions comes from the OS
     // sandbox wrapping this spawn, not from trusting the flag itself.
-    // planSandboxedSpawn() fails closed (throws) when no sandbox is
-    // available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
-    let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
-    try {
-      plan = await planSandboxedSpawn({
-        agentType: this.vendor,
-        command: this.vendor,
-        args,
-        workspacePath: this.config.workspacePath,
-      })
-    } catch (err) {
-      this.emitError("CRASH", `${err}`, false)
-      return
-    }
-
-    // Pass prompt via stdin to avoid arg length/injection issues
-    this.process = spawn(plan.command, plan.args, {
-      detached: process.platform !== "win32",
-      cwd: this.config.workspacePath,
-      env: buildAgentEnv(this.vendor, this.config.env) as NodeJS.ProcessEnv,
+    // spawnSandboxed() fails closed when no sandbox is available unless
+    // SYMPHONY_ALLOW_UNSANDBOXED=1 is set. The prompt goes through stdin to
+    // avoid arg length/injection issues.
+    const spawned = await this.spawnSandboxed({
+      agentType: this.vendor,
+      command: this.vendor,
+      args,
       stdio: ["pipe", "pipe", "pipe"],
+      prompt,
     })
-
-    this.process.stdin?.write(prompt, "utf-8")
-    this.process.stdin?.end()
+    if (!spawned) return
 
     await this.readStream()
   }

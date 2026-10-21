@@ -1,7 +1,8 @@
 import { z } from "zod"
+import { AGENT_IDS } from "../domain/agent"
 import { taskSchema } from "./task-schema"
 
-export const actorTypeSchema = z.enum(["claude", "codex", "qwen", "antigravity", "cursor", "grok", "kimi", "opencode"])
+export const actorTypeSchema = z.enum(AGENT_IDS)
 
 export const actorDefaultsSchema = z.object({
   type: actorTypeSchema.optional(),

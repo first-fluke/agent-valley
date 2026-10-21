@@ -1,10 +1,9 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
 import { useSize } from "ahooks"
-import { OfficeScene } from "@/lib/canvas/office-scene"
-import { computeLayout } from "@/features/office/utils/office-layout"
+import { useEffect, useRef, useState } from "react"
 import type { OrchestratorState } from "@/features/office/types/agent"
+import { OfficeScene } from "@/lib/canvas/office-scene"
 
 interface PixiCanvasProps {
   state: OrchestratorState | null
@@ -61,11 +60,7 @@ export function PixiCanvas({ state }: PixiCanvasProps) {
     }
   }, [state])
 
-  const slotCount = state?.config.maxParallel ?? 3
-  const layout = computeLayout(slotCount)
-  const scale = size
-    ? Math.min(size.width / dimensions.width, (size.height || 600) / dimensions.height, 3)
-    : 1
+  const scale = size ? Math.min(size.width / dimensions.width, (size.height || 600) / dimensions.height, 3) : 1
 
   return (
     <div ref={containerRef} className="flex items-center justify-center w-full h-full">

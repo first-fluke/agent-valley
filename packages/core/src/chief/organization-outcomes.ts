@@ -13,7 +13,7 @@ import {
   type OrganizationOutcome,
   organizationOutcomeSchema,
 } from "./organization-types"
-import { reviewGatesAreCurrent } from "./review-gates"
+import { reviewGatesAreCurrent } from "./review-gate-check"
 import type { Mission } from "./types"
 
 const evidenceInputSchema = memoryEvidenceSchema.partial({ sha256: true })

@@ -2,7 +2,8 @@
  * BaseSession — Shared event emitter and process management for all session implementations.
  */
 
-import type { ChildProcess } from "node:child_process"
+import { type ChildProcess, type StdioOptions, spawn } from "node:child_process"
+import { agentEnvKeys } from "../agent-registry"
 import type {
   AgentConfig,
   AgentError,
@@ -13,6 +14,7 @@ import type {
   RunResult,
 } from "./agent-session"
 import { signalProcessTree } from "./process-tree"
+import { planSandboxedSpawn } from "./sandbox"
 
 /** Env vars safe to pass to agent subprocesses */
 const SAFE_ENV_KEYS = [
@@ -32,52 +34,9 @@ const SAFE_ENV_KEYS = [
   "BUN_ENV",
 ]
 
-/**
- * Per-agent env keys that must be forwarded for the agent CLI to authenticate.
- * Keyed by the literal `agentType` string each session passes to
- * `buildAgentEnv()` — this matches the config-facing vendor id used by
- * SessionFactory/config/ledger (e.g. AgySession passes "antigravity" here,
- * even though its actual CLI binary is named `agy`).
- */
-const AGENT_ENV_KEYS: Record<string, string[]> = {
-  codex: ["OPENAI_API_KEY", "CODEX_HOME"],
-  qwen: [
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "OPENAI_MODEL",
-    "QWEN_MODEL",
-    "QWEN_HOME",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_MODEL",
-    "GEMINI_API_KEY",
-    "GEMINI_MODEL",
-    "GOOGLE_API_KEY",
-    "GOOGLE_MODEL",
-    "GOOGLE_GENAI_USE_VERTEXAI",
-    "DASHSCOPE_API_KEY",
-    "BAILIAN_CODING_PLAN_API_KEY",
-    "BAILIAN_TOKEN_PLAN_API_KEY",
-  ],
-  claude: ["ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR"],
-  antigravity: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
-  cursor: ["CURSOR_API_KEY"],
-  grok: ["XAI_API_KEY", "GROK_API_KEY"],
-  // kimi primarily authenticates via ~/.kimi-code/config.toml (set by the
-  // `/login` device-code flow), not env vars — these are forwarded for
-  // parity/CI when present, and are harmless no-ops when absent.
-  kimi: ["KIMI_API_KEY", "MOONSHOT_API_KEY", "KIMI_CODE_HOME"],
-  // opencode is multi-provider (75+); auth.json is primary, these are
-  // convenience passthroughs — opencode's primary auth is
-  // ~/.local/share/opencode/auth.json via `opencode auth`, not env vars.
-  opencode: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "XDG_DATA_HOME"],
-}
-
 /** Credential names only; callers cannot mutate the session environment allowlist. */
 export function getAgentAuthEnvKeys(agentType: string): readonly string[] {
-  return Object.freeze(
-    (AGENT_ENV_KEYS[agentType] ?? []).filter((key) => /_(API_KEY|AUTH_TOKEN|ACCESS_TOKEN)$/.test(key)),
-  )
+  return Object.freeze(agentEnvKeys(agentType).filter((key) => /_(API_KEY|AUTH_TOKEN|ACCESS_TOKEN)$/.test(key)))
 }
 
 /**
@@ -96,7 +55,7 @@ export function buildAgentEnv(
     if (val != null) env[key] = val
   }
 
-  const agentKeys = AGENT_ENV_KEYS[agentType] ?? []
+  const agentKeys = agentEnvKeys(agentType)
   for (const key of agentKeys) {
     const val = source[key]
     if (val != null) env[key] = val
@@ -219,6 +178,60 @@ export abstract class BaseSession implements AgentSession {
       })
       this.emit({ type: "spawned", pid: proc.pid })
     }
+  }
+
+  /**
+   * Plan + spawn an agent CLI under the OS sandbox and initialise the shared
+   * process plumbing (pid event, stderr drain, stdin prompt).
+   *
+   * Returns false after emitting a CRASH error when no sandbox is available;
+   * callers should stop executing in that case.
+   */
+  protected async spawnSandboxed(options: {
+    agentType: string
+    command: string
+    args: string[]
+    stdio: StdioOptions
+    prompt?: string
+    extraEnv?: Record<string, string>
+    /** Close stdin after spawn so CLIs that read argv never block on input. */
+    closeStdin?: boolean
+    /** Let sandbox-planning failures propagate (used by start() for a clear error). */
+    rethrowSandboxError?: boolean
+  }): Promise<boolean> {
+    if (!this.config) {
+      this.emitError("CRASH", "spawnSandboxed() called before start()", false)
+      return false
+    }
+
+    let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
+    try {
+      plan = await planSandboxedSpawn({
+        agentType: options.agentType,
+        command: options.command,
+        args: options.args,
+        workspacePath: this.config.workspacePath,
+      })
+    } catch (err) {
+      if (options.rethrowSandboxError) throw err
+      this.emitError("CRASH", `${err}`, false)
+      return false
+    }
+
+    this.process = spawn(plan.command, plan.args, {
+      detached: process.platform !== "win32",
+      cwd: this.config.workspacePath,
+      env: buildAgentEnv(options.agentType, { ...this.config.env, ...options.extraEnv }) as NodeJS.ProcessEnv,
+      stdio: options.stdio,
+    })
+
+    if (options.prompt !== undefined) {
+      this.process.stdin?.write(options.prompt, "utf-8")
+      this.process.stdin?.end()
+    } else if (options.closeStdin) {
+      this.process.stdin?.end()
+    }
+    return true
   }
 
   /** OS process id of the spawned child, when known. */

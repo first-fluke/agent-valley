@@ -6,9 +6,9 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 3.1 (D), § 5.8, § 6.6 E24.
  */
 
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { PromMetrics } from "@agent-valley/core/observability/prom-metrics"
 import { createPromMetrics } from "@agent-valley/core/observability/prom-metrics"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 type EndpointConfig = {
   enabled: boolean

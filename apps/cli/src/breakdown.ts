@@ -8,6 +8,9 @@ import { loadConfig } from "@agent-valley/core/config/yaml-loader"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 import { publishBreakdown, validateBreakdown } from "./breakdown-publish"
+import type { BreakdownResult, BreakdownSubIssue } from "./breakdown-types"
+
+export type { BreakdownResult, BreakdownSubIssue }
 
 const BREAKDOWN_PROMPT = `You are a technical project decomposer. Given a feature description, break it down into concrete sub-issues with dependency relationships.
 
@@ -36,18 +39,6 @@ Rules:
 - Aim for 2-6 sub-issues (not too granular, not too coarse)
 - Write in the same language as the input
 - Sub-issues should be independently testable and assignable to an AI agent`
-
-export interface BreakdownSubIssue {
-  title: string
-  description: string
-  blockedByIndices: number[]
-}
-
-export interface BreakdownResult {
-  parentTitle: string
-  parentDescription: string
-  subIssues: BreakdownSubIssue[]
-}
 
 export function parseBreakdownOutput(output: string): BreakdownResult {
   const parentTitleMatch = output.match(/^PARENT_TITLE:\s*(.+)$/m)

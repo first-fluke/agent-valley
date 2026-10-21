@@ -1,6 +1,6 @@
 import { Container, Sprite, type Ticker } from "pixi.js"
-import { getPuppyTexture } from "@/lib/canvas/sprite-generator"
 import { TILE_SIZE } from "@/features/office/utils/office-layout"
+import { getPuppyTexture } from "@/lib/canvas/sprite-generator"
 
 const WANDER_SPEED = 0.6
 const WALK_FRAME_INTERVAL = 250
@@ -23,10 +23,7 @@ export class OfficePuppy {
   private poopCooldown = 0
   onPoop: ((x: number, y: number) => void) | null = null
 
-  constructor(
-    walkableTiles: { col: number; row: number }[],
-    ticker: Ticker,
-  ) {
+  constructor(walkableTiles: { col: number; row: number }[], ticker: Ticker) {
     this.walkableTiles = walkableTiles
     this.ticker = ticker
     this.container = new Container()

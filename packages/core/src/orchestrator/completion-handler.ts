@@ -10,6 +10,7 @@ import { type OmaEvidenceRequest, type OmaEvidenceResult, validateOmaEvidence } 
 import type { RunCallbacks } from "./agent-runner"
 import { validateAnalysisArtifact } from "./analysis-artifact"
 import type { BudgetService } from "./budget-service"
+import type { CompletionDeps } from "./completion-deps"
 import { handleAgentFailure } from "./completion-error"
 import { recordBudgetUsage } from "./completion-usage"
 import type { DagScheduler } from "./dag-scheduler"
@@ -17,27 +18,7 @@ import { buildWorkSummary } from "./helpers"
 import type { PersistedFinalization } from "./persistence/run-state-store"
 import { buildVerificationFailurePrompt, resolveVerifyCommand, runVerificationGate } from "./verification-gate"
 
-export interface CompletionDeps {
-  config: Config
-  workspace: WorkspaceGateway
-  tracker: IssueTracker
-  dagScheduler: DagScheduler
-  /** Update orchestrator state on completion/failure. Orchestrator remains sole state authority. */
-  cleanupState: (issueId: string, status: "done" | "failed") => void
-  saveAttempt: (workspace: Workspace, attempt: RunAttempt) => void | Promise<void>
-  /** `category` (see `RetryCategory`) drives RetryQueue's per-category max-attempts policy. Defaults to "infra" when omitted. */
-  addRetry: (issueId: string, attemptCount: number, error: string, category?: RetryCategory) => boolean
-  emitEvent: (event: string, payload: Record<string, unknown>) => void
-  fillVacantSlots: () => Promise<void>
-  triggerUnblocked: (issueIds: string[]) => Promise<void>
-  /** Observability hooks (OTel + Prom). Defaults to no-op when omitted. */
-  observability?: ObservabilityHooks
-  budget?: BudgetService
-  /** Additional operator evidence gate for configured analysis tasks. */
-  assessNoCodeOutcome?: (issue: Issue, attempt: RunAttempt) => Promise<boolean> | boolean
-  omaEvidence?: (request: OmaEvidenceRequest) => OmaEvidenceResult | Promise<OmaEvidenceResult>
-  finalizeDelivered: (record: PersistedFinalization) => Promise<void>
-}
+export type { CompletionDeps }
 
 interface WorkspaceFailure {
   error: string

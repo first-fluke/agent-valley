@@ -1,6 +1,5 @@
 /** User team tokens are verified by the gateway; database credentials stay on the server. */
-import { randomUUID } from "node:crypto"
-import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, unlinkSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { normalizeTeamRelayUrl } from "@agent-valley/core/config/team-schema"
 import { loadGlobalConfig, loadProjectConfig } from "@agent-valley/core/config/yaml-loader"
@@ -12,6 +11,7 @@ import {
   validateRelayCredentials,
 } from "@agent-valley/core/relay/credentials"
 import { TeamRelayClient } from "@agent-valley/core/relay/team-relay-client"
+import { writeJsonAtomicSync } from "@agent-valley/core/util/atomic-json"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 
@@ -23,18 +23,7 @@ export function saveCredentials(creds: Credentials, path: string = defaultCreden
   const directory = dirname(path)
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   chmodSync(directory, 0o700)
-  const temporary = join(directory, `.credentials-${randomUUID()}.tmp`)
-  try {
-    writeFileSync(temporary, JSON.stringify(valid, null, 2), { flag: "wx", mode: 0o600 })
-    renameSync(temporary, path)
-  } catch (error) {
-    try {
-      unlinkSync(temporary)
-    } catch {
-      // Preserve the write/rename failure if best-effort temporary cleanup also fails.
-    }
-    throw error
-  }
+  writeJsonAtomicSync(path, valid)
 }
 
 export function loadCredentials(

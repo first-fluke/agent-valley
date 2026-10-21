@@ -1,6 +1,5 @@
 import { z } from "zod"
 import { type SkillCompatibilityPolicy, skillCompatibilityPolicySchema } from "../oma/skill-matrix-schema"
-import type { MetricTarget } from "./organization"
 import { type ReviewGate, reviewGatesSchema } from "./review-gates"
 
 const actorType = z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/)
@@ -21,7 +20,7 @@ export interface ChiefOperatingPolicy {
   reviewGates?: ReviewGate[]
   readyActors?: string[]
   memory: boolean
-  metricTargets?: MetricTarget[]
+  metricTargets?: { name: string; unit?: string; direction: "increase" | "decrease"; target?: number }[]
   skillCompatibility?: SkillCompatibilityPolicy
 }
 

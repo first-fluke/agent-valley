@@ -8,7 +8,8 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 5.4, § 6.7 (E27, E28)
  */
 
-import { readFile } from "node:fs/promises"
+import { lstat, readFile, realpath } from "node:fs/promises"
+import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 import { runCommand } from "./worktree-lifecycle"
@@ -158,11 +159,86 @@ export async function findConflictMarkerFiles(root: string, files: string[]): Pr
   return conflicts
 }
 
+function isInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+function untrustedGitError(detail: string): WorkspaceValidationResult {
+  return {
+    ok: false,
+    error:
+      `Workspace Git metadata is not trusted: ${detail}\n` +
+      "  Fix: Recreate the workspace with `av` so it is a linked git worktree of the configured repository.\n" +
+      "  Do not commit or deliver from a workspace whose .git pointer was rewritten.",
+  }
+}
+
+/**
+ * Verify that the workspace still points at the expected linked worktree.
+ * The agent can write `.git`, so auto-commit must not run against a
+ * rewritten pointer (which could redirect Git to an attacker-controlled
+ * directory and its hooks/config).
+ */
+export async function validateTrustedWorktree(cwd: string, repoRoot?: string): Promise<WorkspaceValidationResult> {
+  const dotGit = join(cwd, ".git")
+  const entry = await lstat(dotGit).catch(() => null)
+  if (!entry) return untrustedGitError(`missing ${dotGit}`)
+  if (entry.isSymbolicLink()) return untrustedGitError(`${dotGit} is a symlink`)
+
+  if (entry.isFile()) {
+    const contents = await readFile(dotGit, "utf8")
+    const match = /^gitdir:\s*(.+)$/m.exec(contents)
+    if (!match?.[1]) return untrustedGitError(`${dotGit} has no gitdir pointer`)
+    const gitDir = resolve(cwd, match[1].trim())
+    if (!gitDir.split(sep).includes("worktrees"))
+      return untrustedGitError(`${dotGit} does not point into a worktrees directory`)
+    if (isInside(cwd, gitDir)) return untrustedGitError(`${dotGit} points inside the agent-writable workspace`)
+
+    const gitDirStat = await lstat(gitDir).catch(() => null)
+    if (!gitDirStat?.isDirectory()) return untrustedGitError(`${dotGit} points at a missing directory`)
+
+    if (repoRoot) {
+      const commonDir = resolve(gitDir, "..", "..")
+      const [actualCommon, expectedCommon] = await Promise.all([
+        realpath(commonDir).catch(() => null),
+        realpath(join(repoRoot, ".git")).catch(() => null),
+      ])
+      if (!expectedCommon || actualCommon !== expectedCommon) {
+        return untrustedGitError(`${dotGit} points outside the configured repository`)
+      }
+    }
+  } else if (entry.isDirectory()) {
+    // A directory is a standalone repository, not a pointer: Git stays inside
+    // the workspace and hooks are disabled by GIT_SAFETY_ARGS.
+  } else {
+    return untrustedGitError(`${dotGit} is neither a file nor a directory`)
+  }
+
+  const top = await runCommand("git", ["rev-parse", "--show-toplevel"], { cwd })
+  if (top.exitCode !== 0) return untrustedGitError(top.stderr.trim() || "git rev-parse failed")
+  const [actualTop, expectedTop] = await Promise.all([
+    realpath(top.stdout.trim()).catch(() => null),
+    realpath(cwd).catch(() => null),
+  ])
+  if (!actualTop || !expectedTop || actualTop !== expectedTop) {
+    return untrustedGitError("git reports a different worktree root")
+  }
+
+  return { ok: true }
+}
+
 /**
  * Inspect a worktree for unmerged files or conflict markers before running
  * auto-commit. Returns ok=true when the worktree is safe to commit.
  */
-export async function validateWorktreeBeforeAutoCommit(cwd: string): Promise<WorkspaceValidationResult> {
+export async function validateWorktreeBeforeAutoCommit(
+  cwd: string,
+  repoRoot?: string,
+): Promise<WorkspaceValidationResult> {
+  const trust = await validateTrustedWorktree(cwd, repoRoot)
+  if (!trust.ok) return trust
+
   const { stdout: unmergedOut } = await runCommand("git", ["diff", "--name-only", "--diff-filter=U"], { cwd })
   const unmergedFiles = unmergedOut
     .trim()
@@ -220,10 +296,10 @@ export async function validateWorktreeBeforeAutoCommit(cwd: string): Promise<Wor
 }
 
 /** Run the full validation + safety-net auto-commit on the workspace. */
-export async function autoCommit(workspace: Workspace): Promise<WorkspaceValidationResult> {
+export async function autoCommit(workspace: Workspace, repoRoot?: string): Promise<WorkspaceValidationResult> {
   const cwd = workspace.path
 
-  const validation = await validateWorktreeBeforeAutoCommit(cwd)
+  const validation = await validateWorktreeBeforeAutoCommit(cwd, repoRoot)
   if (!validation.ok) {
     logger.warn("workspace-manager", "Auto-commit blocked by workspace validation", {
       workspacePath: workspace.path,

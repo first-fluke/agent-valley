@@ -3,7 +3,11 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto"
 type Scope = "status" | "intervention"
 const CONFIG: Record<Scope, { token: string; remote: string; cookie: string }> = {
   status: { token: "SYMPHONY_DASHBOARD_TOKEN", remote: "SYMPHONY_ALLOW_REMOTE_STATUS", cookie: "av_status_session" },
-  intervention: { token: "SYMPHONY_INTERVENTION_TOKEN", remote: "SYMPHONY_ALLOW_REMOTE_INTERVENTION", cookie: "av_intervention_session" },
+  intervention: {
+    token: "SYMPHONY_INTERVENTION_TOKEN",
+    remote: "SYMPHONY_ALLOW_REMOTE_INTERVENTION",
+    cookie: "av_intervention_session",
+  },
 }
 const SESSION_SECONDS = 8 * 60 * 60
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
@@ -24,7 +28,11 @@ function bearer(request: Request): string | null {
 }
 
 function cookie(request: Request, name: string): string | null {
-  const value = request.headers.get("cookie")?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))
+  const value = request.headers
+    .get("cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
   return value?.slice(name.length + 1) ?? null
 }
 
@@ -44,9 +52,8 @@ export function sessionCookie(scope: Scope, request: Request): string {
   const secret = process.env[CONFIG[scope].token]
   if (!secret) throw new Error(`${CONFIG[scope].token} must be configured before issuing a session`)
   const expiration = String(Math.floor(Date.now() / 1000) + SESSION_SECONDS)
-  const secure = new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https"
-    ? "; Secure"
-    : ""
+  const secure =
+    new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https" ? "; Secure" : ""
   return `${CONFIG[scope].cookie}=${expiration}.${signature(scope, expiration, secret)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_SECONDS}${secure}`
 }
 
@@ -69,7 +76,12 @@ export function sameOrigin(request: Request): boolean {
   if (!origin || !host) return false
   try {
     const parsed = new URL(origin)
-    return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.host === host && !parsed.username && !parsed.password
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.host === host &&
+      !parsed.username &&
+      !parsed.password
+    )
   } catch {
     return false
   }
@@ -78,7 +90,10 @@ export function sameOrigin(request: Request): boolean {
 export function sessionState(request: Request): Record<Scope, { required: boolean; authenticated: boolean }> {
   return {
     status: { required: tokenConfigured("status"), authenticated: authorizeStatusRequest(request) === null },
-    intervention: { required: tokenConfigured("intervention"), authenticated: authorizeInterventionRequest(request) === null },
+    intervention: {
+      required: tokenConfigured("intervention"),
+      authenticated: authorizeInterventionRequest(request) === null,
+    },
   }
 }
 
@@ -86,15 +101,30 @@ function authorize(request: Request, scope: Scope): Response | null {
   const cfg = CONFIG[scope]
   const secret = process.env[cfg.token]
   if (!secret && process.env[cfg.remote] === "1") {
-    return Response.json({ error: "Forbidden", message: `${cfg.remote}=1 requires ${cfg.token}. Set ${cfg.token} before enabling remote access.` }, { status: 403 })
+    return Response.json(
+      {
+        error: "Forbidden",
+        message: `${cfg.remote}=1 requires ${cfg.token}. Set ${cfg.token} before enabling remote access.`,
+      },
+      { status: 403 },
+    )
   }
   if (secret) {
     const supplied = bearer(request)
     if ((supplied && equal(supplied, secret)) || validSession(request, scope, secret)) return null
-    return Response.json({ error: "Unauthorized", message: `Log in to the dashboard or provide Authorization: Bearer <${cfg.token}>.` }, { status: 401 })
+    return Response.json(
+      { error: "Unauthorized", message: `Log in to the dashboard or provide Authorization: Bearer <${cfg.token}>.` },
+      { status: 401 },
+    )
   }
   if (localRequest(request)) return null
-  return Response.json({ error: "Forbidden", message: `${scope} is local-only without ${cfg.token}. Bind the dashboard to loopback or configure ${cfg.token}.` }, { status: 403 })
+  return Response.json(
+    {
+      error: "Forbidden",
+      message: `${scope} is local-only without ${cfg.token}. Bind the dashboard to loopback or configure ${cfg.token}.`,
+    },
+    { status: 403 },
+  )
 }
 
 export function authorizeStatusRequest(request: Request): Response | null {
@@ -111,5 +141,8 @@ export function authorizeInterventionMutation(request: Request): Response | null
   const supplied = bearer(request)
   if (supplied && validToken("intervention", supplied)) return null
   if (sameOrigin(request)) return null
-  return Response.json({ error: "Forbidden", message: "The Origin header must match this dashboard for browser mutations." }, { status: 403 })
+  return Response.json(
+    { error: "Forbidden", message: "The Origin header must match this dashboard for browser mutations." },
+    { status: 403 },
+  )
 }

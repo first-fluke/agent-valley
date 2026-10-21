@@ -20,17 +20,12 @@ import {
   mcpResumeSchema,
   missionIdSchema,
 } from "./mcp-contract"
+import type { MissionApiDependencies } from "./mission-api-types"
 import { digest, ensureAvDirectory, type JobLiveness, jobLiveness, type MissionJob, MissionJobs } from "./mission-jobs"
 import { launchMission, type MissionLaunch } from "./mission-launcher"
 import { OperationApi } from "./operation-api"
 
-export interface MissionApiDependencies {
-  launch?: (input: MissionLaunch) => Promise<{ pid: number; identity?: string }>
-  liveness?: (job: MissionJob) => JobLiveness
-  signal?: (pid: number) => void
-  validateOrder?: (workspace: string, options: OrderOptions) => Promise<unknown>
-  env?: NodeJS.ProcessEnv
-}
+export type { MissionApiDependencies }
 
 function orderOptions(input: McpOrderInput | McpResumeInput): OrderOptions {
   const options: OrderOptions = {}

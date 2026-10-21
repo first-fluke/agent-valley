@@ -105,11 +105,9 @@
  * confirmed schema.
  */
 
-import { spawn } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, buildAgentEnv, waitForStreamCompletion } from "./base-session"
+import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
-import { planSandboxedSpawn } from "./sandbox"
 
 export const OPENCODE_COMMAND = "opencode"
 
@@ -191,28 +189,15 @@ export class OpencodeSession extends BaseSession {
     // opencode otherwise auto-discovers.
     //
     // Containment for --auto comes from the OS sandbox wrapping this
-    // spawn, not from trusting the flag itself. planSandboxedSpawn() fails
-    // closed (throws) when no sandbox is available unless
-    // SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
-    let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
-    try {
-      plan = await planSandboxedSpawn({
-        agentType: "opencode",
-        command: OPENCODE_COMMAND,
-        args,
-        workspacePath: this.config.workspacePath,
-      })
-    } catch (err) {
-      this.emitError("CRASH", `${err}`, false)
-      return
-    }
-
-    this.process = spawn(plan.command, plan.args, {
-      detached: process.platform !== "win32",
-      cwd: this.config.workspacePath,
-      env: buildAgentEnv("opencode", this.config.env) as NodeJS.ProcessEnv,
+    // spawn, not from trusting the flag itself. spawnSandboxed() fails closed
+    // when no sandbox is available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
+    const spawned = await this.spawnSandboxed({
+      agentType: "opencode",
+      command: OPENCODE_COMMAND,
+      args,
       stdio: ["ignore", "pipe", "pipe"],
     })
+    if (!spawned) return
 
     await this.readStream()
   }

@@ -18,11 +18,13 @@
  *   cursor       — ["append_prompt", "abort"]               (stateless spawn-per-execute)
  *   grok         — ["append_prompt", "abort"]               (stateless spawn-per-execute)
  *
- * The Claude append_prompt implementation (cancel + respawn with merged
- * prompt) is stubbed in this PR — send() throws for now so the failure
- * path is still well-defined. See TODO below.
+ * Stateless agents have no native user-message path at the port level;
+ * `InterventionBus` handles their append_prompt by cancelling the run and
+ * re-queueing with the merged instruction.
  */
 
+import { capabilitiesFor } from "../../agent-registry"
+import { AGENT_IDS } from "../../domain/agent"
 import type { RunAttempt } from "../../domain/models"
 import type {
   AgentRunEvent,
@@ -34,22 +36,17 @@ import type {
   Unsubscribe,
 } from "../../domain/ports/agent-runner"
 import { InterventionUnsupportedError } from "../../domain/ports/agent-runner"
-import { AgentRunnerService, type RunCallbacks, type RunOptions } from "../../orchestrator/agent-runner"
 import type { AgentSession } from "../agent-session"
+import { AgentRunnerService, type RunCallbacks, type RunOptions } from "./agent-runner-service"
 
 /** Static capability table. Keeps `capabilities()` O(1) and UI-queryable. */
-export const CAPABILITY_TABLE: Record<string, InterventionCapability[]> = Object.freeze({
-  claude: ["append_prompt", "abort"],
-  qwen: ["abort"],
-  codex: ["pause", "resume", "append_prompt", "abort"],
-  antigravity: ["append_prompt", "abort"],
-  cursor: ["append_prompt", "abort"],
-  grok: ["append_prompt", "abort"],
-}) as Record<string, InterventionCapability[]>
+export const CAPABILITY_TABLE: Record<string, InterventionCapability[]> = Object.freeze(
+  Object.fromEntries(AGENT_IDS.map((id) => [id, capabilitiesFor(id)])),
+)
 
 /** Maps agent type name to an expected default capability set (read-only). */
 export function defaultCapabilities(agentType: string): InterventionCapability[] {
-  return CAPABILITY_TABLE[agentType] ?? ["append_prompt", "abort"]
+  return capabilitiesFor(agentType)
 }
 
 export class SpawnAgentRunnerAdapter implements AgentRunnerPort {

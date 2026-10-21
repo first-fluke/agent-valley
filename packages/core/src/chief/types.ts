@@ -1,103 +1,32 @@
 import type { Workspace } from "../domain/models"
 import type { CapturePolicy, CaptureResult } from "./capture"
 import type { ContainerObservationPolicy, ContainerObservationSnapshot } from "./container-observation-policy"
-import type { ExecutionPolicy, ExecutionState } from "./execution"
+import type {
+  AdvisoryReview,
+  ChiefPlan,
+  ChiefReport,
+  ChiefStage,
+  ChiefTaskState,
+  ExecutionPolicy,
+  ExecutionState,
+  GateReview,
+  GoalBrief,
+  MissionStatus,
+  MissionSupervision,
+  Persona,
+  Review,
+  Verification,
+} from "./contracts"
 import type { MetricSourcePolicy } from "./metric-source-policy"
 import type { PreparedOmaActor } from "./oma-actor"
 import type { ChiefOperatingPolicy, ChiefOperations } from "./operations"
-import type { OrganizationContext } from "./organization"
-import type { ChiefReport } from "./reports"
-import type { GateReview } from "./review-gates"
+import type { OrganizationContext } from "./organization-types"
 import type { SkillDescriptor } from "./skills"
 import type { GoalVerificationContract, GoalVerificationResult } from "./verification"
 
-export interface Actor {
-  id: string
-  name: string
-  role: string
-  agentType: string
-  model?: string
-  skills: string[]
-}
-
-/** Legacy persisted missions and native adapters keep their existing fields. */
-export type Persona = Actor
-
-export interface ChiefTask {
-  id: string
-  title: string
-  personaId: string
-  instructions: string
-  acceptance: string[]
-  dependencies: string[]
-  effectScope?: "workspace" | "external"
-}
-
-export interface ChiefPlan {
-  tasks: ChiefTask[]
-}
-
-export interface Review {
-  passed: boolean
-  summary: string
-  findings: string[]
-  criteria?: { criterion: string; passed: boolean; evidence: string }[]
-}
-
-export interface ChiefTaskState {
-  id: string
-  reviewerId: string
-  status: "pending" | "running" | "reviewing" | "completed"
-  attempts: number
-  repairRound?: number
-  output?: string
-  review?: Review
-  fingerprint?: string
-  effectState?: "not-started" | "running" | "unknown" | "completed"
-  parallel?: import("./parallel-workspace").TaskWorktreeRecord
-}
-
-export interface MissionEvent {
-  at: string
-  stage: string
-  message: string
-  taskId?: string
-}
-
-export interface Verification {
-  ok: boolean
-  output?: string
-  fingerprint: string
-}
-
-export interface AdvisoryReview {
-  planKey: string
-  reviewerId: string
-  fingerprint: string
-  review: Review
-}
-
-export type MissionStatus =
-  | "pending"
-  | "planning"
-  | "executing"
-  | "reviewing"
-  | "verifying"
-  | "waiting"
-  | "paused"
-  | "completed"
-  | "failed"
-export type ChiefStage =
-  | "plan"
-  | "technical-review"
-  | "design-review"
-  | "marketing-review"
-  | "work"
-  | "review"
-  | "gate-review"
-  | "final-review"
-  | "supervise"
-  | "report"
+// Compatibility surface: consumers can keep importing leaf types from
+// `chief/types`, while feature modules depend on `chief/contracts` directly.
+export * from "./contracts"
 
 export interface Mission {
   id: string
@@ -133,7 +62,7 @@ export interface Mission {
   gateReviewRefreshes?: number
   finalReview?: Review
   verification?: Verification
-  history: MissionEvent[]
+  history: import("./contracts").MissionEvent[]
   error?: string
   fingerprint?: string
   initialFingerprint?: string
@@ -155,38 +84,6 @@ export interface Mission {
   containerObservationPolicy?: ContainerObservationPolicy
   containerObservation?: ContainerObservationSnapshot
   containerObservationVerifiedFingerprint?: string
-}
-
-export interface GoalBrief {
-  interpretation: string
-  assumptions: string[]
-  successCriteria: string[]
-}
-
-export interface SupervisionDecision {
-  round: number
-  at: string
-  action: "repair" | "reassign" | "replan" | "stop" | "wait"
-  retryAfterSec?: number
-  reason: string
-  fingerprint: string
-  taskId?: string
-  personaId?: string
-  instructions?: string
-  previousTasks?: ChiefTaskState[]
-  evidence?: { finalReview?: Review; verification?: Verification }
-}
-
-export interface MissionSupervision {
-  maxRounds: number
-  rounds: number
-  stalledRounds: number
-  lastFingerprint?: string
-  decisions: SupervisionDecision[]
-  originalAcceptance?: string[]
-  operatorGoal?: string
-  operatorVerifyCommand?: string
-  pendingRecovery?: { reason: string; taskId?: string }
 }
 
 export interface ChiefPorts {
@@ -216,9 +113,9 @@ export interface ChiefPorts {
       mission: Mission,
       taskId: string,
       attempt: number,
-    ): Promise<import("./parallel-workspace").TaskWorktreeRecord>
-    integrate(mission: Mission, record: import("./parallel-workspace").TaskWorktreeRecord): Promise<void>
-    dispose(record: import("./parallel-workspace").TaskWorktreeRecord): Promise<void>
+    ): Promise<import("./parallel-contract").TaskWorktreeRecord>
+    integrate(mission: Mission, record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
+    dispose(record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
   }
   signal?: AbortSignal
 }
