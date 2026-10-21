@@ -17,7 +17,7 @@ interface LedgerEventBase {
   seq: number
   relayTimestamp: string
   clientTimestamp: string
-  nodeId: string // "{username}:{machineId}"
+  nodeId: string // "{authenticated-user-uuid}:{machineId}"
 }
 
 export interface NodeJoinEvent extends LedgerEventBase {

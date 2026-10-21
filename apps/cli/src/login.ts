@@ -1,231 +1,144 @@
-/**
- * CLI login command — authenticates with Supabase via OAuth or email.
- * Stores credentials in ~/.agent-valley/credentials.json (0600).
- */
-
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+/** User team tokens are verified by the gateway; database credentials stay on the server. */
+import { randomUUID } from "node:crypto"
+import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { normalizeTeamRelayUrl } from "@agent-valley/core/config/team-schema"
+import { loadGlobalConfig, loadProjectConfig } from "@agent-valley/core/config/yaml-loader"
+import {
+  defaultCredentialsPath,
+  loadRelayCredentials,
+  type RelayCredentials,
+  type RelayCredentialsBinding,
+  validateRelayCredentials,
+} from "@agent-valley/core/relay/credentials"
+import { TeamRelayClient } from "@agent-valley/core/relay/team-relay-client"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
 
-const CONFIG_DIR = join(homedir(), ".agent-valley")
-const CREDENTIALS_FILE = join(CONFIG_DIR, "credentials.json")
+export type Credentials = RelayCredentials
 
-export interface Credentials {
-  accessToken: string
-  refreshToken: string
-  expiresAt: number
-  supabaseUrl: string
-  userId: string
-  email: string
-}
-
-function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 })
-  }
-}
-
-export function saveCredentials(creds: Credentials): void {
-  ensureConfigDir()
-  writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), { mode: 0o600 })
-}
-
-export function loadCredentials(): Credentials | null {
-  if (!existsSync(CREDENTIALS_FILE)) return null
+export function saveCredentials(creds: Credentials, path: string = defaultCredentialsPath()): void {
+  const valid = validateRelayCredentials(creds)
+  if (!valid) throw new Error("Invalid or expired team session. Run 'av login' again.")
+  const directory = dirname(path)
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  chmodSync(directory, 0o700)
+  const temporary = join(directory, `.credentials-${randomUUID()}.tmp`)
   try {
-    const raw = readFileSync(CREDENTIALS_FILE, "utf-8")
-    return JSON.parse(raw) as Credentials
-  } catch {
-    return null
+    writeFileSync(temporary, JSON.stringify(valid, null, 2), { flag: "wx", mode: 0o600 })
+    renameSync(temporary, path)
+  } catch (error) {
+    try {
+      unlinkSync(temporary)
+    } catch {
+      // Preserve the write/rename failure if best-effort temporary cleanup also fails.
+    }
+    throw error
   }
 }
 
-export function clearCredentials(): void {
-  if (existsSync(CREDENTIALS_FILE)) {
-    writeFileSync(CREDENTIALS_FILE, "", { mode: 0o600 })
+export function loadCredentials(
+  path: string = defaultCredentialsPath(),
+  binding?: RelayCredentialsBinding,
+): Credentials | null {
+  return loadRelayCredentials(path, binding)
+}
+
+export function clearCredentials(path: string = defaultCredentialsPath()): void {
+  try {
+    unlinkSync(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
 }
 
-async function loginWithEmail(supabaseUrl: string, supabaseAnonKey: string): Promise<Credentials> {
-  const email = await p.text({
-    message: "Email",
-    placeholder: "you@company.com",
-    validate: (v) => (!v?.includes("@") ? "Please enter a valid email" : undefined),
-  })
-  if (p.isCancel(email)) {
-    p.cancel("Cancelled")
-    process.exit(0)
-  }
-
-  const password = await p.password({
-    message: "Password",
-    validate: (v) => ((v?.length ?? 0) < 6 ? "Password must be at least 6 characters" : undefined),
-  })
-  if (p.isCancel(password)) {
-    p.cancel("Cancelled")
-    process.exit(0)
-  }
-
-  const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: supabaseAnonKey,
-    },
-    body: JSON.stringify({ email, password }),
-  })
-
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
-    const msg = (body.error_description ?? body.msg ?? "Login failed") as string
-    throw new Error(msg)
-  }
-
-  const data = (await res.json()) as {
-    access_token: string
-    refresh_token: string
-    expires_in: number
-    user: { id: string; email: string }
-  }
-
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-    supabaseUrl,
-    userId: data.user.id,
-    email: data.user.email,
-  }
+function loadLoginTeamConfig(): RelayCredentialsBinding {
+  const global = loadGlobalConfig()
+  const project = loadProjectConfig()
+  const relayUrl = project?.team?.relay_url ?? global?.team?.relay_url
+  const teamId = project?.team?.id ?? global?.team?.id
+  if (!relayUrl || !teamId)
+    throw new Error(
+      "Set team.relay_url and team.id in av.yaml or ~/.config/agent-valley/settings.yaml, then run 'av login'. " +
+        "Ask your team administrator for the gateway URL and a user team token.",
+    )
+  return { relayUrl: normalizeTeamRelayUrl(relayUrl), teamId }
 }
 
-async function signupWithEmail(supabaseUrl: string, supabaseAnonKey: string): Promise<Credentials> {
-  const email = await p.text({
-    message: "Email",
-    placeholder: "you@company.com",
-    validate: (v) => (!v?.includes("@") ? "Please enter a valid email" : undefined),
-  })
-  if (p.isCancel(email)) {
-    p.cancel("Cancelled")
-    process.exit(0)
-  }
-
-  const password = await p.password({
-    message: "Password (min 6 characters)",
-    validate: (v) => ((v?.length ?? 0) < 6 ? "Password must be at least 6 characters" : undefined),
-  })
-  if (p.isCancel(password)) {
-    p.cancel("Cancelled")
-    process.exit(0)
-  }
-
-  const res = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: supabaseAnonKey,
-    },
-    body: JSON.stringify({ email, password }),
-  })
-
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
-    const msg = (body.error_description ?? body.msg ?? "Signup failed") as string
-    throw new Error(msg)
-  }
-
-  const data = (await res.json()) as {
-    access_token: string
-    refresh_token: string
-    expires_in: number
-    user: { id: string; email: string }
-  }
-
-  if (!data.access_token) {
-    p.log.info("A verification link has been sent to your email. Please verify and log in again.")
-    process.exit(0)
-  }
-
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-    supabaseUrl,
-    userId: data.user.id,
-    email: data.user.email,
-  }
+export interface LoginDependencies {
+  loadTeamConfig?: () => RelayCredentialsBinding
+  createClient?: (input: { relayUrl: string; token: string; teamId: string }) => Pick<TeamRelayClient, "getSession">
+  credentialsPath?: string
 }
 
-export async function login(): Promise<void> {
+export async function login(deps: LoginDependencies = {}): Promise<void> {
   p.intro(pc.bgCyan(pc.black(" Agent Valley Login ")))
-
-  const existing = loadCredentials()
-  if (existing && existing.expiresAt > Date.now()) {
-    p.log.info(`Already logged in as: ${existing.email}`)
-    const relogin = await p.confirm({ message: "Log in again?" })
-    if (p.isCancel(relogin) || !relogin) {
-      p.outro("Keeping existing login")
+  let token: string | undefined
+  let spinner: ReturnType<typeof p.spinner> | undefined
+  try {
+    const configured = (deps.loadTeamConfig ?? loadLoginTeamConfig)()
+    const binding = { ...configured, relayUrl: normalizeTeamRelayUrl(configured.relayUrl) }
+    const path = deps.credentialsPath ?? defaultCredentialsPath()
+    const existing = loadCredentials(path, binding)
+    if (existing) {
+      p.log.info(`Already logged in as ${existing.displayName ?? existing.userId}`)
+      const relogin = await p.confirm({ message: "Log in again?" })
+      if (p.isCancel(relogin) || !relogin) {
+        p.outro("Keeping existing login")
+        return
+      }
+    }
+    const entered = await p.password({
+      message: "AV user team token",
+      validate: (value) =>
+        !value?.trim() || /\s/.test(value) ? "Enter the user team token from your administrator" : undefined,
+    })
+    if (p.isCancel(entered)) {
+      p.cancel("Cancelled")
       return
     }
-  }
-
-  const supabaseUrl = await p.text({
-    message: "Supabase URL",
-    placeholder: "https://xxx.supabase.co",
-    validate: (v) => (!v?.startsWith("https://") ? "Must start with https://" : undefined),
-  })
-  if (p.isCancel(supabaseUrl)) {
-    p.cancel("Cancelled")
-    process.exit(0)
-  }
-
-  const supabaseAnonKey = await p.text({
-    message: "Supabase Anon Key",
-    placeholder: "eyJhbGciOiJIUzI1NiIs...",
-    validate: (v) => ((v?.length ?? 0) < 20 ? "Please enter a valid key" : undefined),
-  })
-  if (p.isCancel(supabaseAnonKey)) {
-    p.cancel("Cancelled")
-    process.exit(0)
-  }
-
-  const action = await p.select({
-    message: "Authentication method",
-    options: [
-      { value: "login", label: "Log in with existing account" },
-      { value: "signup", label: "Create new account" },
-    ],
-  })
-  if (p.isCancel(action)) {
-    p.cancel("Cancelled")
-    process.exit(0)
-  }
-
-  const spinner = p.spinner()
-  spinner.start("Authenticating...")
-
-  try {
-    const creds =
-      action === "signup"
-        ? await signupWithEmail(supabaseUrl as string, supabaseAnonKey as string)
-        : await loginWithEmail(supabaseUrl as string, supabaseAnonKey as string)
-
-    saveCredentials(creds)
+    token = entered
+    spinner = p.spinner()
+    spinner.start("Verifying team session...")
+    const client = (deps.createClient ?? ((input) => new TeamRelayClient(input)))({
+      relayUrl: binding.relayUrl,
+      teamId: binding.teamId,
+      token,
+    })
+    const identity = await client.getSession()
+    const credentials = validateRelayCredentials(
+      {
+        accessToken: token,
+        userId: identity.userId,
+        teamId: identity.teamId,
+        relayUrl: binding.relayUrl,
+        expiresAt: identity.expiresAt,
+        ...(identity.displayName ? { displayName: identity.displayName } : {}),
+      },
+      binding,
+    )
+    if (!credentials)
+      throw new Error(
+        "The gateway returned an expired or mismatched team session. Ask your administrator for a new user team token.",
+      )
+    saveCredentials(credentials, path)
     spinner.stop("Authentication complete")
-
-    p.log.success(`Logged in as ${creds.email}`)
-    p.log.info(`Credentials saved: ${CREDENTIALS_FILE}`)
+    p.log.success(`Logged in as ${credentials.displayName ?? credentials.userId}`)
+    p.log.info(`Credentials saved: ${path}`)
     p.outro(pc.green("Login complete!"))
-  } catch (err) {
-    spinner.stop("Authentication failed")
-    p.log.error(String(err instanceof Error ? err.message : err))
-    p.outro(pc.red("Login failed. Please try again."))
-    process.exit(1)
+  } catch (error) {
+    spinner?.stop("Authentication failed")
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unable to authenticate. Check team.relay_url and team.id, then run 'av login' again."
+    p.log.error(token ? message.split(token).join("[redacted]") : message)
+    p.outro(pc.red("Login failed. Check the gateway settings and user team token."))
+    process.exitCode = 1
   }
 }
 
-export async function logout(): Promise<void> {
-  clearCredentials()
-  p.log.success("Logged out")
+export async function logout(path: string = defaultCredentialsPath()): Promise<void> {
+  clearCredentials(path)
+  p.log.success("Logged out locally. Ask your administrator to revoke the token if needed.")
 }

@@ -81,9 +81,10 @@ bun av down               # 백그라운드 데몬 중지
 bun av status             # Orchestrator 상태 조회
 bun av top                # 실시간 Actor 상태 모니터
 bun av logs               # 대시보드 로그 조회 (-n으로 라인 수 지정)
-bun av login              # 팀 로그인 (Supabase 인증)
+bun av login              # AV 사용자 팀 토큰을 검증하고 로컬 로그인 저장
 bun av logout             # 팀 로그아웃
 bun av invite             # 팀 설정을 클립보드에 복사
+bun av team --help        # 중앙 서버 팀 관리 및 기존 데이터 가져오기
 bun av order --help       # Chief Director에게 목표 전달; --verify로 검증 명령 선택 제공
 bun av missions           # 저장된 로컬 Chief Director 작업 목록
 bun av missions --watch   # 대상 주문과 예약된 지표 관측을 저장 상태에서 재개
@@ -142,11 +143,15 @@ server:
 
 # 팀 대시보드 (선택 사항)
 team:
-  supabase_url: https://xxx.supabase.co
-  supabase_anon_key: your-anon-key
-  id: my-team
+  relay_url: https://av.example.com
+  id: 11111111-1111-4111-8111-111111111111
   display_name: my-node
 ```
+
+Worker에는 gateway URL, 팀 UUID와 `av login`으로 저장한 AV 사용자 토큰만 둡니다.
+중앙 서버는 `team.turso_url`과 `team.turso_auth_token_env`(기본 `TURSO_AUTH_TOKEN`)도
+설정합니다. DB 토큰은 중앙 서버 또는 명시적 관리 명령을 실행하는 기기에만 보관합니다.
+[팀 ledger 설정·이관 가이드](./docs/guides/team-ledger.md)를 참고하세요.
 
 ### 프로젝트 설정 (`av.yaml`)
 
@@ -344,7 +349,7 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 - **운용 패널** — 의존성 차단 사유, 재시도 이유와 예정 시각
 - **시스템 메트릭** — CPU, 메모리, 가동 시간
 - **SSE 실시간 이벤트** — actor.start, actor.done, actor.failed 즉시 업데이트
-- **팀 HUD** — 멀티 노드 뷰 (Supabase 설정 필요)
+- **팀 HUD** — AV gateway와 Turso ledger 기반 멀티 노드 뷰. 브라우저는 로컬 relay를 5초마다 조회
 
 ### API 엔드포인트
 
@@ -357,6 +362,10 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 | `/api/health` | GET | 헬스 체크 (Orchestrator 초기화 실패 또는 중지 시 503) |
 | `/api/intervention` | POST | 라이브 Actor 제어. 기본은 로컬 접근, 토큰 설정 시 인증 필요 |
 | `/api/metrics` | GET | Prometheus 메트릭 (`observability.prometheus.enabled` 시 활성화) |
+| `/api/team/ledger` | GET | 로컬 브라우저용 팀 상태. Dashboard 상태 인증 유지 |
+| `/api/team/session` | GET | AV 팀 bearer 토큰으로 `team_id` 소속·만료 확인 |
+| `/api/team/relay` | GET | AV 팀 bearer 토큰으로 순번 cursor 이후의 이벤트 조회 |
+| `/api/team/relay` | POST | AV 팀 bearer 토큰과 node 소유권을 확인하고 이벤트 저장 |
 
 ---
 

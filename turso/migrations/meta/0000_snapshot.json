@@ -1,0 +1,342 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "f13fc5d3-4ca5-45e0-a956-6af11a67f0ac",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "ledger_events": {
+      "name": "ledger_events",
+      "columns": {
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_timestamp": {
+          "name": "client_timestamp",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'native'"
+        }
+      },
+      "indexes": {
+        "ledger_events_team_event_unique": {
+          "name": "ledger_events_team_event_unique",
+          "columns": ["team_id", "event_id"],
+          "isUnique": true
+        },
+        "idx_ledger_team_seq": {
+          "name": "idx_ledger_team_seq",
+          "columns": ["team_id", "seq"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "ledger_events_team_id_teams_id_fk": {
+          "name": "ledger_events_team_id_teams_id_fk",
+          "tableFrom": "ledger_events",
+          "tableTo": "teams",
+          "columnsFrom": ["team_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "ledger_event_id_length": {
+          "name": "ledger_event_id_length",
+          "value": "length(\"ledger_events\".\"event_id\") between 1 and 200"
+        },
+        "ledger_event_type": {
+          "name": "ledger_event_type",
+          "value": "\"ledger_events\".\"type\" in ('node.join','node.reconnect','node.leave','agent.start','agent.done','agent.failed','agent.cancelled')"
+        },
+        "ledger_payload_object": {
+          "name": "ledger_payload_object",
+          "value": "json_valid(\"ledger_events\".\"payload\") and json_type(\"ledger_events\".\"payload\") = 'object'"
+        },
+        "ledger_source": {
+          "name": "ledger_source",
+          "value": "\"ledger_events\".\"source\" in ('native','supabase-import')"
+        },
+        "ledger_native_node_owner": {
+          "name": "ledger_native_node_owner",
+          "value": "\"ledger_events\".\"source\" = 'supabase-import' or (lower(substr(\"ledger_events\".\"node_id\", 1, length(\"ledger_events\".\"user_id\") + 1)) = lower(\"ledger_events\".\"user_id\") || ':' and length(\"ledger_events\".\"node_id\") > length(\"ledger_events\".\"user_id\") + 1)"
+        }
+      }
+    },
+    "team_members": {
+      "name": "team_members",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "idx_team_members_user": {
+          "name": "idx_team_members_user",
+          "columns": ["user_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "team_members_team_id_teams_id_fk": {
+          "name": "team_members_team_id_teams_id_fk",
+          "tableFrom": "team_members",
+          "tableTo": "teams",
+          "columnsFrom": ["team_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "team_members_team_id_user_id_pk": {
+          "columns": ["team_id", "user_id"],
+          "name": "team_members_team_id_user_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "team_members_role": {
+          "name": "team_members_role",
+          "value": "\"team_members\".\"role\" in ('owner', 'admin', 'member')"
+        },
+        "team_members_display_name_length": {
+          "name": "team_members_display_name_length",
+          "value": "length(trim(\"team_members\".\"display_name\")) between 1 and 200"
+        }
+      }
+    },
+    "team_tokens": {
+      "name": "team_tokens",
+      "columns": {
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_team_tokens_member": {
+          "name": "idx_team_tokens_member",
+          "columns": ["team_id", "user_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "team_tokens_team_id_user_id_team_members_team_id_user_id_fk": {
+          "name": "team_tokens_team_id_user_id_team_members_team_id_user_id_fk",
+          "tableFrom": "team_tokens",
+          "tableTo": "team_members",
+          "columnsFrom": ["team_id", "user_id"],
+          "columnsTo": ["team_id", "user_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "team_tokens_hash_length": {
+          "name": "team_tokens_hash_length",
+          "value": "length(\"team_tokens\".\"token_hash\") = 64"
+        },
+        "team_tokens_expiry": {
+          "name": "team_tokens_expiry",
+          "value": "\"team_tokens\".\"expires_at\" > 0"
+        }
+      }
+    },
+    "teams": {
+      "name": "teams",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "teams_slug_unique": {
+          "name": "teams_slug_unique",
+          "columns": ["slug"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "teams_name_length": {
+          "name": "teams_name_length",
+          "value": "length(trim(\"teams\".\"name\")) between 1 and 200"
+        },
+        "teams_slug_length": {
+          "name": "teams_slug_length",
+          "value": "length(trim(\"teams\".\"slug\")) between 1 and 200"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

@@ -81,7 +81,7 @@ describe("saveConfig", () => {
     const RAW_TOKEN = "ghp_DO_NOT_PERSIST_ME_0123456789"
     writeFileSync(
       join(tmpRoot, "agent-valley", "settings.yaml"),
-      "linear:\n  api_key: existing_linear_key\nserver:\n  port: 9900\nteam:\n  id: existing-team\n",
+      "linear:\n  api_key: existing_linear_key\nserver:\n  port: 9900\nteam:\n  id: 5fa388f1-325b-49e6-ae65-cafddfd493be\n",
     )
     const ctx: ResolvedSetupContext = {
       trackerKind: "github",
@@ -125,7 +125,7 @@ describe("saveConfig", () => {
     // A new GitHub project must preserve credentials and settings for other projects.
     expect(settings).toContain("api_key: existing_linear_key")
     expect(settings).toContain("port: 9900")
-    expect(settings).toContain("id: existing-team")
+    expect(settings).toContain("id: 5fa388f1-325b-49e6-ae65-cafddfd493be")
     expect(settings).not.toContain(RAW_TOKEN)
 
     // av.yaml must contain token_env reference but not the token itself

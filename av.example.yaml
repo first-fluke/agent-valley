@@ -211,15 +211,17 @@ verify:
 #     video: true
 
 # ── Team Dashboard / Ledger Relay (optional) ──────────────────────────
-# Streams orchestrator events (node.join, issue lifecycle, etc.) to a
-# Supabase-backed team ledger for the shared dashboard. Same shape as
+# Sends orchestrator events through an AV gateway to its Turso ledger.
+# Workers receive an AV user token through `av login`, never a DB token.
+# Same shape as
 # team: in ~/.config/agent-valley/settings.yaml; project values win.
-# Activates only when supabase_url + supabase_anon_key + id are ALL set
-# AND a valid Supabase session exists on disk (run `av login`). Any other
-# state (fields missing, or not logged in) is a silent no-op — single-node
-# setups are never blocked from booting.
+# Publishing requires relay_url + id and a valid endpoint-bound AV login.
+# Missing configuration or login leaves the local orchestrator usable.
+# See docs/guides/team-ledger.md for setup, Drizzle migrations and data import.
 # team:
-#   supabase_url: https://xxx.supabase.co
-#   supabase_anon_key: your-anon-key
-#   id: my-team                       # Team identifier shared by all nodes
+#   relay_url: https://av.example.com
+#   id: 11111111-1111-4111-8111-111111111111
 #   display_name: my-node             # This node's display name on the dashboard
+#   # Central server / explicit administration machine only:
+#   turso_url: libsql://your-team-region.turso.io
+#   turso_auth_token_env: TURSO_AUTH_TOKEN # Environment variable name, never its secret value

@@ -255,6 +255,16 @@ describe("standalone order setup", () => {
     expect(existsSync("av.yaml")).toBe(false)
   })
 
+  it("refuses legacy team authentication keys without rewriting either settings file", async () => {
+    writeDefaults()
+    const originalGlobal = readFileSync(settingsPath, "utf-8")
+    const originalProject = "team:\n  supabase_anon_key: RETIRED_TEST_KEY\n"
+    writeFileSync("av.yaml", originalProject)
+    await expect(setup()).rejects.toThrow("team.relay_url")
+    expect(readFileSync("av.yaml", "utf-8")).toBe(originalProject)
+    expect(readFileSync(settingsPath, "utf-8")).toBe(originalGlobal)
+  })
+
   it("rebuilds a malformed existing project file after replacement is confirmed", async () => {
     writeDefaults()
     writeFileSync("av.yaml", "workspace: [invalid YAML\n")
@@ -268,7 +278,7 @@ describe("standalone order setup", () => {
     {
       name: "invalid Chief Director model with valid unrelated settings",
       content:
-        "agent:\n  type: codex\n  model: 42\n  timeout: 120\nserver:\n  port: 9900\nteam:\n  id: retained-team\n",
+        "agent:\n  type: codex\n  model: 42\n  timeout: 120\nserver:\n  port: 9900\nteam:\n  id: 5fa388f1-325b-49e6-ae65-cafddfd493be\n",
       retainedPort: 9900,
     },
   ])("repairs $name after warning and confirmed save", async ({ content, retainedPort }) => {
@@ -282,7 +292,7 @@ describe("standalone order setup", () => {
     expect(defaults.server.port).toBe(retainedPort)
     if (retainedPort === 9900) {
       expect(defaults.actor.timeout).toBe(120)
-      expect(defaults.team.id).toBe("retained-team")
+      expect(defaults.team.id).toBe("5fa388f1-325b-49e6-ae65-cafddfd493be")
     }
     expect(p.log.warn).toHaveBeenCalledWith(expect.stringContaining("settings.yaml"))
     expect(vi.mocked(p.log.warn).mock.invocationCallOrder[0]).toBeLessThan(

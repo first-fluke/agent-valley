@@ -1,6 +1,6 @@
 /**
  * LedgerBridge — Listens to Orchestrator events and publishes to LedgerEventPublisher.
- * Fire-and-forget: Supabase failures must never stop the Orchestrator.
+ * Fire-and-forget: relay failures must never stop the Orchestrator.
  */
 
 import type { LedgerEvent, LedgerEventPublisher, LedgerEventType } from "../domain/ledger"
@@ -38,8 +38,8 @@ export class LedgerBridge {
       clientTimestamp: new Date().toISOString(),
       payload,
     } as PublishableEvent
-    this.publisher.publish(event).catch((err) => {
-      logger.warn("ledger-bridge", `Failed to publish ${type} event`, { error: String(err) })
+    this.publisher.publish(event).catch(() => {
+      logger.warn("ledger-bridge", `Failed to publish ${type} event. Check the team relay and session.`)
     })
   }
 

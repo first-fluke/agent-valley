@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest"
 
-const readTeamLedger = vi.fn(async (): Promise<{ mode: string; status?: string; code?: string; message?: string }> => ({ mode: "standalone" }))
+const readTeamLedger = vi.fn(
+  async (): Promise<{ mode: string; status?: string; code?: string; message?: string }> => ({ mode: "standalone" }),
+)
 vi.mock("@/lib/team-ledger-service", () => ({ readTeamLedger }))
 vi.mock("@/lib/project-root", () => ({ resolveProjectRoot: async () => "/project" }))
 vi.mock("@/lib/env", () => ({ toOrchestratorConfig: () => ({}) }))
@@ -23,13 +25,16 @@ describe("GET /api/team/ledger", () => {
     expect((await GET(request({ authorization: "Bearer status-secret" }))).status).toBe(200)
   })
 
-  test("maps team session expiry to an explicit 401", async () => {
+  test("maps invalid, expired or revoked team sessions to an explicit 401", async () => {
     readTeamLedger.mockResolvedValueOnce({
-      mode: "team", status: "error", code: "session_expired", message: "Run av login again.",
+      mode: "team",
+      status: "error",
+      code: "session_invalid",
+      message: "Run av login again.",
     })
     const response = await GET(request())
     expect(response.status).toBe(401)
-    expect(await response.json()).toMatchObject({ code: "session_expired" })
+    expect(await response.json()).toMatchObject({ code: "session_invalid" })
     expect(response.headers.get("cache-control")).toBe("no-store")
   })
 })

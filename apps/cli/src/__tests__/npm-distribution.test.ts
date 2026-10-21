@@ -2,9 +2,16 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { distributionManifest, stageNpmDistribution } from "../npm-distribution"
+import { cliBuildConfig } from "../cli-build-config"
+import { distributionManifest, externalRuntimePackages, stageNpmDistribution } from "../npm-distribution"
 
 const engines = { node: ">=26.10.0", bun: ">=1.4.2" }
+const core = { dependencies: { "@libsql/client": "^0.18.99", "drizzle-orm": "^0.45.99" } }
+const journal = {
+  version: "7",
+  dialect: "sqlite",
+  entries: [{ idx: 0, version: "6", when: 1_700_000_000_000, tag: "0000_fixture", breakpoints: true }],
+}
 const source = {
   name: "agent-valley",
   version: "9.8.7",
@@ -30,6 +37,7 @@ async function fixture() {
   const cli = join(root, "apps/cli")
   const files: Record<string, string> = {
     "package.json": JSON.stringify({ engines }),
+    "packages/core/package.json": JSON.stringify(core),
     LICENSE: "Fixture AGPL license\n",
     "README.md": "# Fixture CLI\n",
     "apps/cli/package.json": JSON.stringify(source),
@@ -38,6 +46,9 @@ async function fixture() {
     "apps/cli/dist/assets/skills/av/SKILL.md": "---\nname: av\n---\nFixture skill\n",
     "apps/cli/dist/assets/plugin.json": JSON.stringify({ name: "av", version: source.version }),
     "apps/cli/dist/assets/LICENSE": "Fixture AGPL license\n",
+    "apps/cli/dist/assets/turso/migrations/meta/_journal.json": JSON.stringify(journal),
+    "apps/cli/dist/assets/turso/migrations/0000_fixture.sql": "create table fixture(id integer);\n",
+    "apps/cli/dist/assets/turso/migrations/unlisted-secret.sql": "Must not enter the distribution\n",
     "apps/cli/dist/debug.txt": "Must not enter the distribution\n",
   }
   for (const [relative, content] of Object.entries(files)) {
@@ -51,7 +62,7 @@ async function fixture() {
 describe("npm distribution", () => {
   it("retains publish identity and runtime requirements without npm workspace resolution or lifecycle hooks", () => {
     const original = structuredClone(source)
-    const manifest = distributionManifest(source, engines)
+    const manifest = distributionManifest(source, engines, core)
     expect(manifest).toMatchObject({
       name: source.name,
       version: source.version,
@@ -62,7 +73,7 @@ describe("npm distribution", () => {
       engines,
       files: ["dist", "LICENSE", "README.md"],
     })
-    expect(manifest).not.toHaveProperty("dependencies")
+    expect(manifest.dependencies).toEqual({ "@libsql/client": core.dependencies["@libsql/client"] })
     expect(manifest).not.toHaveProperty("devDependencies")
     expect(manifest).not.toHaveProperty("scripts")
     expect(JSON.stringify(manifest)).not.toContain("workspace:")
@@ -82,6 +93,7 @@ describe("npm distribution", () => {
         bundledDependencies: ["@agent-valley/core"],
       },
       engines,
+      core,
     )
     for (const key of [
       "private",
@@ -98,12 +110,35 @@ describe("npm distribution", () => {
   it.each([{ name: "wrong-package" }, { version: "bad" }, { type: "commonjs" }])(
     "rejects invalid package identity before staging: %j",
     (patch) => {
-      expect(() => distributionManifest({ ...source, ...patch }, engines)).toThrow("apps/cli/package.json")
+      expect(() => distributionManifest({ ...source, ...patch }, engines, core)).toThrow("apps/cli/package.json")
+    },
+  )
+
+  it("keeps the native driver external while bundling application and ORM modules", () => {
+    const config = cliBuildConfig("/checkout/apps/cli")
+    expect(config).toMatchObject({
+      target: "node",
+      format: "esm",
+      packages: "bundle",
+      outdir: "/checkout/apps/cli/dist",
+    })
+    expect(config.entrypoints).toEqual(["/checkout/apps/cli/src/index.ts", "/checkout/apps/cli/src/supervisor.ts"])
+    expect(config.external).toEqual(externalRuntimePackages.flatMap((name) => [name, `${name}/*`]))
+    expect(config.external).not.toContain("drizzle-orm")
+    expect(config.external).not.toContain("@agent-valley/core")
+  })
+
+  it.each([{}, { dependencies: {} }, { dependencies: { "@libsql/client": "workspace:*" } }])(
+    "rejects missing or workspace native-driver versions before staging",
+    (metadata) => {
+      expect(() => distributionManifest(source, engines, metadata)).toThrow(
+        "dependencies.@libsql/client in packages/core/package.json",
+      )
     },
   )
 
   it("reports the missing engine key in the root manifest", () => {
-    expect(() => distributionManifest(source, { ...engines, node: "" })).toThrow("engines.node and engines.bun")
+    expect(() => distributionManifest(source, { ...engines, node: "" }, core)).toThrow("engines.node and engines.bun")
   })
 
   it("stages checked bundles, assets and legal files while leaving source development metadata untouched", async () => {
@@ -112,7 +147,7 @@ describe("npm distribution", () => {
     const destination = await stageNpmDistribution(cli, root)
     expect(destination).toBe(join(cli, "dist/npm"))
     const manifest = JSON.parse(await readFile(join(destination, "package.json"), "utf8"))
-    expect(manifest).not.toHaveProperty("dependencies")
+    expect(manifest.dependencies).toEqual({ "@libsql/client": core.dependencies["@libsql/client"] })
     expect(manifest.engines).toEqual(engines)
     for (const file of [
       "dist/index.js",
@@ -120,12 +155,17 @@ describe("npm distribution", () => {
       "dist/assets/skills/av/SKILL.md",
       "dist/assets/plugin.json",
       "dist/assets/LICENSE",
+      "dist/assets/turso/migrations/meta/_journal.json",
+      "dist/assets/turso/migrations/0000_fixture.sql",
     ])
       expect(await readFile(join(destination, file), "utf8")).toBe(await readFile(join(cli, file), "utf8"))
     expect(await readFile(join(destination, "LICENSE"), "utf8")).toBe(await readFile(join(root, "LICENSE"), "utf8"))
     expect(await readFile(join(destination, "README.md"), "utf8")).toBe(await readFile(join(root, "README.md"), "utf8"))
     expect((await lstat(join(destination, "dist/index.js"))).mode & 0o111).toBe(0o111)
     await expect(lstat(join(destination, "dist/debug.txt"))).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(lstat(join(destination, "dist/assets/turso/migrations/unlisted-secret.sql"))).rejects.toMatchObject({
+      code: "ENOENT",
+    })
     expect(await readFile(join(cli, "package.json"), "utf8")).toBe(before)
     await chmod(join(destination, "dist/index.js"), 0o600)
     await stageNpmDistribution(cli, root)
@@ -142,6 +182,20 @@ describe("npm distribution", () => {
     expect(await readFile(sentinel, "utf8")).toBe("retain until valid replacement")
     await rm(join(cli, "dist/assets/LICENSE"))
     await expect(stageNpmDistribution(cli, root)).rejects.toMatchObject({ code: "ENOENT" })
+    expect(await readFile(sentinel, "utf8")).toBe("retain until valid replacement")
+  })
+
+  it("retains an existing stage when a declared migration asset is missing or links elsewhere", async () => {
+    const { root, cli } = await fixture()
+    const destination = await stageNpmDistribution(cli, root)
+    const sentinel = join(destination, "retained.txt")
+    await writeFile(sentinel, "retain until valid replacement")
+    const sql = join(cli, "dist/assets/turso/migrations/0000_fixture.sql")
+    await rm(sql)
+    await expect(stageNpmDistribution(cli, root)).rejects.toThrow("invalid or incomplete")
+    expect(await readFile(sentinel, "utf8")).toBe("retain until valid replacement")
+    await symlink(join(root, "LICENSE"), sql)
+    await expect(stageNpmDistribution(cli, root)).rejects.toThrow("invalid or incomplete")
     expect(await readFile(sentinel, "utf8")).toBe("retain until valid replacement")
   })
 

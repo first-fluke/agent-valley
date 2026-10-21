@@ -1,6 +1,6 @@
 /**
  * Node ID generation — "{authenticated-user-uuid}:{hostname}" format.
- * The UUID prefix is checked by the team ledger RLS insert policy.
+ * The UUID prefix is checked against the authenticated AV user by the relay store.
  */
 
 import { hostname } from "node:os"

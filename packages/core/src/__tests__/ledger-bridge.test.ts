@@ -22,9 +22,21 @@ import type { Config } from "../config/yaml-loader"
 import type { LedgerEvent, LedgerEventPublisher } from "../domain/ledger"
 import { OrchestratorEventEmitter } from "../orchestrator/event-emitter"
 import type { Orchestrator } from "../orchestrator/orchestrator"
-import { loadRelayCredentials } from "../relay/credentials"
+import { loadRelayCredentials, type RelayCredentials } from "../relay/credentials"
 import { LedgerBridge } from "../relay/ledger-bridge"
 import { decideLedgerRelay, wireLedgerRelay } from "../relay/ledger-wiring"
+
+const teamId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+const relayUrl = "https://relay.example.test"
+const userId = "11111111-1111-4111-8111-111111111111"
+const session = (overrides: Partial<RelayCredentials> = {}): RelayCredentials => ({
+  accessToken: "user-token",
+  userId,
+  teamId,
+  relayUrl,
+  expiresAt: Date.now() + 60_000,
+  ...overrides,
+})
 
 function makeFakePublisher(): LedgerEventPublisher & {
   published: Array<Omit<LedgerEvent, "seq" | "relayTimestamp" | "v">>
@@ -132,20 +144,20 @@ describe("LedgerBridge", () => {
 describe("decideLedgerRelay — gating decision", () => {
   test("single-node: team fields absent -> disabled", () => {
     const config = makeConfig()
-    expect(decideLedgerRelay(config, { accessToken: "t", userId: "u", expiresAt: 0 })).toEqual({
+    expect(decideLedgerRelay(config, session())).toEqual({
       enabled: false,
       reason: "single_node",
     })
   })
 
   test("team mode configured but no session -> disabled with missing_session reason", () => {
-    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
+    const config = makeConfig({ teamRelayUrl: relayUrl, teamId })
     expect(decideLedgerRelay(config, null)).toEqual({ enabled: false, reason: "missing_session" })
   })
 
   test("team mode configured + valid session -> enabled", () => {
-    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
-    expect(decideLedgerRelay(config, { accessToken: "t", userId: "u", expiresAt: 0 })).toEqual({
+    const config = makeConfig({ teamRelayUrl: relayUrl, teamId })
+    expect(decideLedgerRelay(config, session())).toEqual({
       enabled: true,
       reason: "ready",
     })
@@ -161,33 +173,29 @@ describe("wireLedgerRelay — factory", () => {
     const loader = vi.fn(() => null)
     const bridge = wireLedgerRelay(orchestrator, config, loader)
     expect(bridge).toBeNull()
+    expect(loader).not.toHaveBeenCalled()
   })
 
   test("team mode without a session returns null (no crash)", () => {
     const orchestrator = makeFakeOrchestrator()
-    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
+    const config = makeConfig({ teamRelayUrl: relayUrl, teamId })
     const bridge = wireLedgerRelay(orchestrator, config, () => null)
     expect(bridge).toBeNull()
   })
 
   test("team mode with a valid session constructs and attaches a LedgerBridge", async () => {
     const orchestrator = makeFakeOrchestrator()
-    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
-    const bridge = wireLedgerRelay(orchestrator, config, () => ({
-      accessToken: "tok",
-      userId: "11111111-1111-4111-8111-111111111111",
-      expiresAt: 0,
-    }))
+    const config = makeConfig({ teamRelayUrl: relayUrl, teamId })
+    const bridge = wireLedgerRelay(orchestrator, config, () => session())
     expect(bridge).not.toBeNull()
     await bridge?.dispose()
   })
 
   test("relay publishes the authenticated user ID as the node ID prefix", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: true } as Response)
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ ok: true }))
     const orchestrator = makeFakeOrchestrator()
-    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
-    const userId = "11111111-1111-4111-8111-111111111111"
-    const bridge = wireLedgerRelay(orchestrator, config, () => ({ accessToken: "tok", userId, expiresAt: 0 }))
+    const config = makeConfig({ teamRelayUrl: relayUrl, teamId })
+    const bridge = wireLedgerRelay(orchestrator, config, () => session())
     expect(bridge).not.toBeNull()
 
     orchestrator.publish("agent.start", { agentType: "claude", issueKey: "PROJ-1", issueId: "i1" })
@@ -195,26 +203,26 @@ describe("wireLedgerRelay — factory", () => {
     const init = fetchMock.mock.calls[0]?.[1]
     ok(init, "Expected relay publish request options")
     const body = JSON.parse(init.body as string) as {
-      node_id: string
-      user_id: string
+      teamId: string
+      event: { nodeId: string }
     }
-    expect(body.user_id).toBe(userId)
-    expect(body.node_id.startsWith(`${userId}:`)).toBe(true)
-    expect(body.node_id.length).toBeGreaterThan(userId.length + 1)
+    expect(body.teamId).toBe(teamId)
+    expect(body).not.toHaveProperty("userId")
+    expect(body.event).not.toHaveProperty("userId")
+    expect(body.event.nodeId.startsWith(`${userId}:`)).toBe(true)
+    expect(body.event.nodeId.length).toBeGreaterThan(userId.length + 1)
     await bridge?.dispose()
   })
 
   test("invalid stored user identity disables the team relay", () => {
     const orchestrator = makeFakeOrchestrator()
-    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
-    expect(
-      wireLedgerRelay(orchestrator, config, () => ({ accessToken: "tok", userId: "alice", expiresAt: 0 })),
-    ).toBeNull()
+    const config = makeConfig({ teamRelayUrl: relayUrl, teamId })
+    expect(wireLedgerRelay(orchestrator, config, () => session({ userId: "alice" }))).toBeNull()
   })
 
   test("a throwing credentials loader is caught — relay disabled, never crashes bootstrap", () => {
     const orchestrator = makeFakeOrchestrator()
-    const config = makeConfig({ supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "anon", teamId: "team-1" })
+    const config = makeConfig({ teamRelayUrl: relayUrl, teamId })
     const bridge = wireLedgerRelay(orchestrator, config, () => {
       throw new Error("disk read failed")
     })
@@ -251,18 +259,15 @@ describe("loadRelayCredentials", () => {
 
   test("expired session resolves to null", async () => {
     await mkdir(TEST_PATH.replace(/\/[^/]+$/, ""), { recursive: true })
-    await writeFile(
-      TEST_PATH,
-      JSON.stringify({ accessToken: "tok", userId: "u1", expiresAt: Date.now() - 1_000 }),
-      "utf-8",
-    )
+    await writeFile(TEST_PATH, JSON.stringify(session({ expiresAt: Date.now() - 1_000 })), "utf-8")
     expect(loadRelayCredentials(TEST_PATH)).toBeNull()
   })
 
   test("valid, unexpired credentials are returned", async () => {
     await mkdir(TEST_PATH.replace(/\/[^/]+$/, ""), { recursive: true })
     const expiresAt = Date.now() + 60_000
-    await writeFile(TEST_PATH, JSON.stringify({ accessToken: "tok", userId: "u1", expiresAt }), "utf-8")
-    expect(loadRelayCredentials(TEST_PATH)).toEqual({ accessToken: "tok", userId: "u1", expiresAt })
+    const credentials = session({ expiresAt })
+    await writeFile(TEST_PATH, JSON.stringify(credentials), "utf-8")
+    expect(loadRelayCredentials(TEST_PATH)).toEqual(credentials)
   })
 })

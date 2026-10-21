@@ -23,6 +23,7 @@
 import { existsSync } from "node:fs"
 import { mergeChiefConfig } from "@agent-valley/core/config/chief-schema"
 import { resolveProjectConfigPath } from "@agent-valley/core/config/project-config-path"
+import { TeamConfigMigrationError } from "@agent-valley/core/config/team-schema"
 import { loadProjectConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/yaml-loader"
 import * as p from "@clack/prompts"
 import pc from "picocolors"
@@ -173,7 +174,8 @@ export async function setup(options: { mode?: "order" | "tracker" } = {}): Promi
       ctx.verifyCommand = existing?.verify?.command
       ctx.task = existing?.task
       ctx.chief = mergeChiefConfig(ctx.chief, existing?.chief)
-    } catch {
+    } catch (error) {
+      if (error instanceof TeamConfigMigrationError) throw error
       replaceInvalidProject = true
       p.log.warn("Existing av.yaml cannot be read. Re-enter the workspace and verification settings to replace it.")
     }

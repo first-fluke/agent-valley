@@ -1,5 +1,6 @@
 import { lstat, realpath } from "node:fs/promises"
 import { isAbsolute, join, parse as parsePath, resolve } from "node:path"
+import { assertTeamConfigMigrated } from "@agent-valley/core/config/team-schema"
 import {
   type GlobalConfig,
   globalConfigSchema,
@@ -63,6 +64,7 @@ async function configFile(
     throw new Error(
       `Invalid existing configuration at ${path}: expected a YAML mapping. Repair this file before rerunning av setup --yes.`,
     )
+  assertTeamConfigMigrated(raw as Record<string, unknown>, path)
   const checked = schema.safeParse(raw)
   if (!checked.success) {
     const keys = [...new Set(checked.error.issues.map((issue) => issue.path.join(".") || "<root>"))]

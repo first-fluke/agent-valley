@@ -87,12 +87,6 @@ export default defineConfig({
         "packages/core/src/domain/parsed-webhook-event.ts",
         "packages/core/src/domain/ledger.ts",
         "packages/core/src/sessions/agent-session.ts",
-        // Supabase relay bridge — external-service integration exercised only
-        // in the dashboard runtime, no unit-test seam in v0.2. Tracked for
-        // v0.3 coverage uplift (see CHANGELOG Unreleased).
-        "packages/core/src/relay/ledger-bridge.ts",
-        "packages/core/src/relay/node-id.ts",
-        "packages/core/src/relay/supabase-ledger-client.ts",
         // Scoring service is an LLM-call boundary wrapper; covered indirectly
         // via routing integration (score-routing.test.ts). Dedicated seam
         // planned for v0.3.
@@ -102,7 +96,6 @@ export default defineConfig({
         // v0.2 — exercised manually + e2e. The pure helpers under
         // `apps/cli/src/setup/` (mask, preview, resolve, save, yaml-build,
         // github-api, linear-api) stay covered.
-        "apps/cli/src/login.ts",
         "apps/cli/src/supervisor.ts",
         "apps/cli/src/issue.ts",
         "apps/cli/src/breakdown.ts",

@@ -16,6 +16,7 @@ import { resolveMaxParallel } from "./merge-helpers"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
 import { resolveProjectConfigPath } from "./project-config-path"
 import { resolvedTaskSchema, taskSchema } from "./task-schema"
+import { assertTeamConfigMigrated, teamConfigSchema, teamRelayUrlSchema } from "./team-schema"
 import { buildTunnelConfig, tunnelMergedSchema, tunnelProjectSchema } from "./tunnel-schema"
 import { buildVerifyConfig, verifyMergedSchema, verifyProjectSchema } from "./verify-schema"
 import { readYamlFile } from "./yaml-file"
@@ -42,14 +43,7 @@ export const globalConfigSchema = z
         port: z.number().int().min(1).max(65535).optional(),
       })
       .optional(),
-    team: z
-      .object({
-        supabase_url: z.string().optional(),
-        supabase_anon_key: z.string().optional(),
-        id: z.string().optional(),
-        display_name: z.string().optional(),
-      })
-      .optional(),
+    team: teamConfigSchema.optional(),
   })
   .strict()
   .overwrite(normalizeActorDefaults)
@@ -132,14 +126,7 @@ export const projectConfigSchema = z
         routes: scoreRoutingSchema.optional(),
       })
       .optional(),
-    team: z
-      .object({
-        supabase_url: z.string().optional(),
-        supabase_anon_key: z.string().optional(),
-        id: z.string().optional(),
-        display_name: z.string().optional(),
-      })
-      .optional(),
+    team: teamConfigSchema.optional(),
     observability: observabilityProjectSchema,
     budget: budgetProjectSchema,
     tunnel: tunnelProjectSchema,
@@ -215,9 +202,18 @@ const mergedConfigSchema = z
     ),
     scoringModel: z.string().optional(),
     scoreRouting: scoreRoutingSchema.optional(),
-    supabaseUrl: z.string().optional(),
-    supabaseAnonKey: z.string().optional(),
-    teamId: z.string().optional(),
+    teamRelayUrl: teamRelayUrlSchema.optional(),
+    tursoUrl: z.string().min(1).optional(),
+    tursoAuthTokenEnv: z
+      .string()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+      .optional(),
+    teamId: z
+      .uuid({
+        error:
+          "Set team.id in av.yaml or ~/.config/agent-valley/settings.yaml to the team UUID supplied by your administrator.",
+      })
+      .optional(),
     displayName: z.string().optional(),
     observability: observabilityMergedSchema,
     budget: budgetMergedSchema,
@@ -285,6 +281,7 @@ export function loadGlobalConfig(configPath?: string): GlobalConfig | null {
   const path = configPath ?? resolveGlobalConfigPath()
   const raw = readYamlFile(path)
   if (!raw) return null
+  assertTeamConfigMigrated(raw, path)
 
   const result = globalConfigSchema.safeParse(raw)
   if (!result.success) {
@@ -299,6 +296,7 @@ export function loadProjectConfig(projectRoot?: string): ProjectConfig | null {
   const path = resolveProjectConfigPath(root)
   const raw = readYamlFile(path)
   if (!raw) return null
+  assertTeamConfigMigrated(raw, path)
 
   const result = projectConfigSchema.safeParse(raw)
   if (!result.success) {
@@ -400,8 +398,9 @@ function mergeConfigs(
     })),
     scoringModel: project?.scoring?.model ?? undefined,
     scoreRouting: project?.scoring?.routes ?? undefined,
-    supabaseUrl: project?.team?.supabase_url ?? global?.team?.supabase_url ?? undefined,
-    supabaseAnonKey: project?.team?.supabase_anon_key ?? global?.team?.supabase_anon_key ?? undefined,
+    teamRelayUrl: project?.team?.relay_url ?? global?.team?.relay_url ?? undefined,
+    tursoUrl: project?.team?.turso_url ?? global?.team?.turso_url ?? undefined,
+    tursoAuthTokenEnv: project?.team?.turso_auth_token_env ?? global?.team?.turso_auth_token_env ?? "TURSO_AUTH_TOKEN",
     teamId: project?.team?.id ?? global?.team?.id ?? undefined,
     displayName: project?.team?.display_name ?? global?.team?.display_name ?? undefined,
     observability: buildObservabilityConfig(project),
@@ -419,7 +418,7 @@ function mergeConfigs(
 // ── Public API ──────────────────────────────────────────────────────
 
 export function isTeamMode(config: Config): boolean {
-  return !!(config.supabaseUrl && config.supabaseAnonKey && config.teamId)
+  return !!(config.teamRelayUrl && config.teamId)
 }
 
 /** Validate the effective configuration without terminating the caller. */

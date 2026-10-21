@@ -12,15 +12,23 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const config = toOrchestratorConfig(await resolveProjectRoot(process.cwd()))
     const result = await readTeamLedger(config)
-    const status = result.mode === "team" && result.status === "error"
-      ? result.code === "team_access_denied" ? 403
-        : ["missing_session", "session_expired", "session_mismatch"].includes(result.code) ? 401
-          : 503
-      : 200
+    const status =
+      result.mode === "team" && result.status === "error"
+        ? result.code === "team_access_denied"
+          ? 403
+          : ["missing_session", "session_invalid", "session_mismatch"].includes(result.code)
+            ? 401
+            : 503
+        : 200
     return Response.json(result, { status, headers: { "Cache-Control": "no-store" } })
   } catch {
     return Response.json(
-      { mode: "team", status: "error", code: "config_unavailable", message: "Dashboard configuration could not be loaded. Check av.yaml and settings.yaml." },
+      {
+        mode: "team",
+        status: "error",
+        code: "config_unavailable",
+        message: "Dashboard configuration could not be loaded. Check av.yaml and settings.yaml.",
+      },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     )
   }

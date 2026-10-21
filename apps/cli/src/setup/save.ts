@@ -12,9 +12,11 @@
 
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { chiefConfigSchema } from "@agent-valley/core/config/chief-schema"
+import { TeamConfigMigrationError } from "@agent-valley/core/config/team-schema"
 import { readYamlFile } from "@agent-valley/core/config/yaml-file"
 import {
   loadGlobalConfig,
+  loadProjectConfig,
   resolveGlobalConfigDir,
   resolveGlobalConfigPath,
 } from "@agent-valley/core/config/yaml-loader"
@@ -37,6 +39,12 @@ export async function saveConfig(
   ctx: ResolvedSetupContext,
   options: { replaceInvalidGlobal?: boolean; replaceInvalidProject?: boolean } = {},
 ): Promise<void> {
+  try {
+    loadProjectConfig()
+  } catch (error) {
+    if (error instanceof TeamConfigMigrationError) throw error
+    // Existing malformed-project replacement remains controlled by the setup confirmation.
+  }
   if (ctx.trackerKind === "none") {
     const workspaceError = await validateOrderWorkspace(ctx.workspaceRoot)
     if (workspaceError) throw new Error(workspaceError)

@@ -1,7 +1,24 @@
 import { chmod, copyFile, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { loadTursoMigrationAssets, TURSO_MIGRATION_ASSET_PATH } from "@agent-valley/core/relay/turso-migration-assets"
 
 type PackageMetadata = Record<string, unknown>
+export const externalRuntimePackages = ["@libsql/client"] as const
+
+function externalRuntimeDependencies(core: PackageMetadata): Record<string, string> {
+  const dependencies = core.dependencies
+  const result: Record<string, string> = {}
+  for (const name of externalRuntimePackages) {
+    const version =
+      typeof dependencies === "object" && dependencies !== null ? Reflect.get(dependencies, name) : undefined
+    if (typeof version !== "string" || !version.trim() || /^(workspace|file|link|catalog):/.test(version))
+      throw new Error(
+        `Set dependencies.${name} in packages/core/package.json to a published registry version before staging the CLI.`,
+      )
+    result[name] = version
+  }
+  return result
+}
 export interface DistributionEngines {
   node: string
   bun: string
@@ -20,8 +37,12 @@ const developmentFields = [
   "bundleDependencies",
 ] as const
 
-/** All runtime modules are bundled; npm must never resolve development workspace dependencies. */
-export function distributionManifest(source: PackageMetadata, engines: DistributionEngines): PackageMetadata {
+/** Bundle application modules; retain only the native driver as a registry dependency. */
+export function distributionManifest(
+  source: PackageMetadata,
+  engines: DistributionEngines,
+  core: PackageMetadata,
+): PackageMetadata {
   if (
     source.name !== "agent-valley" ||
     typeof source.version !== "string" ||
@@ -39,6 +60,7 @@ export function distributionManifest(source: PackageMetadata, engines: Distribut
     files: ["dist", "LICENSE", "README.md"],
   }
   for (const field of developmentFields) delete manifest[field]
+  manifest.dependencies = externalRuntimeDependencies(core)
   return manifest
 }
 
@@ -53,13 +75,16 @@ async function metadata(path: string): Promise<PackageMetadata> {
 export async function stageNpmDistribution(cliRoot: string, repositoryRoot: string): Promise<string> {
   const source = await metadata(join(cliRoot, "package.json"))
   const runtime = await metadata(join(repositoryRoot, "package.json"))
-  const manifest = distributionManifest(source, runtime.engines as DistributionEngines)
+  const core = await metadata(join(repositoryRoot, "packages/core/package.json"))
+  const manifest = distributionManifest(source, runtime.engines as DistributionEngines, core)
+  const migrations = await loadTursoMigrationAssets([join(cliRoot, "dist", TURSO_MIGRATION_ASSET_PATH)])
   const files = [
     "dist/index.js",
     "dist/supervisor.js",
     "dist/assets/skills/av/SKILL.md",
     "dist/assets/plugin.json",
     "dist/assets/LICENSE",
+    ...migrations.files.map((file) => join("dist", TURSO_MIGRATION_ASSET_PATH, file)),
   ]
   const copies = [
     ...files.map((file) => ({ source: join(cliRoot, file), target: file })),

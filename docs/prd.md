@@ -30,7 +30,7 @@
 ### 2.2 기회
 - Linear 웹훅 + 로컬 오케스트레이터 + git worktree 조합으로 "이슈 = 작업 단위" 자동 실행이 가능하다.
 - ISO/IEC 14143 기능점수 기반 난이도 스코어링으로 easy/medium/hard 이슈를 적절한 모델에 자동 위임해 비용을 최적화할 수 있다.
-- 팀 대시보드(Supabase ledger) 로 멀티 노드 가시성을 제공해 "누가 어떤 이슈를 돌리는지" 실시간 공유할 수 있다.
+- 팀 대시보드(AV gateway + Turso ledger)로 여러 노드에서 어떤 이슈를 실행하는지 공유할 수 있다. 브라우저는 같은 origin의 relay를 5초마다 조회한다.
 
 ---
 
@@ -93,7 +93,7 @@
 | 에이전트 세션 | Claude(NDJSON) / Codex(JSON-RPC stdio) / Gemini(ACP + CLI 폴백) 플러그인 | `packages/core/src/sessions/*` |
 | 대시보드 | Next.js 16 + PixiJS 오피스 씬, 시스템 메트릭, SSE 실시간 업데이트, 팀 HUD | `apps/dashboard/src/app`, `features/office`, `features/team` |
 | 스코어링 | ISO/IEC 14143 기능점수 분석 → easy/medium/hard 모델 라우팅 | `packages/core/src/orchestrator/scoring-service.ts` |
-| 팀 대시보드 | Supabase auth + ledger 이벤트 브로드캐스트, 리플레이 | `packages/core/src/relay/*`, `supabase/migrations/001_team_dashboard.sql` |
+| 팀 대시보드 | AV 사용자 토큰으로 gateway 인증, Turso ledger 저장·조회·리플레이, Drizzle 스키마·마이그레이션 관리 | `packages/core/src/relay/*`, `apps/dashboard/src/app/api/team/*` |
 | 관측성 | JSON/text 구조화 로그, `/api/status` 스냅샷, `/api/events` SSE, `/api/health` | `packages/core/src/observability/logger.ts` |
 | 관측성 (v0.2) | OpenTelemetry OTLP HTTP 트레이스 + Prometheus `/api/metrics` (기본 off, `av.yaml observability` 섹션으로 활성화) | `packages/core/src/observability/otel-exporter.ts`, `prom-metrics.ts` |
 | GitHub 어댑터 (v0.2) | `IssueTracker` / `WebhookReceiver` 포트의 GitHub 구현 + `POST /api/webhook/github` | `packages/core/src/tracker/adapters/github-adapter.ts`, `github-webhook-receiver.ts` |
@@ -139,7 +139,7 @@ Infrastructure packages/core/src/tracker/       Linear GraphQL + webhook HMAC
                packages/core/src/sessions/      Claude / Codex / Gemini AgentSession
                packages/core/src/config/        Zod YAML loader
                packages/core/src/observability/ logger
-               packages/core/src/relay/         Supabase ledger bridge
+               packages/core/src/relay/         AV gateway client / Turso ledger store
 ```
 의존 방향은 반드시 아래쪽으로만 흐른다. 상위 참조는 위반(`docs/architecture/LAYERS.md`).
 
@@ -206,7 +206,7 @@ Linear webhook POST
 - FR-7.4 `av status` 는 `/api/status` 를 조회해 JSON 스냅샷을 출력한다.
 - FR-7.5 `av top` 은 2초 간격으로 활성 에이전트·대기 이슈·재시도 큐를 TUI 로 표시한다.
 - FR-7.6 `av issue <desc>` 는 Claude CLI 로 설명을 확장해 Linear 이슈를 생성한다. `--raw/--parent/--blocked-by/--scope/--breakdown` 옵션 지원.
-- FR-7.7 `av login/logout` 은 Supabase 세션을 관리하고, `av invite` 는 팀 합류용 config 를 클립보드에 복사한다.
+- FR-7.7 `av login/logout`은 gateway·팀에 바인딩된 AV 사용자 토큰을 저장·삭제한다. `av invite`는 DB 자격 증명 없이 팀 합류용 config를 복사한다. 중앙 서버의 `av team` 명령은 초기화, 구성원 발급·폐기와 기존 데이터 가져오기를 수행한다.
 
 ### FR-8. 대시보드 API
 - FR-8.1 `POST /api/webhook` — Linear 웹훅 수신.
@@ -216,9 +216,11 @@ Linear webhook POST
 - FR-8.5 대시보드 UI 는 PixiJS 로 오피스 씬(책상 = `MAX_PARALLEL`, 캐릭터 = 에이전트)을 렌더링하고 실시간 업데이트한다.
 
 ### FR-9. 팀 대시보드 (옵션)
-- FR-9.1 Supabase 인증 + ledger 이벤트 삽입(`node.join/reconnect/leave`, `actor.start/done/failed/cancelled`).
-- FR-9.2 RLS 로 본인 소속 팀만 이벤트를 읽을 수 있다.
+- FR-9.1 중앙 AV gateway가 사용자 토큰을 인증하고 Turso에 ledger 이벤트(`node.join/reconnect/leave`, `agent.start/done/failed/cancelled`)를 저장한다. Drizzle이 스키마와 마이그레이션을 관리하며 API 요청은 스키마를 생성하지 않는다.
+- FR-9.2 DB 토큰은 중앙 서버와 명시적 관리자 CLI에만 둔다. 서버는 AV 토큰의 해시·만료·폐기·팀 소속과 node ID의 사용자 UUID 소유권을 검사한다. 브라우저에는 토큰을 보내지 않는다.
 - FR-9.3 노드 재연결 시 `lastSeq` 기반으로 누락 이벤트를 리플레이한다.
+- FR-9.4 브라우저는 `/api/team/ledger`를 5초마다 조회하고 팀 조회 실패 시 로컬 상태와 오류를 표시한다. 로컬 오케스트레이터의 `/api/events` SSE와 dashboard HMAC 세션 인증은 유지한다.
+- FR-9.5 명시적 legacy import는 팀·사용자 UUID, 이벤트 순번과 기존 node ID를 유지하며 인증 비밀은 가져오지 않는다. 충돌 시 데이터 가져오기 트랜잭션을 취소한다. [팀 ledger 운영 가이드](./guides/team-ledger.md)를 따른다.
 
 ### FR-10. 설정
 - FR-10.1 `settings.yaml`(글로벌, 사용자 자격) + `av.yaml`(프로젝트, 팀/워크스페이스/라우팅) 머지. 프로젝트가 글로벌을 덮어쓴다.
@@ -296,5 +298,5 @@ PR 단위 기준:
 - **Worktree:** 이슈별로 격리된 git working tree. `WORKSPACE_ROOT/{issue-key}` 경로.
 - **AgentSession:** 에이전트 프로세스 생명주기를 추상화한 인터페이스. Claude/Codex/Gemini 각자 구현.
 - **DAG 스케줄러:** `blocked_by` 관계를 그래프로 해석해 실행 가능한 이슈만 디스패치.
-- **Ledger:** 팀 대시보드 이벤트 소싱 저장소(Supabase).
+- **Ledger:** AV gateway를 통해 접근하는 팀 이벤트 저장소(Turso). 스키마·마이그레이션은 Drizzle로 관리한다.
 - **MAX_PARALLEL:** 동시에 실행 가능한 에이전트 최대 수. 기본값 하드웨어 기반 자동 산출.

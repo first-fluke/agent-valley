@@ -175,26 +175,28 @@ the webhook-only listener forwards them.
 
 ## Team dashboard
 
-Team mode needs `team.supabase_url`, `team.supabase_anon_key`, and
-`team.id` in `av.yaml` or `~/.config/agent-valley/settings.yaml`.
-Run `av login` on the dashboard machine and restart the dashboard. The
-dashboard reads the saved user session on the server and queries Supabase with
-that user's access token, so the `team_members` and `ledger_events` RLS
-policies must allow that user to read the configured team. The browser receives
-only the replayed team state through `/api/team/ledger`; it never receives the
-Supabase access token or anon key.
+Team workers configure `team.relay_url` and `team.id` in `av.yaml` or
+`~/.config/agent-valley/settings.yaml`, then run `av login` with an opaque AV
+user team token issued by the administrator. The token is bound to the full
+gateway URL and team UUID. HTTPS is required except for loopback HTTP.
 
-Apply `supabase/migrations/002_team_rls_identity.sql` after the initial team
-dashboard migration for existing databases. It removes recursive membership
-reads and requires new ledger event node IDs to start with the authenticated
-user UUID, followed by `:` and a nonempty machine name. `team_members.display_name`
-is for display only and does not grant node ownership. Existing username-prefixed
-events remain readable, but older running publishers cannot add new events until
-they restart with the updated node ID generator. The migration is not applied
-automatically by the dashboard. To exercise the policies against synthetic data
-in an isolated local PostgreSQL cluster, run
-`bash supabase/tests/run-team-rls-local.sh`; it exits 77 when no local server
-binary is installed.
+The central AV dashboard server additionally sets `team.turso_url` and the
+environment variable named by `team.turso_auth_token_env` (default
+`TURSO_AUTH_TOKEN`). Keep that database credential on the central server or an
+explicit administration machine. `av team init --name NAME --slug SLUG`
+applies the Drizzle-managed schema and saves an owner's local AV login;
+`av team add-member` issues private user token files. API requests do not
+create the database schema.
+
+The browser polls its own `/api/team/ledger` every five seconds and receives
+only replayed state. That local endpoint keeps dashboard status-token/HMAC
+cookie authentication. The central `/api/team/session` and `/api/team/relay`
+endpoints instead require the user's AV bearer token and check team membership,
+expiry, revocation and node ownership. New events use `<user-uuid>:<machine>`
+node IDs; imported historical node IDs remain readable.
+
+See [team ledger setup, administration and migration](./team-ledger.md) for
+configuration, Drizzle migrations, token rotation and the bounded legacy import.
 
 When team mode is absent, the dashboard shows the local orchestrator. A missing,
 expired, or mismatched `av login` session, denied membership, or upstream error

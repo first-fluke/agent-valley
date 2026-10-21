@@ -11,7 +11,7 @@ interface TeamLedgerResponse {
   message?: string
 }
 
-/** Reads the local dashboard relay; Supabase credentials stay on the server. */
+/** Reads the local dashboard relay; team tokens and database credentials stay on their servers. */
 export function useTeamLedger() {
   const [teamState, setTeamState] = useState<TeamState | null>(null)
   const [status, setStatus] = useState<ConnectionStatus>("connecting")

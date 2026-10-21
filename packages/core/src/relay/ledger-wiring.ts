@@ -4,9 +4,8 @@
  * booting the full Next.js app.
  *
  * Team dashboard relay is opt-in: it only activates when
- * `config.isTeamMode()` is true (supabase_url + supabase_anon_key +
- * team.id are all set in av.yaml/settings.yaml) AND a valid Supabase
- * session exists on disk (`av login`). Any other state — single-node
+ * `config.isTeamMode()` is true (team.relay_url + team.id) AND a valid
+ * endpoint-bound user session exists on disk (`av login`). Any other state — single-node
  * setups, or team config present but not yet logged in — is a clean
  * no-op, never a crash.
  */
@@ -16,10 +15,11 @@ import { isTeamMode } from "../config/yaml-loader"
 import { logger } from "../observability/logger"
 import type { Orchestrator } from "../orchestrator/orchestrator"
 import type { RelayCredentials } from "./credentials"
-import { loadRelayCredentials } from "./credentials"
+import { loadRelayCredentials, validateRelayCredentials } from "./credentials"
 import { LedgerBridge } from "./ledger-bridge"
 import { generateNodeId } from "./node-id"
-import { SupabaseLedgerClient } from "./supabase-ledger-client"
+import { TeamRelayClient } from "./team-relay-client"
+import { TeamRelayPublisher } from "./team-relay-publisher"
 
 export type LedgerRelayReason = "single_node" | "missing_session" | "ready"
 
@@ -31,13 +31,18 @@ export interface LedgerRelayDecision {
 /** Pure gating decision — no I/O beyond the caller-supplied credentials value. */
 export function decideLedgerRelay(config: Config, credentials: RelayCredentials | null): LedgerRelayDecision {
   if (!isTeamMode(config)) return { enabled: false, reason: "single_node" }
-  if (!credentials) return { enabled: false, reason: "missing_session" }
+  if (
+    !config.teamRelayUrl ||
+    !config.teamId ||
+    !validateRelayCredentials(credentials, { relayUrl: config.teamRelayUrl, teamId: config.teamId })
+  )
+    return { enabled: false, reason: "missing_session" }
   return { enabled: true, reason: "ready" }
 }
 
 /**
  * Build + attach a LedgerBridge to `orchestrator` when team mode is
- * configured and a valid Supabase session exists; otherwise returns
+ * configured and a valid user session exists; otherwise returns
  * null. Must be called before `orchestrator.start()` so the initial
  * `node.join` event (emitted from OrchestratorCore.start()) is not
  * missed.
@@ -52,6 +57,7 @@ export function wireLedgerRelay(
   credentialsLoader: () => RelayCredentials | null = loadRelayCredentials,
 ): LedgerBridge | null {
   try {
+    if (!isTeamMode(config)) return null
     const credentials = credentialsLoader()
     const decision = decideLedgerRelay(config, credentials)
 
@@ -59,7 +65,7 @@ export function wireLedgerRelay(
       if (decision.reason === "missing_session") {
         logger.warn(
           "ledger-wiring",
-          "Team mode configured (team.supabase_url/supabase_anon_key/id set) but no Supabase session found — ledger relay disabled",
+          "Team mode configured but no valid session for team.relay_url and team.id — ledger relay disabled",
           { fix: "Run 'av login' from the project root, then restart Symphony." },
         )
       }
@@ -69,24 +75,20 @@ export function wireLedgerRelay(
     // decision.enabled implies credentials !== null; the config fields
     // are re-checked here only to satisfy the type checker (isTeamMode
     // narrows at runtime, not at the type level).
-    if (!config.supabaseUrl || !config.supabaseAnonKey || !config.teamId || !credentials) return null
+    if (!config.teamRelayUrl || !config.teamId || !credentials) return null
 
     const nodeId = generateNodeId(credentials.userId)
-    const publisher = new SupabaseLedgerClient(
-      config.supabaseUrl,
-      config.supabaseAnonKey,
-      credentials.accessToken,
-      nodeId,
-      config.teamId,
-      credentials.userId,
+    const publisher = new TeamRelayPublisher(
+      new TeamRelayClient({ relayUrl: config.teamRelayUrl, token: credentials.accessToken, teamId: config.teamId }),
     )
     const bridge = new LedgerBridge(orchestrator, publisher, nodeId)
     logger.info("ledger-wiring", "Team ledger relay enabled", { nodeId, teamId: config.teamId })
     return bridge
-  } catch (err) {
-    logger.warn("ledger-wiring", "Failed to initialize team ledger relay — continuing without it", {
-      error: String(err),
-    })
+  } catch {
+    logger.warn(
+      "ledger-wiring",
+      "Failed to initialize team ledger relay — continuing without it. Check team.relay_url and run av login again.",
+    )
     return null
   }
 }

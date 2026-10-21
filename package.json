@@ -20,6 +20,9 @@
     "typecheck": "tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p apps/cli/tsconfig.json && tsc --noEmit --incremental false -p apps/dashboard/tsconfig.json",
     "test": "vitest run --config vitest.config.ts",
     "test:coverage": "vitest run --coverage --config vitest.config.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
+    "db:migrate": "bun apps/cli/src/index.ts team migrate",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -31,6 +34,7 @@
     "@commitlint/config-conventional": "^21.2.3",
     "@types/bun": "^1.4.2",
     "@vitest/coverage-v8": "^5.0.3",
+    "drizzle-kit": "^0.31.11",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "typescript": "^7.0.2",

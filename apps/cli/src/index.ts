@@ -35,6 +35,7 @@ import {
 } from "./runtime"
 import { registerSetupCommand } from "./setup/command"
 import { readStatus } from "./status-client"
+import { registerTeamCommands } from "./team"
 import { spawnTunnel, type TunnelHandle, type TunnelLogger } from "./tunnel"
 import { dashboardHost, startWebhookProxy, webhookPort } from "./webhook-proxy"
 
@@ -439,7 +440,7 @@ program
 // ── login ────────────────────────────────────────────────────────────────────
 program
   .command("login")
-  .description("Login to Agent Valley team (Supabase auth)")
+  .description("Login to the team gateway with a user team token")
   .action(async () => {
     const { login } = await import("./login")
     await login()
@@ -448,7 +449,7 @@ program
 // ── logout ───────────────────────────────────────────────────────────────────
 program
   .command("logout")
-  .description("Logout from Agent Valley team")
+  .description("Remove the local team gateway session")
   .action(async () => {
     const { logout } = await import("./login")
     await logout()
@@ -463,6 +464,7 @@ registerDoctorCommand(program)
 registerChiefCommands(program)
 registerOrganizationCommands(program)
 registerAgentClientCommands(program)
+registerTeamCommands(program)
 
 program.parseAsync().catch((error: unknown) => {
   console.error(pc.red(error instanceof Error ? error.message : String(error)))

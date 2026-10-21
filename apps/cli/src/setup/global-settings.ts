@@ -1,3 +1,4 @@
+import { TeamConfigMigrationError } from "@agent-valley/core/config/team-schema"
 import { readYamlFile } from "@agent-valley/core/config/yaml-file"
 import {
   type GlobalConfig,
@@ -12,7 +13,8 @@ export const GLOBAL_CONFIG_REPAIR_WARNING =
 export function readSetupGlobalConfig(): { config: GlobalConfig; invalid: boolean } {
   try {
     return { config: loadGlobalConfig() ?? {}, invalid: false }
-  } catch {
+  } catch (error) {
+    if (error instanceof TeamConfigMigrationError) throw error
     let raw: Record<string, unknown>
     try {
       raw = readYamlFile(resolveGlobalConfigPath()) ?? {}

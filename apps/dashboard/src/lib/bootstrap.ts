@@ -93,8 +93,8 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
 
   const orchestrator = new Orchestrator(config, tracker, webhook, workspace, undefined, observability, budget)
 
-  // Team ledger relay — opt-in via av.yaml team: (supabase_url +
-  // supabase_anon_key + id) AND a valid `av login` session. Clean no-op
+  // Team ledger relay — opt-in via av.yaml team: (relay_url + id)
+  // and a valid user team token saved by `av login`. Clean no-op
   // (null) for single-node setups or a team config with no session yet;
   // never throws, never blocks boot. Must be wired before start() so the
   // initial node.join event (emitted from OrchestratorCore.start()) is

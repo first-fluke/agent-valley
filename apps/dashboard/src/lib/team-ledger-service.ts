@@ -1,39 +1,15 @@
-import { readFileSync } from "node:fs"
-import { AGENT_TYPES, type LedgerEvent, type NodePresence } from "@agent-valley/core/domain/ledger"
-import { defaultCredentialsPath } from "@agent-valley/core/relay/credentials"
+import { normalizeTeamRelayUrl } from "@agent-valley/core/config/team-schema"
+import type { LedgerEvent, NodePresence } from "@agent-valley/core/domain/ledger"
+import { loadRelayCredentials } from "@agent-valley/core/relay/credentials"
 import { replayLedger } from "@agent-valley/core/relay/replay"
-import { z } from "zod"
+import { teamIdSchema } from "@agent-valley/core/relay/team-event-codec"
+import { TeamRelayClient, TeamRelayError, type TeamRelayFetch } from "@agent-valley/core/relay/team-relay-client"
 
 const PAGE_SIZE = 1000
 const MAX_EVENTS = 20_000
-const savedCredentialsSchema = z.object({
-  accessToken: z.string().min(1),
-  expiresAt: z.number().finite(),
-  supabaseUrl: z.url(),
-  userId: z.string().min(1),
-})
-const ledgerRowSchema = z.object({
-  seq: z.number().int().positive(),
-  node_id: z.string().min(1),
-  type: z.enum(["node.join", "node.reconnect", "node.leave", "agent.start", "agent.done", "agent.failed", "agent.cancelled"]),
-  payload: z.record(z.string(), z.unknown()),
-  client_timestamp: z.string(),
-  created_at: z.string(),
-})
-const agentTypeSchema = z.enum(AGENT_TYPES)
-const payloadSchemas = {
-  "node.join": z.object({ defaultAgentType: agentTypeSchema, maxParallel: z.number(), displayName: z.string() }),
-  "node.reconnect": z.object({ lastSeq: z.number() }),
-  "node.leave": z.object({ reason: z.enum(["graceful", "crash", "timeout"]) }),
-  "agent.start": z.object({ agentType: agentTypeSchema, issueKey: z.string(), issueId: z.string() }),
-  "agent.done": z.object({ issueKey: z.string(), issueId: z.string(), durationMs: z.number() }),
-  "agent.failed": z.object({ issueKey: z.string(), issueId: z.string(), error: z.object({ code: z.string(), message: z.string(), retryable: z.boolean() }) }),
-  "agent.cancelled": z.object({ issueKey: z.string(), issueId: z.string(), reason: z.string() }),
-} as const
 
 export interface TeamLedgerConfig {
-  supabaseUrl?: string
-  supabaseAnonKey?: string
+  teamRelayUrl?: string
   teamId?: string
 }
 
@@ -44,7 +20,7 @@ export type TeamLedgerResult =
 
 interface TeamLedgerDeps {
   credentialsPath?: string
-  fetcher?: (input: URL, init: RequestInit) => Promise<Response>
+  fetcher?: TeamRelayFetch
   now?: number
 }
 
@@ -52,112 +28,67 @@ function failure(code: string, message: string): TeamLedgerResult {
   return { mode: "team", status: "error", code, message }
 }
 
-function toEvent(value: unknown): LedgerEvent {
-  const row = ledgerRowSchema.parse(value)
-  // Each payload is validated at the external response boundary before it
-  // reaches the trusted replay function.
-  const payload = payloadSchemas[row.type].parse(row.payload)
-  return {
-    v: 1,
-    seq: row.seq,
-    relayTimestamp: row.created_at,
-    clientTimestamp: row.client_timestamp,
-    nodeId: row.node_id,
-    type: row.type,
-    payload,
-  } as LedgerEvent
-}
-
+/** The browser receives replayed state; its user token stays on this server and the DB token stays on the gateway. */
 export async function readTeamLedger(config: TeamLedgerConfig, deps: TeamLedgerDeps = {}): Promise<TeamLedgerResult> {
-  const { supabaseUrl, supabaseAnonKey, teamId } = config
-  if (!supabaseUrl && !supabaseAnonKey && !teamId) return { mode: "standalone" }
-  if (!supabaseUrl || !supabaseAnonKey || !teamId) {
-    return failure("team_config_incomplete", "Set team.supabase_url, team.supabase_anon_key, and team.id in av.yaml or settings.yaml.")
-  }
-  let endpoint: URL
+  const { teamRelayUrl, teamId } = config
+  if (!teamRelayUrl && !teamId) return { mode: "standalone" }
+  if (!teamRelayUrl || !teamId)
+    return failure("team_config_incomplete", "Set team.relay_url and team.id in av.yaml or settings.yaml.")
+  let relayUrl: string
   try {
-    endpoint = new URL("/rest/v1/ledger_events", supabaseUrl)
-    if (endpoint.protocol !== "https:") throw new Error("HTTPS required")
+    relayUrl = normalizeTeamRelayUrl(teamRelayUrl)
+    if (!teamIdSchema.safeParse(teamId).success) throw new Error("Invalid team ID")
   } catch {
-    return failure("team_config_invalid", "Set team.supabase_url to a valid HTTPS URL.")
+    return failure(
+      "team_config_invalid",
+      "Set team.relay_url to HTTPS or loopback HTTP and team.id to its team UUID in av.yaml or settings.yaml.",
+    )
   }
-
-  let saved: unknown
+  const credentials = loadRelayCredentials(deps.credentialsPath, { relayUrl, teamId }, deps.now)
+  if (!credentials)
+    return failure(
+      "missing_session",
+      "No valid login for this gateway and team. Run av login with an AV team token; legacy Supabase sessions cannot be reused.",
+    )
+  const client = new TeamRelayClient({ relayUrl, token: credentials.accessToken, teamId, fetcher: deps.fetcher })
   try {
-    saved = JSON.parse(readFileSync(deps.credentialsPath ?? defaultCredentialsPath(), "utf8"))
-  } catch {
-    return failure("missing_session", "No team login found. Run av login on this machine, then restart the dashboard.")
-  }
-  const credentials = savedCredentialsSchema.safeParse(saved)
-  if (!credentials.success) return failure("missing_session", "Team login is invalid. Run av login again.")
-  if (credentials.data.expiresAt <= (deps.now ?? Date.now())) {
-    return failure("session_expired", "Team login expired. Run av login again, then restart the dashboard.")
-  }
-  if (new URL(credentials.data.supabaseUrl).origin !== endpoint.origin) {
-    return failure("session_mismatch", "Team login belongs to another Supabase project. Run av login for the configured team.")
-  }
-
-  const events: LedgerEvent[] = []
-  const fetcher = deps.fetcher ?? fetch
-  const headers = {
-    apikey: supabaseAnonKey,
-    Authorization: `Bearer ${credentials.data.accessToken}`,
-  }
-  const membershipUrl = new URL("/rest/v1/team_members", supabaseUrl)
-  membershipUrl.searchParams.set("team_id", `eq.${teamId}`)
-  membershipUrl.searchParams.set("user_id", `eq.${credentials.data.userId}`)
-  membershipUrl.searchParams.set("select", "user_id")
-  membershipUrl.searchParams.set("limit", "1")
-  let membership: Response
-  try {
-    membership = await fetcher(membershipUrl, { headers, cache: "no-store" })
-  } catch {
-    return failure("team_unavailable", "Team membership could not be checked. Check the Supabase URL and network connection.")
-  }
-  if (membership.status === 401) return failure("session_expired", "Team login was rejected. Run av login again.")
-  if (membership.status === 403) return failure("team_access_denied", "Team membership was denied. Check your membership and Supabase RLS policies.")
-  if (!membership.ok) return failure("team_policy_error", `Team membership check failed (${membership.status}). Check the team_members RLS policy.`)
-  try {
-    const rows: unknown = await membership.json()
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return failure("team_access_denied", "Your account is not a member of the configured team.")
+    const identity = await client.getSession()
+    if (identity.userId !== credentials.userId)
+      return failure(
+        "session_mismatch",
+        "The saved user identity no longer matches its team token. Run av login again.",
+      )
+    const events: LedgerEvent[] = []
+    let cursor = 0
+    while (events.length <= MAX_EVENTS) {
+      const page = await client.readEvents(cursor, PAGE_SIZE)
+      events.push(...page)
+      if (events.length > MAX_EVENTS)
+        return failure(
+          "ledger_limit",
+          "Team ledger has more than 20,000 events. Archive old events before loading the dashboard.",
+        )
+      if (page.length < PAGE_SIZE) break
+      cursor = page.at(-1)?.seq ?? cursor
     }
-  } catch {
-    return failure("team_policy_error", "Team membership returned invalid data. Check the Supabase schema.")
+    const state = replayLedger(events)
+    return {
+      mode: "team",
+      status: "connected",
+      state: { nodes: Array.from(state.nodes.values()), lastSeq: state.lastSeq },
+    }
+  } catch (error) {
+    if (error instanceof TeamRelayError) {
+      if (error.code === "session_invalid")
+        return failure("session_invalid", "Team login is invalid, expired or revoked. Run av login again.")
+      if (error.code === "team_access_denied")
+        return failure("team_access_denied", "Team access was denied. Ask its administrator to check your membership.")
+      if (error.code === "invalid_response")
+        return failure(
+          "invalid_ledger",
+          "The team gateway returned invalid data. Ask its administrator to check the relay version and stored events.",
+        )
+    }
+    return failure("team_unavailable", "Team relay is unavailable. Check team.relay_url and the gateway connection.")
   }
-
-  for (let offset = 0; offset <= MAX_EVENTS; offset += PAGE_SIZE) {
-    const url = new URL(endpoint)
-    url.searchParams.set("team_id", `eq.${teamId}`)
-    url.searchParams.set("order", "seq.asc")
-    url.searchParams.set("limit", String(PAGE_SIZE))
-    url.searchParams.set("offset", String(offset))
-    let response: Response
-    try {
-      response = await fetcher(url, {
-        headers,
-        cache: "no-store",
-      })
-    } catch {
-      return failure("team_unavailable", "Team ledger is unavailable. Check the Supabase URL and network connection.")
-    }
-    if (response.status === 401) return failure("session_expired", "Team login was rejected. Run av login again.")
-    if (response.status === 403) return failure("team_access_denied", "Team access was denied. Check membership and Supabase RLS policies.")
-    if (!response.ok) return failure("team_unavailable", `Team ledger request failed (${response.status}).`)
-
-    let rows: unknown
-    try {
-      rows = await response.json()
-      if (!Array.isArray(rows)) throw new Error("Expected rows")
-      for (const row of rows) events.push(toEvent(row))
-    } catch {
-      return failure("invalid_ledger", "Team ledger returned invalid events. Check the Supabase schema and data.")
-    }
-    if (events.length > MAX_EVENTS) {
-      return failure("ledger_limit", "Team ledger has more than 20,000 events. Archive old events before loading the dashboard.")
-    }
-    if ((rows as unknown[]).length < PAGE_SIZE) break
-  }
-  const state = replayLedger(events)
-  return { mode: "team", status: "connected", state: { nodes: Array.from(state.nodes.values()), lastSeq: state.lastSeq } }
 }

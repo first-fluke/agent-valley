@@ -16,9 +16,9 @@ describe("team dashboard wiring", () => {
     expect(page).toContain('role="alert"')
   })
 
-  test("browser fetches only the same-origin relay and does not receive Supabase credentials", () => {
+  test("browser fetches only the same-origin relay and does not receive team or database credentials", () => {
     expect(hook).toContain('fetch("/api/team/ledger"')
-    expect(hook).not.toContain("supabaseAnonKey")
+    expect(hook).not.toContain("tursoAuthToken")
     expect(hook).not.toContain("accessToken")
     expect(hook).not.toContain("NEXT_PUBLIC_")
   })

@@ -43,7 +43,7 @@ server:
 const VALID_PROJECT = `
 linear:
   team_id: ACR
-  team_uuid: uuid-team-123
+  team_uuid: uuid-5fa388f1-325b-49e6-ae65-cafddfd493be23
   webhook_secret: whsec_test123
   workflow_states:
     todo: state-todo-uuid
@@ -385,7 +385,7 @@ describe("loadConfig", () => {
 
     expect(config.linearApiKey).toBe("lin_api_test123")
     expect(config.linearTeamId).toBe("ACR")
-    expect(config.linearTeamUuid).toBe("uuid-team-123")
+    expect(config.linearTeamUuid).toBe("uuid-5fa388f1-325b-49e6-ae65-cafddfd493be23")
     expect(config.linearWebhookSecret).toBe("whsec_test123")
     expect(config.workflowStates.todo).toBe("state-todo-uuid")
     expect(config.workflowStates.inProgress).toBe("state-ip-uuid")
@@ -691,9 +691,10 @@ routing:
 linear:
   api_key: key
 team:
-  supabase_url: https://xxx.supabase.co
-  supabase_anon_key: eyJxxx
-  id: team-1
+  relay_url: https://team.example.com
+  turso_url: libsql://team-db.turso.io
+  turso_auth_token_env: TEAM_TURSO_TOKEN
+  id: 5fa388f1-325b-49e6-ae65-cafddfd493be
   display_name: tester
 `,
     )
@@ -717,9 +718,10 @@ prompt: test
     )
     const config = loadConfig(projectDir, globalPath)
 
-    expect(config.supabaseUrl).toBe("https://xxx.supabase.co")
-    expect(config.supabaseAnonKey).toBe("eyJxxx")
-    expect(config.teamId).toBe("team-1")
+    expect(config.teamRelayUrl).toBe("https://team.example.com")
+    expect(config.tursoUrl).toBe("libsql://team-db.turso.io")
+    expect(config.tursoAuthTokenEnv).toBe("TEAM_TURSO_TOKEN")
+    expect(config.teamId).toBe("5fa388f1-325b-49e6-ae65-cafddfd493be")
     expect(config.displayName).toBe("tester")
   })
 

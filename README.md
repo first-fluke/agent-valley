@@ -90,9 +90,10 @@ bun av down               # Stop background daemon
 bun av status             # Query orchestrator status
 bun av top                # Live actor status monitor
 bun av logs               # Tail dashboard logs (-n for line count)
-bun av login              # Login to team (Supabase auth)
+bun av login              # Verify and save an opaque AV user team token
 bun av logout             # Logout from team
 bun av invite             # Copy team config to clipboard
+bun av team --help        # Central-server team administration and legacy data import
 bun av order --help       # Give a Chief Director a goal; --verify supplies an optional trusted command
 bun av missions           # List saved local Chief Director orders
 bun av missions --watch   # Resume eligible saved orders and scheduled observations
@@ -155,11 +156,15 @@ server:
 
 # Team Dashboard (optional)
 team:
-  supabase_url: https://xxx.supabase.co
-  supabase_anon_key: your-anon-key
-  id: my-team
+  relay_url: https://av.example.com
+  id: 11111111-1111-4111-8111-111111111111
   display_name: my-node
 ```
+
+Workers receive the gateway URL, team UUID and an AV user token through `av login`.
+The central server also configures `team.turso_url` and `team.turso_auth_token_env`
+(default `TURSO_AUTH_TOKEN`). The database token stays on the central server or an
+explicit administration machine. See [team ledger setup and migration](./docs/guides/team-ledger.md).
 
 ### Project Config (`av.yaml`)
 
@@ -360,7 +365,7 @@ PixiJS-rendered office scene showing real-time actor status:
 - **Operations panel** — dependency blockers, retry reasons and next retry times
 - **System metrics** — CPU, memory, uptime
 - **SSE real-time events** — instant updates on actor.start, actor.done, actor.failed
-- **Team HUD** — multi-node view (requires Supabase config)
+- **Team HUD** — multi-node view through the AV gateway and Turso ledger; the browser polls its local relay every five seconds
 
 ### API Endpoints
 
@@ -373,6 +378,10 @@ PixiJS-rendered office scene showing real-time actor status:
 | `/api/health` | GET | Health check (503 if the orchestrator is unavailable or stopped) |
 | `/api/intervention` | POST | Live actor intervention; local by default, token-authenticated when configured |
 | `/api/metrics` | GET | Prometheus-format metrics (enabled via `observability.prometheus.enabled`) |
+| `/api/team/ledger` | GET | Replayed team state for the local browser; dashboard status authentication applies |
+| `/api/team/session` | GET | Validate an AV team bearer token for `team_id` |
+| `/api/team/relay` | GET | Read team events after a sequence cursor using an AV team bearer token |
+| `/api/team/relay` | POST | Publish a validated event using an AV team bearer token; enforces node ownership |
 
 ---
 
