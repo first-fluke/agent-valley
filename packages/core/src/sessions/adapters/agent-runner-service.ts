@@ -35,6 +35,7 @@ export interface RunCallbacks {
    * probe liveness on restart (see `persistence/recovery.ts`).
    */
   onSpawned?: (pid: number | undefined) => void
+  onOutput?: (text: string) => void
 }
 
 const MAX_OUTPUT_SNIPPET = 24
@@ -46,6 +47,11 @@ export class AgentRunnerService {
   private activeAgentTypes = new Map<string, string>()
   private cancelAttempts = new Map<string, () => void>()
   private pendingDisposals = new Set<Promise<void>>()
+  private pendingStarts = new Map<string, Promise<void>>()
+  private pendingExecutions = new Map<string, Promise<void>>()
+  private attemptDisposals = new Map<string, Set<Promise<void>>>()
+  private cleanupFailures = new Map<string, Error>()
+  private startingDisposals = new Map<string, AgentSession>()
   private pendingCallbacks = new Set<Promise<void>>()
   private callbackContext = new AsyncLocalStorage<boolean>()
   private activeStops = new Map<string, Promise<void>>()
@@ -68,7 +74,48 @@ export class AgentRunnerService {
     }
   }
 
-  async spawn(attempt: RunAttempt, options: RunOptions, handlers: RunCallbacks): Promise<void> {
+  spawn(attempt: RunAttempt, options: RunOptions, handlers: RunCallbacks): Promise<void> {
+    const starting = this.startAttempt(attempt, options, handlers)
+    this.pendingStarts.set(attempt.id, starting)
+    const forget = () => {
+      if (this.pendingStarts.get(attempt.id) === starting) this.pendingStarts.delete(attempt.id)
+      const disposed = this.startingDisposals.get(attempt.id)
+      if (disposed) {
+        this.recordCleanupState(disposed, attempt.id)
+        this.startingDisposals.delete(attempt.id)
+      }
+    }
+    void starting.then(forget, forget)
+    return starting
+  }
+
+  /** Join only this attempt, including a process that starts after cancellation. */
+  async waitForAttempt(attemptId: string): Promise<void> {
+    await this.pendingStarts.get(attemptId)
+    await this.activeStops.get(attemptId)
+    const executing = this.pendingExecutions.get(attemptId)
+    if (this.cleanupFailures.has(attemptId) && executing) {
+      // A failed signal can race a natural exit. Let execute() join and retry
+      // disposal; a still-live or still-denied execution remains uncertain.
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          executing,
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 250)
+          }),
+        ])
+      } finally {
+        clearTimeout(timer)
+      }
+    } else await executing
+    while (this.attemptDisposals.has(attemptId)) await Promise.all(this.attemptDisposals.get(attemptId) ?? [])
+    const failure = this.cleanupFailures.get(attemptId)
+    if (failure) throw failure
+    await executing
+  }
+
+  private async startAttempt(attempt: RunAttempt, options: RunOptions, handlers: RunCallbacks): Promise<void> {
     const callbacks: RunCallbacks = {
       ...handlers,
       onComplete: (result) => this.dispatchCallback(attempt.id, () => handlers.onComplete(result)),
@@ -157,6 +204,7 @@ export class AgentRunnerService {
     })
     session.on("output", (e) => {
       if (handled) return
+      callbacks.onOutput?.(e.chunk)
       const snippet = e.chunk.trim().replace(/\s+/g, " ").slice(-MAX_OUTPUT_SNIPPET)
       if (snippet) this.lastOutputs.set(attempt.id, snippet)
     })
@@ -200,16 +248,32 @@ export class AgentRunnerService {
     })
 
     // Fire-and-forget: execute returns when agent finishes, but we don't block spawn()
-    session.execute(options.prompt).catch((err) => {
-      if (handled) return
-      handled = true
-      cleanup()
-      callbacks.onError({
-        code: "CRASH",
-        message: `Agent execution failed: ${err}`,
-        recoverable: true,
+    const executing = session
+      .execute(options.prompt)
+      .catch((err) => {
+        if (handled) return
+        handled = true
+        cleanup()
+        callbacks.onError({
+          code: "CRASH",
+          message: `Agent execution failed: ${err}`,
+          recoverable: true,
+        })
       })
-    })
+      .finally(async () => {
+        // execute() can await preparation before creating a process. Cancellation
+        // must also dispose a process that appears after its first stop request.
+        if (handled) {
+          await this.activeStops.get(attempt.id)
+          await Promise.all(this.attemptDisposals.get(attempt.id) ?? [])
+          if (session.isAlive() || this.cleanupFailures.has(attempt.id)) await this.disposeSession(session, attempt.id)
+        }
+      })
+    this.pendingExecutions.set(attempt.id, executing)
+    const forgetExecution = () => {
+      if (this.pendingExecutions.get(attempt.id) === executing) this.pendingExecutions.delete(attempt.id)
+    }
+    void executing.then(forgetExecution, forgetExecution)
 
     if (handled) return
     // Timeout watchdog — stored so it can be cleared on completion
@@ -298,13 +362,35 @@ export class AgentRunnerService {
     const disposal = (async () => {
       try {
         await session.dispose()
+        this.cleanupFailures.delete(attemptId)
+        // A cancelled start can create its process after an earlier disposal.
+        // Inspect it once start has joined, after the final disposal has run.
+        if (this.pendingStarts.has(attemptId)) this.startingDisposals.set(attemptId, session)
+        else this.recordCleanupState(session, attemptId)
       } catch (err) {
+        this.cleanupFailures.set(attemptId, err instanceof Error ? err : new Error(String(err)))
         logger.error("orchestrator", "Failed to dispose agent session", { attemptId, error: String(err) })
       }
     })()
     this.pendingDisposals.add(disposal)
-    void disposal.finally(() => this.pendingDisposals.delete(disposal))
+    const disposals = this.attemptDisposals.get(attemptId) ?? new Set<Promise<void>>()
+    disposals.add(disposal)
+    this.attemptDisposals.set(attemptId, disposals)
+    void disposal.finally(() => {
+      this.pendingDisposals.delete(disposal)
+      disposals.delete(disposal)
+      if (disposals.size === 0) this.attemptDisposals.delete(attemptId)
+    })
     return disposal
+  }
+
+  private recordCleanupState(session: AgentSession, attemptId: string): void {
+    try {
+      if (session.isAlive())
+        throw new Error("Agent session remains active after disposal. Inspect and stop it before resuming.")
+    } catch (error) {
+      this.cleanupFailures.set(attemptId, error instanceof Error ? error : new Error(String(error)))
+    }
   }
 
   private dispatchCallback(attemptId: string, callback: () => unknown): void {

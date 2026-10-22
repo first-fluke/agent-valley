@@ -6,6 +6,8 @@
  *   1. domain purity — domain/** must not import application/infrastructure.
  *   2. adapter isolation — adapter modules must not import application layers.
  *   3. no circular imports between production modules.
+ *   4. domain contracts have no external package dependencies.
+ *   5. LangChain stays inside the existing coordinator routing adapter.
  *
  * Existing violations are frozen in scripts/import-rules.baseline.json so the
  * gate can land without a big-bang refactor; any NEW violation fails CI.
@@ -32,6 +34,7 @@ const DOMAIN_FORBIDDEN = [
 
 const IMPORT_PATTERN =
   /(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)/g
+const COORDINATOR_GRAPH = "packages/core/src/chief/coordinator-graph.ts"
 
 function walk(directory, files = []) {
   for (const entry of readdirSync(directory)) {
@@ -118,10 +121,20 @@ export function collectViolations(root = repositoryRoot) {
     }
     for (const file of files) {
       const normalizedFile = file.replaceAll(sep, "/")
+      const sourcePath = relative(root, file).replaceAll(sep, "/")
       const content = readFileSync(file, "utf8")
       for (const match of content.matchAll(IMPORT_PATTERN)) {
         const specifier = match[1] ?? match[2]
         if (!specifier) continue
+        if (normalizedFile.includes("/domain/") && !specifier.startsWith(".")) {
+          violations.add(`domain-external\t${sourcePath}\t${specifier}`)
+        }
+        if (
+          (specifier.startsWith("@langchain/") || specifier === "langchain" || specifier.startsWith("langchain/")) &&
+          sourcePath !== COORDINATOR_GRAPH
+        ) {
+          violations.add(`framework-boundary\t${sourcePath}\t${specifier}`)
+        }
         const target = resolveImport(file, specifier)
         if (!target) continue
         const resolvedTarget = resolveFile(target)
@@ -186,6 +199,8 @@ function main() {
     `\n${added.length} new import-rule violation(s).\n` +
       "  Fix: depend on domain/ports from application code, and never import\n" +
       "  application modules (orchestrator/chief/workspace) from adapters.\n" +
+      "  Keep domain imports relative to domain modules. Confine LangChain\n" +
+      "  dependencies to chief/coordinator-graph.ts; AV owns Mission state.\n" +
       "  Location: scripts/check-import-rules.mjs",
   )
   process.exit(1)

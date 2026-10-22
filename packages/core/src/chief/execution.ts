@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
-import { type ExecutionState, executionPolicySchema, executionStateSchema, type FailureKind } from "./contracts"
+import type { ExecutionState, FailureKind } from "./contracts"
 import type { Mission } from "./types"
+import { markOperatingRunUnknown } from "./usage"
 
 export {
   type ExecutionPolicy,
@@ -55,7 +56,16 @@ export function executionState(mission: Mission): ExecutionState {
 
 export function finalizeAbandonedRuns(mission: Mission): void {
   for (const run of mission.operations?.runs ?? []) {
+    if (run.executionState === "unknown") continue
     if (run.finishedAt) continue
+    if (run.executionState === "running" && run.executionRecovery !== "local-process") {
+      markOperatingRunUnknown(
+        run,
+        "Coordinator ended before the runtime established a terminal outcome. Reconcile this execution before resuming.",
+      )
+      continue
+    }
+    run.executionState = "settled"
     run.finishedAt = new Date().toISOString()
     run.elapsedMs = Math.max(0, Date.parse(run.finishedAt) - Date.parse(run.startedAt))
     run.outcome = "failed"
@@ -66,8 +76,49 @@ export function finalizeAbandonedRuns(mission: Mission): void {
   }
 }
 
+/** Transport errors and cancellation requests cannot prove that an execution stopped. */
+export function assertNoUncertainExecution(mission: Mission): void {
+  const run = mission.operations?.runs.find((entry) => entry.executionState === "unknown")
+  if (run)
+    throw new MissionPause(
+      `Runtime execution ${run.runId} has an unknown outcome.${run.evidence ? ` Cause: ${run.evidence.slice(0, 1_000)}.` : ""} Inspect and reconcile its saved execution record and any task effects before resuming; further Actor calls are stopped.`,
+      "unknown-effect",
+    )
+}
+
+/** Record proof of termination; effects, task reviews and unknown billing remain independent. */
+export function reconcileExecution(
+  mission: Mission,
+  runId: string,
+  evidence: string,
+  authority: "operator-recorded" | "local-process-guard" = "operator-recorded",
+): void {
+  const run = mission.operations?.runs.find((entry) => entry.runId === runId)
+  const proof = evidence.trim()
+  if (run?.executionState !== "unknown" || !proof || proof.length > 2_000)
+    throw new Error("Select an uncertain execution and record up to 2,000 characters of evidence that it stopped.")
+  if (authority === "local-process-guard" && run.executionRecovery !== "local-process")
+    throw new Error("A local process guard cannot reconcile a nonlocal execution. Obtain runtime termination proof.")
+  const at = new Date().toISOString()
+  run.executionState = "settled"
+  run.finishedAt = at
+  const elapsed = Date.parse(at) - Date.parse(run.startedAt)
+  run.elapsedMs = Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null
+  run.outcome = "failed"
+  run.evidence = proof
+  const task = mission.tasks.find((entry) => entry.id === run.taskId)
+  if (task?.effectState === "running") task.effectState = "unknown"
+  mission.history.push({
+    at,
+    stage: "execution-reconciled",
+    ...(run.taskId ? { taskId: run.taskId } : {}),
+    message: JSON.stringify({ runId, authority, evidence: proof }),
+  })
+}
+
 /** Money is a configured-price estimate. Unknown usage cannot establish headroom. */
 export function assertExecutionBudget(mission: Mission, now = Date.now()): void {
+  assertNoUncertainExecution(mission)
   const policy = mission.executionPolicy
   if (!policy) return
   const state = executionState(mission)
@@ -146,6 +197,7 @@ export function progressKey(mission: Mission, fingerprint: string): string {
 }
 
 export function pauseForFailure(mission: Mission, reason: string, taskId?: string): void {
+  assertNoUncertainExecution(mission)
   if (!mission.executionPolicy) return
   const task = mission.plan?.tasks.find((entry) => entry.id === taskId)
   const state = mission.tasks.find((entry) => entry.id === taskId)

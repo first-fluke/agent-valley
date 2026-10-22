@@ -121,7 +121,7 @@ export class KimiSession extends BaseSession {
   }
 
   override isAlive(): boolean {
-    if (!this.process) return this.started
+    if (!this.process) return this.started && this.config !== null
     return super.isAlive()
   }
 

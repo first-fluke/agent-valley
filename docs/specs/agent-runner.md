@@ -21,6 +21,12 @@ interface AgentRunnerPort {
 interface RunHandle {
   readonly attemptId: string
   readonly issueKey: string
+  readonly result: Promise<RunAttempt>
+  readonly executionCapabilities: {
+    cancellation: "confirmed" | "request-only" | "unsupported"
+    forceStop: boolean
+    reconnect: boolean
+  }
   onEvent(handler: (event: AgentRunEvent) => void): Unsubscribe
   send(cmd: InterventionCommand): Promise<void>
   cancel(): Promise<void>
@@ -57,6 +63,36 @@ opencode     → ["append_prompt", "abort"] conservatively (stateless)
 outside the advertised set. For `append_prompt` on a stateless agent
 (Claude), the upper-layer `InterventionBus` cancels the session and
 re-queues the issue with the appended instruction.
+
+`SpawnInput` accepts a caller-owned `attempt`, `model`, explicitly allowed `env`,
+`signal` and diagnostic `stage`. The caller persists the attempt before dispatch.
+`RunHandle.result` returns the full attempt, including output and observed usage;
+`AgentRunError` preserves that attempt on failure and marks uncertain outcomes.
+The local adapter replays start and terminal lifecycle events to late subscribers.
+Output events are live observations and are not replayed.
+
+A local result settles only after that attempt's startup and disposal have joined.
+Cancelling one attempt does not stop concurrent attempts on the same service.
+`isAlive()` is an activity observation; callers still join `result` before reading
+the workspace. Check execution capabilities before requesting force-stop or
+assuming cancellation confirms termination. Request-only or unsupported
+cancellation cannot authorize another writer or reviewer.
+
+Chief uses this port too. Its default adapter binds local process guards in
+`chief/local-runner.ts`; verification shell commands retain their local guards.
+Mission state, budgets, retries and checkpoints stay in AV. Durable run records
+separate execution state (`running`, `settled`, `unknown`) from review outcome.
+Unknown injected executions require reconciliation before restart can dispatch
+work. There is no configured remote backend in this change; see the
+[runtime decision](../decisions/adr-runtime-execution-and-state-ownership.md) for
+A2A adoption gates.
+
+`reconcileExecution(mission, runId, evidence)` in `chief/execution.ts` records
+explicit termination evidence and leaves the run failed, with task reviews,
+external effects and unknown costs still independent. It is a programmatic
+operation, not a new CLI flag. Default local runs can also be reconciled when
+`MissionStore.recoverProcesses` clears their matching process marker and proves
+termination. A missing marker cannot establish termination for an unknown run.
 
 ---
 
@@ -147,10 +183,10 @@ interface RunResult {
 
 ```
 1. session = createSession(config.agent.type)
-2. await session.start(config)          // spawn agent process
-3. await session.execute(prompt)        // send rendered prompt
-4. session.on("complete", handleResult) // listen for completion
-5. session.on("error", handleError)     // listen for errors
+2. session.on("complete", handleResult) // subscribe before execution
+3. session.on("error", handleError)
+4. await session.start(config)          // spawn agent process
+5. await session.execute(prompt)        // send rendered prompt
 6. // On timeout:
    await session.cancel()               // SIGTERM
    // wait 10 seconds

@@ -2,13 +2,20 @@ import { consultDirectors } from "./advisor-coordination"
 import { refreshMissionContainers } from "./coordinator-container"
 import { applyPlanningResult } from "./coordinator-results"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
-import { assertExecutionDeadline, chiefRecoveryStopped, finalizeAbandonedRuns, MissionPause } from "./execution"
+import {
+  assertExecutionDeadline,
+  assertNoUncertainExecution,
+  chiefRecoveryStopped,
+  finalizeAbandonedRuns,
+  MissionPause,
+} from "./execution"
 import { planPrompt } from "./prompts"
 import { parsePlanningResponse } from "./schemas"
 
 export async function resumeMission(context: CoordinatorContext): Promise<StageTransition> {
   const { mission, ports, operatorGoal, operatorVerify, checkAbort, invalidate, save } = context
   finalizeAbandonedRuns(mission)
+  assertNoUncertainExecution(mission)
   checkAbort()
   assertExecutionDeadline(mission)
   if (mission.execution?.failureKind === "chief-wait") {

@@ -134,6 +134,7 @@ export function latestWorkRun(mission: Mission, taskId: string) {
 
 export function recordTaskVerdict(mission: Mission, taskId: string, passed: boolean, evidence: string): void {
   const run = latestWorkRun(mission, taskId)
+  if (run?.executionState === "unknown") return
   const decision = mission.operations?.reviewDecisions.findLast(
     (entry) => !entry.gateId && entry.taskId === taskId && (!run || entry.runId === run.runId),
   )

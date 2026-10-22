@@ -76,6 +76,10 @@ export const operatingRunSchema = z.strictObject({
   outputTokens: z.number().int().nonnegative().nullable(),
   costUsd: amount.nullable(),
   outcome: z.enum(["pending", "passed", "rejected", "failed"]),
+  /** Execution termination is separate from the independent review verdict. */
+  executionState: z.enum(["running", "settled", "unknown"]).optional(),
+  /** Absent on legacy records, whose executions were always local processes. */
+  executionRecovery: z.enum(["local-process", "reconcile"]).optional(),
   routingReason: text.optional(),
   evidence: text.optional(),
   fingerprint: text.optional(),

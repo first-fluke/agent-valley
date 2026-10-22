@@ -1,0 +1,3 @@
+# Keep renderer output identifiable without changing the generated artifact.
+docs/decisions/*.archify.html linguist-generated=true whitespace=-blank-at-eol
+docs/decisions/*.archify.delivery.json linguist-generated=true

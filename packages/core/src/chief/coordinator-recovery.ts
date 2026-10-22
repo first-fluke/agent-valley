@@ -1,5 +1,12 @@
 import type { createMissionRun } from "./coordinator-run"
-import { assertExecutionDeadline, executionState, MissionPause, progressKey, recordPause } from "./execution"
+import {
+  assertExecutionDeadline,
+  assertNoUncertainExecution,
+  executionState,
+  MissionPause,
+  progressKey,
+  recordPause,
+} from "./execution"
 import { supervisePrompt } from "./prompts"
 import { parseSupervisionResponse } from "./schemas"
 import { applyRecovery, recordDecision } from "./supervision"
@@ -14,6 +21,7 @@ interface RecoveryHooks {
 
 export function createChiefRecovery(mission: Mission, ports: ChiefPorts, hooks: RecoveryHooks) {
   return async (reason: string, taskId?: string): Promise<void> => {
+    assertNoUncertainExecution(mission)
     const supervision = mission.supervision
     if (!supervision) throw new Error(reason)
     hooks.checkAbort()

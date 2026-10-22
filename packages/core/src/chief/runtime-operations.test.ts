@@ -13,10 +13,11 @@ import { MissionStore } from "./store"
 import type { Mission } from "./types"
 
 const mocks = vi.hoisted(() => ({ spawn: vi.fn(), killAll: vi.fn(async () => {}) }))
-vi.mock("../orchestrator/agent-runner", () => ({
+vi.mock("../sessions/adapters/agent-runner-service", () => ({
   AgentRunnerService: class {
     spawn = mocks.spawn
-    killAll = mocks.killAll
+    kill = mocks.killAll
+    waitForAttempt = async () => {}
   },
 }))
 

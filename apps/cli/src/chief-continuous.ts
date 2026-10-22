@@ -273,7 +273,7 @@ export async function runOperation(
             throw new Error(
               "This decision is already completed. Omit decision budget flags and resume the saved result.",
             )
-          await decisions.recoverProcesses(decision.id)
+          await decisions.recoverProcesses(decision.id, decision)
           finalizeAbandonedRuns(decision)
           const adjustments: OrderOptions = { resume: decision.id }
           for (const key of decisionBudgetKeys) if (options[key] !== undefined) adjustments[key] = options[key]

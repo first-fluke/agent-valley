@@ -126,6 +126,7 @@ export class FakeAgentSession implements AgentSession {
 
   async dispose(): Promise<void> {
     this.disposeCalls++
+    this.alive = false
   }
 
   /** Test-driver API — trigger events from outside. */

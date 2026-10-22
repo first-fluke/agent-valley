@@ -12,6 +12,7 @@
  *   - Tests can `emitRaw()` to inject additional events (output/error).
  */
 
+import type { RunAttempt } from "../../domain/models"
 import type {
   AgentRunEvent,
   AgentRunnerPort,
@@ -21,7 +22,7 @@ import type {
   SpawnInput,
   Unsubscribe,
 } from "../../domain/ports/agent-runner"
-import { InterventionUnsupportedError } from "../../domain/ports/agent-runner"
+import { AgentRunError, InterventionUnsupportedError } from "../../domain/ports/agent-runner"
 
 const DEFAULT_CAPS: Record<string, InterventionCapability[]> = {
   claude: ["append_prompt", "abort"],
@@ -79,6 +80,15 @@ export class FakeAgentRunner implements AgentRunnerPort {
       issueKey: input.issue.identifier,
       agentType: input.agentType,
       caps: this.capabilities(input.agentType),
+      attempt: input.attempt ?? {
+        id: input.attemptId,
+        issueId: input.issue.id,
+        workspacePath: input.workspace.path,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        exitCode: null,
+        agentOutput: null,
+      },
     })
     this.handles.push(handle)
     handle.emitRaw({ kind: "started", attemptId: input.attemptId })
@@ -91,17 +101,34 @@ export class FakeRunHandle implements RunHandle {
   readonly issueKey: string
   readonly agentType: string
   readonly caps: InterventionCapability[]
+  readonly result: Promise<RunAttempt>
+  readonly executionCapabilities = { cancellation: "confirmed", forceStop: true, reconnect: false } as const
+  private readonly attempt: RunAttempt
+  private resolveResult!: (attempt: RunAttempt) => void
+  private rejectResult!: (error: AgentRunError) => void
   readonly sendCalls: InterventionCommand[] = []
   cancelCalls = 0
   killCalls = 0
   private readonly handlers = new Set<(event: AgentRunEvent) => void>()
   private alive = true
 
-  constructor(deps: { attemptId: string; issueKey: string; agentType: string; caps: InterventionCapability[] }) {
+  constructor(deps: {
+    attemptId: string
+    issueKey: string
+    agentType: string
+    caps: InterventionCapability[]
+    attempt: RunAttempt
+  }) {
     this.attemptId = deps.attemptId
     this.issueKey = deps.issueKey
     this.agentType = deps.agentType
     this.caps = deps.caps
+    this.attempt = deps.attempt
+    this.result = new Promise((resolve, reject) => {
+      this.resolveResult = resolve
+      this.rejectResult = reject
+    })
+    void this.result.catch(() => {})
   }
 
   onEvent(handler: (event: AgentRunEvent) => void): Unsubscribe {
@@ -143,6 +170,13 @@ export class FakeRunHandle implements RunHandle {
 
   /** Test-driver API — inject a raw event. */
   emitRaw(event: AgentRunEvent): void {
+    if (event.kind === "complete") {
+      this.alive = false
+      this.resolveResult({ ...this.attempt, finishedAt: new Date().toISOString(), exitCode: event.exitCode })
+    } else if (event.kind === "error") {
+      this.alive = false
+      this.rejectResult(new AgentRunError(event.error.message, this.attempt))
+    }
     for (const h of [...this.handlers]) {
       try {
         h(event)

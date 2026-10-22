@@ -59,4 +59,30 @@ describe("import rule gate", () => {
 
     expect(collectViolations(root)).toEqual([])
   })
+
+  test("rejects framework packages in domain contracts", async () => {
+    const root = await fixture({
+      "packages/core/src/domain/ports/runner.ts":
+        'import type { Task } from "@a2a-js/sdk"\nexport type Result = Task\n',
+      "packages/core/src/domain/state.ts": 'export { StateGraph } from "@langchain/langgraph"\n',
+    })
+
+    expect(collectViolations(root)).toEqual([
+      "domain-external\tpackages/core/src/domain/ports/runner.ts\t@a2a-js/sdk",
+      "domain-external\tpackages/core/src/domain/state.ts\t@langchain/langgraph",
+      "framework-boundary\tpackages/core/src/domain/state.ts\t@langchain/langgraph",
+    ])
+  })
+
+  test("confines LangChain to the coordinator routing adapter", async () => {
+    const root = await fixture({
+      "packages/core/src/chief/coordinator-graph.ts":
+        'import { StateGraph } from "@langchain/langgraph"\nexport const Graph = StateGraph\n',
+      "packages/core/src/chief/store.ts": 'export const checkpoint = import("@langchain/langgraph/checkpoint")\n',
+    })
+
+    expect(collectViolations(root)).toEqual([
+      "framework-boundary\tpackages/core/src/chief/store.ts\t@langchain/langgraph/checkpoint",
+    ])
+  })
 })

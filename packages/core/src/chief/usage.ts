@@ -25,6 +25,8 @@ export function startOperatingRun(
     outputTokens: null,
     costUsd: null,
     outcome: "pending",
+    executionState: "running",
+    executionRecovery: "reconcile",
     ...(routingReason ? { routingReason } : {}),
   }
   mission.operations.runs.push(entry)
@@ -33,6 +35,14 @@ export function startOperatingRun(
 
 const tokens = (value: unknown): number | null =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null
+
+export function markOperatingRunUnknown(entry: OperatingRun, reason?: string): void {
+  entry.executionState = "unknown"
+  entry.finishedAt = null
+  entry.outcome = "pending"
+  const detail = reason?.trim()
+  if (detail) entry.evidence = detail.slice(-2_000)
+}
 
 export function finishOperatingRun(mission: Mission, entry: OperatingRun, attempt: RunAttempt, failed = false): void {
   entry.finishedAt = attempt.finishedAt ?? new Date().toISOString()
@@ -59,5 +69,11 @@ export function finishOperatingRun(mission: Mission, entry: OperatingRun, attemp
       1_000_000
     entry.costUsd = Number.isFinite(estimate) ? estimate : null
   }
-  entry.outcome = failed ? "failed" : entry.stage === "work" ? "pending" : "passed"
+  if (entry.executionState === "unknown") {
+    entry.finishedAt = null
+    entry.outcome = "pending"
+  } else {
+    entry.executionState = "settled"
+    entry.outcome = failed ? "failed" : entry.stage === "work" ? "pending" : "passed"
+  }
 }

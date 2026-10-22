@@ -53,6 +53,7 @@
       "!**/dist",
       "!**/bun.lock",
       "!**/next-env.d.ts",
+      "!docs/decisions/*.archify.html",
       "!.agents",
       "!.claude",
       "!.codex",

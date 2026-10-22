@@ -22,6 +22,7 @@ export function verifiedMissionEvidence(mission: Mission): boolean {
   const review = mission.finalReview
   if (
     !plan?.tasks.length ||
+    mission.operations?.runs.some((run) => run.executionState && run.executionState !== "settled") ||
     !review?.passed ||
     !mission.verification?.ok ||
     !mission.fingerprint?.trim() ||
@@ -72,6 +73,14 @@ export function automaticMissionRecovery(
 ): AutomaticMissionRecovery {
   const stop = (reason: string): AutomaticMissionRecovery => ({ retry: false, reason })
   if (!mission.executionPolicy?.autoResume) return stop("Automatic recovery is disabled by the saved policy.")
+  if (
+    mission.operations?.runs.some(
+      (run) =>
+        run.executionState === "unknown" ||
+        (run.executionState === "running" && run.executionRecovery !== "local-process"),
+    )
+  )
+    return stop("A runtime execution has an unknown outcome. Reconcile its saved record before automatic recovery.")
   const state = mission.execution
   if (!Number.isFinite(now) || (state && !Number.isFinite(Date.parse(state.startedAt))))
     return stop("The saved execution timestamp is invalid; automatic recovery is stopped.")

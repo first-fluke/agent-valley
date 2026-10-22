@@ -17,7 +17,7 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { SpawnInput } from "../domain/ports/agent-runner"
-import { InterventionUnsupportedError } from "../domain/ports/agent-runner"
+import { AgentRunError, InterventionUnsupportedError } from "../domain/ports/agent-runner"
 import { CAPABILITY_TABLE, defaultCapabilities, SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
 import { registerSession } from "../sessions/session-factory"
 import { FakeAgentSession, makeIssue, makeWorkspace } from "./characterization/helpers"
@@ -158,7 +158,7 @@ describe("SpawnAgentRunnerAdapter — send dispatch", () => {
 })
 
 describe("SpawnAgentRunnerAdapter — handle lifecycle", () => {
-  test("cancel() and kill() both delegate to service.kill exactly once per call", async () => {
+  test("cancel() and kill() join the same completed shutdown", async () => {
     const adapter = new SpawnAgentRunnerAdapter()
     const killSpy = vi.spyOn(adapter.service, "kill")
     const handle = await adapter.spawn(buildSpawnInput({ attemptId: "att-lifecycle" }))
@@ -168,24 +168,217 @@ describe("SpawnAgentRunnerAdapter — handle lifecycle", () => {
     expect(handle.isAlive()).toBe(false)
 
     await handle.kill()
-    expect(killSpy).toHaveBeenCalledTimes(2)
+    expect(killSpy).toHaveBeenCalledTimes(1)
   })
 
-  test("onEvent delivers the synchronous `started` event emitted during spawn", async () => {
-    // The adapter emits `started` immediately after service.spawn resolves;
-    // subscribing afterwards will not retroactively receive it, so we
-    // verify it is at least reachable by subscribing and triggering a
-    // subsequent cancel which flows through kill() without producing an
-    // additional `complete` on the port stream (the underlying service
-    // does not surface it in PR4). We assert no handler error.
+  test("subscribers receive the started event and the terminal event after cancellation", async () => {
     const adapter = new SpawnAgentRunnerAdapter()
     const handle = await adapter.spawn(buildSpawnInput({ attemptId: "att-sub" }))
     const events: string[] = []
-    const unsub = handle.onEvent((e) => events.push(e.kind))
+    const unsubscribe = handle.onEvent((event) => events.push(event.kind))
+    await vi.waitFor(() => expect(FakeAgentSession.instances).toHaveLength(1))
     await handle.kill()
-    unsub()
-    // The handler should not throw — contract only requires unsubscribe to
-    // work and for emissions to be side-effect-free.
-    expect(Array.isArray(events)).toBe(true)
+    unsubscribe()
+    expect(events).toEqual(["started", "error"])
+  })
+
+  test("retains synchronous completion and measured usage for late subscribers", async () => {
+    const session = new FakeAgentSession()
+    session.execute = async () => {
+      session.emit("complete", {
+        type: "complete",
+        result: {
+          exitCode: 0,
+          output: "Verified result",
+          durationMs: 12,
+          filesChanged: [],
+          tokenUsage: { input: 12, output: 4, model: "measured" },
+        },
+      })
+    }
+    registerSession("claude", () => session)
+    const adapter = new SpawnAgentRunnerAdapter()
+    const handle = await adapter.spawn({ ...buildSpawnInput(), model: "selected", env: { FIXTURE: "forwarded" } })
+    expect(await handle.result).toMatchObject({
+      exitCode: 0,
+      agentOutput: "Verified result",
+      tokenUsage: { input: 12, output: 4, model: "measured" },
+    })
+    expect(session.startCalls[0]).toMatchObject({ model: "selected", env: { FIXTURE: "forwarded" } })
+    const events: string[] = []
+    handle.onEvent((event) => events.push(event.kind))()
+    expect(events).toEqual(["started", "complete"])
+    expect(handle.isAlive()).toBe(false)
+    expect(session.disposeCalls).toBeGreaterThan(0)
+  })
+
+  test("retains startup failure and partial usage in a typed result error", async () => {
+    const session = new FakeAgentSession()
+    session.start = async () => {
+      session.emit("error", {
+        type: "error",
+        error: {
+          code: "CRASH",
+          message: "Startup failed",
+          recoverable: true,
+          exitCode: 2,
+          tokenUsage: { input: 7, output: 3, model: "observed" },
+        },
+      })
+    }
+    registerSession("claude", () => session)
+    const handle = await new SpawnAgentRunnerAdapter().spawn(buildSpawnInput())
+    await expect(handle.result).rejects.toMatchObject({
+      name: "AgentRunError",
+      code: "CRASH",
+      outcomeUnknown: false,
+      attempt: { exitCode: 2, tokenUsage: { input: 7, output: 3, model: "observed" } },
+    })
+    const events: string[] = []
+    handle.onEvent((event) => events.push(event.kind))()
+    expect(events).toEqual(["started", "error"])
+    expect(handle.isAlive()).toBe(false)
+  })
+
+  test("cancellation joins a delayed start before confirming local cleanup", async () => {
+    const session = new FakeAgentSession()
+    const start = session.start.bind(session)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    session.start = async (config) => {
+      await gate
+      await start(config)
+    }
+    registerSession("claude", () => session)
+    const finished = vi.fn()
+    const adapter = new SpawnAgentRunnerAdapter(undefined, () => ({
+      begin: () => {},
+      spawned: () => {},
+      finish: finished,
+    }))
+    const handle = await adapter.spawn(buildSpawnInput())
+    await vi.waitFor(() => expect(adapter.service.activeCount).toBe(1))
+    let stopped = false
+    const cancelling = handle.cancel().then(() => {
+      stopped = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(stopped).toBe(false)
+    expect(finished).not.toHaveBeenCalled()
+    release()
+    await cancelling
+    await expect(handle.result).rejects.toBeInstanceOf(AgentRunError)
+    expect(finished).toHaveBeenCalledOnce()
+    expect(session.executeCalls).toEqual([])
+    expect(session.disposeCalls).toBeGreaterThanOrEqual(2)
+  })
+
+  test("cancellation also joins delayed execution preparation and disposes a late process", async () => {
+    const session = new FakeAgentSession()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    session.execute = async () => {
+      await gate
+      await session.start({ type: "claude", timeout: 5, workspacePath: "/tmp" })
+    }
+    registerSession("claude", () => session)
+    const adapter = new SpawnAgentRunnerAdapter()
+    const handle = await adapter.spawn(buildSpawnInput())
+    await vi.waitFor(() => expect(adapter.service.activeCount).toBe(1))
+    let stopped = false
+    const cancelling = handle.cancel().then(() => {
+      stopped = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(stopped).toBe(false)
+    release()
+    await cancelling
+    expect(session.isAlive()).toBe(false)
+    expect(session.disposeCalls).toBeGreaterThanOrEqual(2)
+  })
+
+  test("does not stop another attempt while joining a completed run", async () => {
+    const adapter = new SpawnAgentRunnerAdapter()
+    const first = await adapter.spawn(buildSpawnInput({ attemptId: "first" }))
+    const second = await adapter.spawn(buildSpawnInput({ attemptId: "second" }))
+    await vi.waitFor(() => expect(adapter.service.activeCount).toBe(2))
+    FakeAgentSession.instances[0]?.emit("complete", {
+      type: "complete",
+      result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+    })
+    await first.result
+    expect(second.isAlive()).toBe(true)
+    expect(FakeAgentSession.instances[1]?.cancelCalls).toBe(0)
+    expect(adapter.service.activeCount).toBe(1)
+    await second.cancel()
+  })
+
+  test("aborts before registration without starting a session", async () => {
+    const handle = await new SpawnAgentRunnerAdapter().spawn({ ...buildSpawnInput(), signal: AbortSignal.abort() })
+    await expect(handle.result).rejects.toMatchObject({ code: "CANCELLED" })
+    expect(FakeAgentSession.instances).toHaveLength(0)
+  })
+
+  test("reconciles a failed terminal-event disposal after execution actually exits", async () => {
+    const session = new FakeAgentSession()
+    const dispose = session.dispose.bind(session)
+    let disposalCalls = 0
+    session.dispose = async () => {
+      if (++disposalCalls === 1) throw Object.assign(new Error("kill EPERM"), { code: "EPERM" })
+      await dispose()
+    }
+    session.execute = async () => {
+      session.emit("complete", {
+        type: "complete",
+        result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      await session.cancel()
+    }
+    registerSession("claude", () => session)
+    const handle = await new SpawnAgentRunnerAdapter().spawn(buildSpawnInput())
+    expect(await handle.result).toMatchObject({ exitCode: 0, agentOutput: "done" })
+    expect(disposalCalls).toBe(2)
+    expect(session.isAlive()).toBe(false)
+  })
+
+  test("failed process shutdown cannot claim confirmed cancellation without lifecycle hooks", async () => {
+    const session = new FakeAgentSession()
+    session.cancel = async () => {
+      throw new Error("Cancel failed")
+    }
+    session.kill = async () => {
+      throw new Error("Kill failed")
+    }
+    session.dispose = async () => {
+      throw new Error("Dispose failed")
+    }
+    registerSession("claude", () => session)
+    const adapter = new SpawnAgentRunnerAdapter()
+    const handle = await adapter.spawn(buildSpawnInput())
+    await vi.waitFor(() => expect(adapter.service.activeCount).toBe(1))
+    await expect(handle.cancel()).rejects.toMatchObject({ outcomeUnknown: true })
+    await expect(handle.result).rejects.toMatchObject({ outcomeUnknown: true })
+    expect(session.isAlive()).toBe(true)
+  })
+
+  test("unconfirmed local cleanup rejects cancellation and marks the outcome uncertain", async () => {
+    const adapter = new SpawnAgentRunnerAdapter(undefined, () => ({
+      begin: () => {},
+      spawned: () => {},
+      finish: () => {
+        throw new Error("Process group remains active")
+      },
+    }))
+    const handle = await adapter.spawn(buildSpawnInput())
+    await vi.waitFor(() => expect(adapter.service.activeCount).toBe(1))
+    await expect(handle.cancel()).rejects.toMatchObject({ outcomeUnknown: true })
+    await expect(handle.result).rejects.toMatchObject({ outcomeUnknown: true })
   })
 })

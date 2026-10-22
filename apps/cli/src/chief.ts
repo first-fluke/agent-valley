@@ -87,7 +87,7 @@ export async function runOrder(
       mission = await store.load(id)
       applyResumeOptions(mission, goal, options)
       await store.save(mission)
-      await store.recoverProcesses(id)
+      await store.recoverProcesses(id, mission)
       if (mission.status === "paused") return mission
     } else {
       if (!goal?.trim())

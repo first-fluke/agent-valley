@@ -125,7 +125,7 @@ export async function decideContinuousGoal(
       return parseContinuousDecision(result.message)
     }
     if (mission) {
-      await store.recoverProcesses(decisionId)
+      await store.recoverProcesses(decisionId, mission)
       finalizeAbandonedRuns(mission)
       assertContinuousDecisionRecovery(mission)
       // Automatic continuation retains the saved failure disposition and every spent reservation.

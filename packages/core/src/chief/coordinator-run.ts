@@ -1,5 +1,5 @@
 import { createMissionCheckpoint } from "./coordinator-checkpoint"
-import { classifyFailure, MissionPause, reserveExecutionRun } from "./execution"
+import { assertNoUncertainExecution, classifyFailure, MissionPause, reserveExecutionRun } from "./execution"
 import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
 
 export class ReadOnlyViolation extends Error {}
@@ -19,6 +19,7 @@ export function createMissionRun(
     taskId?: string,
     context?: { workspace?: Mission["workspace"]; signal?: AbortSignal },
   ): Promise<string> => {
+    assertNoUncertainExecution(mission)
     checkAbort()
     const task = stage === "work" ? mission.plan?.tasks.find((task) => task.id === taskId) : undefined
     const effect = task?.effectScope === "external" ? mission.tasks.find((state) => state.id === taskId) : undefined
@@ -72,6 +73,7 @@ export function createMissionRun(
           : await ports.runAgent(actor, prompt, mission, stage)
     } catch (error) {
       if (effect) effect.effectState = "unknown"
+      assertNoUncertainExecution(mission)
       mission.fingerprint = await ports.fingerprint(mission)
       assertContract()
       if (stage !== "work" && before !== mission.fingerprint)
@@ -90,6 +92,7 @@ export function createMissionRun(
       }
       throw error
     }
+    assertNoUncertainExecution(mission)
     if (effect) {
       effect.effectState = "completed"
       effect.output = output.slice(-32_000)

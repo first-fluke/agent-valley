@@ -13,6 +13,16 @@ export function signalProcessTree(proc: ChildProcess, signal: "SIGTERM" | "SIGKI
     // The leader can exit while its children still own the group.
     process.kill(-proc.pid, signal)
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") {
+      try {
+        process.kill(-proc.pid, 0)
+      } catch (probeError) {
+        // Natural exit can race the signal. Only absence of the full group
+        // proves cleanup; a live or uninspectable group remains uncertain.
+        if ((probeError as NodeJS.ErrnoException).code === "ESRCH") return
+      }
+      throw error
+    }
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
     if (proc.exitCode === null && proc.signalCode == null) proc.kill(signal)
   }

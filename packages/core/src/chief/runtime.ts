@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { join, resolve } from "node:path"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import { AgentRunError, type AgentRunnerPort, type RunHandle } from "../domain/ports/agent-runner"
 import { buildOmaGuidance, prepareOmaAttempt, validateOmaEvidence } from "../oma/receipt-adapter"
 import {
   assertCompatibleRoute,
@@ -8,13 +9,12 @@ import {
   matrixRouteKey,
   type SkillMatrixDeps,
 } from "../oma/skill-matrix-adapter"
-import { AgentRunnerService } from "../orchestrator/agent-runner"
 import { runVerificationGate } from "../orchestrator/verification-gate"
 import { runCommand } from "../workspace/worktree-lifecycle"
-import type { ActiveMissionProcess } from "./active-process"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
 import { fingerprintWorkspace } from "./fingerprint"
+import { createLocalMissionRunner, finishLocalProcess } from "./local-runner"
 import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
 import { disposeTaskWorktree, integrateTaskWorktree, prepareTaskWorktree } from "./parallel-workspace"
 import { selectWorkActor, workActorCandidates } from "./routing"
@@ -22,26 +22,9 @@ import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, va
 import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
 import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
-import { finishOperatingRun, startOperatingRun } from "./usage"
+import { finishOperatingRun, markOperatingRunUnknown, startOperatingRun } from "./usage"
 import { executeGoalVerification } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
-
-async function finishProcess(active: ActiveMissionProcess): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      active.finish()
-      return
-    } catch (error) {
-      if (attempt >= 20)
-        throw new MissionPause(
-          `Actor process cleanup could not be confirmed: ${error instanceof Error ? error.message : String(error)}`,
-          "unknown-effect",
-        )
-      // The process group may briefly contain children awaiting OS reaping.
-      await new Promise((resolveWait) => setTimeout(resolveWait, 50))
-    }
-  }
-}
 
 export function missionIssue(id: string, goal: string): Issue {
   return {
@@ -97,14 +80,20 @@ async function personaSkills(persona: Persona, mission: Mission, stage: string):
 }
 
 export class ChiefRuntime {
-  private readonly runners = new Set<AgentRunnerService>()
+  private readonly runs = new Set<RunHandle>()
+  private readonly runner: AgentRunnerPort
+  private readonly localExecution: boolean
 
   constructor(
     private readonly store: MissionStore,
     private readonly signal?: AbortSignal,
     private readonly onStage: (stage: string, persona: Persona) => void = () => {},
     private readonly skillMatrixDeps?: SkillMatrixDeps,
-  ) {}
+    runner?: AgentRunnerPort,
+  ) {
+    this.localExecution = runner === undefined
+    this.runner = runner ?? createLocalMissionRunner(store)
+  }
 
   ports(): ChiefPorts {
     return {
@@ -134,7 +123,13 @@ export class ChiefRuntime {
   }
 
   async close(): Promise<void> {
-    await Promise.allSettled([...this.runners].map((runner) => runner.killAll()))
+    const results = await Promise.allSettled([...this.runs].map((run) => this.stopRun(run)))
+    const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))
+    if (failures.length)
+      throw new AggregateError(
+        failures,
+        "Some executions could not be confirmed stopped. Reconcile them before resuming.",
+      )
   }
 
   private async prepareWork(
@@ -178,7 +173,7 @@ export class ChiefRuntime {
           onSpawned: (pid, detached) => active.spawned(pid, detached),
         })
         if (!mission.goalVerification.ok || !mission.verifyCommand.trim()) return mission.goalVerification
-        await finishProcess(active)
+        await finishLocalProcess(active)
         active.begin("operator-verify")
       }
       return await runVerificationGate(mission.workspace, mission.verifyCommand, {
@@ -187,7 +182,7 @@ export class ChiefRuntime {
         onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
       })
     } finally {
-      await finishProcess(active)
+      await finishLocalProcess(active)
     }
   }
 
@@ -294,12 +289,9 @@ export class ChiefRuntime {
       "\n\nYou are already running inside an AV managed mission. Complete this assigned work directly. Do not invoke av order, av_resume, av operate, av_operate, av_operation_resume, or delegate this mission back to AV. AGENT_VALLEY_MANAGED_RUN=1 applies to this run."
     if (route)
       prompt += `\n\nActual work route: ${JSON.stringify({ actorType: persona.agentType, model: persona.model ?? "native default", reason: route.reason })}. This route does not alter the user's Chief Director choice or acceptance contract.`
-    let abort: (() => void) | undefined
-    const runner = new AgentRunnerService()
-    this.runners.add(runner)
-    const active = this.store.processGuard(mission.id, attempt.id)
-    active.begin(stage)
     const entry = startOperatingRun(mission, persona, attempt, stage, context?.taskId, route?.reason)
+    entry.executionRecovery = this.localExecution ? "local-process" : "reconcile"
+    let run: RunHandle | undefined
     if (omaActor)
       mission.history.push({
         at: new Date().toISOString(),
@@ -317,54 +309,53 @@ export class ChiefRuntime {
       })
     let observed = attempt
     let failed = false
+    let executionSettled = false
+    let output = ""
+    let failure: unknown
     try {
       await this.store.save(mission)
-      const completed = await new Promise<RunAttempt>((resolveRun, rejectRun) => {
-        abort = () => {
-          rejectRun(
-            signal?.reason instanceof MissionPause
-              ? signal.reason
-              : new Error("Order interrupted. The worktree and mission record were retained; use av order --resume."),
-          )
-        }
-        signal?.addEventListener("abort", abort, { once: true })
-        if (signal?.aborted) {
-          abort()
-          return
-        }
-        void runner
-          .spawn(
-            attempt,
-            {
-              agentType: persona.agentType,
-              model: persona.model,
-              timeout: mission.timeoutSec,
-              workspacePath: workspace.path,
-              env: { ...resolveToolEnvironment(mission.toolEnvKeys), AGENT_VALLEY_MANAGED_RUN: "1" },
-              prompt,
-            },
-            {
-              onComplete: (completed) => {
-                observed = completed
-                resolveRun(completed)
-              },
-              onError: (error) => {
-                observed = {
-                  ...attempt,
-                  finishedAt: new Date().toISOString(),
-                  exitCode: error.exitCode ?? null,
-                  tokenUsage: error.tokenUsage,
-                }
-                rejectRun(new Error(error.message))
-              },
-              onHeartbeat: () => {},
-              onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
-            },
-          )
-          .catch(rejectRun)
+      run = await this.runner.spawn({
+        attemptId: attempt.id,
+        attempt,
+        issue: evidence.issue,
+        workspace,
+        agentType: persona.agentType,
+        model: persona.model,
+        timeoutMs: mission.timeoutSec * 1_000,
+        prompt,
+        env: { ...resolveToolEnvironment(mission.toolEnvKeys), AGENT_VALLEY_MANAGED_RUN: "1" },
+        signal,
+        stage,
       })
-      // Session disposal must finish before a reviewer reads the shared worktree.
-      await runner.killAll()
+      if (run.attemptId !== attempt.id || run.issueKey !== evidence.issue.identifier) {
+        // A mismatched handle may belong to another task; do not send it cancellation.
+        run = undefined
+        throw new AgentRunError(
+          "Runtime returned a handle for another execution. Reconcile the intended run.",
+          attempt,
+          { outcomeUnknown: true },
+        )
+      }
+      this.runs.add(run)
+      const completed = this.observeAttempt(attempt, await this.awaitRun(run, attempt, signal))
+      if (
+        !completed.finishedAt ||
+        !Number.isFinite(Date.parse(completed.finishedAt)) ||
+        Date.parse(completed.finishedAt) < Date.parse(attempt.startedAt) ||
+        !Number.isInteger(completed.exitCode)
+      )
+        throw new AgentRunError(
+          "Runtime returned incomplete terminal evidence. Reconcile the execution before resuming.",
+          attempt,
+          { outcomeUnknown: true },
+        )
+      observed = completed
+      executionSettled = true
+      if (completed.exitCode !== 0)
+        throw new AgentRunError(
+          "Runtime execution did not complete successfully. Inspect the failed attempt before retrying.",
+          completed,
+        )
       if (mission.oma && stage === "work") {
         const receipt = validateOmaEvidence({ ...evidence, attempt: completed, kind: "code" })
         if (!receipt.ok)
@@ -372,17 +363,114 @@ export class ChiefRuntime {
             `OMA completion evidence failed: ${receipt.reason}. Repair the task's receipt before continuing.`,
           )
       }
-      return completed.agentOutput ?? ""
+      output = completed.agentOutput ?? ""
+    } catch (caught) {
+      failed = true
+      let error = caught
+      if (error instanceof AgentRunError) {
+        try {
+          observed = this.observeAttempt(attempt, error.attempt)
+          executionSettled = !error.outcomeUnknown
+        } catch (identityError) {
+          error = identityError
+        }
+      }
+      failure = error
+      if ((error instanceof AgentRunError && error.outcomeUnknown) || (!this.localExecution && !executionSettled)) {
+        markOperatingRunUnknown(entry, error instanceof Error ? error.message : String(error))
+        failure = new MissionPause(
+          `Execution ${attempt.id} outcome is uncertain: ${(error instanceof Error ? error.message : String(error)).slice(0, 1_000)}. Reconcile the saved run before resuming.`,
+          "unknown-effect",
+        )
+      } else if (signal?.aborted)
+        failure =
+          signal.reason instanceof MissionPause
+            ? signal.reason
+            : new Error("Order interrupted. Resume the saved mission to continue.")
+    }
+    try {
+      if (run) await this.stopRun(run)
     } catch (error) {
       failed = true
-      throw error
+      markOperatingRunUnknown(entry, error instanceof Error ? error.message : String(error))
+      failure = new MissionPause(
+        `Execution ${attempt.id} cleanup is unconfirmed: ${(error instanceof Error ? error.message : String(error)).slice(0, 1_000)}. Reconcile the saved run before resuming.`,
+        "unknown-effect",
+      )
     } finally {
-      if (abort) signal?.removeEventListener("abort", abort)
-      await runner.killAll()
-      this.runners.delete(runner)
-      await finishProcess(active)
+      if (run) this.runs.delete(run)
       finishOperatingRun(mission, entry, observed, failed)
       await this.store.save(mission)
+    }
+    if (failed) throw failure
+    return output
+  }
+
+  private observeAttempt(expected: RunAttempt, observed: RunAttempt): RunAttempt {
+    if (
+      observed.id !== expected.id ||
+      observed.issueId !== expected.issueId ||
+      typeof observed.workspacePath !== "string" ||
+      resolve(observed.workspacePath) !== resolve(expected.workspacePath)
+    )
+      throw new AgentRunError(
+        "Runtime result belongs to another execution or workspace. Reconcile the intended run before resuming.",
+        expected,
+        { outcomeUnknown: true },
+      )
+    return observed
+  }
+
+  private async stopRun(run: RunHandle): Promise<void> {
+    if (!run.isAlive()) {
+      await this.joinRun(run)
+      return
+    }
+    if (run.executionCapabilities.cancellation === "unsupported")
+      throw new Error("Runtime cannot confirm cancellation. Reconcile the execution before resuming.")
+    await run.cancel()
+    if (run.executionCapabilities.cancellation !== "confirmed")
+      throw new Error(
+        "Runtime accepted cancellation without confirming completion. Reconcile the execution before resuming.",
+      )
+    await this.joinRun(run)
+  }
+
+  private async joinRun(run: RunHandle): Promise<void> {
+    try {
+      await run.result
+    } catch (error) {
+      if (error instanceof AgentRunError && error.outcomeUnknown) throw error
+    }
+  }
+
+  private async awaitRun(run: RunHandle, attempt: RunAttempt, signal?: AbortSignal): Promise<RunAttempt> {
+    if (!signal) return run.result
+    let abort: (() => void) | undefined
+    const interrupted = new Promise<never>((_resolve, reject) => {
+      abort = () => {
+        void this.stopRun(run).then(
+          () =>
+            reject(
+              signal.reason instanceof MissionPause
+                ? signal.reason
+                : new Error("Order interrupted. Resume the saved mission to continue."),
+            ),
+          (error) =>
+            reject(
+              new AgentRunError(error instanceof Error ? error.message : String(error), attempt, {
+                outcomeUnknown: true,
+              }),
+            ),
+        )
+      }
+      signal.addEventListener("abort", abort, { once: true })
+      if (signal.aborted) abort()
+    })
+    try {
+      return await Promise.race([run.result, interrupted])
+    } finally {
+      if (abort) signal.removeEventListener("abort", abort)
     }
   }
 }

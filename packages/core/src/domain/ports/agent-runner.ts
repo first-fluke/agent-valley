@@ -9,7 +9,7 @@
  * scripts/harness/validate.sh.
  */
 
-import type { Issue, Workspace } from "../models"
+import type { Issue, RunAttempt, Workspace } from "../models"
 
 // ── Spawn input ───────────────────────────────────────────────────────
 
@@ -23,6 +23,13 @@ export interface SpawnInput {
   timeoutMs?: number
   /** Attempt id minted upstream so events carry a stable correlation id. */
   attemptId: string
+  /** Preserve the caller's run identity, timestamps, and usage correlation. */
+  attempt?: RunAttempt
+  model?: string
+  env?: Record<string, string>
+  signal?: AbortSignal
+  /** Diagnostic stage name; runtime adapters may record it locally. */
+  stage?: string
 }
 
 // ── Run handle ────────────────────────────────────────────────────────
@@ -51,18 +58,47 @@ export type AgentRunEvent =
   | { kind: "complete"; attemptId: string; exitCode: number | null }
   | { kind: "error"; attemptId: string; error: Error }
 
+export interface ExecutionCapabilities {
+  /** Whether successful cancellation confirms that execution has stopped. */
+  cancellation: "confirmed" | "request-only" | "unsupported"
+  forceStop: boolean
+  reconnect: boolean
+}
+
+/** A failed execution can still carry observed usage and an uncertain outcome. */
+export class AgentRunError extends Error {
+  readonly code: string
+  readonly recoverable: boolean
+  readonly outcomeUnknown: boolean
+
+  constructor(
+    message: string,
+    readonly attempt: RunAttempt,
+    details: { code?: string; recoverable?: boolean; outcomeUnknown?: boolean } = {},
+  ) {
+    super(message)
+    this.name = "AgentRunError"
+    this.code = details.code ?? "CRASH"
+    this.recoverable = details.recoverable ?? false
+    this.outcomeUnknown = details.outcomeUnknown ?? false
+  }
+}
+
 export interface RunHandle {
   readonly attemptId: string
   readonly issueKey: string
+  /** Settles only after runtime cleanup; failures retain their observed attempt. */
+  readonly result: Promise<RunAttempt>
+  readonly executionCapabilities: ExecutionCapabilities
   /** Subscribe to the event stream. Returns an unsubscribe function. */
   onEvent(handler: (event: AgentRunEvent) => void): Unsubscribe
   /** Deliver an intervention. Rejects with `InterventionUnsupportedError` if unsupported. */
   send(cmd: InterventionCommand): Promise<void>
-  /** Request graceful cancellation. */
+  /** Request cancellation. A confirmed runtime resolves only after execution stops. */
   cancel(): Promise<void>
-  /** Force kill (after cancel timeout). */
+  /** Force stop when executionCapabilities.forceStop is true; otherwise reject. */
   kill(): Promise<void>
-  /** Process liveness. */
+  /** Last known execution activity; remote runtimes need not have a process. */
   isAlive(): boolean
 }
 

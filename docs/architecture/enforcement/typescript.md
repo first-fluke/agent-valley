@@ -4,7 +4,10 @@
 >
 > **This repository** uses the dependency-free `scripts/check-import-rules.mjs`
 > (`bun run check:imports`) instead of installing dependency-cruiser. It
-> enforces domain purity, adapter isolation, and acyclic imports. Existing
+> enforces domain purity, adapter isolation, and acyclic imports. Domain files
+> cannot import external packages; LangChain imports are confined to
+> `chief/coordinator-graph.ts`, which routes stages while AV owns Mission state.
+> Existing
 > violations are frozen in `scripts/import-rules.baseline.json`; any new
 > violation fails CI. The configuration below documents the equivalent rules.
 

@@ -1,59 +1,42 @@
-/**
- * SpawnAgentRunnerAdapter — Infrastructure adapter that implements the
- * domain `AgentRunnerPort` on top of the existing process-spawning
- * `AgentRunnerService`.
- *
- * Composition: the adapter owns an `AgentRunnerService` and exposes it
- * via `.service` so the in-transition Application code
- * (`OrchestratorCore`) can keep using the callback-based classical API
- * while external call-sites (dashboard intervention bus) consume the
- * port's `RunHandle` stream shape.
- *
- * Design: docs/plans/v0-2-bigbang-design.md § 4.4 (PR4).
- *
- * Intervention support table:
- *   claude       — ["append_prompt", "abort"]               (stateless; pause/resume absent)
- *   codex        — ["pause", "resume", "append_prompt", "abort"]  (persistent app-server)
- *   antigravity  — ["append_prompt", "abort"]               (stateless spawn-per-execute)
- *   cursor       — ["append_prompt", "abort"]               (stateless spawn-per-execute)
- *   grok         — ["append_prompt", "abort"]               (stateless spawn-per-execute)
- *
- * Stateless agents have no native user-message path at the port level;
- * `InterventionBus` handles their append_prompt by cancelling the run and
- * re-queueing with the merged instruction.
- */
-
+/** Local execution adapter. Process identities stay behind this boundary. */
 import { capabilitiesFor } from "../../agent-registry"
 import { AGENT_IDS } from "../../domain/agent"
 import type { RunAttempt } from "../../domain/models"
 import type {
   AgentRunEvent,
   AgentRunnerPort,
+  ExecutionCapabilities,
   InterventionCapability,
   InterventionCommand,
   RunHandle,
   SpawnInput,
   Unsubscribe,
 } from "../../domain/ports/agent-runner"
-import { InterventionUnsupportedError } from "../../domain/ports/agent-runner"
-import type { AgentSession } from "../agent-session"
-import { AgentRunnerService, type RunCallbacks, type RunOptions } from "./agent-runner-service"
+import { AgentRunError, InterventionUnsupportedError } from "../../domain/ports/agent-runner"
+import { AgentRunnerService } from "./agent-runner-service"
 
-/** Static capability table. Keeps `capabilities()` O(1) and UI-queryable. */
 export const CAPABILITY_TABLE: Record<string, InterventionCapability[]> = Object.freeze(
   Object.fromEntries(AGENT_IDS.map((id) => [id, capabilitiesFor(id)])),
 )
 
-/** Maps agent type name to an expected default capability set (read-only). */
 export function defaultCapabilities(agentType: string): InterventionCapability[] {
   return capabilitiesFor(agentType)
 }
 
+/** Optional local persistence hooks; neither domain handles nor remote adapters need PIDs. */
+export interface LocalRunLifecycle {
+  begin(): void | Promise<void>
+  spawned(pid: number | undefined): void
+  finish(): void | Promise<void>
+}
+
 export class SpawnAgentRunnerAdapter implements AgentRunnerPort {
-  /** Exposed so OrchestratorCore keeps the classical callback-based API in PR4. */
   public readonly service: AgentRunnerService
 
-  constructor(service?: AgentRunnerService) {
+  constructor(
+    service?: AgentRunnerService,
+    private readonly lifecycle?: (input: SpawnInput) => LocalRunLifecycle,
+  ) {
     this.service = service ?? new AgentRunnerService()
   }
 
@@ -62,22 +45,18 @@ export class SpawnAgentRunnerAdapter implements AgentRunnerPort {
   }
 
   async spawn(input: SpawnInput): Promise<RunHandle> {
-    if (!input.attemptId) {
+    if (!input.attemptId)
       throw new Error(
-        "SpawnAgentRunnerAdapter.spawn: input.attemptId is required.\n" +
-          "  Fix: mint a stable attemptId upstream and pass it on SpawnInput.\n" +
-          "  Location: caller of AgentRunnerPort.spawn.",
+        "SpawnAgentRunnerAdapter.spawn: input.attemptId is required. Pass a stable attemptId from the caller.",
       )
-    }
-    if (!input.agentType) {
+    if (!input.agentType)
+      throw new Error("SpawnAgentRunnerAdapter.spawn: input.agentType is required. Pass the resolved agent type.")
+    if (input.attempt && (input.attempt.id !== input.attemptId || input.attempt.issueId !== input.issue.id))
       throw new Error(
-        "SpawnAgentRunnerAdapter.spawn: input.agentType is required.\n" +
-          "  Fix: pass the resolved agent type (e.g. 'claude' | 'codex' | 'antigravity' | 'cursor' | 'grok').\n" +
-          "  Location: caller of AgentRunnerPort.spawn.",
+        "SpawnAgentRunnerAdapter.spawn: attempt identity differs from input. Pass the caller's matching attempt.",
       )
-    }
 
-    const attempt: RunAttempt = {
+    const attempt: RunAttempt = input.attempt ?? {
       id: input.attemptId,
       issueId: input.issue.id,
       workspacePath: input.workspace.path,
@@ -87,98 +66,118 @@ export class SpawnAgentRunnerAdapter implements AgentRunnerPort {
       exitCode: null,
       agentOutput: null,
     }
-
-    const emitter = new RunHandleEmitter()
-
-    const options: RunOptions = {
-      agentType: input.agentType,
-      timeout: Math.max(1, Math.round((input.timeoutMs ?? 3_600_000) / 1000)),
-      prompt: input.prompt,
-      workspacePath: input.workspace.path,
-    }
-
-    const callbacks: RunCallbacks = {
-      onComplete: (result) => {
-        emitter.emit({ kind: "complete", attemptId: input.attemptId, exitCode: result.exitCode })
-      },
-      onError: (error) => {
-        emitter.emit({
-          kind: "error",
-          attemptId: input.attemptId,
-          error: new Error(`${error.code}: ${error.message}`),
-        })
-      },
-      onHeartbeat: () => {
-        /* intentionally not surfaced on the port event stream */
-      },
-    }
-
-    // Wire an output-side tap before spawn so early chunks are delivered.
-    const service = this.service
-    await service.ensureRegistered()
-    // Access the session post-spawn to attach a listener; AgentRunnerService
-    // does not expose its Map, so we hook via the registry-bound factory.
-    // Simpler: the port's "output" event is best-effort in this PR — the
-    // existing AgentRunnerService already records last-output snippets for
-    // the status surface. Future work: push raw chunks through the port.
-    await service.spawn(attempt, options, callbacks)
-    emitter.emit({ kind: "started", attemptId: input.attemptId })
-
-    return new ServiceBackedRunHandle({
-      attemptId: input.attemptId,
-      issueKey: input.issue.identifier,
-      agentType: input.agentType,
-      service,
-      emitter,
-    })
+    const handle = new ServiceBackedRunHandle(input, attempt, this.service, this.lifecycle?.(input))
+    handle.start()
+    return handle
   }
 }
 
-// ── Handle + emitter internals ────────────────────────────────────────
-
 class RunHandleEmitter {
   private readonly handlers = new Set<(event: AgentRunEvent) => void>()
+  private readonly lifecycle: AgentRunEvent[] = []
 
   subscribe(handler: (event: AgentRunEvent) => void): Unsubscribe {
     this.handlers.add(handler)
+    // A run may finish during start(). Its lifecycle remains observable after spawn().
+    for (const event of this.lifecycle) this.deliver(handler, event)
     return () => {
       this.handlers.delete(handler)
     }
   }
 
   emit(event: AgentRunEvent): void {
-    for (const h of [...this.handlers]) {
-      try {
-        h(event)
-      } catch {
-        /* handler errors are isolated */
-      }
+    if (event.kind !== "output") this.lifecycle.push(event)
+    for (const handler of [...this.handlers]) this.deliver(handler, event)
+  }
+
+  private deliver(handler: (event: AgentRunEvent) => void, event: AgentRunEvent): void {
+    try {
+      handler(event)
+    } catch {
+      // Subscribers cannot disrupt execution or other observers.
     }
   }
-}
-
-interface ServiceHandleDeps {
-  attemptId: string
-  issueKey: string
-  agentType: string
-  service: AgentRunnerService
-  emitter: RunHandleEmitter
 }
 
 class ServiceBackedRunHandle implements RunHandle {
   readonly attemptId: string
   readonly issueKey: string
-  private readonly agentType: string
-  private readonly service: AgentRunnerService
-  private readonly emitter: RunHandleEmitter
+  readonly result: Promise<RunAttempt>
+  readonly executionCapabilities: ExecutionCapabilities = {
+    cancellation: "confirmed",
+    forceStop: true,
+    reconnect: false,
+  }
+  private readonly emitter = new RunHandleEmitter()
   private alive = true
+  private starting: Promise<void> = Promise.resolve()
+  private ending?: Promise<void>
+  private cancelled = false
+  private began = false
+  private resolveResult!: (attempt: RunAttempt) => void
+  private rejectResult!: (error: AgentRunError) => void
+  private abort?: () => void
 
-  constructor(deps: ServiceHandleDeps) {
-    this.attemptId = deps.attemptId
-    this.issueKey = deps.issueKey
-    this.agentType = deps.agentType
-    this.service = deps.service
-    this.emitter = deps.emitter
+  constructor(
+    private readonly input: SpawnInput,
+    private readonly attempt: RunAttempt,
+    private readonly service: AgentRunnerService,
+    private readonly lifecycle?: LocalRunLifecycle,
+  ) {
+    this.attemptId = input.attemptId
+    this.issueKey = input.issue.identifier
+    this.result = new Promise((resolve, reject) => {
+      this.resolveResult = resolve
+      this.rejectResult = reject
+    })
+    // Event-only callers need not await result. The original promise still rejects for awaiters.
+    void this.result.catch(() => {})
+  }
+
+  start(): void {
+    this.starting = Promise.resolve().then(async () => {
+      if (this.cancelled || this.input.signal?.aborted) return
+      await this.lifecycle?.begin()
+      this.began = true
+      if (this.cancelled || this.input.signal?.aborted) return
+      this.emitter.emit({ kind: "started", attemptId: this.attemptId })
+      await this.service.spawn(
+        this.attempt,
+        {
+          agentType: this.input.agentType,
+          model: this.input.model,
+          timeout: Math.max(1, Math.round((this.input.timeoutMs ?? 3_600_000) / 1000)),
+          prompt: this.input.prompt,
+          workspacePath: this.input.workspace.path,
+          env: this.input.env,
+        },
+        {
+          onComplete: (completed) => {
+            void this.finish(completed)
+          },
+          onError: (error) => {
+            const observed = {
+              ...this.attempt,
+              finishedAt: new Date().toISOString(),
+              exitCode: error.exitCode ?? null,
+              tokenUsage: error.tokenUsage,
+            }
+            void this.finish(observed, new AgentRunError(error.message, observed, error))
+          },
+          onHeartbeat: () => {},
+          onSpawned: (pid) => this.lifecycle?.spawned(pid),
+          onOutput: (text) => this.emitter.emit({ kind: "output", attemptId: this.attemptId, text }),
+        },
+      )
+    })
+    void this.starting.catch((error) => {
+      void this.finish(this.attempt, this.runError(error))
+    })
+    this.abort = () => {
+      void this.cancel().catch(() => {})
+    }
+    this.input.signal?.addEventListener("abort", this.abort, { once: true })
+    if (this.input.signal?.aborted) this.abort()
   }
 
   onEvent(handler: (event: AgentRunEvent) => void): Unsubscribe {
@@ -186,77 +185,80 @@ class ServiceBackedRunHandle implements RunHandle {
   }
 
   async send(cmd: InterventionCommand): Promise<void> {
-    const caps = defaultCapabilities(this.agentType)
-    if (!caps.includes(cmd.kind as InterventionCapability)) {
-      throw new InterventionUnsupportedError(cmd.kind, this.agentType)
-    }
+    const caps = defaultCapabilities(this.input.agentType)
+    if (!caps.includes(cmd.kind as InterventionCapability))
+      throw new InterventionUnsupportedError(cmd.kind, this.input.agentType)
+    if (cmd.kind === "abort") return this.cancel()
 
-    if (cmd.kind === "abort") {
-      await this.cancel()
-      return
-    }
-
+    await this.starting
     const session = this.service.getSession(this.attemptId)
-    if (!session?.isAlive()) {
-      throw new Error(
-        `SpawnAgentRunnerAdapter.send(${cmd.kind}): attempt "${this.attemptId}" has no live session.\n` +
-          "  Fix: check RunHandle.isAlive() before dispatching interventions.",
-      )
-    }
-
-    if (cmd.kind === "pause") {
-      if (typeof session.pause !== "function") {
-        throw new InterventionUnsupportedError(cmd.kind, this.agentType)
-      }
-      await session.pause()
+    if (!this.alive || !session?.isAlive())
+      throw new Error(`Attempt "${this.attemptId}" has no live session. Check RunHandle.isAlive() before intervention.`)
+    if (cmd.kind === "pause" || cmd.kind === "resume") {
+      const action = session[cmd.kind]
+      if (!action) throw new InterventionUnsupportedError(cmd.kind, this.input.agentType)
+      await action.call(session)
       return
     }
-
-    if (cmd.kind === "resume") {
-      if (typeof session.resume !== "function") {
-        throw new InterventionUnsupportedError(cmd.kind, this.agentType)
-      }
-      await session.resume()
-      return
-    }
-
-    if (cmd.kind === "append_prompt") {
-      // Prefer the session's native user-message path when available.
-      if (typeof session.sendUserMessage === "function") {
-        await session.sendUserMessage(cmd.text)
-        return
-      }
-      // Stateless sessions (claude, antigravity, cursor, grok) have no native path; the
-      // InterventionBus (Application layer) is responsible for cancel +
-      // respawn there. The port layer surfaces the same error shape.
-      throw new Error(
-        `SpawnAgentRunnerAdapter.send(append_prompt): agent "${this.agentType}" is stateless at the port level.\n` +
-          "  Fix: route append_prompt through InterventionBus, which will cancel + request a retry.",
-      )
-    }
+    if (session.sendUserMessage) return session.sendUserMessage(cmd.text)
+    throw new Error(
+      `Agent "${this.input.agentType}" is stateless at the port level. Route append_prompt through InterventionBus for cancel and retry.`,
+    )
   }
 
   async cancel(): Promise<void> {
-    await this.service.kill(this.attemptId)
-    this.alive = false
+    this.cancelled = true
+    if (this.ending) return this.ending
+    const observed = { ...this.attempt, finishedAt: new Date().toISOString() }
+    return this.finish(
+      observed,
+      new AgentRunError("Order interrupted. Execution was cancelled; resume the mission to continue.", observed, {
+        code: "CANCELLED",
+      }),
+    )
   }
 
-  async kill(): Promise<void> {
-    await this.service.kill(this.attemptId)
-    this.alive = false
+  kill(): Promise<void> {
+    return this.cancel()
   }
 
   isAlive(): boolean {
-    // The underlying service removes the session from its map as soon as
-    // kill() is requested; liveness is best-effort. `alive` stays true
-    // between spawn and the first cancel/kill/complete event.
     return this.alive
+  }
+
+  private finish(observed: RunAttempt, failure?: AgentRunError): Promise<void> {
+    if (this.ending) return this.ending
+    this.alive = false
+    this.ending = Promise.resolve().then(async () => {
+      let error = failure
+      try {
+        // Cancel before joining start: a delayed start must not run the prompt after cancellation.
+        await this.service.kill(this.attemptId)
+        await this.starting.catch(() => {})
+        await this.service.waitForAttempt(this.attemptId)
+        if (this.began) await this.lifecycle?.finish()
+      } catch (cleanupError) {
+        error = this.runError(cleanupError, observed, true)
+      }
+      if (this.abort) this.input.signal?.removeEventListener("abort", this.abort)
+      if (error) {
+        this.rejectResult(error)
+        this.emitter.emit({ kind: "error", attemptId: this.attemptId, error })
+        if (error.outcomeUnknown) throw error
+      } else {
+        this.resolveResult(observed)
+        this.emitter.emit({ kind: "complete", attemptId: this.attemptId, exitCode: observed.exitCode })
+      }
+    })
+    // Terminal callbacks are fire-and-forget; result carries cleanup failures to the caller.
+    void this.ending.catch(() => {})
+    return this.ending
+  }
+
+  private runError(error: unknown, observed = this.attempt, outcomeUnknown = false): AgentRunError {
+    if (error instanceof AgentRunError && !outcomeUnknown) return error
+    return new AgentRunError(error instanceof Error ? error.message : String(error), observed, { outcomeUnknown })
   }
 }
 
-// Re-exported so unit tests can wait for emitter-driven lifecycle without
-// depending on private classes.
 export type InternalRunHandleEmitter = RunHandleEmitter
-
-/** Expose AgentSession lookup shape used by tests to stub session behavior. */
-export type { AgentSession }

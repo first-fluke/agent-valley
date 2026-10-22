@@ -3,6 +3,7 @@ import { mkdir, open, readdir, readFile, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { writeJsonAtomic } from "../util/atomic-json"
 import { ActiveMissionProcess } from "./active-process"
+import { reconcileExecution } from "./execution"
 import { missionSchema } from "./schemas"
 import type { Mission } from "./types"
 
@@ -15,13 +16,27 @@ export class MissionStore {
     return new ActiveMissionProcess(this.directory, id, runId)
   }
 
-  async recoverProcesses(id: string): Promise<void> {
+  async recoverProcesses(id: string, mission?: Mission): Promise<void> {
     this.path(id)
+    if (mission && mission.id !== id)
+      throw new Error("Process recovery mission identity differs from its record. Restore the matching checkpoint.")
     const names = await readdir(this.directory)
     for (const name of names) {
       if (name === `${id}.active`) await this.processGuard(id).recoverOrphan()
-      else if (name.startsWith(`${id}.run-`) && name.endsWith(".active"))
-        await this.processGuard(id, name.slice(id.length + 5, -7)).recoverOrphan()
+      else if (name.startsWith(`${id}.run-`) && name.endsWith(".active")) {
+        const runId = name.slice(id.length + 5, -7)
+        await this.processGuard(id, runId).recoverOrphan()
+        const run = mission?.operations?.runs.find((entry) => entry.runId === runId)
+        if (mission && run?.executionState === "unknown" && run.executionRecovery === "local-process") {
+          reconcileExecution(
+            mission,
+            runId,
+            "The local process guard confirmed that the recorded execution and its process group stopped.",
+            "local-process-guard",
+          )
+          await this.save(mission)
+        }
+      }
     }
   }
 

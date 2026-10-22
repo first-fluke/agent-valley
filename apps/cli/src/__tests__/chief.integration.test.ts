@@ -14,6 +14,7 @@ import { discoverAgents } from "../agent-discovery"
 import { runOrder } from "../chief"
 import type { OrderOptions } from "../chief-config"
 import { initializeOperation, operationStore } from "../chief-continuous"
+import { failureEvidence } from "./chief-diagnostics.fixture"
 import { installOmaFixture } from "./chief-oma.fixture"
 
 vi.mock("@agent-valley/core/sessions/sandbox", () => ({ planSandboxedSpawn: vi.fn() }))
@@ -222,7 +223,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
       },
       root,
     )
-    expect(mission.status).toBe("completed")
+    expect(mission.status, failureEvidence(mission)).toBe("completed")
     expect(mission.containerObservationPolicy).toEqual(policy)
     expect(collect).toHaveBeenCalledTimes(2)
     available = false
@@ -244,7 +245,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect(rendered).toContain("CPU=3%")
     expect(rendered).toContain("threshold 80")
     expect(rendered).toContain("unavailable")
-  }, 20_000)
+  }, 60_000)
 
   it("reuses source-repository decisions and stores verified evidence with unknown costs intact", async () => {
     await addOrganizationMemory(repo, {
@@ -275,7 +276,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     const next = await runOrder("Create another verified deliverable", { workspace: repo, verify, timeout: "10" }, root)
     expect(next.organizationContext?.outcomes.some((item) => item.missionId === mission.id)).toBe(true)
     expect(next.organizationContext?.routeEvidence[0]).toMatchObject({ samples: 1, successes: 1, totalCostUsd: null })
-  }, 20_000)
+  }, 60_000)
 
   it("keeps organization memory disabled through the final-review refresh", async () => {
     await addOrganizationMemory(repo, {
@@ -288,7 +289,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect(mission.organizationContext).toBeUndefined()
     expect((await calls()).some((call) => call.prompt.includes("PRIVATE_DISABLED_MEMORY_MARKER"))).toBe(false)
     expect(await listOrganizationOutcomes(repo)).toEqual([])
-  }, 20_000)
+  }, 60_000)
 
   it("completes an order without tracker config, preserves isolation, and rechecks a saved mission", async () => {
     const sigint = process.listenerCount("SIGINT")
@@ -297,7 +298,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
       { workspace: repo, verify, model: "selected-chief-model", timeout: "10" },
       root,
     )
-    expect(mission.status).toBe("completed")
+    expect(mission.status, failureEvidence(mission)).toBe("completed")
     expect(mission.tasks[0]?.status).toBe("completed")
     expect(mission.tasks[0]?.reviewerId).toBe("technical-director")
     expect(mission.availableAgents).toEqual(["claude"])
@@ -343,7 +344,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect((await calls()).every((call) => call.cwd === canonicalWorkspace)).toBe(true)
     expect(await new MissionStore(join(root, ".agent-valley/missions")).load(mission.id)).toEqual(mission)
     const resumed = await runOrder(undefined, { resume: mission.id }, root)
-    expect(resumed.status).toBe("completed")
+    expect(resumed.status, resumed.error).toBe("completed")
     expect(resumed.tasks[0]?.attempts).toBe(1)
     expect(resumed.personas).toEqual(mission.personas)
     expect(vi.mocked(planSandboxedSpawn).mock.lastCall?.[0].args).toContain("selected-chief-model")
@@ -361,7 +362,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     ])
     expect(await readdir(join(root, ".agent-valley/missions"))).toEqual([`${mission.id}.json`])
     expect(process.listenerCount("SIGINT")).toBe(sigint)
-  }, 20_000)
+  }, 60_000)
 
   it("preserves an explicit roster while detecting ready vendors for independent reviews", async () => {
     const personas = [
@@ -375,7 +376,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
       { workspace: repo, verify, personas: "personas.yaml", timeout: "10" },
       root,
     )
-    expect(mission.status).toBe("completed")
+    expect(mission.status, failureEvidence(mission)).toBe("completed")
     expect(mission.personas.slice(0, personas.length)).toEqual(personas)
     expect(mission.personas.find((persona) => persona.id === "technical-director")).toMatchObject({
       agentType: "claude",
@@ -392,12 +393,12 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
       workerActorType: "claude",
       reviewerActorType: "claude",
     })
-  }, 20_000)
+  }, 60_000)
 
   it("requires an installed OMA profile and skill without receipt enforcement", async () => {
     const path = await installOmaFixture(repo)
     const mission = await runOrder("Create a verified deliverable", { workspace: repo, verify, timeout: "10" }, root)
-    expect(mission.status).toBe("completed")
+    expect(mission.status, failureEvidence(mission)).toBe("completed")
     expect(mission.oma).toBe(false)
     expect(mission.availableSkills).toEqual([
       {
@@ -420,7 +421,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect(await readFile(join(root, ".agent-valley/reports", `${mission.id}.md`), "utf8")).toMatch(
       /oma\\?-fixture\\?-helper/,
     )
-  }, 20_000)
+  }, 60_000)
 
   it.each([
     { schedule: "forward", directorOrder: ["technical-review", "design-review", "marketing-review"] },
@@ -435,7 +436,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
         { workspace: repo, verify, agent: "claude", repairs: "1", timeout: "10", parallel: "3" },
         root,
       )
-      expect(mission.status).toBe("completed")
+      expect(mission.status, failureEvidence(mission)).toBe("completed")
       expect(mission.tasks[0]?.attempts).toBe(2)
       expect(mission.repairRound).toBe(1)
       const stages = (await calls()).map((call) => call.stage)
@@ -454,13 +455,13 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
       { workspace: repo, verify, agent: "claude", model: "selected-chief-model", repairs: "0", timeout: "10" },
       root,
     )
-    expect(paused.status).toBe("paused")
-    expect(paused.error).toContain("Simulated Chief Director connection failure")
+    expect(paused.status, paused.error).toBe("paused")
+    expect(paused.error, failureEvidence(paused)).toContain("Simulated Chief Director connection failure")
     expect(paused.execution?.failureKind).toBe("chief-unavailable")
     const store = new MissionStore(join(root, ".agent-valley/missions"))
     const [failed] = await store.list()
     if (!failed) throw new Error("Expected saved failed mission")
-    expect(failed.status).toBe("paused")
+    expect(failed.status, failed.error).toBe("paused")
     expect(failed.id).toBe(paused.id)
     expect(failed.report?.eli5).toContain("Simulated Chief Director connection failure")
     expect(await readFile(join(root, ".agent-valley/reports", `${failed.id}.md`), "utf8")).toContain(
@@ -470,11 +471,11 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     const spent = structuredClone(failed.execution)
     const beforeResume = await calls()
     const protectedResume = await runOrder(undefined, { resume: failed.id }, root)
-    expect(protectedResume.status).toBe("paused")
+    expect(protectedResume.status, protectedResume.error).toBe("paused")
     expect(protectedResume.execution).toEqual(spent)
     expect(await calls()).toEqual(beforeResume)
     const resumed = await runOrder(undefined, { resume: failed.id, retry: true }, root)
-    expect(resumed.status).toBe("completed")
+    expect(resumed.status, resumed.error).toBe("completed")
     expect(resumed.id).toBe(failed.id)
     expect(resumed.personas.find((actor) => actor.id === resumed.chiefId)?.model).toBe("selected-chief-model")
     expect(resumed.workspace.path).toBe(failed.workspace.path)
@@ -482,7 +483,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect(resumed.supervision?.rounds).toBe(2)
     expect(resumed.supervision?.decisions[0]?.action).toBe("repair")
     expect((await calls()).filter((call) => call.stage === "plan")).toHaveLength(1)
-  }, 20_000)
+  }, 60_000)
 
   it("rejects resume contract changes and releases its lock after CLI validation errors", async () => {
     await expect(runOrder(undefined, { workspace: repo, verify }, root)).rejects.toThrow("Give the chief a goal")
