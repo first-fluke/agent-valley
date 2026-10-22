@@ -204,6 +204,7 @@ export abstract class BaseSession implements AgentSession {
       return false
     }
 
+    const env = buildAgentEnv(options.agentType, { ...this.config.env, ...options.extraEnv }) as NodeJS.ProcessEnv
     let plan: Awaited<ReturnType<typeof planSandboxedSpawn>>
     try {
       plan = await planSandboxedSpawn({
@@ -211,6 +212,7 @@ export abstract class BaseSession implements AgentSession {
         command: options.command,
         args: options.args,
         workspacePath: this.config.workspacePath,
+        env,
       })
     } catch (err) {
       if (options.rethrowSandboxError) throw err
@@ -221,7 +223,7 @@ export abstract class BaseSession implements AgentSession {
     this.process = spawn(plan.command, plan.args, {
       detached: process.platform !== "win32",
       cwd: this.config.workspacePath,
-      env: buildAgentEnv(options.agentType, { ...this.config.env, ...options.extraEnv }) as NodeJS.ProcessEnv,
+      env,
       stdio: options.stdio,
     })
 

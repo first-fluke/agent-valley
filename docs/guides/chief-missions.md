@@ -196,6 +196,17 @@ The normal flow lets the Chief diagnose failures, choose recovery and resume sch
 av order --resume ORDER_ID --retry --runs 400 --duration 172800 --rounds 12
 ```
 
+When a runtime execution has an unknown outcome, first confirm that it has stopped at the runtime or remote destination. Use the run ID printed in the saved mission's unknown-outcome error to record the termination evidence:
+
+```bash
+av missions reconcile ORDER_ID --run RUN_ID \
+  --evidence 'Task status is terminated; inspected its final process log.'
+```
+
+The command requires 1–2,000 characters of operator-provided evidence. It checks recorded local process guards, records the execution as settled and failed, and leaves the mission paused. Live or uncertain local process guards still block reconciliation. The evidence is an operator statement; AV does not independently verify a remote termination claim. A lost response or missing remote task alone does not establish termination.
+
+Reconciliation preserves the saved goal, Actors, checks, task reviews and spent budgets. External effect outcomes use the controls below; unknown costs use [run cost reconciliation](./chief-integrations.md#reconciling-unknown-run-costs). After inspecting those records, explicitly resume with `av order --resume ORDER_ID --retry`. Additional unknown executions continue to block dispatch. This command reads mission records under `.agent-valley/missions/`, including operation children; use the child mission ID rather than its parent operation ID.
+
 External tasks record that execution started before dispatch. A completed external action is preserved even if its review fails; the Chief plans a separate corrective task when authorized. If a crash or interruption leaves an outcome uncertain, the original effect stays unresolved and cannot be repeated. The Chief may wait for trustworthy evidence or stop with the missing prerequisite in its report. AV has no generic automatic destination observer and does not ask the user to guess `completed` or `not-applied` as the default recovery flow.
 
 An operator who has independently checked the actual destination can explicitly record the result with these advanced overrides:

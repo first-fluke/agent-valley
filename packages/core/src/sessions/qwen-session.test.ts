@@ -72,6 +72,7 @@ describe("Qwen Code native single-shot session", () => {
       command: "qwen",
       args: ["--output-format", "stream-json", "--yolo", "--model", "pinned-model"],
       workspacePath: workspace,
+      env: expect.any(Object),
     })
     const complete = events.find((event) => event.type === "complete")
     expect(complete?.result.tokenUsage).toEqual({ input: 100, output: 12, model: "actual-qwen-model" })

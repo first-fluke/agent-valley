@@ -120,6 +120,7 @@ The default tunnel provider is ngrok. The wizard can select Cloudflare or `none`
 | Actor never starts | Check operations-panel blockers/retry time, concurrency, budget limits, selected actor executable/authentication, and webhook delivery in the tracker. |
 | Task retries after producing code | Read the verification/delivery error. Run the configured check in the retained worktree; check Git remote and `gh` authentication. |
 | Process exits without a result | Run the actor interactively once to authenticate and confirm its installed version. Update incompatible CLIs. The task fails promptly instead of waiting for the full task timeout. |
+| Codex cannot initialize state in a custom profile | Confirm the Actor's `CODEX_HOME` names an existing absolute, dedicated profile directory. Sandbox planning uses the same forwarded environment as the Codex subprocess and permits that active profile. A home directory or its ancestor is rejected; preserve the intended account and correct the configured directory. |
 | Dashboard says unavailable | Run `bun av doctor` and inspect `.av.log` or the foreground output for the initialization failure. Fix it and restart. A connected SSE socket does not imply a healthy scheduler. |
 | Runtime restarted while an actor was alive | Recovery reserves that task until the old process exits, then retries retained work. Inspect a stuck process before terminating it. |
 | Read-only user cannot control actors | Sign in separately for controls with the intervention token. Viewing status does not require that token. |

@@ -25,6 +25,7 @@ import {
 import { saveAndDeliverMissionReport } from "./chief-delivery"
 import { createMissionMetricPorts } from "./chief-metrics"
 import { orderExitCode, printOrderOutcome } from "./chief-outcome"
+import { registerMissionReconciliation } from "./chief-reconcile"
 import { applyResumeOptions, validateResumeOptions } from "./chief-resume"
 import { abortableDelay, superviseOrder } from "./chief-supervisor"
 import { prepareChiefToolConfig } from "./chief-tool-config"
@@ -390,7 +391,7 @@ export function registerChiefCommands(program: Command): void {
       }
     })
 
-  program
+  const missions = program
     .command("missions")
     .description("List saved Chief Director orders and their workspaces")
     .option("--watch", "Resume due or interrupted orders from their saved checkpoints")
@@ -434,4 +435,5 @@ export function registerChiefCommands(program: Command): void {
         console.log(`  ${mission.workspace.path}${mission.error ? `\n  ${mission.error}` : ""}`)
       }
     })
+  registerMissionReconciliation(missions)
 }

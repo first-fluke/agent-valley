@@ -1,7 +1,7 @@
 # Runtime execution and state ownership
 
-Date: 2026-10-22
-Status: Proposed, revision 1. The local contract and recovery changes are implemented in this change; adoption of a remote backend remains conditional.
+Date: 2026-10-23
+Status: Proposed, revision 2. Local runtime changes and an independent, opt-in A2A backend are implemented under the user's implementation request. Production endpoint qualification and the economic assessment remain open.
 
 ## Context and evidence
 
@@ -18,7 +18,7 @@ The concrete gaps are narrower: Chief bypasses the existing `AgentRunnerPort`; t
 | Keep direct Chief process orchestration | No migration work | Two execution contracts; port consumers lose early completion and accurate liveness | Reject for the local path |
 | Extend the existing execution port and preserve AV state ownership | Reuses one contract; exposes result, cancellation differences and uncertainty | Adapter lifecycle and concurrency tests; recovery schema extension | Implement local path |
 | Expand LangGraph persistence or replace the core with Mastra | Potential framework facilities | No demonstrated missing capability; changes checkpoint ownership and migration scope | Defer |
-| Add an A2A backend immediately | Remote interoperability | No selected endpoint, artifact contract or demonstrated recovery/security guarantees | Defer until the gates below pass |
+| Add an independent A2A backend with explicit endpoint and artifact contracts | Remote interoperability through the existing execution port | Durable remote records, constrained file delivery, trusted local verification and endpoint qualification | Implement as an opt-in backend; qualify each production endpoint separately |
 
 These are qualitative comparisons, not measured return on investment. Reconsider the backend choice when a concrete remote workload and comparable implementation/operating costs are available.
 
@@ -32,6 +32,7 @@ These are qualitative comparisons, not measured return on investment. Reconsider
 | Local PID identity, process groups and disposal | Local adapter and process guard |
 | Applying changes, workspace fingerprint, review and final verification | Existing AV delivery and verification gates |
 | Unknown execution outcome and operator reconciliation | Durable AV execution record; never a transport retry decision |
+| Independent A2A request, remote reference and artifact application journal | AV execution service and `A2aJobStore`; remote Task state is an observation |
 
 `RunHandle.result` carries the full `RunAttempt`, including output and observed usage. `AgentRunError` retains the observed attempt and explicitly marks an unknown outcome. A local result settles after that attempt's startup and cleanup have joined. Cancelling one attempt must not stop another attempt sharing a service.
 
@@ -44,7 +45,29 @@ authority in history. It settles the execution as failed without approving a
 task, resolving its external effects or inventing billing data. Local recovery
 may use a matching process marker that was successfully cleared; missing markers
 and nonlocal runs require separate evidence. The helper does not authenticate
-remote evidence, and no remote reconciliation CLI is introduced.
+remote evidence. `av missions reconcile` exposes operator-recorded termination
+evidence for Mission runs and leaves the Mission paused. Operation decision
+checkpoints have their own recovery policy; this command covers Missions,
+including operation child Missions.
+
+`av a2a run/resume/status/reconcile` uses the same execution port as local
+execution and owns separate records under `.agent-valley/a2a/`. It does not
+change Chief's native actor selection or make a remote result a completed
+Mission. The endpoint JSON selects an explicitly trusted JSON-RPC interface
+and names an optional Bearer-token environment variable. AV persists the exact
+input and a request digest before `SendMessage`, then the Task/context reference
+before polling. A lost submission response without a Task ID remains unknown;
+`resume` cannot send it again. An accepted Task is resumed with `GetTask`.
+
+The file contract is an inline `agentValleyArtifact` manifest bound to the
+attempt, request digest, repository identity and base revision. The operator
+supplies exact allowed paths and a fixed verification command. AV validates
+bounded complete file bytes and hashes, refuses credential/metadata paths and
+symlinks, journals changes before applying them, and checks interrupted
+application against original or desired file images. It then runs the local
+verifier and rechecks HEAD, delivered files and the workspace fingerprint.
+Neither a remote success claim nor an unconfirmed verifier process cleanup
+allows another execution. See [A2A execution](../guides/a2a-execution.md).
 
 ## Diagram
 
@@ -55,8 +78,13 @@ flowchart LR
     coordinator --> runtime[ChiefRuntime]
     runtime --> port[AgentRunnerPort]
     port --> local[Local spawn adapter]
-    local --> guard[Local process guard]
-    local --> service[AgentRunnerService]
+    local --> process[Local process guard and service]
+    execution[A2A execution service] --> port
+    execution --> jobs[A2aJobStore]
+    port --> a2a[A2A adapter]
+    a2a --> endpoint[Remote endpoint]
+    execution --> gate[Artifact and verification gate]
+    gate --> jobs
 ```
 
 Interactive: [adr-runtime-execution-and-state-ownership.archify.html](./adr-runtime-execution-and-state-ownership.archify.html)
@@ -72,8 +100,13 @@ Interactive: [adr-runtime-execution-and-state-ownership.archify.html](./adr-runt
 | Runtime reports an unknown submission/stop result | Mission pauses; no retry, review or verification dispatch follows |
 | Coordinator restarts with a reconciliation-required run | Durable record remains uncertain; unfinished work is not silently reset for replay |
 | External package enters domain, or LangChain enters a module outside the routing adapter | `bun run check:imports` fails |
+| A2A accepts a submission and loses its response | Persisted uncertainty blocks another submission; taskless `resume` never calls `SendMessage` |
+| AV restarts with a saved A2A Task reference | A new service instance uses `GetTask` and the original execution identity; no replacement submission |
+| Remote artifacts are tampered, stale or escape the allowed paths | Hash/binding/path/symlink checks reject them before application; partial application resumes only from recorded file images |
+| A remote success claim conflicts with local verification | The execution remains failed; explicit resume rechecks the saved response without submitting again |
+| Local verification cannot confirm process cleanup | The execution remains unknown and blocks another repository writer |
 
-Run `bun run test`, `bun run typecheck`, `bun run lint` and `bun run check:imports`; the repository coverage thresholds remain applicable. These checks do not certify an A2A endpoint.
+Run `bun run test`, `bun run typecheck`, `bun run lint` and `bun run check:imports`; the repository coverage thresholds remain applicable. These checks include an actual local HTTP JSON-RPC fixture and real Git/file/verification operations. They do not certify a production A2A endpoint. The separate native-agent interruption/restart smoke requires the local runtime gate's owner approval; its result must be reported independently of automated fixtures.
 
 ## Remote backend gates
 
@@ -91,6 +124,17 @@ The [A2A v1.0.1 specification, sections 3.1.5 and 3.3.1](https://a2a-protocol.or
 
 First extend the existing port, then route Chief's default local execution through its adapter. Preserve local process guards, budgets, OMA receipt checks and delivery verification. Read old records as local; save the new execution metadata for new runs. Test injected executions without PIDs, cleanup races and restart barriers before enabling another backend.
 
-This introduces no remote endpoint or new framework dependency. A2A remains a separate adapter proposal; Mastra may be evaluated as an external agent/runtime when a workload warrants it. LangGraph remains limited to routing. Removing or expanding it requires behavior and recovery evidence.
+The A2A backend is independent and opt-in. It adds no framework dependency and
+does not upload repository contents, inherit a remote Agent Card's endpoint, or
+automatically route Chief stages to a remote service. Production use requires
+an authorized endpoint with access to the intended repository revision, exact
+file permissions and a trusted verifier kept outside the allowed delivery
+paths. Remote artifact URLs are not fetched. Only the approved adapter makes
+remote calls; redirects and unbounded responses are rejected. Each deployment
+still needs its own authorization and operating-cost evidence.
+
+Mastra may be evaluated as an external agent/runtime when a workload warrants
+it. LangGraph remains limited to routing. Removing or expanding it requires
+behavior and recovery evidence.
 
 The tradeoff is additional lifecycle and uncertainty handling in exchange for one reusable execution boundary. A conservative uncertainty pause may require operator investigation. Do not remove that barrier merely to restore automatic progress.

@@ -95,7 +95,7 @@ export function buildLinuxSandboxCommand(
     )
   }
   const tmp = tmpdir()
-  const agentPaths = agentHomeAccess(req.agentType, home)
+  const agentPaths = agentHomeAccess(req.agentType, home, req.env)
 
   const args: string[] = ["--die-with-parent", "--unshare-pid", "--proc", "/proc", "--dev", "/dev"]
 

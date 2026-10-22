@@ -15,6 +15,8 @@ export interface SandboxBuildRequest {
   args: string[]
   /** Git worktree path the agent is allowed to write to. */
   workspacePath: string
+  /** Effective child environment; only forwarded vendor profile overrides apply. */
+  env?: NodeJS.ProcessEnv
   /** Resolved domain allowlist for outbound network egress. */
   networkAllowlist: string[]
 }

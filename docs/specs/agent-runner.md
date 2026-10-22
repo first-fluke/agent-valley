@@ -1,6 +1,6 @@
 # Agent Runner
 
-> Responsibility: Manage agent process lifecycle via the `AgentRunnerPort` abstraction.
+> Responsibility: Manage execution lifecycle via the `AgentRunnerPort` abstraction.
 > SRP: Owns session creation, execution, and cleanup. Retry decisions are the Orchestrator's responsibility.
 
 Domain models: see `domain-models.md` (RunAttempt, LiveSession).
@@ -43,7 +43,7 @@ type InterventionCommand =
 type InterventionCapability = "pause" | "resume" | "append_prompt" | "abort"
 ```
 
-The only built-in adapter is `SpawnAgentRunnerAdapter`
+The default local adapter is `SpawnAgentRunnerAdapter`
 (`packages/core/src/sessions/adapters/spawn-agent-runner.ts`) which wraps
 the existing process-spawning `AgentRunnerService`. The orchestrator also
 consumes the adapter's static capability table so the dashboard can
@@ -83,16 +83,59 @@ Chief uses this port too. Its default adapter binds local process guards in
 Mission state, budgets, retries and checkpoints stay in AV. Durable run records
 separate execution state (`running`, `settled`, `unknown`) from review outcome.
 Unknown injected executions require reconciliation before restart can dispatch
-work. There is no configured remote backend in this change; see the
+work. The independent A2A backend below uses separate AV execution records; see the
 [runtime decision](../decisions/adr-runtime-execution-and-state-ownership.md) for
 A2A adoption gates.
 
 `reconcileExecution(mission, runId, evidence)` in `chief/execution.ts` records
 explicit termination evidence and leaves the run failed, with task reviews,
-external effects and unknown costs still independent. It is a programmatic
-operation, not a new CLI flag. Default local runs can also be reconciled when
+external effects and unknown costs still independent. Operators can record this
+evidence with `av missions reconcile MISSION_ID --run RUN_ID --evidence TEXT`.
+The command acquires the mission lock, checks local process guards and saves the
+record while leaving the mission paused. It records operator-provided evidence
+without independently verifying remote termination. Resume remains an explicit
+action after effects, reviews and costs have been inspected. Default local runs
+can also be reconciled when
 `MissionStore.recoverProcesses` clears their matching process marker and proves
 termination. A missing marker cannot establish termination for an unknown run.
+
+### Independent A2A backend
+
+`A2aAgentRunnerAdapter` implements the same port for the
+[A2A specification 1.0.1](https://a2a-protocol.org/v1.0.1/specification/), using
+JSON-RPC methods `SendMessage`, `GetTask` and `CancelTask` with wire version
+`A2A-Version: 1.0`. It supports `abort`, confirmed cancellation after a terminal
+Task observation, and durable reconnect. It has no process ID or force-stop.
+Unsupported interventions fail explicitly. An acknowledgement, timeout or
+missing Task cannot establish termination.
+
+`av a2a run/resume/status/reconcile` composes the adapter with an AV-owned
+`A2aJobStore`, an inline file artifact gate and local verification. Its initial
+record and request digest precede submission; the accepted Task ID precedes
+polling. Accepted tasks resume through `GetTask`. A taskless uncertain
+submission remains blocked and cannot be sent again. Operator reconciliation
+records termination separately from successful delivery.
+
+The endpoint is explicitly pinned in a strict JSON configuration. HTTPS,
+same-origin Agent Card discovery, declared JSONRPC 1.0 interface/tenant,
+supported authentication, redirect refusal, time limits and bounded payloads
+are enforced by the transport adapter. Only an environment-variable name is
+stored for the optional Bearer credential. HTTP requires an explicit literal
+loopback development setting. Returned URLs and raw attachments are not fetched.
+
+The operator fixes exact allowed paths and a local verification command before
+submission. AV binds complete file bytes and SHA-256 values to the execution,
+request, repository and base revision; rejects metadata, credentials,
+symlinks and paths outside that allowlist; and journals application for restart.
+It rechecks the Git revision, delivered file images and workspace fingerprint
+after local verification and joins the verifier process group before completion.
+Unconfirmed cleanup keeps the record unknown and blocks a subsequent writer.
+
+This backend does not automatically select remote actors for Chief stages.
+Chief Mission transitions, approvals and budgets remain in the existing
+coordinator. See [remote A2A execution](../guides/a2a-execution.md) for the command
+and artifact contracts. Local HTTP protocol fixtures exercise recovery and
+artifact checks; qualifying an external endpoint is a separate deployment check.
 
 ---
 
@@ -202,7 +245,7 @@ Agent processes receive a **minimal allowlisted environment**, not the full host
 
 ```
 Safe system vars: PATH, HOME, SHELL, LANG, TERM, TMPDIR, GIT_AUTHOR_*
-Agent-specific:   codex → OPENAI_API_KEY
+Agent-specific:   codex → OPENAI_API_KEY, CODEX_HOME
                   claude → ANTHROPIC_API_KEY
                   antigravity (and its "agy" CLI key) → GOOGLE_API_KEY, GEMINI_API_KEY
                   cursor → CURSOR_API_KEY
@@ -219,6 +262,17 @@ Explicit extras:  config.env (passed through AgentConfig)
 ```
 
 No other host environment variables are forwarded.
+
+Sandbox planning receives the same allowlisted environment as the actual
+subprocess. For Codex, a forwarded `CODEX_HOME` selects the active writable
+profile, including account-manager profiles outside `~/.codex`. It must resolve
+to an existing absolute directory distinct from the user's home and its
+ancestors. Without an override, the native default remains `~/.codex`.
+An unforwarded host value does not grant an additional sandbox path.
+On macOS, Codex also receives read access to the `apple.cfprefs.` shared-memory
+namespace used by its native configuration loader. This permits repeated
+managed-preference reads without granting shared-memory writes or changing the
+active account's settings.
 
 ---
 

@@ -18,6 +18,7 @@ import { loadConfig, resolveGlobalConfigPath } from "@agent-valley/core/config/y
 import { AV_VERSION } from "@agent-valley/core/version"
 import { program } from "commander"
 import pc from "picocolors"
+import { registerA2aCommands } from "./a2a"
 import { registerAgentClientCommands } from "./agent-client-commands"
 import { registerChiefCommands } from "./chief"
 import { registerOrganizationCommands } from "./chief-organization"
@@ -462,6 +463,7 @@ program.action(() => {
 
 registerDoctorCommand(program)
 registerChiefCommands(program)
+registerA2aCommands(program)
 registerOrganizationCommands(program)
 registerAgentClientCommands(program)
 registerTeamCommands(program)

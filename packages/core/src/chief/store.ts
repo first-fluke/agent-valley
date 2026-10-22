@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto"
-import { mkdir, open, readdir, readFile, unlink } from "node:fs/promises"
+import { mkdir, readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { writeJsonAtomic } from "../util/atomic-json"
+import { lockRecord } from "../util/record-lock"
 import { ActiveMissionProcess } from "./active-process"
 import { reconcileExecution } from "./execution"
 import { missionSchema } from "./schemas"
@@ -87,60 +87,6 @@ export class MissionStore {
 
   /** A second CLI cannot resume a live mission. Dead-owner locks fail closed to avoid a reclaim race. */
   async lock(id: string): Promise<() => Promise<void>> {
-    const path = `${this.path(id)}.lock`
-    await mkdir(this.directory, { recursive: true, mode: 0o700 })
-    const token = randomUUID()
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const file = await open(path, "wx", 0o600)
-        try {
-          await file.writeFile(JSON.stringify({ pid: process.pid, token }))
-        } finally {
-          await file.close()
-        }
-        return async () => {
-          const current = JSON.parse(await readFile(path, "utf8")) as { token?: string }
-          if (current.token === token) await unlink(path)
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
-        await this.reclaimStaleLock(path, id)
-      }
-    }
-    throw new Error(`Could not acquire mission ${id}. Another process resumed it; try av missions.`)
-  }
-
-  private async reclaimStaleLock(path: string, id: string): Promise<void> {
-    const guardPath = `${path}.reclaim`
-    const guard = await open(guardPath, "wx", 0o600).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "EEXIST") throw error
-      throw new Error(
-        `Mission ${id} lock recovery is already in progress. Retry --resume ${id}; if it persists, inspect ${guardPath} and remove it only after its owner has stopped.`,
-      )
-    })
-    try {
-      await guard.writeFile(JSON.stringify({ pid: process.pid }))
-      // Re-read under an exclusive recovery guard: another contender may have
-      // replaced the stale lock since our initial acquisition failed.
-      const content = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return null
-        throw error
-      })
-      if (content === null) return
-      const lock = JSON.parse(content) as { pid?: number }
-      if (!Number.isInteger(lock.pid) || (lock.pid ?? 0) < 2)
-        throw new Error(`Invalid mission lock at ${path}. Inspect it before removing it.`)
-      try {
-        process.kill(lock.pid as number, 0)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
-        await unlink(path)
-        return
-      }
-      throw new Error(`Mission ${id} is already running (PID ${lock.pid}). Stop that run before resuming.`)
-    } finally {
-      await guard.close()
-      await unlink(guardPath)
-    }
+    return lockRecord(`${this.path(id)}.lock`, `Mission ${id}`, "mission")
   }
 }

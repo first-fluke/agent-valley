@@ -1,7 +1,7 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
 
 /** QWEN_HOME names Qwen Code's user profile, not an API credential. Relative profiles vary per worktree. */
-export function qwenProfilePath(home: string, env: NodeJS.ProcessEnv): string | null {
+export function qwenProfilePath(home: string, env: Readonly<Record<string, string | undefined>>): string | null {
   const configured = env.QWEN_HOME
   if (!configured) return join(home, ".qwen")
   // `~` would make the entire home directory writable inside the sandbox.

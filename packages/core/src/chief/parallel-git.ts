@@ -4,23 +4,13 @@ import { mkdir, realpath, rm, writeFile } from "node:fs/promises"
 import { join, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 import { writeJsonAtomic } from "../util/atomic-json"
+import { clearedGitEnvironment } from "../util/git-environment"
 import type { ParallelBaseline } from "./parallel-contract"
 
 const exec = promisify(execFile)
 export const productPaths = ["--", ".", ":(exclude,glob).agent-valley/**", ":(exclude,glob).agents/**"]
 export const excludedParallelPath = (path: string) => /^(?:\.agent-valley|\.agents)(?:\/|$)/.test(path)
-export const clearedGitEnvironment = {
-  GIT_DIR: undefined,
-  GIT_WORK_TREE: undefined,
-  GIT_COMMON_DIR: undefined,
-  GIT_INDEX_FILE: undefined,
-  GIT_OBJECT_DIRECTORY: undefined,
-  GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
-  GIT_LITERAL_PATHSPECS: undefined,
-  GIT_GLOB_PATHSPECS: undefined,
-  GIT_NOGLOB_PATHSPECS: undefined,
-  GIT_ICASE_PATHSPECS: undefined,
-}
+export { clearedGitEnvironment } from "../util/git-environment"
 export async function parallelGit(
   cwd: string,
   args: string[],

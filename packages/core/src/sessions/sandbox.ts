@@ -62,6 +62,8 @@ export interface SandboxSpawnRequest {
   args: string[]
   /** Git worktree path the agent is allowed to write to. */
   workspacePath: string
+  /** Effective child environment, after credential and tool-env allowlisting. */
+  env?: NodeJS.ProcessEnv
 }
 
 export interface SandboxSpawnPlan extends SandboxCommand {

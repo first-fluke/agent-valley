@@ -102,7 +102,7 @@ export function buildDarwinSandboxCommand(
 function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   const tmp = tmpdir()
   const git = linkedWorktreeGitPaths(req.workspacePath)
-  const agentPaths = agentHomeAccess(req.agentType, home)
+  const agentPaths = agentHomeAccess(req.agentType, home, req.env)
 
   // On macOS, os.tmpdir() returns the `/var/folders/...` symlink path, but
   // Seatbelt resolves the real `/private/var/folders/...` path when a
@@ -190,6 +190,7 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
 (allow signal (target self))
 (allow sysctl-read)
 (allow mach-lookup)
+${req.agentType === "codex" ? '(allow ipc-posix-shm-read* (ipc-posix-name-prefix "apple.cfprefs."))' : ""}
 (allow system-socket)
 (allow iokit-open)
 

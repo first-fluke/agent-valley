@@ -21,6 +21,7 @@ type ProcessMarker = z.infer<typeof markerSchema>
 export class ActiveMissionProcess {
   private readonly path: string
   private token?: string
+  private spawnedProcess?: { pid: number; group: boolean }
 
   constructor(
     private readonly directory: string,
@@ -34,6 +35,7 @@ export class ActiveMissionProcess {
 
   assertIdle(): void {
     const marker = this.read()
+    if (this.spawnedProcess) this.assertStopped(this.spawnedProcess.pid, this.spawnedProcess.group)
     if (!marker) return
     if (marker.pid === null) {
       throw new Error(
@@ -61,9 +63,12 @@ export class ActiveMissionProcess {
     })
     this.write(marker)
     this.token = marker.token
+    this.spawnedProcess = undefined
   }
 
   spawned(pid: number | undefined, group = false): void {
+    // PID persistence can fail after spawn. Keep same-process cleanup evidence first.
+    if (pid !== undefined) this.spawnedProcess = { pid, group }
     const marker = this.read()
     if (!marker || !this.token || marker.token !== this.token)
       throw new Error(`Mission ${this.missionId} lost its process marker. Inspect ${this.path} before resuming.`)
@@ -104,17 +109,22 @@ export class ActiveMissionProcess {
   }
 
   finish(): void {
+    if (this.spawnedProcess) this.assertStopped(this.spawnedProcess.pid, this.spawnedProcess.group)
     if (!this.token) return
     const marker = this.read()
     if (marker?.token === this.token) {
-      if (marker.pid !== null && this.isRunning(marker.pid, marker.group)) {
-        throw new Error(
-          `Mission ${this.missionId} Actor cleanup is incomplete (PID ${marker.pid}). Retained ${this.path}; stop the remaining Actor before resuming.`,
-        )
-      }
+      if (marker.pid !== null) this.assertStopped(marker.pid, marker.group)
       unlinkSync(this.path)
     }
     this.token = undefined
+    this.spawnedProcess = undefined
+  }
+
+  private assertStopped(pid: number, group: boolean): void {
+    if (this.isRunning(pid, group))
+      throw new Error(
+        `Mission ${this.missionId} still has a running Actor; cleanup is incomplete (PID ${pid}). Retained ${this.path}; stop the remaining Actor before resuming.`,
+      )
   }
 
   private isRunning(pid: number, group: boolean): boolean {
