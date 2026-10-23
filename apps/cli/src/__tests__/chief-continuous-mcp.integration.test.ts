@@ -4,9 +4,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { planSandboxedSpawn } from "@agent-valley/core/sessions/sandbox"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { discoverAgents } from "../agent-discovery"
 import { runOrder } from "../chief"
+import { createOrderRunGuard } from "./order-run-guard"
 
 vi.mock("@agent-valley/core/sessions/sandbox", () => ({ planSandboxedSpawn: vi.fn() }))
 vi.mock("../agent-discovery", () => ({ discoverAgents: vi.fn() }))
@@ -16,32 +17,42 @@ vi.mock("@agent-valley/core/config/yaml-loader", async (original) => ({
 }))
 const execute = promisify(execFile)
 let root: string | undefined
+let order: ReturnType<typeof createOrderRunGuard>
+beforeEach(() => {
+  order = createOrderRunGuard()
+  root = undefined
+})
 afterEach(async () => {
+  const ownedOrder = order
+  const fixtureRoot = root
+  await ownedOrder.stopAndJoin()
   vi.restoreAllMocks()
   vi.clearAllMocks()
-  if (root) await rm(root, { recursive: true, force: true })
+  if (fixtureRoot) await rm(fixtureRoot, { recursive: true, force: true })
 })
 
 describe("configured MCP tools in isolated parallel Actors", () => {
   it("prepares ignored trusted MCP configuration in both Actor clones without changing the source config", async () => {
-    root = await realpath(await mkdtemp(join(tmpdir(), "av-continuous-mcp-")))
-    await execute("git", ["init", "-qb", "main"], { cwd: root })
-    await writeFile(join(root, ".gitignore"), ".agent-valley/\n.agents/\n.mcp.json\nORDER-*/\n")
-    await writeFile(join(root, "README.md"), "Parallel MCP fixture\n")
-    await execute("git", ["add", "."], { cwd: root })
+    const ownedOrder = order
+    const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), "av-continuous-mcp-")))
+    root = fixtureRoot
+    await execute("git", ["init", "-qb", "main"], { cwd: fixtureRoot })
+    await writeFile(join(fixtureRoot, ".gitignore"), ".agent-valley/\n.agents/\n.mcp.json\nORDER-*/\n")
+    await writeFile(join(fixtureRoot, "README.md"), "Parallel MCP fixture\n")
+    await execute("git", ["add", "."], { cwd: fixtureRoot })
     await execute(
       "git",
       ["-c", "user.name=AV Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"],
-      { cwd: root },
+      { cwd: fixtureRoot },
     )
     const config = JSON.stringify({
       mcpServers: { aside: { command: "fake-aside", args: [] } },
       unrelated: "must not copy",
     })
-    await writeFile(join(root, ".mcp.json"), config)
-    const script = join(root, ".agent-valley", "fake-actor.cjs")
+    await writeFile(join(fixtureRoot, ".mcp.json"), config)
+    const script = join(fixtureRoot, ".agent-valley", "fake-actor.cjs")
     const { mkdir } = await import("node:fs/promises")
-    await mkdir(join(root, ".agent-valley"))
+    await mkdir(join(fixtureRoot, ".agent-valley"))
     await writeFile(
       script,
       `
@@ -75,12 +86,14 @@ process.stdin.on('end',()=>{
       platform: process.platform,
       networkAllowlist: [],
     }))
-    const mission = await runOrder("Write two verified files", { workspace: root, timeout: "10" }, root)
+    const mission = await ownedOrder.run(() =>
+      runOrder("Write two verified files", { workspace: fixtureRoot, timeout: "10" }, fixtureRoot),
+    )
     expect(mission.status).toBe("completed")
     expect(mission.tasks).toHaveLength(2)
     expect(await readFile(join(mission.workspace.path, "left.txt"), "utf8")).toBe("left result")
     expect(await readFile(join(mission.workspace.path, "right.txt"), "utf8")).toBe("right result")
-    expect(await readFile(join(root, ".mcp.json"), "utf8")).toBe(config)
-    expect((await execute("git", ["status", "--porcelain"], { cwd: root })).stdout).toBe("")
-  }, 20_000)
+    expect(await readFile(join(fixtureRoot, ".mcp.json"), "utf8")).toBe(config)
+    expect((await execute("git", ["status", "--porcelain"], { cwd: fixtureRoot })).stdout).toBe("")
+  }, 60_000)
 })

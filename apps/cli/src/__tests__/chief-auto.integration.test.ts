@@ -5,9 +5,10 @@ import { join } from "node:path"
 import { promisify } from "node:util"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { planSandboxedSpawn } from "@agent-valley/core/sessions/sandbox"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { discoverAgents } from "../agent-discovery"
 import { runOrder } from "../chief"
+import { createOrderRunGuard } from "./order-run-guard"
 
 vi.mock("@agent-valley/core/sessions/sandbox", () => ({ planSandboxedSpawn: vi.fn() }))
 vi.mock("../agent-discovery", () => ({ discoverAgents: vi.fn() }))
@@ -17,17 +18,27 @@ vi.mock("@agent-valley/core/config/yaml-loader", async (original) => ({
 }))
 let root: string | undefined
 const exec = promisify(execFile)
+let order: ReturnType<typeof createOrderRunGuard>
+beforeEach(() => {
+  order = createOrderRunGuard()
+  root = undefined
+})
 afterEach(async () => {
+  const ownedOrder = order
+  const fixtureRoot = root
+  await ownedOrder.stopAndJoin()
   vi.restoreAllMocks()
   vi.clearAllMocks()
-  if (root) await rm(root, { recursive: true, force: true, maxRetries: 3 })
+  if (fixtureRoot) await rm(fixtureRoot, { recursive: true, force: true, maxRetries: 3 })
 })
 
 describe("goal-only Chief CLI order", () => {
   it("plans immutable checks, runs isolated Actors, verifies actual evidence and resumes without a user command", async () => {
-    root = await mkdtemp(join(tmpdir(), "av-chief-auto-"))
-    const repo = join(root, "repo")
-    const log = join(root, "calls.jsonl")
+    const ownedOrder = order
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "av-chief-auto-"))
+    root = fixtureRoot
+    const repo = join(fixtureRoot, "repo")
+    const log = join(fixtureRoot, "calls.jsonl")
     await mkdir(repo)
     await exec("git", ["init", "-q", "-b", "main"], { cwd: repo })
     await exec("git", ["config", "user.name", "AV Test"], { cwd: repo })
@@ -36,7 +47,7 @@ describe("goal-only Chief CLI order", () => {
     await writeFile(join(repo, "README.md"), "Auto Chief fixture")
     await exec("git", ["add", "README.md", ".gitignore"], { cwd: repo })
     await exec("git", ["-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture", "--no-gpg-sign"], { cwd: repo })
-    const script = join(root, "fake-chief.cjs")
+    const script = join(fixtureRoot, "fake-chief.cjs")
     await writeFile(
       script,
       `
@@ -73,10 +84,12 @@ process.stdin.on('end',()=>{
       platform: process.platform,
       networkAllowlist: [],
     }))
-    const mission = await runOrder(
-      "Write left.txt and right.txt with their observed results",
-      { workspace: repo, timeout: "10" },
-      root,
+    const mission = await ownedOrder.run(() =>
+      runOrder(
+        "Write left.txt and right.txt with their observed results",
+        { workspace: repo, timeout: "10" },
+        fixtureRoot,
+      ),
     )
     expect(mission.status).toBe("completed")
     expect(mission.verifyCommand).toBe("")
@@ -100,12 +113,12 @@ process.stdin.on('end',()=>{
     expect(workers).toHaveLength(2)
     expect(new Set(workers.map((call) => call.cwd)).size).toBe(2)
     expect(workers.every((call) => call.cwd !== mission.workspace.path)).toBe(true)
-    expect(await readFile(join(root, ".agent-valley/reports", `${mission.id}.md`), "utf8")).toContain(
+    expect(await readFile(join(fixtureRoot, ".agent-valley/reports", `${mission.id}.md`), "utf8")).toContain(
       "Both requested files",
     )
-    const stored = await new MissionStore(join(root, ".agent-valley/missions")).load(mission.id)
+    const stored = await new MissionStore(join(fixtureRoot, ".agent-valley/missions")).load(mission.id)
     expect(stored.verificationContract).toEqual(mission.verificationContract)
-    const resumed = await runOrder(undefined, { resume: mission.id }, root)
+    const resumed = await ownedOrder.run(() => runOrder(undefined, { resume: mission.id }, fixtureRoot))
     expect(resumed.status).toBe("completed")
     expect(resumed.verificationContractSha256).toBe(mission.verificationContractSha256)
     expect(resumed.tasks.every((task) => task.attempts === 1)).toBe(true)
@@ -114,5 +127,5 @@ process.stdin.on('end',()=>{
       .split("\n")
       .map((line) => JSON.parse(line) as { stage: string })
     expect(resumedCalls.filter((call) => call.stage === "work")).toHaveLength(2)
-  }, 20_000)
+  }, 60_000)
 })

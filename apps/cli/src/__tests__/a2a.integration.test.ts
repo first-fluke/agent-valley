@@ -210,7 +210,8 @@ describe("source A2A CLI with local protocol endpoint", () => {
   it.skipIf(process.platform === "win32")("rejects a FIFO endpoint file without waiting for a writer", async () => {
     const fifo = join(settings, "endpoint.pipe")
     await exec("mkfifo", [fifo])
-    const running = source([
+    // The shared subprocess deadline bounds a FIFO with no writer, including CLI startup.
+    const result = await source([
       "run",
       "Write 42",
       "--endpoint",
@@ -219,10 +220,7 @@ describe("source A2A CLI with local protocol endpoint", () => {
       "result.txt",
       "--verify",
       "node verify.cjs",
-    ])
-    const timer = setTimeout(() => running.child.kill("SIGKILL"), 3_000)
-    const result = await running.result
-    clearTimeout(timer)
+    ]).result
     expect(result.code).toBe(1)
     expect(result.stderr).toContain("regular file")
   })

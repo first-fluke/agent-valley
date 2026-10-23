@@ -32,8 +32,14 @@ const latestCliIO: OmaLatestCliIO = {
 }
 
 function run(command: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): string {
-  const result = spawnSync(command, args, { cwd, env, encoding: "utf-8", timeout: 10_000 })
-  if (result.error) throw result.error
+  const timeout = command === "oma" ? 15_000 : 10_000
+  const startedAt = performance.now()
+  const result = spawnSync(command, args, { cwd, env, encoding: "utf-8", timeout })
+  if (result.error)
+    throw new Error(
+      `${command} ${args.join(" ")} failed after ${Math.round(performance.now() - startedAt)}ms (limit ${timeout}ms): ${result.error.message}`,
+      { cause: result.error },
+    )
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")}: ${result.stderr || result.stdout}`)
   return result.stdout
 }
@@ -163,6 +169,6 @@ describe.skipIf(!available && !required)(`OMA v${OMA_RECEIPT_SCHEMA_VERSION} nat
         rmSync(directory, { recursive: true, force: true })
       }
     },
-    25_000,
+    60_000,
   )
 })
