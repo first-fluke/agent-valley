@@ -303,6 +303,12 @@ an OS network filter: AV's existing HTTP/HTTPS port rules still apply.
 Protected project configuration is denied through both lexical and resolved
 workspace paths, including `/var` aliases on macOS.
 
+The macOS profile permits signals within the same sandbox so cancellation
+can stop child and grandchild tools. Signals to unrelated host processes
+remain denied. A stale child-handle permission error is accepted as an exit
+race only after both the process group and leader are proven absent; live
+or uninspectable processes retain the uncertain-outcome barrier.
+
 ---
 
 ## Timeout Handling

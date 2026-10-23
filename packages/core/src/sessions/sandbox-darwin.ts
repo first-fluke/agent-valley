@@ -184,6 +184,8 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
 (allow process-fork)
 (allow process-exec)
 (allow signal (target self))
+; Tool cancellation must reach grandchildren; target children covers only direct children.
+(allow signal (target same-sandbox))
 (allow sysctl-read)
 (allow mach-lookup)
 ${req.agentType === "codex" ? '(allow ipc-posix-shm-read* (ipc-posix-name-prefix "apple.cfprefs."))' : ""}
