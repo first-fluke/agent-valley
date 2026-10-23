@@ -6,6 +6,15 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [3.0.1](https://github.com/first-fluke/agent-valley/compare/v3.0.0...v3.0.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **chief:** specify review response contracts ([4cf15db](https://github.com/first-fluke/agent-valley/commit/4cf15dbf48375c4a08d2583eac09b656f6da901d))
+* **codex:** delegate tools to enforced macOS sandbox ([4ed3468](https://github.com/first-fluke/agent-valley/commit/4ed34687060e99eb79df93a21375fe42ff6f3df3))
+* **sandbox:** protect canonical project config paths ([79428a9](https://github.com/first-fluke/agent-valley/commit/79428a9a752f6bc0764726eafef14abd38703975))
+
 ## [3.0.0](https://github.com/first-fluke/agent-valley/compare/v2.3.1...v3.0.0) (2026-10-23)
 
 
