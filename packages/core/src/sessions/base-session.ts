@@ -146,6 +146,8 @@ export abstract class BaseSession implements AgentSession {
   private _process: ChildProcess | null = null
   protected terminalEventReceived = false
   private processFailed = false
+  /** Set only by the trusted spawn plan, never by agent configuration. */
+  protected sandboxPlatform: NodeJS.Platform | null = null
 
   /**
    * Backed by `_process` so every subclass's `this.process = spawn(...)`
@@ -160,6 +162,7 @@ export abstract class BaseSession implements AgentSession {
 
   protected set process(proc: ChildProcess | null) {
     this._process = proc
+    if (!proc) this.sandboxPlatform = null
     if (proc) {
       this.processFailed = false
       this.terminalEventReceived = false
@@ -199,6 +202,7 @@ export abstract class BaseSession implements AgentSession {
     /** Let sandbox-planning failures propagate (used by start() for a clear error). */
     rethrowSandboxError?: boolean
   }): Promise<boolean> {
+    this.sandboxPlatform = null
     if (!this.config) {
       this.emitError("CRASH", "spawnSandboxed() called before start()", false)
       return false
@@ -220,6 +224,7 @@ export abstract class BaseSession implements AgentSession {
       return false
     }
 
+    this.sandboxPlatform = plan.sandboxed ? plan.platform : null
     this.process = spawn(plan.command, plan.args, {
       detached: process.platform !== "win32",
       cwd: this.config.workspacePath,

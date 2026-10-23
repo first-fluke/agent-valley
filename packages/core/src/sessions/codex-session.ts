@@ -104,6 +104,11 @@ export class CodexSession extends BaseSession {
     const turnResult = (await this.rpc("turn/start", {
       threadId: this.threadId,
       input: [{ type: "text", text: prompt }],
+      // Codex's inner Seatbelt cannot apply inside AV's OS sandbox. Delegate
+      // only when the trusted spawn plan confirms that containment is enforced.
+      ...(this.sandboxPlatform === "darwin"
+        ? { sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" } }
+        : {}),
     })) as { turn?: { id: string } }
     if (!this.terminalEventReceived && turnResult.turn) this.turnId = turnResult.turn.id
   }

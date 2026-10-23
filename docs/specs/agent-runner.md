@@ -288,6 +288,21 @@ namespace used by its native configuration loader. This permits repeated
 managed-preference reads without granting shared-memory writes or changing the
 active account's settings.
 
+When the trusted spawn plan confirms an enforced macOS sandbox, Codex turns
+use the official `externalSandbox` policy with `networkAccess: "restricted"`
+to avoid applying a second Seatbelt sandbox inside AV's existing one. Linux
+and explicitly unsandboxed fallback plans retain the native `workspace-write`
+policy. An unsupported policy or managed-policy rejection fails the run;
+there is no retry with weaker containment. See the [official App Server
+contract](https://developers.openai.com/codex/app-server/).
+
+In this macOS mode the existing AV profile defines the effective filesystem
+and network boundary, including the active CLI profile, shared caches and
+temporary directory. The protocol's `restricted` declaration does not add
+an OS network filter: AV's existing HTTP/HTTPS port rules still apply.
+Protected project configuration is denied through both lexical and resolved
+workspace paths, including `/var` aliases on macOS.
+
 ---
 
 ## Timeout Handling
