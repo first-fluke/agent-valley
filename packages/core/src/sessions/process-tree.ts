@@ -24,6 +24,24 @@ export function signalProcessTree(proc: ChildProcess, signal: "SIGTERM" | "SIGKI
       throw error
     }
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
-    if (proc.exitCode === null && proc.signalCode == null) proc.kill(signal)
+    if (proc.exitCode === null && proc.signalCode == null) {
+      try {
+        proc.kill(signal)
+      } catch (handleError) {
+        // A child handle can lag OS exit. Never suppress a permission failure
+        // unless both the group and leader are independently proven absent.
+        if ((handleError as NodeJS.ErrnoException).code === "EPERM" && absent(-proc.pid) && absent(proc.pid)) return
+        throw handleError
+      }
+    }
+  }
+}
+
+function absent(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH"
   }
 }
