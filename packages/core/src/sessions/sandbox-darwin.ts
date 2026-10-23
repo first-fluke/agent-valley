@@ -100,7 +100,7 @@ export function buildDarwinSandboxCommand(
 }
 
 function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
-  const tmp = tmpdir()
+  const tmpPaths = pathAliases(tmpdir())
   const git = linkedWorktreeGitPaths(req.workspacePath)
   const agentPaths = agentHomeAccess(req.agentType, home, req.env)
 
@@ -108,21 +108,13 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   // Seatbelt resolves the real `/private/var/folders/...` path when a
   // process creates a NEW file there — a write-rule scoped only to the
   // `/var/folders/...` subpath silently denies those writes. Resolve the
-  // real path via realpathSync and allow-list both forms so writes to the
+  // real path and allow-list both forms so writes to the
   // sandboxed tmp workspace succeed regardless of which form the kernel
-  // checks against. Falls back to the unresolved tmp path alone if
-  // realpathSync fails (e.g. the dir doesn't exist yet).
-  let tmpReal = tmp
-  try {
-    tmpReal = realpathSync(tmp)
-  } catch {
-    /* keep tmp as-is */
-  }
+  // checks against. Keep unresolved paths when they do not exist yet.
 
   const writablePaths = [
     req.workspacePath,
-    tmp,
-    ...(tmpReal !== tmp ? [tmpReal] : []),
+    ...tmpPaths,
     ...agentPaths.active,
     `${home}/.cache`,
     `${home}/.npm`,
@@ -163,7 +155,11 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   ]
   const denyReadLiterals = [
     `${home}/.git-credentials`,
-    ...new Set([process.cwd(), req.workspacePath].map((root) => join(root, PROJECT_CONFIG_FILENAME))),
+    ...new Set(
+      [process.cwd(), req.workspacePath].flatMap((root) =>
+        pathAliases(root).flatMap((path) => pathAliases(join(path, PROJECT_CONFIG_FILENAME))),
+      ),
+    ),
   ]
   const denyReadRules = [
     ...denyReadSubpaths.map((p) => `(deny file-read* (subpath ${seatbeltString(p)}))`),
@@ -216,6 +212,15 @@ ${denyWriteRules}
 (allow network-outbound (remote tcp "*:443"))
 (allow network-outbound (remote tcp "*:80"))
 `
+}
+
+function pathAliases(path: string): string[] {
+  try {
+    const canonical = realpathSync(path)
+    return canonical === path ? [path] : [path, canonical]
+  } catch {
+    return [path]
+  }
 }
 
 function seatbeltString(value: string): string {
