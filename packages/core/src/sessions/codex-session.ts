@@ -34,6 +34,9 @@ export class CodexSession extends BaseSession {
   private tokenUsage: { input: number; output: number; model: string } | undefined
   private filesChanged: string[] = []
   private outputTail = ""
+  private finalAnswer: string | undefined
+  private completedMessage: string | undefined
+  private phasedMessageSeen = false
   private pendingResolvers = new Map<
     number,
     {
@@ -80,8 +83,13 @@ export class CodexSession extends BaseSession {
 
     this.filesChanged = []
     this.outputTail = ""
+    this.finalAnswer = undefined
+    this.completedMessage = undefined
+    this.phasedMessageSeen = false
     this.tokenUsage = undefined
     this.terminalEventReceived = false
+    // Disable the previous thread before awaiting the new thread's RPC reply.
+    this.threadId = null
     this.turnId = null
 
     const threadResult = (await this.rpc("thread/start", {
@@ -271,8 +279,11 @@ export class CodexSession extends BaseSession {
       return
     }
 
+    // Until thread/start replies, late notifications cannot supply a new result.
+    if (!this.threadId && msg.method !== "error") return
     // Notifications for other threads must not complete or steer this run.
-    if (msg.params?.threadId && this.threadId && msg.params.threadId !== this.threadId) return
+    if (msg.params?.threadId && msg.params.threadId !== this.threadId) return
+    if (msg.params?.turnId && this.turnId && msg.params.turnId !== this.turnId) return
     if (this.terminalEventReceived) return
     switch (msg.method) {
       case "turn/started": {
@@ -319,9 +330,19 @@ export class CodexSession extends BaseSession {
         const item = msg.params?.item as
           | {
               type?: string
+              text?: string
+              phase?: string | null
               changes?: Array<{ path: string; kind: { type: string } }>
             }
           | undefined
+        if (item?.type === "agentMessage") {
+          if (item.phase != null) this.phasedMessageSeen = true
+          if (typeof item.text === "string") {
+            const text = item.text.slice(-10240)
+            if (item.phase === "final_answer") this.finalAnswer = text
+            else if (item.phase == null) this.completedMessage = text
+          }
+        }
         if (item?.type === "fileChange") {
           for (const change of item.changes ?? []) {
             if (!this.filesChanged.includes(change.path)) this.filesChanged.push(change.path)
@@ -349,7 +370,10 @@ export class CodexSession extends BaseSession {
           )
           break
         }
-        const result = this.buildRunResult(this.outputTail, this.filesChanged)
+        // Progress deltas stay live, but structured consumers need the answer
+        // declared by the protocol. Older delta-only servers retain their tail.
+        const output = this.finalAnswer ?? this.completedMessage ?? (this.phasedMessageSeen ? "" : this.outputTail)
+        const result = this.buildRunResult(output, this.filesChanged)
         result.exitCode = 0
         const usage = this.tokenUsage ?? this.extractTokenUsage(msg.params)
         if (usage) result.tokenUsage = usage

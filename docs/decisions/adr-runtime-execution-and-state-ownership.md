@@ -105,8 +105,23 @@ Interactive: [adr-runtime-execution-and-state-ownership.archify.html](./adr-runt
 | Remote artifacts are tampered, stale or escape the allowed paths | Hash/binding/path/symlink checks reject them before application; partial application resumes only from recorded file images |
 | A remote success claim conflicts with local verification | The execution remains failed; explicit resume rechecks the saved response without submitting again |
 | Local verification cannot confirm process cleanup | The execution remains unknown and blocks another repository writer |
+| Cancellation arrives during submission checkpoint persistence | No new request is transmitted; the saved checkpoint records the absence of submission |
+| Cancellation races a Message response containing a Task ID | The remote reference is saved before cancellation and remains available for confirmation |
+| A different saved execution is resumed while another outcome is unknown | The repository barrier blocks submission and file application |
+| Direct handle cancellation races artifact application or verification | Cancellation reaches the local gate; unconfirmed cleanup remains unknown |
+| Codex progress precedes a structured final answer | Live progress remains observable; only the completed answer reaches the Chief JSON parser; late prior-thread messages are excluded |
+| A CLI endpoint or prompt path is a named pipe | The command rejects it as a nonregular file without waiting for a writer |
 
-Run `bun run test`, `bun run typecheck`, `bun run lint` and `bun run check:imports`; the repository coverage thresholds remain applicable. These checks include an actual local HTTP JSON-RPC fixture and real Git/file/verification operations. They do not certify a production A2A endpoint. The separate native-agent interruption/restart smoke requires the local runtime gate's owner approval; its result must be reported independently of automated fixtures.
+Run `bun run test`, `bun run typecheck`, `bun run lint` and `bun run check:imports`; the repository coverage thresholds remain applicable. These checks include actual local HTTP JSON-RPC fixtures, source CLI processes, native-protocol stdio fixtures and real Git/file/verification operations. They do not certify a production A2A endpoint.
+
+The separate native-agent interruption/restart smoke remains incomplete. On
+2026-10-23, two real Codex calls completed, but the Mission stopped on an advisory
+JSON parsing error before work began. Its raw response was not retained, so that
+failure does not prove a particular message-format cause. The output-selection
+fix is covered by stdio regressions. A subsequent real-Mission attempt was denied
+by the local owner's runtime gate before execution. Actual work, interruption,
+same-Mission restart and final verification still require their own runtime
+evidence; automated fixtures do not establish that result.
 
 ## Remote backend gates
 

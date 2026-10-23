@@ -71,6 +71,14 @@ re-queues the issue with the appended instruction.
 The local adapter replays start and terminal lifecycle events to late subscribers.
 Output events are live observations and are not replayed.
 
+Codex progress deltas remain live output. The saved result prefers completed
+`agentMessage` text marked `final_answer`, so progress narration cannot corrupt
+a Chief stage's structured response. A completed message without a phase or a
+legacy delta-only response remains supported. A turn containing only explicitly
+nonfinal messages has no final answer. Notifications from another thread or
+turn, including late messages while a new thread is opening, cannot supply the
+new execution's result.
+
 A local result settles only after that attempt's startup and disposal have joined.
 Cancelling one attempt does not stop concurrent attempts on the same service.
 `isAlive()` is an activity observation; callers still join `result` before reading
@@ -130,6 +138,12 @@ symlinks and paths outside that allowlist; and journals application for restart.
 It rechecks the Git revision, delivered file images and workspace fingerprint
 after local verification and joins the verifier process group before completion.
 Unconfirmed cleanup keeps the record unknown and blocks a subsequent writer.
+
+Cancellation is checked again after the submission checkpoint is saved and
+before transmission. A response's remote Task reference is persisted before
+handling a concurrent cancellation. The local artifact and verification gate
+also receives the handle's cancellation signal. Both new submissions and
+resumes check for other unresolved executions in the same repository.
 
 This backend does not automatically select remote actors for Chief stages.
 Chief Mission transitions, approvals and budgets remain in the existing
