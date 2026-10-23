@@ -40,11 +40,7 @@ export async function startA2aExecution(
   const store = new A2aJobStore(repository.root)
   const release = await store.lock()
   try {
-    const pending = (await store.list()).find((job) => !terminalStatuses.has(job.status))
-    if (pending)
-      throw new Error(
-        `A2A execution ${pending.id} is unresolved. Use av a2a resume or reconcile before starting another.`,
-      )
+    await assertNoOtherExecution(store)
     const baseFingerprint = await assertA2aClean(repository.root)
     const allowedPaths = validateA2aAllowedPaths(options.allowedPaths)
     const id = randomUUID()
@@ -85,10 +81,19 @@ export async function resumeA2aExecution(root: string, id: string, signal?: Abor
     if (job.repositoryId !== repository.repositoryId)
       throw new Error("A2A repository identity changed. Restore the original repository before resuming.")
     if (job.status === "completed" || job.status === "reconciled" || (job.status === "failed" && job.result)) return job
+    await assertNoOtherExecution(store, job.id)
     return await execute(store, job, signal)
   } finally {
     await release()
   }
+}
+
+async function assertNoOtherExecution(store: A2aJobStore, currentId?: string): Promise<void> {
+  const pending = (await store.list()).find((job) => job.id !== currentId && !terminalStatuses.has(job.status))
+  if (pending)
+    throw new Error(
+      `A2A execution ${pending.id} is unresolved. Use av a2a resume or reconcile before starting another.`,
+    )
 }
 
 export async function listA2aExecutions(root: string): Promise<A2aJob[]> {
@@ -127,7 +132,7 @@ async function execute(store: A2aJobStore, job: A2aJob, signal?: AbortSignal): P
     job.updatedAt = new Date().toISOString()
     await store.save(job)
   }
-  const complete = async (response: A2aSendResponse): Promise<RunAttempt> => {
+  const complete = async (response: A2aSendResponse, signal = input.signal): Promise<RunAttempt> => {
     signal?.throwIfAborted()
     job.response = response
     await persist()
@@ -240,7 +245,7 @@ async function execute(store: A2aJobStore, job: A2aJob, signal?: AbortSignal): P
           job.checkpoint = checkpoint
           await persist()
         },
-        complete: async (response) => complete(response),
+        complete: async (response, _checkpoint, signal) => complete(response, signal),
       }))
       result = await (await runner.spawn(input)).result
     }

@@ -36,6 +36,7 @@ export class A2aRunHandle implements RunHandle {
   }
   private readonly emitter = new RunHandleEmitter()
   private readonly pollAbort = new AbortController()
+  private readonly completionAbort = new AbortController()
   private readonly attempt: RunAttempt
   private readonly deadline: number
   private checkpoint?: A2aCheckpoint
@@ -124,6 +125,7 @@ export class A2aRunHandle implements RunHandle {
   async cancel(): Promise<void> {
     this.cancelled = true
     this.pollAbort.abort()
+    this.completionAbort.abort(this.input.signal?.reason)
     await this.finished
     if (this.failure?.outcomeUnknown) throw this.failure
   }
@@ -143,15 +145,7 @@ export class A2aRunHandle implements RunHandle {
     while (true) {
       if (this.cancelled) return this.cancelRemote()
       if (response.message) {
-        if (response.message.role !== "ROLE_AGENT" || !response.message.contextId)
-          throw this.unknown("A2A returned an invalid agent message. Reconcile the dispatched execution.")
         if (response.message.taskId) {
-          await this.persist({
-            ...this.requiredCheckpoint(),
-            phase: "accepted",
-            taskId: response.message.taskId,
-            contextId: response.message.contextId,
-          })
           const polled = await this.pollTask()
           if (polled) response = { task: polled }
           continue
@@ -243,6 +237,11 @@ export class A2aRunHandle implements RunHandle {
       throw this.cancelledError()
     }
     await this.persist({ ...this.requiredCheckpoint(), phase: "submitting" })
+    if (this.cancelled || Date.now() >= this.deadline) {
+      this.timedOut = Date.now() >= this.deadline
+      await this.persist({ ...this.requiredCheckpoint(), phase: "prepared" })
+      throw this.cancelledError()
+    }
     this.remotePossible = true
     let raw: unknown
     try {
@@ -274,6 +273,18 @@ export class A2aRunHandle implements RunHandle {
     if (!parsed.success)
       throw this.unknown("A2A SendMessage response is invalid. Reconcile the submitted execution before retrying.")
     if (parsed.data.task) await this.observe(parsed.data.task)
+    const message = parsed.data.message
+    if (message) {
+      if (message.role !== "ROLE_AGENT" || !message.contextId)
+        throw this.unknown("A2A returned an invalid agent message. Reconcile the dispatched execution.")
+      if (message.taskId)
+        await this.persist({
+          ...this.requiredCheckpoint(),
+          phase: "accepted",
+          taskId: message.taskId,
+          contextId: message.contextId,
+        })
+    }
     return parsed.data
   }
 
@@ -324,7 +335,9 @@ export class A2aRunHandle implements RunHandle {
   }
 
   private async complete(response: A2aSendResponse): Promise<RunAttempt> {
-    const result = await this.lifecycle.complete(response, this.requiredCheckpoint())
+    if (this.cancelled) throw this.cancelledError()
+    const result = await this.lifecycle.complete(response, this.requiredCheckpoint(), this.completionAbort.signal)
+    if (this.cancelled) throw this.cancelledError()
     if (
       result.id !== this.attemptId ||
       result.issueId !== this.attempt.issueId ||
@@ -416,7 +429,7 @@ export class A2aRunHandle implements RunHandle {
     return new AgentRunError(
       this.timedOut
         ? "A2A execution timed out; any known remote task was confirmed stopped."
-        : "A2A execution was cancelled; no new artifacts were applied.",
+        : "A2A execution was cancelled. Inspect its saved artifact receipt before resuming.",
       { ...this.attempt, finishedAt: new Date().toISOString(), exitCode: null },
       { code: this.timedOut ? "TIMEOUT" : "CANCELLED" },
     )
@@ -428,7 +441,7 @@ export class A2aRunHandle implements RunHandle {
 
   private executionError(error: unknown): AgentRunError {
     if (error instanceof AgentRunError) return error
-    if (this.cancelled && !this.remotePossible) return this.cancelledError()
+    if (this.cancelled && (!this.remotePossible || this.terminal)) return this.cancelledError()
     return new AgentRunError(
       error instanceof A2aClientError
         ? error.message

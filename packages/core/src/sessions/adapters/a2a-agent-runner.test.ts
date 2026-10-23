@@ -381,6 +381,7 @@ describe("A2A execution backend", () => {
     expect(state.complete).toHaveBeenCalledWith(
       { task: task("TASK_STATE_COMPLETED") },
       expect.objectContaining({ phase: "terminal", taskId: "remote-task" }),
+      expect.any(AbortSignal),
     )
   })
 })

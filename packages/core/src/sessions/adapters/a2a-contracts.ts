@@ -150,8 +150,8 @@ export type A2aCheckpoint = z.infer<typeof a2aCheckpointSchema>
 export interface A2aLifecycle {
   load(): Promise<A2aCheckpoint | undefined>
   save(checkpoint: A2aCheckpoint): Promise<void>
-  /** The trusted AV gate verifies repository/artifact evidence before accepting output. */
-  complete(response: A2aSendResponse, checkpoint: A2aCheckpoint): Promise<RunAttempt>
+  /** Verify evidence and honor cancellation before applying files or starting a verifier. */
+  complete(response: A2aSendResponse, checkpoint: A2aCheckpoint, signal: AbortSignal): Promise<RunAttempt>
 }
 export type A2aLifecycleFactory = (input: SpawnInput) => A2aLifecycle
 

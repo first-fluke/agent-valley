@@ -1,6 +1,9 @@
+import { execFile } from "node:child_process"
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
+import { promisify } from "node:util"
 import { captureParallelBaseline, parallelGit } from "@agent-valley/core/chief/parallel-git"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { prepareChiefToolConfig } from "../chief-tool-config"
@@ -8,6 +11,7 @@ import { parseClientToml } from "../client-toml"
 
 const paths = [".mcp.json", ".cursor/mcp.json", ".qwen/settings.json", ".gemini/settings.json", ".codex/config.toml"]
 const fixtureSecret = "required-fixture-credential"
+const exec = promisify(execFile)
 let directory: string
 let original: string
 let target: string
@@ -42,6 +46,28 @@ afterEach(async () => {
 })
 
 describe("native Chief project MCP configuration", () => {
+  it.skipIf(process.platform === "win32").each(["source config", "Git exclude"])(
+    "rejects a FIFO %s before opening it for reading",
+    async (location) => {
+      const fifo = location === "source config" ? join(original, ".mcp.json") : join(target, ".git", "info", "exclude")
+      if (location === "Git exclude") {
+        await config(original, ".mcp.json", JSON.stringify({ mcpServers: { aside: { command: "aside" } } }))
+        await rm(fifo)
+      }
+      await exec("mkfifo", [fifo])
+      const checkout = resolve(import.meta.dirname, "../../../..")
+      const module = pathToFileURL(join(checkout, "apps/cli/src/chief-tool-config.ts")).href
+      const script = `const { prepareChiefToolConfig } = await import(${JSON.stringify(module)}); await prepareChiefToolConfig(process.argv[1], process.argv[2]).catch(error => { console.error(error.message); process.exitCode = 1; });`
+      await expect(
+        exec("bun", ["-e", script, original, target], { cwd: checkout, timeout: 5_000 }),
+      ).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("regular files"),
+      })
+      await expect(lstat(join(target, ".mcp.json"))).rejects.toMatchObject({ code: "ENOENT" })
+    },
+  )
+
   it("copies only MCP namespaces privately and keeps credentials out of Git snapshots, index and refs", async () => {
     for (const path of paths.slice(0, 4))
       await config(

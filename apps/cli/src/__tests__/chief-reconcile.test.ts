@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
+import { promisify } from "node:util"
 import { automaticMissionRecovery } from "@agent-valley/core/chief/continuous-recovery"
 import {
   assertExecutionBudget,
@@ -22,6 +24,7 @@ let mission: Mission
 const proof = "Task status is terminated; inspected the runtime task page and its final process log."
 const options = { run: "uncertain-run", evidence: proof }
 const recordPath = () => join(root, ".agent-valley", "missions", `${mission.id}.json`)
+const exec = promisify(execFile)
 
 const uncertainRun = (runId = options.run): OperatingRun => ({
   runId,
@@ -68,6 +71,41 @@ afterEach(async () => {
 })
 
 describe("operator execution reconciliation", () => {
+  it("runs the source command with its normal guards, respects the live lock and leaves the mission paused", async () => {
+    const checkout = resolve(import.meta.dirname, "../../../..")
+    const args = [
+      "--cwd",
+      root,
+      join(checkout, "apps/cli/src/index.ts"),
+      "missions",
+      "reconcile",
+      mission.id,
+      "--run",
+      options.run,
+      "--evidence",
+      proof,
+    ]
+    const unlock = await store.lock(mission.id)
+    try {
+      await expect(exec("bun", args, { cwd: checkout, timeout: 10_000 })).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("already running"),
+      })
+      expect((await store.load(mission.id)).operations?.runs[0]?.executionState).toBe("unknown")
+    } finally {
+      await unlock()
+    }
+    const result = await exec("bun", args, { cwd: checkout, timeout: 10_000 })
+    expect(result.stdout).toContain("the mission remains paused")
+    expect(result.stdout + result.stderr).not.toContain(proof)
+    expect((await store.load(mission.id)).status).toBe("paused")
+    expect((await store.load(mission.id)).operations?.runs[0]).toMatchObject({
+      executionState: "settled",
+      outcome: "failed",
+      costUsd: null,
+    })
+  })
+
   it("persists termination evidence, preserves the mission contract and spend, and leaves work paused", async () => {
     const before = structuredClone(mission)
     const result = await reconcileMissionExecution(mission.id, options, root)

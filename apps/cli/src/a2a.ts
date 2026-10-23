@@ -1,3 +1,4 @@
+import { constants } from "node:fs"
 import { open } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
 import { type A2aJob, a2aEndpointSchema } from "@agent-valley/core/executions/a2a-job"
@@ -28,7 +29,7 @@ function workspace(options: WorkspaceOptions, root: string): string {
 }
 
 async function readText(path: string, label: string, limit: number): Promise<string> {
-  const file = await open(resolve(path), "r")
+  const file = await open(resolve(path), constants.O_RDONLY | constants.O_NONBLOCK)
   try {
     const stat = await file.stat()
     if (!stat.isFile() || stat.size > limit)

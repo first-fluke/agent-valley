@@ -26,6 +26,9 @@ Set the named environment variable through your normal credential mechanism befo
 
 The strict endpoint schema also accepts `tenant` and `maxResponseBytes`. Unknown fields are rejected. The JSON file limit is 65,536 bytes.
 
+Endpoint and prompt inputs must be regular files. Directories, devices and
+named pipes are rejected without waiting for a writer.
+
 ## Submit and inspect
 
 ```bash
@@ -66,6 +69,14 @@ These commands also accept `--workspace /absolute/path/to/repository`. Status pr
 Ctrl-C or SIGTERM requests cancellation and allows the service to retain its checkpoint. A cancellation request or lost HTTP response cannot establish that remote work stopped.
 
 Resume retains the endpoint, goal, request binding, allowed paths and verifier. An accepted task with a saved remote task ID is fetched again without submitting another task. A saved terminal response can be verified locally again. A submission whose acceptance is uncertain and has no task ID remains blocked for reconciliation.
+
+Resuming another saved execution cannot bypass this repository's unresolved
+execution barrier. Reconcile or resume the blocking execution first. If
+cancellation arrives before transmission, AV retains a checkpoint proving no
+request was sent. Once a Task reference has been received, it is saved before
+cancellation proceeds. Local artifact application and verification also honor
+cancellation; inspect their saved receipts because an interruption can leave
+partially applied files.
 
 After independently confirming termination, record the evidence:
 
