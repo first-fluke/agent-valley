@@ -6,6 +6,33 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [3.0.0](https://github.com/first-fluke/agent-valley/compare/v2.3.1...v3.0.0) (2026-10-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **team:** team configuration uses relay_url and turso_url. Supabase sessions must be replaced by AV user tokens.
+
+### Features
+
+* **chief:** orchestrate missions and review gates with LangGraph ([1f5b085](https://github.com/first-fluke/agent-valley/commit/1f5b0854d1868e803571b670d2ae6e7a6139721f))
+* **runtime:** add durable A2A execution and operator recovery ([84d5849](https://github.com/first-fluke/agent-valley/commit/84d5849abeef8054793118bc844fe5012c9f1dfd))
+* **team:** replace Supabase with Turso and Drizzle ([b5327fa](https://github.com/first-fluke/agent-valley/commit/b5327fabb6724d42b35bf084aab9dddfbed444d3))
+
+
+### Bug Fixes
+
+* **a2a:** close cancellation and recovery gaps ([76bcfbc](https://github.com/first-fluke/agent-valley/commit/76bcfbc0194e6dad2d9899e9626c1e1d81812c99))
+* **chief:** preserve execution outcomes and join runtime cleanup ([4a2c30a](https://github.com/first-fluke/agent-valley/commit/4a2c30aef1729d26a1630dbaa78721acb9188e7e))
+* **ci:** make A2A deadline checks deterministic ([7777b6f](https://github.com/first-fluke/agent-valley/commit/7777b6ff8691572914e5677d52c1fd22b5256984))
+* **ci:** validate native CLI runtime dependencies ([cbaa4c5](https://github.com/first-fluke/agent-valley/commit/cbaa4c526745b550ffc8c131c8c33ff301d0a31f))
+* **codex:** select completed final answers ([2af9ad2](https://github.com/first-fluke/agent-valley/commit/2af9ad2ef33e2d5d1da02bfa6ee5b0518d3f3a68))
+
+
+### Refactors
+
+* harden orchestration and enforce quality gates ([f213d15](https://github.com/first-fluke/agent-valley/commit/f213d150678ec6480c5a6b95c77d24f278919730))
+
 ## [2.3.1](https://github.com/first-fluke/agent-valley/compare/v2.3.0...v2.3.1) (2026-10-09)
 
 
