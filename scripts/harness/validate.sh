@@ -418,9 +418,9 @@ else
     # Let vitest stream its own output — it already prints a structured
     # coverage table and the exact threshold that was missed.
     if ! bun run test:coverage; then
-      violation "Coverage below threshold — see vitest summary above."
-      violation "  Fix: add tests for the lines/branches reported as uncovered,"
-      violation "       or justify a threshold change in vitest.config.ts:coverage.thresholds."
+      violation "Tests or coverage check failed — see vitest output above."
+      violation "  Fix: resolve reported test failures. If coverage is below threshold,"
+      violation "       add tests for the reported uncovered lines/branches."
       violation "  Thresholds live in: vitest.config.ts"
       violation "  Design reference: docs/plans/v0-2-bigbang-design.md §5.6 / §7"
       VIOLATIONS=$(( VIOLATIONS + 1 ))

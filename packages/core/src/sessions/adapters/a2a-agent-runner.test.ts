@@ -1,5 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { card, input, memoryLifecycle, protocolServer, reply, task } from "../../__tests__/a2a.fixture"
+import { afterEach, describe, expect, it } from "vitest"
+import {
+  card,
+  input,
+  manualDeadlineClock,
+  memoryLifecycle,
+  protocolServer,
+  reply,
+  task,
+  waitForTaskCheckpoint,
+} from "../../__tests__/a2a.fixture"
 import { AgentRunError, InterventionUnsupportedError } from "../../domain/ports/agent-runner"
 import { A2aAgentRunnerAdapter } from "./a2a-agent-runner"
 import { type A2aCheckpoint, a2aRequestSha256 } from "./a2a-contracts"
@@ -175,7 +184,7 @@ describe("A2A execution backend", () => {
     const request = input()
     const state = memoryLifecycle(request)
     const handle = await new A2aAgentRunnerAdapter(server.endpoint, () => state.lifecycle).spawn(request)
-    await vi.waitFor(() => expect(state.saved()?.taskId).toBe("remote-task"))
+    await waitForTaskCheckpoint(handle, state)
     await handle.cancel()
     await expect(handle.result).rejects.toMatchObject({ code: "CANCELLED", outcomeUnknown: false })
     expect(state.complete).not.toHaveBeenCalled()
@@ -197,7 +206,7 @@ describe("A2A execution backend", () => {
     const request = input()
     const state = memoryLifecycle(request)
     const handle = await new A2aAgentRunnerAdapter(server.endpoint, () => state.lifecycle).spawn(request)
-    await vi.waitFor(() => expect(state.saved()?.taskId).toBe("remote-task"))
+    await waitForTaskCheckpoint(handle, state)
     await handle.cancel()
     await expect(handle.result).rejects.toBeInstanceOf(AgentRunError)
     expect(state.saved()).toMatchObject({ phase: "terminal", state: "TASK_STATE_CANCELED" })
@@ -217,7 +226,7 @@ describe("A2A execution backend", () => {
     const request = input()
     const state = memoryLifecycle(request)
     const handle = await new A2aAgentRunnerAdapter(server.endpoint, () => state.lifecycle).spawn(request)
-    await vi.waitFor(() => expect(state.saved()?.taskId).toBe("remote-task"))
+    await waitForTaskCheckpoint(handle, state)
     await expect(handle.cancel()).rejects.toMatchObject({ outcomeUnknown: true })
     await expect(handle.result).rejects.toMatchObject({ outcomeUnknown: true })
     expect(state.complete).not.toHaveBeenCalled()
@@ -323,37 +332,84 @@ describe("A2A execution backend", () => {
   })
 
   it("bounds a stalled GetTask by the execution deadline and confirms remote timeout cancellation", async () => {
-    const server = await fixture((rpc, response) => {
-      if (rpc.method === "SendMessage") reply(response, rpc, { task: task() })
-      else if (rpc.method === "CancelTask") reply(response, rpc, task("TASK_STATE_CANCELED"))
-    })
-    const request = input({ timeoutMs: 100 })
-    const state = memoryLifecycle(request)
-    const started = Date.now()
-    const handle = await new A2aAgentRunnerAdapter(
-      { ...server.endpoint, requestTimeoutMs: 1_000 },
-      () => state.lifecycle,
-    ).spawn(request)
-    await expect(handle.result).rejects.toMatchObject({ code: "TIMEOUT", outcomeUnknown: false })
-    expect(Date.now() - started).toBeLessThan(800)
-    expect(server.calls.map((call) => call.method)).toEqual(["SendMessage", "GetTask", "CancelTask"])
-    expect(state.complete).not.toHaveBeenCalled()
+    const clock = manualDeadlineClock()
+    try {
+      const request = input({ timeoutMs: 5_000 })
+      const state = memoryLifecycle(request)
+      const server = await fixture((rpc, response) => {
+        if (rpc.method === "SendMessage") {
+          clock.advance(4_000)
+          reply(response, rpc, { task: task() })
+        } else if (rpc.method === "GetTask") {
+          expect(state.saved()).toMatchObject({ phase: "accepted", taskId: "remote-task" })
+          clock.advance(1_000)
+        } else if (rpc.method === "CancelTask") reply(response, rpc, task("TASK_STATE_CANCELED"))
+      })
+      const handle = await new A2aAgentRunnerAdapter(
+        { ...server.endpoint, requestTimeoutMs: 10_000 },
+        () => state.lifecycle,
+      ).spawn(request)
+      await expect(handle.result).rejects.toMatchObject({ code: "TIMEOUT", outcomeUnknown: false })
+      await expect(handle.cancel()).resolves.toBeUndefined()
+      expect(server.calls.map((call) => call.method)).toEqual(["SendMessage", "GetTask", "CancelTask"])
+      expect(state.saved()).toMatchObject({ phase: "terminal", taskId: "remote-task", state: "TASK_STATE_CANCELED" })
+      expect(handle.isAlive()).toBe(false)
+      expect(state.complete).not.toHaveBeenCalled()
+    } finally {
+      clock.restore()
+    }
+  })
+
+  it("retains uncertainty when its execution deadline expires before the SendMessage response arrives", async () => {
+    const clock = manualDeadlineClock()
+    try {
+      const request = input({ timeoutMs: 5_000 })
+      const state = memoryLifecycle(request)
+      const server = await fixture(() => {
+        clock.advance(5_000)
+      })
+      const adapter = new A2aAgentRunnerAdapter({ ...server.endpoint, requestTimeoutMs: 10_000 }, () => state.lifecycle)
+      await expect((await adapter.spawn(request)).result).rejects.toMatchObject({ code: "CRASH", outcomeUnknown: true })
+      expect(state.saved()).toMatchObject({ phase: "unknown" })
+      expect(state.saved()?.taskId).toBeUndefined()
+      await expect((await adapter.spawn(request)).result).rejects.toMatchObject({ outcomeUnknown: true })
+      expect(server.calls.map((call) => call.method)).toEqual(["SendMessage"])
+      expect(state.complete).not.toHaveBeenCalled()
+    } finally {
+      clock.restore()
+    }
   })
 
   it("keeps a still-running task uncertain when cancellation never reaches a terminal state", async () => {
-    const server = await fixture((rpc, response) =>
-      reply(response, rpc, rpc.method === "SendMessage" ? { task: task() } : task()),
-    )
-    const request = input()
-    const state = memoryLifecycle(request)
-    const handle = await new A2aAgentRunnerAdapter(
-      { ...server.endpoint, requestTimeoutMs: 50 },
-      () => state.lifecycle,
-    ).spawn(request)
-    await vi.waitFor(() => expect(state.saved()?.taskId).toBe("remote-task"))
-    await expect(handle.cancel()).rejects.toMatchObject({ outcomeUnknown: true })
-    expect(state.saved()).toMatchObject({ phase: "unknown", taskId: "remote-task" })
-    expect(state.complete).not.toHaveBeenCalled()
+    const clock = manualDeadlineClock()
+    try {
+      let cancelling = false
+      let cancellationPolls = 0
+      const server = await fixture((rpc, response) => {
+        if (rpc.method === "SendMessage") reply(response, rpc, { task: task() })
+        else {
+          if (rpc.method === "CancelTask") cancelling = true
+          else if (cancelling) {
+            cancellationPolls++
+            clock.advance(cancellationPolls === 1 ? 4_000 : 1_000)
+          }
+          reply(response, rpc, task("TASK_STATE_WORKING"))
+        }
+      })
+      const request = input()
+      const state = memoryLifecycle(request)
+      const handle = await new A2aAgentRunnerAdapter(server.endpoint, () => state.lifecycle).spawn(request)
+      await waitForTaskCheckpoint(handle, state)
+      await expect(handle.cancel()).rejects.toMatchObject({ outcomeUnknown: true })
+      await expect(handle.result).rejects.toMatchObject({ outcomeUnknown: true })
+      expect(server.calls.filter((rpc) => rpc.method === "CancelTask")).toHaveLength(1)
+      expect(server.calls.filter((rpc) => rpc.method === "SendMessage")).toHaveLength(1)
+      expect(cancellationPolls).toBe(2)
+      expect(state.saved()).toMatchObject({ phase: "unknown", taskId: "remote-task", state: "TASK_STATE_WORKING" })
+      expect(state.complete).not.toHaveBeenCalled()
+    } finally {
+      clock.restore()
+    }
   })
 
   it("follows an associated direct message through its task before gating completion", async () => {

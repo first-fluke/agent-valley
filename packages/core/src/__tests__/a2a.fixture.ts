@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net"
 import { vi } from "vitest"
 import type { RunAttempt } from "../domain/models"
-import type { SpawnInput } from "../domain/ports/agent-runner"
+import type { RunHandle, SpawnInput } from "../domain/ports/agent-runner"
 import type {
   A2aCheckpoint,
   A2aEndpoint,
@@ -45,6 +45,10 @@ export function input(overrides: Partial<SpawnInput> = {}): SpawnInput {
 export function memoryLifecycle(request: SpawnInput, initial?: A2aCheckpoint) {
   let saved = initial
   const checkpoints: A2aCheckpoint[] = []
+  let recordTask!: () => void
+  const taskRecorded = new Promise<void>((resolve) => {
+    recordTask = resolve
+  })
   const complete = vi.fn(
     async (_response: A2aSendResponse, _checkpoint: A2aCheckpoint): Promise<RunAttempt> => ({
       ...(request.attempt as RunAttempt),
@@ -58,10 +62,20 @@ export function memoryLifecycle(request: SpawnInput, initial?: A2aCheckpoint) {
     save: async (checkpoint) => {
       saved = structuredClone(checkpoint)
       checkpoints.push(saved)
+      if (checkpoint.taskId) recordTask()
     },
     complete,
   }
-  return { lifecycle, checkpoints, complete, saved: () => saved }
+  return { lifecycle, checkpoints, complete, taskRecorded, saved: () => saved }
+}
+
+export async function waitForTaskCheckpoint(handle: RunHandle, state: { taskRecorded: Promise<void> }): Promise<void> {
+  await Promise.race([
+    state.taskRecorded,
+    handle.result.then(() => {
+      throw new Error("Execution completed before recording its remote task.")
+    }),
+  ])
 }
 export function card(endpoint: A2aEndpoint) {
   return {
@@ -112,7 +126,7 @@ export async function protocolServer(
     id: "fixture",
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/rpc`,
     allowHttpLoopback: true,
-    requestTimeoutMs: 250,
+    requestTimeoutMs: 5_000,
     pollIntervalMs: 1,
   }
   agentCard = card(endpoint)
@@ -131,4 +145,29 @@ export async function protocolServer(
 }
 export function reply(response: ServerResponse, rpc: RpcRequest, result: unknown): void {
   response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result }))
+}
+
+/** Advance deadline signals at protocol barriers without timing the HTTP handshake. */
+export function manualDeadlineClock() {
+  let now = Date.now()
+  const deadlines: { at: number; controller: AbortController }[] = []
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now)
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+    const controller = new AbortController()
+    deadlines.push({ at: now + delay, controller })
+    return controller.signal
+  })
+  return {
+    advance: (milliseconds: number) => {
+      now += milliseconds
+      for (const deadline of deadlines) {
+        if (deadline.at <= now && !deadline.controller.signal.aborted)
+          deadline.controller.abort(new DOMException("Execution deadline reached", "TimeoutError"))
+      }
+    },
+    restore: () => {
+      timeout.mockRestore()
+      clock.mockRestore()
+    },
+  }
 }
