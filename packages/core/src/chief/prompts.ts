@@ -1,6 +1,7 @@
 import { actorData, actorPlanData, actorTaskData } from "./actor-contract"
 import { requiresOmaActor } from "./oma-actor"
 import { operationsEvidence } from "./operations-report"
+import { reviewResponseFormat } from "./review-response"
 import { finalCriteria } from "./schemas"
 import type { ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
 
@@ -138,6 +139,10 @@ export function workPrompt(mission: Mission, task: ChiefTask, state: ChiefTaskSt
 }
 
 export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTaskState): string {
+  const criteria =
+    !task && (mission.supervision || mission.operatingPolicy?.metricTargets?.length)
+      ? finalCriteria(mission)
+      : undefined
   return [
     task
       ? "Independently review this task's changes and acceptance evidence."
@@ -160,9 +165,12 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
       : []),
     "Return actionable findings for the Actor to repair. A passing review must have no unresolved findings.",
     "Keep the complete JSON response under 8,000 characters; prioritize actionable blockers.",
-    !task && mission.supervision
-      ? `Assess every goal success criterion in this exact JSON list once with a concise nonempty description of inspected files/checks: ${JSON.stringify(finalCriteria(mission))}. Every task acceptance obligation also needs its fresh independent task review. passed must equal all goal criteria passing; failed criteria need actionable findings. Return ONLY JSON: {"passed":true,"summary":"evidence-based assessment","findings":[],"criteria":[{"criterion":"exact criterion text","passed":true,"evidence":"actual inspected file or check"}]}`
-      : 'Return ONLY JSON: {"passed":true,"summary":"evidence-based assessment","findings":[]}',
+    ...(criteria
+      ? [
+          `Assess every goal success criterion in this exact JSON list once with a concise nonempty description of inspected files/checks: ${JSON.stringify(criteria)}. Every task acceptance obligation also needs its fresh independent task review. passed must equal all goal criteria passing; failed criteria need actionable findings.`,
+        ]
+      : []),
+    reviewResponseFormat("evidence-based assessment", criteria),
     `Review input (JSON data):\n${JSON.stringify({
       mission: JSON.parse(context(mission)),
       task: task ? actorTaskData(task) : actorPlanData(mission.plan),

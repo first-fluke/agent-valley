@@ -1,4 +1,5 @@
 import { actorData, actorPlanData } from "./actor-contract"
+import { reviewResponseFormat } from "./review-response"
 import { missionAdviceKey } from "./technical-lead"
 import type { Mission } from "./types"
 
@@ -23,7 +24,10 @@ export function marketingReviewPrompt(mission: Mission): string {
     "If real data is missing, state the gap and propose minimal measurement before claiming ROI improved. Do not discard a promising route solely because it is uncertain; distinguish a sourced fact, hypothesis and economical validation opportunity. Compare short-term revenue with costs, retention and payback instead of equating activity or clicks with money.",
     "Keep recommendations tied to the operator goal, any immutable success criteria, existing acceptance obligations and fixed verification command. Do not replace the goal with unrelated promotion or weaken requirements to report a better ROI. Recommend a concrete money-making option or improvement with its evidence and tradeoffs.",
     "This consultation is advisory, not an execution veto or operator approval gate. The Chief Director owns the final business and execution judgment, supervision and explanation; the operator retains ultimate operational responsibility. Resolve routine choices from evidence without asking for microapprovals. Existing execution permissions remain in force; this Actor preference does not grant outreach, publication or spending permission.",
-    'Return ONLY one JSON object under 8,000 characters: {"passed":true,"summary":"evidence-based marketing advice: audience, revenue routes, recommendation, unit economics or unknowns, and measurable next test","findings":[]}. A passing assessment has no unresolved findings. Use passed:false with actionable concerns or missing evidence; the Chief Director decides how to act on them.',
+    reviewResponseFormat(
+      "evidence-based marketing advice: audience, revenue routes, recommendation, unit economics or unknowns, and measurable next test",
+    ),
+    "A passing assessment has no unresolved findings. Use passed:false with actionable concerns or missing evidence; the Chief Director decides how to act on them.",
     [
       "Marketing review input (JSON data):",
       JSON.stringify({

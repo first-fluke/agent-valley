@@ -1,4 +1,5 @@
 import { actorData, actorPlanData } from "./actor-contract"
+import { reviewResponseFormat } from "./review-response"
 import { missionAdviceKey } from "./technical-lead"
 import type { Mission } from "./types"
 
@@ -24,7 +25,10 @@ export function designReviewPrompt(mission: Mission): string {
     "If actual data is absent or insufficient, state what is unknown and propose the smallest useful instrumentation or user/field test: the specific journey or hypothesis, relevant user persona, observation or metric, comparison and decision rule. Propose these steps as advice; do not execute them in this read-only stage. Avoid false certainty and do not discard an opportunity solely because evidence is not yet available.",
     "Recommend the smallest adequate design approach that preserves the operator goal, any immutable success criteria, existing acceptance obligations and fixed verification command. Flag usability or evidence gaps with inspected examples and concrete alternatives; do not weaken requirements or demand an unrelated redesign.",
     "This consultation is advisory, not an execution veto or operator approval gate. The Chief Director owns the final business and execution judgment, supervision and explanation; the operator retains ultimate operational responsibility. Resolve routine choices from evidence without asking for microapprovals. Existing execution permissions remain in force.",
-    'Return ONLY one JSON object under 8,000 characters: {"passed":true,"summary":"evidence-based design advice: alternatives, recommendation, data or unknowns, and retention tradeoffs","findings":[]}. Use passed:false with actionable concerns when evidence or usability needs improvement; the Chief Director decides how to act on them.',
+    reviewResponseFormat(
+      "evidence-based design advice: alternatives, recommendation, data or unknowns, and retention tradeoffs",
+    ),
+    "Use passed:false with actionable concerns when evidence or usability needs improvement; the Chief Director decides how to act on them.",
     [
       "Design review input (JSON data):",
       JSON.stringify({

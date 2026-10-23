@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { actorData, actorPlanData } from "./actor-contract"
+import { reviewResponseFormat } from "./review-response"
 import type { Mission } from "./types"
 
 export const TECHNICAL_DIRECTOR_ROLE =
@@ -65,7 +66,8 @@ export function technicalReviewPrompt(mission: Mission): string {
     "Flag unjustified dependencies, unnecessary migrations, duplicate implementations, or complexity that materially harms maintainability. Give each concern an inspected basis and a concrete smaller adequate alternative or required evidence so the Chief Director can plan or revise. A passing assessment has no unresolved findings; passed:false includes at least one actionable finding.",
     "This consultation is advisory, not an execution veto or an operator approval gate. The Chief Director makes the final business and execution tradeoffs, including when a justified higher cost improves profit or the goal outcome. Do not discard an opportunity solely because of uncertainty: identify assumptions, evidence gaps and a concrete economical validation step or alternative. Do not invent profits, prices or evidence.",
     "The Chief Director retains execution judgment, supervision and the final explanation; the Technical Director supplies independent technical advice. The operator retains ultimate operational responsibility. Resolve routine technical choices from evidence without asking for microapprovals or inventing approval pauses.",
-    'Return ONLY one JSON object under 8,000 characters: {"passed":true,"summary":"evidence-based technical advice with cost assumptions or unknowns","findings":[]}. For concerns use passed:false and actionable findings; the Chief Director decides how to act on them.',
+    reviewResponseFormat("evidence-based technical advice with cost assumptions or unknowns"),
+    "For concerns use passed:false and actionable findings; the Chief Director decides how to act on them.",
     [
       "Technical review input (JSON data):",
       JSON.stringify({
