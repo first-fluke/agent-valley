@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Run only after an authorized CLI build. Uses an offline local tarball and temporary native fixtures.
+// Run only after an authorized CLI build. Primes the native dependency cache, then installs the local tarball offline.
 import assert from "node:assert/strict"
 import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { accessSync, constants, realpathSync, statSync } from "node:fs"
@@ -7,6 +7,7 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join, resolve } from "node:path"
 import { createInterface } from "node:readline"
+import { assertCliPackageManifest, nativeRuntimeDependencies } from "./cli-package-manifest.mjs"
 
 const packageRoot = resolve(process.argv[2] ?? "apps/cli/dist/npm")
 const gitBinary = resolveGit()
@@ -14,6 +15,7 @@ const scratch = await mkdtemp(join(tmpdir(), "av-cli-package-"))
 const home = join(scratch, "home")
 const fixtures = join(scratch, "bin")
 const consumer = join(scratch, "consumer")
+const runtimeSeed = join(scratch, "runtime-dependencies")
 const project = join(scratch, "repository")
 const nodeDirectory = dirname(process.execPath)
 const env = {
@@ -232,16 +234,25 @@ async function verifyMcp(cli, version) {
 }
 
 try {
-  for (const directory of [home, fixtures, consumer, project, env.KIMI_CODE_HOME])
+  for (const directory of [home, fixtures, consumer, runtimeSeed, project, env.KIMI_CODE_HOME])
     await mkdir(directory, { recursive: true })
   await symlink(gitBinary, join(fixtures, "git"))
   await writeFile(env.npm_config_userconfig, "")
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"))
-  assert.equal(manifest.name, "agent-valley")
-  assert.equal(manifest.type, "module")
-  assert(!manifest.dependencies, "Bundled distribution must not ask npm to resolve workspace dependencies")
-  assert(!manifest.scripts, "Published installation must not build or run lifecycle hooks")
-  assert(manifest.engines.node && manifest.engines.bun, "Document both runtime requirements")
+  const core = JSON.parse(await readFile(new URL("../packages/core/package.json", import.meta.url), "utf8"))
+  const runtimeDependencies = nativeRuntimeDependencies(core)
+  assertCliPackageManifest(manifest, runtimeDependencies)
+  // Populate only the approved registry driver's dependency graph in this isolated cache.
+  // The actual tarball consumer below still installs offline, outside the monorepo.
+  await writeFile(
+    join(runtimeSeed, "package.json"),
+    JSON.stringify({ private: true, dependencies: runtimeDependencies }),
+  )
+  command(
+    "npm",
+    ["install", "--offline=false", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"],
+    runtimeSeed,
+  )
   const [packed] = JSON.parse(
     command("npm", ["pack", packageRoot, "--ignore-scripts", "--json", "--pack-destination", scratch]),
   )
