@@ -6,6 +6,19 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [3.0.2](https://github.com/first-fluke/agent-valley/compare/v3.0.1...v3.0.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **runtime:** verify stale handle cleanup failures ([e22fe28](https://github.com/first-fluke/agent-valley/commit/e22fe288bcbda7cf0e061641307ed74c424947df))
+* **sandbox:** allow signals within the agent sandbox ([037dbd6](https://github.com/first-fluke/agent-valley/commit/037dbd6968a930776e78bb539e301e29720b82c6))
+
+
+### Tests
+
+* stabilize process integration deadlines and cleanup ([e56d05f](https://github.com/first-fluke/agent-valley/commit/e56d05faebcf85e309e2e5a38677b510c94f43c8))
+
 ## [3.0.1](https://github.com/first-fluke/agent-valley/compare/v3.0.0...v3.0.1) (2026-10-23)
 
 
