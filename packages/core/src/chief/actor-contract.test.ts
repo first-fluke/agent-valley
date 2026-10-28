@@ -81,6 +81,56 @@ describe("Director and Actor contract compatibility", () => {
     expect(mission.plan).toBeUndefined()
   })
 
+  it.each([
+    [false, false, false, ["tasks"]],
+    [true, false, false, ["tasks", "actors"]],
+    [false, true, false, ["tasks", "goalBrief"]],
+    [true, true, false, ["tasks", "actors", "goalBrief"]],
+    [false, true, true, ["tasks", "goalBrief", "verificationContract"]],
+    [true, true, true, ["tasks", "actors", "goalBrief", "verificationContract"]],
+  ] as const)(
+    "separates input identities from response keys for roster=%s supervision=%s chief verification=%s",
+    (roster, supervised, chiefVerification, keys) => {
+      const { mission } = fixture()
+      if (roster) mission.availableAgents = ["codex", "cursor", "claude"]
+      if (!supervised) delete mission.supervision
+      if (chiefVerification) mission.verificationMode = "chief"
+      mission.technicalLeadId = "technical-director"
+      mission.designLeadId = "design-director"
+      mission.marketingLeadId = "marketing-director"
+      const prompt = planPrompt(mission)
+      expect(prompt).toContain(`Allowed top-level response keys for this mode: ${JSON.stringify(keys)}.`)
+      expect(prompt).toContain("Mission input identity fields are metadata, not response fields")
+      expect(prompt).toContain(
+        "Do not copy chiefId, technicalLeadId, designLeadId or marketingLeadId into the response root",
+      )
+      expect(prompt).toContain("retain nominated companions only as entries in actors")
+      const input = JSON.parse(prompt.split("Mission input (JSON data):\n")[1] ?? "")
+      expect(input.technicalLeadId).toBe(mission.technicalLeadId)
+      expect(input.designLeadId).toBe(mission.designLeadId)
+      expect(input.marketingLeadId).toBe(mission.marketingLeadId)
+    },
+  )
+
+  it("still rejects the observed planning response with copied Director metadata", () => {
+    const { mission } = fixture()
+    const response = { ...actorPlanData(plan), goalBrief: brief }
+    expect(parsePlanningResponse(JSON.stringify(response), mission).plan).toEqual(plan)
+    const before = JSON.stringify(mission)
+    expect(() =>
+      parsePlanningResponse(
+        JSON.stringify({
+          ...response,
+          technicalLeadId: "technical-director",
+          designLeadId: "design-director",
+          marketingLeadId: "marketing-director",
+        }),
+        mission,
+      ),
+    ).toThrow(/Unrecognized keys/)
+    expect(JSON.stringify(mission)).toBe(before)
+  })
+
   it("accepts canonical recovery assignments and preserves legacy task state IDs", () => {
     const { mission } = fixture()
     mission.plan = structuredClone(plan)

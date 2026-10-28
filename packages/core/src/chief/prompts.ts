@@ -38,6 +38,12 @@ function context(mission: Mission): string {
 
 export function planPrompt(mission: Mission): string {
   const chief = mission.personas.find((persona) => persona.id === mission.chiefId)
+  const responseKeys = [
+    "tasks",
+    ...(mission.availableAgents ? ["actors"] : []),
+    ...(mission.supervision ? ["goalBrief"] : []),
+    ...(mission.verificationMode === "chief" ? ["verificationContract"] : []),
+  ]
   return [
     "You are the Chief Director coordinating this mission. Understand the user's intent and the actual business and product context, then decide a strategy and plan the requested work.",
     CHIEF_DIRECTOR_ROLE,
@@ -90,6 +96,8 @@ export function planPrompt(mission: Mission): string {
           "Select only needed catalog skill names for each generated Actor. No invented names or paths; the runtime supplies selected skill files. Skill access does not extend publication, spending or file-change authorization.",
         ]
       : []),
+    `Allowed top-level response keys for this mode: ${JSON.stringify(responseKeys)}. Return no other root keys.`,
+    "Mission input identity fields are metadata, not response fields. Do not copy chiefId, technicalLeadId, designLeadId or marketingLeadId into the response root, or copy other Mission metadata. When generating a roster, retain nominated companions only as entries in actors with their supplied ids. With a fixed roster, use configured Actor ids without returning actors.",
     ...(mission.availableAgents
       ? [
           `The operator's Chief Director CLI is fixed: ${JSON.stringify({ id: mission.chiefId, actorType: chief?.agentType })}. Do not replace it with another vendor. Omit model from every response Actor; the scheduler retains the selected Chief Director model and Actors use their CLI defaults.`,
