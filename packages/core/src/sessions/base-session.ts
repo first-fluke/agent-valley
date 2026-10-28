@@ -13,7 +13,7 @@ import type {
   AgentSession,
   RunResult,
 } from "./agent-session"
-import { signalProcessTree } from "./process-tree"
+import { rootAndGroupAbsent, signalProcessTree } from "./process-tree"
 import { planSandboxedSpawn } from "./sandbox"
 
 /** Env vars safe to pass to agent subprocesses */
@@ -94,6 +94,15 @@ function waitForReap(proc: ChildProcess, timeoutMs: number): Promise<boolean> {
     proc.once("close", onExit)
     if (proc.exitCode !== null || proc.signalCode != null) onExit()
   })
+}
+
+async function waitForRootAndGroupAbsence(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + Math.min(250, timeoutMs)
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(25, deadline - Date.now())))
+    if (rootAndGroupAbsent(pid)) return true
+  }
+  return false
 }
 
 /**
@@ -327,6 +336,7 @@ export abstract class BaseSession implements AgentSession {
 
   private async terminateProcess(proc: ChildProcess): Promise<void> {
     if (!proc.pid) return
+    const deadline = Date.now() + 5000
     let signalError: unknown
     try {
       signalProcessTree(proc, "SIGKILL")
@@ -336,7 +346,7 @@ export abstract class BaseSession implements AgentSession {
     }
     // Darwin can report EPERM for an unreaped zombie group. Yield for root
     // reaping, then repeat the existing checks; never infer detached-tool exit.
-    if (!(await waitForReap(proc, 5000))) {
+    if (!(await waitForReap(proc, Math.max(0, deadline - Date.now())))) {
       throw (
         signalError ??
         new Error(`Agent process ${proc.pid} did not exit within 5000ms after SIGKILL; inspect it before retrying.`)
@@ -345,7 +355,14 @@ export abstract class BaseSession implements AgentSession {
     if (signalError) {
       try {
         signalProcessTree(proc, "SIGKILL")
-      } catch {
+      } catch (retryError) {
+        // Root reaping can precede Darwin's group settlement. Only fresh ESRCH
+        // for both identities is proof; polling sends no additional kill signal.
+        if (
+          (retryError as NodeJS.ErrnoException).code === "EPERM" &&
+          (await waitForRootAndGroupAbsence(proc.pid, Math.max(0, deadline - Date.now())))
+        )
+          return
         throw signalError
       }
     }

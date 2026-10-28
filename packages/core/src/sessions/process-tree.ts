@@ -30,11 +30,16 @@ export function signalProcessTree(proc: ChildProcess, signal: "SIGTERM" | "SIGKI
       } catch (handleError) {
         // A child handle can lag OS exit. Never suppress a permission failure
         // unless both the group and leader are independently proven absent.
-        if ((handleError as NodeJS.ErrnoException).code === "EPERM" && absent(-proc.pid) && absent(proc.pid)) return
+        if ((handleError as NodeJS.ErrnoException).code === "EPERM" && rootAndGroupAbsent(proc.pid)) return
         throw handleError
       }
     }
   }
+}
+
+/** Absence of this root PID and its detached process group, not all descendants. */
+export function rootAndGroupAbsent(pid: number): boolean {
+  return absent(-pid) && absent(pid)
 }
 
 function absent(pid: number): boolean {

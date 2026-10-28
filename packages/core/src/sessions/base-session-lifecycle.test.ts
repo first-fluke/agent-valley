@@ -48,6 +48,37 @@ afterEach(() => {
 })
 
 describe.skipIf(process.platform === "win32")("BaseSession process reaping", () => {
+  it("yields for kernel settlement after an already reaped root still reports group EPERM", async () => {
+    vi.useFakeTimers()
+    const { session, reap } = fixture()
+    reap()
+    const original = denied()
+    const start = Date.now()
+    const signal = vi.spyOn(process, "kill").mockImplementation((_pid, value) => {
+      if (value !== 0 || Date.now() - start < 50) throw original
+      throw gone()
+    })
+    let finished = false
+    const outcome = session.dispose().then(
+      () => {
+        finished = true
+        return "disposed"
+      },
+      (error: unknown) => {
+        finished = true
+        return error
+      },
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(finished).toBe(false)
+    await vi.advanceTimersByTimeAsync(50)
+    expect(await outcome).toBe("disposed")
+    expect(signal.mock.calls.filter((call) => call[1] === "SIGKILL")).toHaveLength(2)
+    expect(signal).toHaveBeenCalledWith(-987654, 0)
+    expect(signal).toHaveBeenCalledWith(987654, 0)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it("joins root exit before kill completes and shares cleanup with dispose", async () => {
     const signal = vi.spyOn(process, "kill").mockReturnValue(true)
     const { proc, session, reap } = fixture()
@@ -65,6 +96,33 @@ describe.skipIf(process.platform === "win32")("BaseSession process reaping", () 
     expect(proc.listenerCount("close")).toBe(0)
     expect(session.pid).toBeUndefined()
   })
+
+  it.each(["live", "uninspectable"] as const)(
+    "keeps shared failure when the positive root stays %s after group settlement",
+    async (state) => {
+      vi.useFakeTimers()
+      const { session, reap } = fixture()
+      reap()
+      const original = denied()
+      let groupProbes = 0
+      const signal = vi.spyOn(process, "kill").mockImplementation((pid, value) => {
+        if (value !== 0) {
+          throw original
+        }
+        if (pid < 0 && ++groupProbes >= 3) throw gone()
+        if (pid > 0 && state === "live") return true
+        throw original
+      })
+      const outcome = session.kill().catch((error: unknown) => error)
+      await vi.advanceTimersByTimeAsync(250)
+      expect(await outcome).toBe(original)
+      expect(await session.dispose().catch((error: unknown) => error)).toBe(original)
+      expect(signal.mock.calls.filter((call) => call[1] === "SIGKILL")).toHaveLength(2)
+      expect(session.pid).toBe(987654)
+      expect(session.configured).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
 
   it("retries zombie-group EPERM after the root is reaped without waiting for pipe close", async () => {
     const original = denied()
