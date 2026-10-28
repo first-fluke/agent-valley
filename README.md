@@ -126,10 +126,10 @@ bun av issue "refactor auth" --breakdown           # Auto-decompose into sub-tas
 
 Two YAML config files, merged at startup (project wins over global):
 
-| File | Scope | Description |
-|---|---|---|
-| `~/.config/agent-valley/settings.yaml` | Global (user) | API key, actor defaults, team dashboard |
-| `av.yaml` | Project | Team config, workspace root, prompt template, routing |
+| File                                   | Scope         | Description                                           |
+| -------------------------------------- | ------------- | ----------------------------------------------------- |
+| `~/.config/agent-valley/settings.yaml` | Global (user) | API key, actor defaults, team dashboard               |
+| `av.yaml`                              | Project       | Team config, workspace root, prompt template, routing |
 
 Run `av setup` to create both files interactively, or follow [agent-led setup](./AGENT_SETUP.md) for an unattended installation using the initiating agent as Chief Director. See `av.example.yaml` for format reference.
 
@@ -142,14 +142,14 @@ linear:
   api_key: lin_api_xxx
 
 actor:
-  type: claude          # Default actor: claude / codex / antigravity / cursor / grok / kimi / opencode
+  type: claude # Default actor: claude / codex / antigravity / cursor / grok / kimi / opencode
   timeout: 3600
   max_retries: 3
-  max_parallel: 3       # Max concurrent actor runs (default: hardware-detected recommendation)
+  max_parallel: 3 # Max concurrent actor runs (default: hardware-detected recommendation)
 
 logging:
-  level: info           # debug / info / warn / error
-  format: json          # json / text
+  level: info # debug / info / warn / error
+  format: json # json / text
 
 server:
   port: 9741
@@ -171,7 +171,7 @@ explicit administration machine. See [team ledger setup and migration](./docs/gu
 ```yaml
 # Tracker selector (v0.2+). Defaults to `linear` when omitted.
 tracker:
-  kind: linear        # linear | github
+  kind: linear # linear | github
 
 linear:
   team_id: ACR
@@ -199,7 +199,7 @@ workspace:
   root: /absolute/path/to/target-repo
 
 delivery:
-  mode: merge           # merge (auto merge+push) or pr (create draft PR)
+  mode: merge # merge (auto merge+push) or pr (create draft PR)
 
 prompt: |
   You are working on {{issue.identifier}}: {{issue.title}}.
@@ -215,7 +215,7 @@ routing:
       workspace_root: /path/to/frontend
       actor_type: codex
       delivery_mode: pr
-      verify_command: "pytest && mypy ."   # overrides verify.command below for this route
+      verify_command: "pytest && mypy ." # overrides verify.command below for this route
 
 # Verification Gate (required for code tasks). Runs before delivery and before the
 # issue transitions to Done; on failure the actor retries with the captured
@@ -228,9 +228,9 @@ verify:
 scoring:
   model: haiku
   routes:
-    easy:  { min: 1, max: 3, actor: antigravity }
+    easy: { min: 1, max: 3, actor: antigravity }
     medium: { min: 4, max: 7, actor: codex }
-    hard:  { min: 8, max: 10, actor: claude }
+    hard: { min: 8, max: 10, actor: claude }
 
 # Actor Budget Caps (optional, v0.2+). Omit to disable (default).
 # budget:
@@ -320,37 +320,37 @@ Dependency arrows point **downward only**. See `docs/architecture/LAYERS.md`.
 Since v0.2 the Application layer talks to the outside world through four
 domain ports so adapters can be swapped without touching the orchestrator:
 
-| Port | Purpose | Current adapters |
-|---|---|---|
-| `IssueTracker` | Fetch / update issues, post comments, attach labels | `LinearTrackerAdapter`, `GitHubTrackerAdapter` |
-| `WebhookReceiver<TEvent>` | Verify signature + parse to `ParsedWebhookEvent` | `LinearWebhookReceiver`, `GitHubWebhookReceiver` |
-| `WorkspaceGateway` | Per-issue worktree lifecycle + delivery | `FileSystemWorkspaceGateway` |
-| `AgentRunnerPort` | Spawn actors + expose `RunHandle` for interventions | `SpawnAgentRunnerAdapter` |
+| Port                      | Purpose                                             | Current adapters                                 |
+| ------------------------- | --------------------------------------------------- | ------------------------------------------------ |
+| `IssueTracker`            | Fetch / update issues, post comments, attach labels | `LinearTrackerAdapter`, `GitHubTrackerAdapter`   |
+| `WebhookReceiver<TEvent>` | Verify signature + parse to `ParsedWebhookEvent`    | `LinearWebhookReceiver`, `GitHubWebhookReceiver` |
+| `WorkspaceGateway`        | Per-issue worktree lifecycle + delivery             | `FileSystemWorkspaceGateway`                     |
+| `AgentRunnerPort`         | Spawn actors + expose `RunHandle` for interventions | `SpawnAgentRunnerAdapter`                        |
 
 ### The 7 Symphony Components
 
-| # | Component | Responsibility | Spec |
-|---|---|---|---|
-| 1 | **Workflow Loader** | Prompt template rendering + input sanitization | `docs/specs/workflow-loader.md` |
-| 2 | **Config Layer** | YAML config loader (settings.yaml + av.yaml) + Zod validation | `docs/specs/config-layer.md` |
-| 3 | **Tracker Client** | Linear GraphQL — fetch issues, state transitions, comments, HMAC verification | `docs/specs/tracker-client.md` |
-| 4 | **Orchestrator** | Webhook event handler, state machine, retry queue, DAG scheduler | `docs/specs/orchestrator.md` |
-| 5 | **Workspace Manager** | Per-issue git worktree creation, merge/PR, cleanup | `docs/specs/workspace-manager.md` |
-| 6 | **Actor Runner** | AgentSession abstraction, timeout enforcement, parallel execution | `docs/specs/agent-runner.md` |
-| 7 | **Observability** | Structured JSON logs, system metrics, SSE status surface | `docs/specs/observability.md` |
+| #   | Component             | Responsibility                                                                | Spec                              |
+| --- | --------------------- | ----------------------------------------------------------------------------- | --------------------------------- |
+| 1   | **Workflow Loader**   | Prompt template rendering + input sanitization                                | `docs/specs/workflow-loader.md`   |
+| 2   | **Config Layer**      | YAML config loader (settings.yaml + av.yaml) + Zod validation                 | `docs/specs/config-layer.md`      |
+| 3   | **Tracker Client**    | Linear GraphQL — fetch issues, state transitions, comments, HMAC verification | `docs/specs/tracker-client.md`    |
+| 4   | **Orchestrator**      | Webhook event handler, state machine, retry queue, DAG scheduler              | `docs/specs/orchestrator.md`      |
+| 5   | **Workspace Manager** | Per-issue git worktree creation, merge/PR, cleanup                            | `docs/specs/workspace-manager.md` |
+| 6   | **Actor Runner**      | AgentSession abstraction, timeout enforcement, parallel execution             | `docs/specs/agent-runner.md`      |
+| 7   | **Observability**     | Structured JSON logs, system metrics, SSE status surface                      | `docs/specs/observability.md`     |
 
 ### Actor Session Plugins
 
-| Actor | Config value | Executable |
-|---|---|---|
-| Claude Code | `claude` | `claude` |
-| Codex | `codex` | `codex` |
-| Qwen Code | `qwen` | `qwen` |
-| Antigravity | `antigravity` | `agy` |
-| Cursor | `cursor` | `cursor-agent` |
-| Grok | `grok` | `grok` |
-| Kimi | `kimi` | `kimi` |
-| OpenCode | `opencode` | `opencode` |
+| Actor       | Config value  | Executable     |
+| ----------- | ------------- | -------------- |
+| Claude Code | `claude`      | `claude`       |
+| Codex       | `codex`       | `codex`        |
+| Qwen Code   | `qwen`        | `qwen`         |
+| Antigravity | `antigravity` | `agy`          |
+| Cursor      | `cursor`      | `cursor-agent` |
+| Grok        | `grok`        | `grok`         |
+| Kimi        | `kimi`        | `kimi`         |
+| OpenCode    | `opencode`    | `opencode`     |
 
 Extensible via `registerSession()` — implement the `AgentSession` interface to add custom actors.
 
@@ -369,19 +369,19 @@ PixiJS-rendered office scene showing real-time actor status:
 
 ### API Endpoints
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/webhook` | POST | Linear webhook receiver (HMAC-SHA256 verified) |
-| `/api/webhook/github` | POST | GitHub webhook receiver (HMAC-SHA256 verified) |
-| `/api/events` | GET | SSE stream for real-time dashboard updates |
-| `/api/status` | GET | JSON orchestrator status snapshot |
-| `/api/health` | GET | Health check (503 if the orchestrator is unavailable or stopped) |
-| `/api/intervention` | POST | Live actor intervention; local by default, token-authenticated when configured |
-| `/api/metrics` | GET | Prometheus-format metrics (enabled via `observability.prometheus.enabled`) |
-| `/api/team/ledger` | GET | Replayed team state for the local browser; dashboard status authentication applies |
-| `/api/team/session` | GET | Validate an AV team bearer token for `team_id` |
-| `/api/team/relay` | GET | Read team events after a sequence cursor using an AV team bearer token |
-| `/api/team/relay` | POST | Publish a validated event using an AV team bearer token; enforces node ownership |
+| Endpoint              | Method | Description                                                                        |
+| --------------------- | ------ | ---------------------------------------------------------------------------------- |
+| `/api/webhook`        | POST   | Linear webhook receiver (HMAC-SHA256 verified)                                     |
+| `/api/webhook/github` | POST   | GitHub webhook receiver (HMAC-SHA256 verified)                                     |
+| `/api/events`         | GET    | SSE stream for real-time dashboard updates                                         |
+| `/api/status`         | GET    | JSON orchestrator status snapshot                                                  |
+| `/api/health`         | GET    | Health check (503 if the orchestrator is unavailable or stopped)                   |
+| `/api/intervention`   | POST   | Live actor intervention; local by default, token-authenticated when configured     |
+| `/api/metrics`        | GET    | Prometheus-format metrics (enabled via `observability.prometheus.enabled`)         |
+| `/api/team/ledger`    | GET    | Replayed team state for the local browser; dashboard status authentication applies |
+| `/api/team/session`   | GET    | Validate an AV team bearer token for `team_id`                                     |
+| `/api/team/relay`     | GET    | Read team events after a sequence cursor using an AV team bearer token             |
+| `/api/team/relay`     | POST   | Publish a validated event using an AV team bearer token; enforces node ownership   |
 
 ---
 
@@ -453,9 +453,9 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 
 ### CI/CD
 
-| Workflow | Trigger | Purpose |
-|---|---|---|
-| `ci.yml` | Push/PR to main | `validate.sh` + tests |
+| Workflow         | Trigger                   | Purpose                |
+| ---------------- | ------------------------- | ---------------------- |
+| `ci.yml`         | Push/PR to main           | `validate.sh` + tests  |
 | `harness-gc.yml` | Weekly (Sunday 00:00 UTC) | Stale worktree cleanup |
 
 ---
@@ -477,15 +477,15 @@ Full documentation: `docs/harness/SAFETY.md`
 
 ## Architecture Constraints
 
-| # | Rule | Rationale |
-|---|---|---|
-| 1 | No framework imports in Domain layer | Domain stays pure and testable |
-| 2 | No business logic in routers | Presentation delegates to Application |
-| 3 | No hardcoded secrets | Config YAML only (gitignored) |
-| 4 | Issue body is untrusted | Sanitize at boundary |
-| 5 | Max 500 lines per file | Readability |
-| 6 | No shared mutable state outside Orchestrator | Single state authority |
-| 7 | Error messages must include fix instructions | Agents self-correct from errors |
+| #   | Rule                                         | Rationale                             |
+| --- | -------------------------------------------- | ------------------------------------- |
+| 1   | No framework imports in Domain layer         | Domain stays pure and testable        |
+| 2   | No business logic in routers                 | Presentation delegates to Application |
+| 3   | No hardcoded secrets                         | Config YAML only (gitignored)         |
+| 4   | Issue body is untrusted                      | Sanitize at boundary                  |
+| 5   | Max 500 lines per file                       | Readability                           |
+| 6   | No shared mutable state outside Orchestrator | Single state authority                |
+| 7   | Error messages must include fix instructions | Agents self-correct from errors       |
 
 Full list with examples: `docs/architecture/CONSTRAINTS.md`
 
@@ -504,12 +504,12 @@ Claude Code sub-agents are available in `.claude/agents/`:
 
 ## Metrics
 
-| Metric | Description |
-|---|---|
-| **Time to PR** | Issue assigned → PR created |
-| **CI pass rate** | PRs that pass CI on the first run |
-| **Review time per PR** | Average human reviewer time per PR |
-| **Doc freshness** | Days since `AGENTS.md` last updated (flag if > 30 days) |
+| Metric                 | Description                                             |
+| ---------------------- | ------------------------------------------------------- |
+| **Time to PR**         | Issue assigned → PR created                             |
+| **CI pass rate**       | PRs that pass CI on the first run                       |
+| **Review time per PR** | Average human reviewer time per PR                      |
+| **Doc freshness**      | Days since `AGENTS.md` last updated (flag if > 30 days) |
 
 ---
 

@@ -113,10 +113,10 @@ bun av issue "refactor auth" --breakdown           # 하위 작업으로 자동 
 
 두 개의 YAML 설정 파일이 시작 시 머지됩니다 (프로젝트 설정이 글로벌 설정보다 우선):
 
-| 파일 | 범위 | 설명 |
-|---|---|---|
-| `~/.config/agent-valley/settings.yaml` | 글로벌 (사용자) | API 키, Actor 기본값, 팀 대시보드 |
-| `av.yaml` | 프로젝트 | 팀 설정, 작업 경로, 프롬프트 템플릿, 라우팅 |
+| 파일                                   | 범위            | 설명                                        |
+| -------------------------------------- | --------------- | ------------------------------------------- |
+| `~/.config/agent-valley/settings.yaml` | 글로벌 (사용자) | API 키, Actor 기본값, 팀 대시보드           |
+| `av.yaml`                              | 프로젝트        | 팀 설정, 작업 경로, 프롬프트 템플릿, 라우팅 |
 
 `av setup`을 실행하면 두 파일을 대화형으로 생성합니다. 포맷은 `av.example.yaml`을 참고하세요.
 
@@ -129,14 +129,14 @@ linear:
   api_key: lin_api_xxx
 
 actor:
-  type: claude          # 기본 Actor: claude / codex / antigravity / cursor / grok / kimi / opencode
+  type: claude # 기본 Actor: claude / codex / antigravity / cursor / grok / kimi / opencode
   timeout: 3600
   max_retries: 3
-  max_parallel: 3       # 동시 실행 가능한 Actor 수 (기본값: 하드웨어 감지 기반 권장치)
+  max_parallel: 3 # 동시 실행 가능한 Actor 수 (기본값: 하드웨어 감지 기반 권장치)
 
 logging:
-  level: info           # debug / info / warn / error
-  format: json          # json / text
+  level: info # debug / info / warn / error
+  format: json # json / text
 
 server:
   port: 9741
@@ -158,7 +158,7 @@ Worker에는 gateway URL, 팀 UUID와 `av login`으로 저장한 AV 사용자 �
 ```yaml
 # 트래커 선택 (v0.2+). 생략 시 linear 로 간주합니다.
 tracker:
-  kind: linear        # linear | github
+  kind: linear # linear | github
 
 linear:
   team_id: ACR
@@ -186,7 +186,7 @@ workspace:
   root: /absolute/path/to/target-repo
 
 delivery:
-  mode: merge           # merge (자동 병합+푸시) 또는 pr (draft PR 생성)
+  mode: merge # merge (자동 병합+푸시) 또는 pr (draft PR 생성)
 
 prompt: |
   You are working on {{issue.identifier}}: {{issue.title}}.
@@ -202,7 +202,7 @@ routing:
       workspace_root: /path/to/frontend
       actor_type: codex
       delivery_mode: pr
-      verify_command: "pytest && mypy ."   # 이 라우트에 한해 아래 verify.command 를 덮어씁니다
+      verify_command: "pytest && mypy ." # 이 라우트에 한해 아래 verify.command 를 덮어씁니다
 
 # 검증 게이트 (코드 작업에 필수). 배포/PR 생성과 Done 전환 전에 실행되며,
 # 실패 시 캡처된 출력을 컨텍스트로 기존 재시도 큐를 통해 다시 시도합니다.
@@ -215,9 +215,9 @@ verify:
 scoring:
   model: haiku
   routes:
-    easy:  { min: 1, max: 3, actor: antigravity }
+    easy: { min: 1, max: 3, actor: antigravity }
     medium: { min: 4, max: 7, actor: codex }
-    hard:  { min: 8, max: 10, actor: claude }
+    hard: { min: 8, max: 10, actor: claude }
 
 # Actor 예산 제한 (선택 사항, v0.2+). 생략 시 비활성.
 # budget:
@@ -305,36 +305,36 @@ Infrastructure Linear + GitHub 어댑터, git 작업, Actor 세션, 관측성
 
 v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부와 상호작용하며, 어댑터 교체만으로 다른 tracker / FS / Actor 백엔드를 지원합니다:
 
-| 포트 | 역할 | 현재 어댑터 |
-|---|---|---|
-| `IssueTracker` | 이슈 조회 / 전이 / 코멘트 / 레이블 | `LinearTrackerAdapter`, `GitHubTrackerAdapter` |
-| `WebhookReceiver<TEvent>` | 서명 검증 + `ParsedWebhookEvent` 파싱 | `LinearWebhookReceiver`, `GitHubWebhookReceiver` |
-| `WorkspaceGateway` | 이슈별 worktree 생명주기 + 딜리버리 | `FileSystemWorkspaceGateway` |
-| `AgentRunnerPort` | Actor spawn + 인터벤션용 `RunHandle` 노출 | `SpawnAgentRunnerAdapter` |
+| 포트                      | 역할                                      | 현재 어댑터                                      |
+| ------------------------- | ----------------------------------------- | ------------------------------------------------ |
+| `IssueTracker`            | 이슈 조회 / 전이 / 코멘트 / 레이블        | `LinearTrackerAdapter`, `GitHubTrackerAdapter`   |
+| `WebhookReceiver<TEvent>` | 서명 검증 + `ParsedWebhookEvent` 파싱     | `LinearWebhookReceiver`, `GitHubWebhookReceiver` |
+| `WorkspaceGateway`        | 이슈별 worktree 생명주기 + 딜리버리       | `FileSystemWorkspaceGateway`                     |
+| `AgentRunnerPort`         | Actor spawn + 인터벤션용 `RunHandle` 노출 | `SpawnAgentRunnerAdapter`                        |
 
 ### Symphony 7개 컴포넌트
 
-| # | 컴포넌트 | 역할 | 스펙 |
-|---|---|---|---|
-| 1 | **Workflow Loader** | 프롬프트 템플릿 렌더링 + 입력 살균 | `docs/specs/workflow-loader.md` |
-| 2 | **Config Layer** | 타입 기반 설정 (Zod) + `$VAR` 환경 변수 해석 | `docs/specs/config-layer.md` |
-| 3 | **Tracker Client** | Linear GraphQL — 이슈 조회, 상태 전환, 코멘트, HMAC 검증 | `docs/specs/tracker-client.md` |
-| 4 | **Orchestrator** | 웹훅 이벤트 핸들러, 상태 머신, 재시도 큐, DAG 스케줄러 | `docs/specs/orchestrator.md` |
-| 5 | **Workspace Manager** | 이슈별 git worktree 생성, 병합/PR, 정리 | `docs/specs/workspace-manager.md` |
-| 6 | **Actor Runner** | AgentSession 추상화, 타임아웃 강제, 병렬 실행 | `docs/specs/agent-runner.md` |
-| 7 | **Observability** | 구조화된 JSON 로그, 시스템 메트릭, SSE 상태 표면 | `docs/specs/observability.md` |
+| #   | 컴포넌트              | 역할                                                     | 스펙                              |
+| --- | --------------------- | -------------------------------------------------------- | --------------------------------- |
+| 1   | **Workflow Loader**   | 프롬프트 템플릿 렌더링 + 입력 살균                       | `docs/specs/workflow-loader.md`   |
+| 2   | **Config Layer**      | 타입 기반 설정 (Zod) + `$VAR` 환경 변수 해석             | `docs/specs/config-layer.md`      |
+| 3   | **Tracker Client**    | Linear GraphQL — 이슈 조회, 상태 전환, 코멘트, HMAC 검증 | `docs/specs/tracker-client.md`    |
+| 4   | **Orchestrator**      | 웹훅 이벤트 핸들러, 상태 머신, 재시도 큐, DAG 스케줄러   | `docs/specs/orchestrator.md`      |
+| 5   | **Workspace Manager** | 이슈별 git worktree 생성, 병합/PR, 정리                  | `docs/specs/workspace-manager.md` |
+| 6   | **Actor Runner**      | AgentSession 추상화, 타임아웃 강제, 병렬 실행            | `docs/specs/agent-runner.md`      |
+| 7   | **Observability**     | 구조화된 JSON 로그, 시스템 메트릭, SSE 상태 표면         | `docs/specs/observability.md`     |
 
 ### Actor Session 플러그인
 
-| Actor | 설정 값 | 실행 파일 |
-|---|---|---|
-| Claude Code | `claude` | `claude` |
-| Codex | `codex` | `codex` |
-| Antigravity | `antigravity` | `agy` |
-| Cursor | `cursor` | `cursor-agent` |
-| Grok | `grok` | `grok` |
-| Kimi | `kimi` | `kimi` |
-| OpenCode | `opencode` | `opencode` |
+| Actor       | 설정 값       | 실행 파일      |
+| ----------- | ------------- | -------------- |
+| Claude Code | `claude`      | `claude`       |
+| Codex       | `codex`       | `codex`        |
+| Antigravity | `antigravity` | `agy`          |
+| Cursor      | `cursor`      | `cursor-agent` |
+| Grok        | `grok`        | `grok`         |
+| Kimi        | `kimi`        | `kimi`         |
+| OpenCode    | `opencode`    | `opencode`     |
 
 `registerSession()`을 통해 확장 가능 — `AgentSession` 인터페이스를 구현하여 커스텀 Actor를 추가하세요.
 
@@ -353,19 +353,19 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 
 ### API 엔드포인트
 
-| 엔드포인트 | 메서드 | 설명 |
-|---|---|---|
-| `/api/webhook` | POST | Linear 웹훅 수신기 (HMAC-SHA256 검증) |
-| `/api/webhook/github` | POST | GitHub 웹훅 수신기 (HMAC-SHA256 검증) |
-| `/api/events` | GET | 실시간 대시보드 업데이트를 위한 SSE 스트림 |
-| `/api/status` | GET | Orchestrator 상태 JSON 스냅샷 |
-| `/api/health` | GET | 헬스 체크 (Orchestrator 초기화 실패 또는 중지 시 503) |
-| `/api/intervention` | POST | 라이브 Actor 제어. 기본은 로컬 접근, 토큰 설정 시 인증 필요 |
-| `/api/metrics` | GET | Prometheus 메트릭 (`observability.prometheus.enabled` 시 활성화) |
-| `/api/team/ledger` | GET | 로컬 브라우저용 팀 상태. Dashboard 상태 인증 유지 |
-| `/api/team/session` | GET | AV 팀 bearer 토큰으로 `team_id` 소속·만료 확인 |
-| `/api/team/relay` | GET | AV 팀 bearer 토큰으로 순번 cursor 이후의 이벤트 조회 |
-| `/api/team/relay` | POST | AV 팀 bearer 토큰과 node 소유권을 확인하고 이벤트 저장 |
+| 엔드포인트            | 메서드 | 설명                                                             |
+| --------------------- | ------ | ---------------------------------------------------------------- |
+| `/api/webhook`        | POST   | Linear 웹훅 수신기 (HMAC-SHA256 검증)                            |
+| `/api/webhook/github` | POST   | GitHub 웹훅 수신기 (HMAC-SHA256 검증)                            |
+| `/api/events`         | GET    | 실시간 대시보드 업데이트를 위한 SSE 스트림                       |
+| `/api/status`         | GET    | Orchestrator 상태 JSON 스냅샷                                    |
+| `/api/health`         | GET    | 헬스 체크 (Orchestrator 초기화 실패 또는 중지 시 503)            |
+| `/api/intervention`   | POST   | 라이브 Actor 제어. 기본은 로컬 접근, 토큰 설정 시 인증 필요      |
+| `/api/metrics`        | GET    | Prometheus 메트릭 (`observability.prometheus.enabled` 시 활성화) |
+| `/api/team/ledger`    | GET    | 로컬 브라우저용 팀 상태. Dashboard 상태 인증 유지                |
+| `/api/team/session`   | GET    | AV 팀 bearer 토큰으로 `team_id` 소속·만료 확인                   |
+| `/api/team/relay`     | GET    | AV 팀 bearer 토큰으로 순번 cursor 이후의 이벤트 조회             |
+| `/api/team/relay`     | POST   | AV 팀 bearer 토큰과 node 소유권을 확인하고 이벤트 저장           |
 
 ---
 
@@ -437,10 +437,10 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 
 ### CI/CD
 
-| 워크플로우 | 트리거 | 목적 |
-|---|---|---|
-| `ci.yml` | main에 Push/PR | `validate.sh` + 테스트 |
-| `harness-gc.yml` | 매주 (일요일 00:00 UTC) | 오래된 worktree 정리 |
+| 워크플로우       | 트리거                  | 목적                   |
+| ---------------- | ----------------------- | ---------------------- |
+| `ci.yml`         | main에 Push/PR          | `validate.sh` + 테스트 |
+| `harness-gc.yml` | 매주 (일요일 00:00 UTC) | 오래된 worktree 정리   |
 
 ---
 
@@ -461,15 +461,15 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 
 ## 아키텍처 제약 사항
 
-| # | 규칙 | 근거 |
-|---|---|---|
-| 1 | Domain 레이어에 프레임워크 import 금지 | Domain은 순수하고 테스트 가능하게 유지 |
-| 2 | 라우터에 비즈니스 로직 금지 | Presentation은 Application에 위임 |
-| 3 | 하드코딩된 시크릿 금지 | 설정 YAML만 사용 (gitignore 처리) |
-| 4 | 이슈 본문은 신뢰할 수 없음 | 경계에서 살균 |
-| 5 | 파일당 최대 500줄 | 가독성 |
-| 6 | Orchestrator 외부에서 공유 가변 상태 금지 | 단일 상태 권한 |
-| 7 | 에러 메시지에 수정 지침 포함 필수 | Actor가 에러에서 자가 교정 |
+| #   | 규칙                                      | 근거                                   |
+| --- | ----------------------------------------- | -------------------------------------- |
+| 1   | Domain 레이어에 프레임워크 import 금지    | Domain은 순수하고 테스트 가능하게 유지 |
+| 2   | 라우터에 비즈니스 로직 금지               | Presentation은 Application에 위임      |
+| 3   | 하드코딩된 시크릿 금지                    | 설정 YAML만 사용 (gitignore 처리)      |
+| 4   | 이슈 본문은 신뢰할 수 없음                | 경계에서 살균                          |
+| 5   | 파일당 최대 500줄                         | 가독성                                 |
+| 6   | Orchestrator 외부에서 공유 가변 상태 금지 | 단일 상태 권한                         |
+| 7   | 에러 메시지에 수정 지침 포함 필수         | Actor가 에러에서 자가 교정             |
 
 예제가 포함된 전체 목록: `docs/architecture/CONSTRAINTS.md`
 
@@ -488,12 +488,12 @@ Claude Code 하위 Actor는 `.claude/agents/`에서 사용 가능합니다:
 
 ## 메트릭
 
-| 메트릭 | 설명 |
-|---|---|
-| **Time to PR** | 이슈 할당 → PR 생성 |
-| **CI pass rate** | 첫 실행에서 CI를 통과한 PR 비율 |
-| **Review time per PR** | PR당 평균 사람 리뷰어 소요 시간 |
-| **Doc freshness** | `AGENTS.md` 마지막 업데이트 이후 일수 (30일 초과 시 경고) |
+| 메트릭                 | 설명                                                      |
+| ---------------------- | --------------------------------------------------------- |
+| **Time to PR**         | 이슈 할당 → PR 생성                                       |
+| **CI pass rate**       | 첫 실행에서 CI를 통과한 PR 비율                           |
+| **Review time per PR** | PR당 평균 사람 리뷰어 소요 시간                           |
+| **Doc freshness**      | `AGENTS.md` 마지막 업데이트 이후 일수 (30일 초과 시 경고) |
 
 ---
 

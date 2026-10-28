@@ -33,10 +33,10 @@ The install script auto-detects project state and branches into new/existing mod
 
 **Configuration files:**
 
-| File | Scope | Description |
-|---|---|---|
-| `~/.config/agent-valley/settings.yaml` | Global (user) | API key, actor defaults, team dashboard |
-| `av.yaml` | Project | Team config, workspace root, workflow states, prompt, routing |
+| File                                   | Scope         | Description                                                   |
+| -------------------------------------- | ------------- | ------------------------------------------------------------- |
+| `~/.config/agent-valley/settings.yaml` | Global (user) | API key, actor defaults, team dashboard                       |
+| `av.yaml`                              | Project       | Team config, workspace root, workflow states, prompt, routing |
 
 Run `av setup` to create both files interactively and prepare OMA in the target repository. See `av.example.yaml` for format reference and [environment setup](docs/guides/environment-setup.md) for installation and update behavior.
 
@@ -52,15 +52,15 @@ Project configuration uses only `av.yaml`. New settings use `actor:`. Product ro
 
 Symphony SPEC — 7 components:
 
-| # | Component | Responsibility |
-|---|---|---|
-| 1 | **Workflow Loader** | Prompt template rendering + input sanitization |
-| 2 | **Config Layer** | YAML config loader (settings.yaml + av.yaml) + Zod validation |
-| 3 | **Issue Tracker Client** | Linear / GitHub webhook parsing + signature verification + startup sync |
-| 4 | **Orchestrator** | Webhook event handler, state machine, retry queue, sole in-memory state authority. v0.2+ split into `OrchestratorCore` / `IssueLifecycle` / `WebhookRouter` / `InterventionBus` |
-| 5 | **Workspace Manager** | Per-issue isolated directory + git worktree lifecycle. v0.2+ split into `worktree-lifecycle` / `delivery-strategy` / `safety-net` |
-| 6 | **Agent Runner** | `AgentRunnerPort` abstraction (claude/codex/qwen/antigravity/cursor/grok/kimi/opencode via native protocols) + live intervention `RunHandle` |
-| 7 | **Observability** | Structured logs (JSON) + optional OTel traces + optional Prometheus metrics |
+| #   | Component                | Responsibility                                                                                                                                                                  |
+| --- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Workflow Loader**      | Prompt template rendering + input sanitization                                                                                                                                  |
+| 2   | **Config Layer**         | YAML config loader (settings.yaml + av.yaml) + Zod validation                                                                                                                   |
+| 3   | **Issue Tracker Client** | Linear / GitHub webhook parsing + signature verification + startup sync                                                                                                         |
+| 4   | **Orchestrator**         | Webhook event handler, state machine, retry queue, sole in-memory state authority. v0.2+ split into `OrchestratorCore` / `IssueLifecycle` / `WebhookRouter` / `InterventionBus` |
+| 5   | **Workspace Manager**    | Per-issue isolated directory + git worktree lifecycle. v0.2+ split into `worktree-lifecycle` / `delivery-strategy` / `safety-net`                                               |
+| 6   | **Agent Runner**         | `AgentRunnerPort` abstraction (claude/codex/qwen/antigravity/cursor/grok/kimi/opencode via native protocols) + live intervention `RunHandle`                                    |
+| 7   | **Observability**        | Structured logs (JSON) + optional OTel traces + optional Prometheus metrics                                                                                                     |
 
 **Domain port layer (v0.2+):** Application code speaks to four domain
 ports — `IssueTracker`, `WebhookReceiver<TEvent>`, `WorkspaceGateway`,
@@ -121,12 +121,12 @@ live in `packages/core/src/domain/ports/`.
 
 Metrics for measuring agent throughput and harness efficiency:
 
-| Metric | Description |
-|---|---|
-| **Time to PR** | Time from issue assignment to PR creation |
-| **CI pass rate** | Percentage of PRs that pass CI on the first run |
-| **Review time per PR** | Average time a human reviewer spends per PR |
-| **Doc freshness** | Last update of this file (`AGENTS.md`). Review if >30 days stale. |
+| Metric                 | Description                                                       |
+| ---------------------- | ----------------------------------------------------------------- |
+| **Time to PR**         | Time from issue assignment to PR creation                         |
+| **CI pass rate**       | Percentage of PRs that pass CI on the first run                   |
+| **Review time per PR** | Average time a human reviewer spends per PR                       |
+| **Doc freshness**      | Last update of this file (`AGENTS.md`). Review if >30 days stale. |
 
 **Feedback loop:** If agents repeatedly fail in a pattern, update this file. Details: `docs/harness/FEEDBACK-LOOPS.md`
 
@@ -181,20 +181,20 @@ Run workflows only when explicitly requested or detected by a hook; never self-i
 
 Read the relevant file from `.agents/rules/` when working on matching code.
 
-| Rule | File | Scope |
-|------|------|-------|
-| backend | `.agents/rules/backend.md` | on request |
-| commit | `.agents/rules/commit.md` | on request |
-| database | `.agents/rules/database.md` | **/*.{sql,prisma} |
-| debug | `.agents/rules/debug.md` | on request |
-| design | `.agents/rules/design.md` | on request |
-| dev-workflow | `.agents/rules/dev-workflow.md` | on request |
-| frontend | `.agents/rules/frontend.md` | **/*.{tsx,jsx,css,scss} |
-| i18n-arb | `.agents/rules/i18n-arb.md` | **/*.arb |
-| i18n-guide | `.agents/rules/i18n-guide.md` | always |
-| infrastructure | `.agents/rules/infrastructure.md` | **/*.{tf,tfvars,hcl} |
-| market | `.agents/rules/market.md` | on request |
-| mobile | `.agents/rules/mobile.md` | **/*.{dart,swift,kt} |
-| quality | `.agents/rules/quality.md` | on request |
+| Rule           | File                              | Scope                   |
+| -------------- | --------------------------------- | ----------------------- |
+| backend        | `.agents/rules/backend.md`        | on request              |
+| commit         | `.agents/rules/commit.md`         | on request              |
+| database       | `.agents/rules/database.md`       | **/*.{sql,prisma}       |
+| debug          | `.agents/rules/debug.md`          | on request              |
+| design         | `.agents/rules/design.md`         | on request              |
+| dev-workflow   | `.agents/rules/dev-workflow.md`   | on request              |
+| frontend       | `.agents/rules/frontend.md`       | **/*.{tsx,jsx,css,scss} |
+| i18n-arb       | `.agents/rules/i18n-arb.md`       | **/*.arb                |
+| i18n-guide     | `.agents/rules/i18n-guide.md`     | always                  |
+| infrastructure | `.agents/rules/infrastructure.md` | **/*.{tf,tfvars,hcl}    |
+| market         | `.agents/rules/market.md`         | on request              |
+| mobile         | `.agents/rules/mobile.md`         | **/*.{dart,swift,kt}    |
+| quality        | `.agents/rules/quality.md`        | on request              |
 
 <!-- OMA:END -->

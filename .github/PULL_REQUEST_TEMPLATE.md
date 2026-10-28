@@ -21,7 +21,6 @@
 ## Architecture Checklist
 
 > Reference: `docs/architecture/CONSTRAINTS.md`, `docs/architecture/LAYERS.md`
-
 - [ ] No layer violations — domain/ does not import from infrastructure/, presentation/, or external SDKs
 - [ ] No business logic in router/handler/CLI layer (presentation delegates to application)
 - [ ] No hardcoded secrets, tokens, or environment-specific values in code
@@ -35,7 +34,6 @@
 
 > If this PR introduces a new pattern, convention, or shared utility, AGENTS.md must be updated
 > so future agents have the context to follow it. See AGENTS.md §5 Conventions.
-
 - [ ] No new conventions introduced — no update needed
 - [ ] **New pattern added** → updated `AGENTS.md` §Conventions (describe below)
 - [ ] **New shared utility added** → noted in `AGENTS.md` so agents know it exists
@@ -57,7 +55,6 @@
 
 > Complete this section for any code produced by an AI agent (Codex, Claude, Gemini, etc.).
 > Human-authored PRs may skip this section.
-
 - [ ] Verified the agent did not duplicate existing utilities (searched codebase before accepting)
 - [ ] Verified the agent did not introduce a new abstraction when an existing one covers the case
 - [ ] Error messages include actionable fix instructions, not just symptom descriptions (CONSTRAINTS.md §7)
@@ -73,7 +70,6 @@
 ## Security Checklist
 
 > Reference: `docs/harness/SAFETY.md`
-
 - [ ] No secrets committed — `.env` is in `.gitignore`, only `.env.example` is tracked
 - [ ] `scripts/harness/validate.sh` passes locally (`./scripts/harness/validate.sh`)
 - [ ] External inputs (issue body, PR description, comments) are NOT directly inserted into prompts or shell commands

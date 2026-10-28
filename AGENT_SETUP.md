@@ -25,16 +25,16 @@ ChatGPT or Claude in a browser without local shell access cannot perform this in
 
 Use the initiating agent runtime's trusted identity to choose the Chief Director. A delegated worker uses the identity passed by that initiating session. Do not choose from installed executables, authentication state, repository OMA settings, price, or a model's provider name. For example, an OpenCode session using an OpenAI model remains an `opencode` Chief Director.
 
-| Initiating agent runtime | `--actor` |
-|---|---|
-| Codex | `codex` |
-| Claude Code | `claude` |
-| Cursor | `cursor` |
-| Qwen Code | `qwen` |
-| Antigravity | `antigravity` |
-| Grok CLI | `grok` |
-| Kimi CLI | `kimi` |
-| OpenCode | `opencode` |
+| Initiating agent runtime | `--actor`     |
+| ------------------------ | ------------- |
+| Codex                    | `codex`       |
+| Claude Code              | `claude`      |
+| Cursor                   | `cursor`      |
+| Qwen Code                | `qwen`        |
+| Antigravity              | `antigravity` |
+| Grok CLI                 | `grok`        |
+| Kimi CLI                 | `kimi`        |
+| OpenCode                 | `opencode`    |
 
 Pass the exact active model only when trusted session metadata or the effective runtime configuration confirms it. Static configuration or a variable such as `ANTHROPIC_MODEL` alone may have been overridden in the session. Do not invent or translate model aliases. If the exact model is unavailable, pass `--model ''`: this clears a saved model pin and uses that CLI's native default. Report that the exact session model was not pinned. Never change the Chief Director to another vendor because it is cheaper or already authenticated. AV can route Actors independently.
 
@@ -114,11 +114,11 @@ Configuration and mission history stay in A, `workspace.root` selects B, and the
 
 Read setup's JSON and exit status. Its report includes project/config paths, Chief Director selection and readiness, OMA and integration results, and `nextActions`.
 
-| Setup status | Exit | Agent action |
-|---|---|---|
-| `ready` | `0` | Report the verified local setup and any remaining client reload/trust step. |
-| `action_required` | `2` | Preserve saved configuration, report the exact next action, and stop unattended retries. Rerun the same setup command after the action is complete. |
-| `failed` | `1` | Report the actual error and affected path. Fix an authorized, understood cause or report the remaining blocker. |
+| Setup status      | Exit | Agent action                                                                                                                                        |
+| ----------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ready`           | `0`  | Report the verified local setup and any remaining client reload/trust step.                                                                         |
+| `action_required` | `2`  | Preserve saved configuration, report the exact next action, and stop unattended retries. Rerun the same setup command after the action is complete. |
+| `failed`          | `1`  | Report the actual error and affected path. Fix an authorized, understood cause or report the remaining blocker.                                     |
 
 An installed executable does not prove authentication. Unknown authentication or model readiness must remain visible in the report. Browser/device sign-in is a concrete user action; do not bypass it or choose another vendor to avoid it.
 

@@ -4,13 +4,13 @@
 
 Preserve the current dashboard. This change standardizes role names and configuration terminology for repository operators.
 
-| Responsibility | Product name |
-|---|---|
-| Goal ownership and supervision | Chief Director |
+| Responsibility                                    | Product name       |
+| ------------------------------------------------- | ------------------ |
+| Goal ownership and supervision                    | Chief Director     |
 | Cost, stack, dependencies, reuse, and maintenance | Technical Director |
-| Promotion, monetization, and ROI | Marketing Director |
-| Usability, design exploration, and user testing | Design Director |
-| Assigned execution and independent review | Actor |
+| Promotion, monetization, and ROI                  | Marketing Director |
+| Usability, design exploration, and user testing   | Design Director    |
+| Assigned execution and independent review         | Actor              |
 
 Use `av.yaml` for project configuration and `av.example.yaml` for its example.
 
@@ -20,11 +20,11 @@ Retain the existing Tailwind gray surfaces, white and gray text, blue focus indi
 
 ## 3. Typography Rules
 
-| Role | Font | Size | Weight | Line Height | Letter Spacing | Features | Notes |
-|---|---|---|---|---|---|---|---|
-| Panel title | Existing inherited stack | Existing `text-sm` | Existing bold | Existing | Existing | None added | Use Active Actors |
-| Status and controls | Existing inherited stack | Existing | Existing | Existing | Existing | None added | Keep current semantic controls |
-| Identifiers | Existing monospace stack | Existing | Existing | Existing | Existing | None added | Preserve saved IDs |
+| Role                | Font                     | Size               | Weight        | Line Height | Letter Spacing | Features   | Notes                          |
+| ------------------- | ------------------------ | ------------------ | ------------- | ----------- | -------------- | ---------- | ------------------------------ |
+| Panel title         | Existing inherited stack | Existing `text-sm` | Existing bold | Existing    | Existing       | None added | Use Active Actors              |
+| Status and controls | Existing inherited stack | Existing           | Existing      | Existing    | Existing       | None added | Keep current semantic controls |
+| Identifiers         | Existing monospace stack | Existing           | Existing      | Existing    | Existing       | None added | Preserve saved IDs             |
 
 Retain the installed system font stack and CJK fallbacks. Do not add font packages.
 
