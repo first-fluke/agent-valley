@@ -178,10 +178,15 @@ async function execute(store: A2aJobStore, job: A2aJob, signal?: AbortSignal): P
     let verification: Awaited<ReturnType<typeof runVerificationGate>> | undefined
     let verificationFailure: unknown
     try {
+      // The verifier is a fixed local command, not agent-controlled code, but
+      // it may still need to observe an explicit toggle (e.g. a test-only
+      // failure flag). Forward it explicitly rather than inheriting the whole
+      // process environment, which would defeat the secret-leak isolation.
       verification = await runVerificationGate(input.workspace, job.verifyCommand, {
         timeoutSec: job.timeoutSec,
         signal,
         onSpawned: (pid) => guard.spawned(pid, process.platform !== "win32"),
+        ...(process.env.A2A_VERIFY_FAIL ? { extraEnv: { A2A_VERIFY_FAIL: process.env.A2A_VERIFY_FAIL } } : {}),
       })
     } catch (error) {
       verificationFailure = error

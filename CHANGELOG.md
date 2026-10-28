@@ -10,34 +10,31 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 
 ### Breaking Changes
 
-* **orchestrator:** verification gate security hardening & prompt injection defense
-* **deps:** major dependency update (Biome v2.6.3, Bun types v1.4.4, Commitlint v21.2.4)
+- **orchestrator:** verification gate security hardening & prompt injection defense
+- **deps:** major dependency update (Biome v2.6.3, Bun types v1.4.4, Commitlint v21.2.4)
 
 ### Features
 
-* **orchestrator:** Verification gate security hardening (`buildVerifyEnv` secret-leak isolation, `stripAnsi` control sequence stripping, `sanitizeVerbatim` prompt injection defense, timeout sec clamp)
+- **orchestrator:** Verification gate security hardening (`buildVerifyEnv` secret-leak isolation, `stripAnsi` control sequence stripping, `sanitizeVerbatim` prompt injection defense, timeout sec clamp)
 
 ## [3.0.5](https://github.com/first-fluke/agent-valley/compare/v3.0.4...v3.0.5) (2026-10-28)
 
-
 ### Bug Fixes
 
-* **runtime:** wait for retired process groups after EPERM ([095ea50](https://github.com/first-fluke/agent-valley/commit/095ea50cc35ab3ae54cfb01a4759242a9fe7b823))
+- **runtime:** wait for retired process groups after EPERM ([095ea50](https://github.com/first-fluke/agent-valley/commit/095ea50cc35ab3ae54cfb01a4759242a9fe7b823))
 
 ## [3.0.4](https://github.com/first-fluke/agent-valley/compare/v3.0.3...v3.0.4) (2026-10-28)
 
-
 ### Bug Fixes
 
-* **chief:** separate planning response from mission metadata ([9161822](https://github.com/first-fluke/agent-valley/commit/91618225dbb2caa6440dcc84151e7d88c9448028))
+- **chief:** separate planning response from mission metadata ([9161822](https://github.com/first-fluke/agent-valley/commit/91618225dbb2caa6440dcc84151e7d88c9448028))
 
 ## [3.0.3](https://github.com/first-fluke/agent-valley/compare/v3.0.2...v3.0.3) (2026-10-28)
 
-
 ### Bug Fixes
 
-* **ci:** satisfy runtime size and timeout checks ([aeae032](https://github.com/first-fluke/agent-valley/commit/aeae0320a19deb5c71bf757285bc46333125042c))
-* **runtime:** join Codex shutdown before confirming cleanup ([2a18358](https://github.com/first-fluke/agent-valley/commit/2a18358d0472a36755a65c51d268d341f84b4b23))
+- **ci:** satisfy runtime size and timeout checks ([aeae032](https://github.com/first-fluke/agent-valley/commit/aeae0320a19deb5c71bf757285bc46333125042c))
+- **runtime:** join Codex shutdown before confirming cleanup ([2a18358](https://github.com/first-fluke/agent-valley/commit/2a18358d0472a36755a65c51d268d341f84b4b23))
 
 ## [3.0.2](https://github.com/first-fluke/agent-valley/compare/v3.0.1...v3.0.2) (2026-10-23)
 

@@ -44,8 +44,12 @@ function stripAnsi(text: string): string {
  * orchestrator's full environment by default, which would leak API keys and
  * tokens held by the orchestrator into a worktree-scoped third-party command
  * (AGENTS.md §3). Only a small, explicit allowlist is forwarded.
+ *
+ * Callers that need the verifier to observe a specific variable (for example
+ * a test-only toggle) must forward it explicitly via `extraEnv`; blind
+ * inheritance of the whole process environment is never permitted.
  */
-function buildVerifyEnv(): NodeJS.ProcessEnv {
+function buildVerifyEnv(extraEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
@@ -55,6 +59,7 @@ function buildVerifyEnv(): NodeJS.ProcessEnv {
     FORCE_COLOR: "0",
     // Preserve the agent's own tool env so wrappers like `npx`/`bun` resolve.
     ...pickEnv(process.env, ["NODE_PATH", "BUN_INSTALL", "BUN_VERSION", "npm_config_user_agent"]),
+    ...extraEnv,
   } as NodeJS.ProcessEnv
 }
 
@@ -78,10 +83,11 @@ export type VerifyExecFn = (
   timeoutMs: number,
   signal?: AbortSignal,
   onSpawned?: (pid: number | undefined) => void,
+  extraEnv?: NodeJS.ProcessEnv,
 ) => Promise<VerifyExecResult>
 
 /** Real implementation: runs `command` through the shell in `cwd`, killing it if it exceeds `timeoutMs`. */
-export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal, onSpawned) =>
+export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal, onSpawned, extraEnv) =>
   new Promise((resolve) => {
     if (signal?.aborted) {
       resolve({ exitCode: -1, output: "Verification cancelled.", timedOut: false, aborted: true })
@@ -94,8 +100,9 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
       stdio: ["ignore", "pipe", "pipe"],
       // Never inherit the orchestrator's full environment: it holds API keys
       // and tokens that AGENTS.md §3 forbids leaking into agent-visible or
-      // worktree-scoped third-party commands.
-      env: buildVerifyEnv(),
+      // worktree-scoped third-party commands. Callers that need the verifier
+      // to observe a specific variable forward it explicitly via extraEnv.
+      env: buildVerifyEnv(extraEnv),
     })
 
     let output = ""
@@ -195,6 +202,12 @@ export interface VerificationGateOptions {
   exec?: VerifyExecFn
   signal?: AbortSignal
   onSpawned?: (pid: number | undefined) => void
+  /**
+   * Explicit env overrides forwarded to the verify child on top of the
+   * reduced allowlist. Never the whole process environment — that would
+   * defeat the secret-leak isolation (AGENTS.md §3).
+   */
+  extraEnv?: NodeJS.ProcessEnv
 }
 
 /**
@@ -235,11 +248,7 @@ export async function runVerificationGate(
 
   logger.info("verification-gate", "Running verify_command", { workspacePath: workspace.path, command, timeoutSec })
 
-  const result = opts.onSpawned
-    ? await exec(command, workspace.path, timeoutMs, opts.signal, opts.onSpawned)
-    : opts.signal
-      ? await exec(command, workspace.path, timeoutMs, opts.signal)
-      : await exec(command, workspace.path, timeoutMs)
+  const result = await exec(command, workspace.path, timeoutMs, opts.signal, opts.onSpawned, opts.extraEnv)
   // Bound here too so the guarantee holds for caller-supplied mocks that
   // return oversized output; `defaultVerifyExec` binds at capture time for
   // the real subprocess path. Both are idempotent for already-bounded input.
