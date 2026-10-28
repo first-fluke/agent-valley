@@ -6,6 +6,14 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [3.0.3](https://github.com/first-fluke/agent-valley/compare/v3.0.2...v3.0.3) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ci:** satisfy runtime size and timeout checks ([aeae032](https://github.com/first-fluke/agent-valley/commit/aeae0320a19deb5c71bf757285bc46333125042c))
+* **runtime:** join Codex shutdown before confirming cleanup ([2a18358](https://github.com/first-fluke/agent-valley/commit/2a18358d0472a36755a65c51d268d341f84b4b23))
+
 ## [3.0.2](https://github.com/first-fluke/agent-valley/compare/v3.0.1...v3.0.2) (2026-10-23)
 
 
