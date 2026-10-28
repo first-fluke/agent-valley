@@ -309,17 +309,36 @@ remain denied. A stale child-handle permission error is accepted as an exit
 race only after both the process group and leader are proven absent; live
 or uninspectable processes retain the uncertain-outcome barrier.
 
+`kill()` and `dispose()` share one bounded five-second root-exit join. Darwin
+can return `EPERM` while a killed group still contains an unreaped zombie.
+The runner joins root exit and retries the existing group checks; an
+unconfirmed exit or permission failure retains the original error. This
+root-process check does not prove termination of tools in separate groups.
+
+Codex cancellation waits up to five seconds for the matching thread/turn
+terminal notification after `turn/interrupt`; its RPC reply alone is only an
+acknowledgement. Codex shutdown closes the app-server's input and joins its
+clean exit for up to five seconds so its command and thread managers can
+stop their tools. A forced fallback retains cleanup uncertainty even if the
+root process subsequently exits. Immediate app-server `SIGKILL` can leave
+commands running in separate process groups. Once execution preparation has
+begun, a root that exits before its graceful shutdown is joined also retains
+uncertainty; its absence alone cannot certify cleanup of detached commands.
+An initialization failure before any thread was requested can still reap the
+root without claiming a task ever ran.
+
 ---
 
 ## Timeout Handling
 
 ```
 When config.agent.timeout seconds elapse:
-  1. await session.cancel()  → SIGTERM (or RPC cancel for Codex)
-  2. Wait 10 seconds
-  3. If session.isAlive() → await session.kill()  → SIGKILL
-  4. AgentError emitted with code: "TIMEOUT", recoverable: true
-  5. Log: agent timed out for attempt {id}, issueId: {issueId}
+  1. Suppress completion/retry callbacks and install the 10-second stop watchdog
+  2. await session.cancel()  → SIGTERM (or confirmed turn interruption for Codex)
+  3. Once cancellation settles, await session.kill() and session.dispose()
+     Codex first closes stdio; forced SIGKILL remains bounded and uncertain
+  4. If cancellation stalls, the watchdog starts that same shutdown path
+  5. Emit TIMEOUT only after the attempt's shutdown path has joined
 ```
 
 ---

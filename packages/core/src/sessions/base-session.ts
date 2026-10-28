@@ -75,6 +75,27 @@ export function waitForExit(proc: ChildProcess): Promise<void> {
   })
 }
 
+/** Join the spawned root's exit without waiting forever for inherited stdio. */
+function waitForReap(proc: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (proc.exitCode !== null || proc.signalCode != null) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (exited: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      proc.off("exit", onExit)
+      proc.off("close", onExit)
+      resolve(exited)
+    }
+    const onExit = () => finish(true)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    proc.once("exit", onExit)
+    proc.once("close", onExit)
+    if (proc.exitCode !== null || proc.signalCode != null) onExit()
+  })
+}
+
 /**
  * Waits for a spawned child process to fully finish, resolving only after
  * BOTH the stdout readable stream has ended (`'end'`) AND the process
@@ -144,6 +165,7 @@ export abstract class BaseSession implements AgentSession {
   protected config: AgentConfig | null = null
   protected startedAt: number = 0
   private _process: ChildProcess | null = null
+  private stopping: { process: ChildProcess; result: Promise<void> } | null = null
   protected terminalEventReceived = false
   private processFailed = false
   /** Set only by the trusted spawn plan, never by agent configuration. */
@@ -161,6 +183,7 @@ export abstract class BaseSession implements AgentSession {
   }
 
   protected set process(proc: ChildProcess | null) {
+    if (this._process !== proc) this.stopping = null
     this._process = proc
     if (!proc) this.sandboxPlatform = null
     if (proc) {
@@ -291,7 +314,41 @@ export abstract class BaseSession implements AgentSession {
   }
 
   async kill(): Promise<void> {
-    if (this.process) signalProcessTree(this.process, "SIGKILL")
+    if (this.process) await this.stopProcess(this.process)
+  }
+
+  private stopProcess(proc: ChildProcess): Promise<void> {
+    // kill() and dispose() must join the same bounded cleanup, including failure.
+    if (this.stopping?.process === proc) return this.stopping.result
+    const result = this.terminateProcess(proc)
+    this.stopping = { process: proc, result }
+    return result
+  }
+
+  private async terminateProcess(proc: ChildProcess): Promise<void> {
+    if (!proc.pid) return
+    let signalError: unknown
+    try {
+      signalProcessTree(proc, "SIGKILL")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error
+      signalError = error
+    }
+    // Darwin can report EPERM for an unreaped zombie group. Yield for root
+    // reaping, then repeat the existing checks; never infer detached-tool exit.
+    if (!(await waitForReap(proc, 5000))) {
+      throw (
+        signalError ??
+        new Error(`Agent process ${proc.pid} did not exit within 5000ms after SIGKILL; inspect it before retrying.`)
+      )
+    }
+    if (signalError) {
+      try {
+        signalProcessTree(proc, "SIGKILL")
+      } catch {
+        throw signalError
+      }
+    }
   }
 
   isAlive(): boolean {
@@ -300,11 +357,7 @@ export abstract class BaseSession implements AgentSession {
   }
 
   async dispose(): Promise<void> {
-    if (this.process) {
-      const wasAlive = this.isAlive()
-      signalProcessTree(this.process, "SIGKILL")
-      if (wasAlive) await waitForExit(this.process)
-    }
+    if (this.process) await this.stopProcess(this.process)
     this.listeners.clear()
     this.process = null
     this.config = null

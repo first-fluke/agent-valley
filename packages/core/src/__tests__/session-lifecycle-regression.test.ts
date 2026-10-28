@@ -122,12 +122,14 @@ describe("Codex app-server protocol", () => {
     expect(completions[0]?.filesChanged).toEqual(["src/fix.ts"])
   })
 
-  test("process death fails an active task immediately", async () => {
+  test("process death fails an active task immediately and retains uncertain cleanup", async () => {
     const { session, completions, errors } = await startCodex("crash")
     await vi.waitFor(() => expect(errors).toHaveLength(1))
     expect(errors[0]).toContain("app-server exited")
     expect(session.isAlive()).toBe(false)
     expect(completions).toHaveLength(0)
+    await expect(session.dispose()).rejects.toThrow("exited before graceful shutdown")
+    sessions = sessions.filter((entry) => entry !== session)
   })
 
   test("startup process exit rejects initialize without waiting for the RPC timeout", async () => {

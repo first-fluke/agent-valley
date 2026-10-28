@@ -5,6 +5,7 @@
  * Lifecycle: initialize → thread/start → turn/start → events → turn/completed
  */
 
+import type { ChildProcess } from "node:child_process"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
@@ -37,6 +38,13 @@ export class CodexSession extends BaseSession {
   private finalAnswer: string | undefined
   private completedMessage: string | undefined
   private phasedMessageSeen = false
+  private cancellation: Promise<void> | undefined
+  private shutdown: Promise<void> | undefined
+  private shutdownFailure: Error | undefined
+  private executionPrepared = false
+  private interruptCompletion:
+    | { threadId: string; turnId: string; resolve: () => void; reject: (error: Error) => void }
+    | undefined
   private pendingResolvers = new Map<
     number,
     {
@@ -50,6 +58,9 @@ export class CodexSession extends BaseSession {
     this.config = config
     this.startedAt = Date.now()
     this.disposing = false
+    this.shutdown = undefined
+    this.shutdownFailure = undefined
+    this.executionPrepared = false
 
     const args = ["app-server", "--listen", "stdio://"]
     if (config.model) {
@@ -80,6 +91,7 @@ export class CodexSession extends BaseSession {
 
   async execute(prompt: string): Promise<void> {
     if (!this.assertStarted()) return
+    this.executionPrepared = true
 
     this.filesChanged = []
     this.outputTail = ""
@@ -114,15 +126,55 @@ export class CodexSession extends BaseSession {
   }
 
   override async cancel(): Promise<void> {
+    if (this.cancellation) return this.cancellation
+    const cancelling = this.cancelTurn()
+    this.cancellation = cancelling
+    try {
+      await cancelling
+    } finally {
+      if (this.cancellation === cancelling) this.cancellation = undefined
+    }
+  }
+
+  private async cancelTurn(): Promise<void> {
     if (this.paused) await this.resume()
-    if (this.threadId && this.turnId) {
-      try {
-        await this.rpc("turn/interrupt", { threadId: this.threadId, turnId: this.turnId })
-      } catch {
-        await super.cancel()
-      }
-    } else {
+    const threadId = this.threadId
+    const turnId = this.turnId
+    if (!threadId || !turnId) {
       await super.cancel()
+      return
+    }
+    let rejectCompletion!: (error: Error) => void
+    const completed = new Promise<void>((resolve, reject) => {
+      rejectCompletion = reject
+      this.interruptCompletion = { threadId, turnId, resolve, reject }
+    })
+    const timer = setTimeout(() => {
+      rejectCompletion(
+        new Error(
+          "Codex did not confirm turn completion within 5 seconds of interruption. Inspect and reconcile the task before retrying.",
+        ),
+      )
+    }, 5_000)
+    timer.unref()
+    let requestFailed = false
+    try {
+      // The interrupt reply only acknowledges the request. Disposing before the
+      // matching terminal notification can strand the command in its own group.
+      await Promise.all([
+        completed,
+        this.rpc("turn/interrupt", { threadId, turnId }).catch((error: unknown) => {
+          requestFailed = true
+          throw error
+        }),
+      ])
+    } catch (error) {
+      if (!requestFailed || this.disposing) throw error
+      await super.cancel()
+    } finally {
+      clearTimeout(timer)
+      if (this.interruptCompletion?.threadId === threadId && this.interruptCompletion.turnId === turnId)
+        this.interruptCompletion = undefined
     }
   }
 
@@ -206,9 +258,89 @@ export class CodexSession extends BaseSession {
     })
   }
 
-  override async dispose(): Promise<void> {
+  override async kill(): Promise<void> {
+    if (this.shutdownFailure) throw this.shutdownFailure
+    if (this.shutdown) return this.shutdown
+    const proc = this.process
+    if (!proc) return
     this.disposing = true
     this.rejectPending(new Error("Codex session disposed while waiting for an RPC response."))
+    const shuttingDown = (async () => {
+      if (!this.isAlive() && proc.pid && this.executionPrepared) {
+        await this.forceUnconfirmedShutdown(
+          new Error(
+            "Codex exited before graceful shutdown was joined. Inspect its command processes and reconcile the task before retrying.",
+          ),
+        )
+      }
+      if (this.isAlive()) {
+        try {
+          await this.closeInputAndJoin(proc)
+        } catch (error) {
+          await this.forceUnconfirmedShutdown(
+            new Error(
+              "Codex graceful shutdown was not confirmed. Inspect its command processes and reconcile the task before retrying.",
+              { cause: error },
+            ),
+          )
+        }
+      }
+      await super.kill()
+    })()
+    this.shutdown = shuttingDown
+    return shuttingDown
+  }
+
+  private async forceUnconfirmedShutdown(error: Error): Promise<never> {
+    this.shutdownFailure = error
+    try {
+      await super.kill()
+    } catch (forceError) {
+      this.shutdownFailure = new AggregateError([error, forceError], error.message)
+    }
+    throw this.shutdownFailure
+  }
+
+  private closeInputAndJoin(proc: ChildProcess): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let inputError: Error | undefined
+      const onInputError = (error: Error) => {
+        inputError = error
+      }
+      const cleanup = () => {
+        clearTimeout(timer)
+        proc.off("close", onClose)
+        proc.stdin?.off("error", onInputError)
+      }
+      const onClose = () => {
+        cleanup()
+        if (proc.exitCode === 0 && proc.signalCode == null) resolve()
+        else
+          reject(
+            new Error(`Codex shutdown exited with ${proc.signalCode ?? proc.exitCode ?? "unknown"}.`, {
+              cause: inputError,
+            }),
+          )
+      }
+      const timer = setTimeout(() => {
+        cleanup()
+        reject(new Error("Codex did not exit within 5 seconds of closing its input.", { cause: inputError }))
+      }, 5_000)
+      timer.unref()
+      proc.once("close", onClose)
+      proc.stdin?.on("error", onInputError)
+      try {
+        if (!proc.stdin) throw new Error("Codex stdin pipe is unavailable.")
+        proc.stdin.end()
+      } catch (error) {
+        cleanup()
+        reject(error)
+      }
+    })
+  }
+
+  override async dispose(): Promise<void> {
+    await this.kill()
     await super.dispose()
     this.threadId = null
     this.turnId = null
@@ -262,6 +394,7 @@ export class CodexSession extends BaseSession {
   }
 
   private rejectPending(error: Error): void {
+    this.interruptCompletion?.reject(error)
     for (const pending of this.pendingResolvers.values()) {
       clearTimeout(pending.timer)
       pending.reject(error)
@@ -270,6 +403,7 @@ export class CodexSession extends BaseSession {
   }
 
   private handleMessage(msg: JsonRpcResponse): void {
+    if (this.disposing) return
     // Response to a request we made
     if (msg.id != null && this.pendingResolvers.has(msg.id)) {
       const resolver = this.pendingResolvers.get(msg.id)
@@ -365,6 +499,14 @@ export class CodexSession extends BaseSession {
       case "turn/completed": {
         const turn = msg.params?.turn as { id?: string; status?: string; error?: { message?: string } } | undefined
         if (turn?.id && this.turnId && turn.id !== this.turnId) return
+        const interrupt = this.interruptCompletion
+        if (interrupt?.threadId === this.threadId && interrupt.turnId === turn?.id) {
+          if (turn?.status && ["completed", "interrupted", "failed"].includes(turn.status)) interrupt.resolve()
+          else
+            interrupt.reject(
+              new Error("Codex interruption has no valid turn completion status. Inspect the task before retrying."),
+            )
+        }
         this.turnId = null
         if (turn?.status !== "completed") {
           this.emitError(
