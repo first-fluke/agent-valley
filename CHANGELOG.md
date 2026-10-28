@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [3.0.5](https://github.com/first-fluke/agent-valley/compare/v3.0.4...v3.0.5) (2026-10-28)
+
+
+### Bug Fixes
+
+* **runtime:** wait for retired process groups after EPERM ([095ea50](https://github.com/first-fluke/agent-valley/commit/095ea50cc35ab3ae54cfb01a4759242a9fe7b823))
+
 ## [3.0.4](https://github.com/first-fluke/agent-valley/compare/v3.0.3...v3.0.4) (2026-10-28)
 
 
