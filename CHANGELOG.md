@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [3.0.4](https://github.com/first-fluke/agent-valley/compare/v3.0.3...v3.0.4) (2026-10-28)
+
+
+### Bug Fixes
+
+* **chief:** separate planning response from mission metadata ([9161822](https://github.com/first-fluke/agent-valley/commit/91618225dbb2caa6440dcc84151e7d88c9448028))
+
 ## [3.0.3](https://github.com/first-fluke/agent-valley/compare/v3.0.2...v3.0.3) (2026-10-28)
 
 
