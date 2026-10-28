@@ -141,7 +141,8 @@ describe("A2A trusted transport boundary", () => {
   it("times out a real stalled HTTP request", async () => {
     const server = await protocolServer(() => {})
     cleanups.push(server.close)
-    const client = new A2aClient({ ...server.endpoint, requestTimeoutMs: 20 })
+    // Allow loopback dispatch under parallel CI load before checking a stalled response.
+    const client = new A2aClient({ ...server.endpoint, requestTimeoutMs: 1_000 })
     await expect(client.rpc("GetTask", { id: "task" })).rejects.toThrow("timed out")
     expect(server.calls).toHaveLength(1)
   })
