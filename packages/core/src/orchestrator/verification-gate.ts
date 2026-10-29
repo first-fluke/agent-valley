@@ -18,26 +18,13 @@ import type { Config } from "../config/yaml-loader"
 import type { Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 import { signalProcessTree } from "../sessions/process-tree"
+import { BoundedProcessOutput } from "../util/bounded-process-output"
 
 /** Bound captured verify output to the last 10KB — same tail-truncation pattern as sessions/claude-session.ts. */
 const MAX_OUTPUT_LENGTH = 10_240
 const DEFAULT_TIMEOUT_SEC = 600
 const MIN_TIMEOUT_SEC = 10
 const MAX_TIMEOUT_SEC = 3_600
-
-/**
- * Strip ANSI/CSI escape sequences before captured output reaches any
- * agent-facing surface. Test/lint/typecheck runners emit color codes and
- * cursor moves; left verbatim they can garble terminals and hide injected
- * text behind overwrite escapes.
- */
-const ANSI_RE =
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: unicode escapes describe the same byte values as \x1b/\x07 with no loss of fidelity
-  /\u001b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\-_])/g
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, "")
-}
 
 /**
  * Build a reduced environment for the verify child. The child inherits the
@@ -105,7 +92,7 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
       env: buildVerifyEnv(extraEnv),
     })
 
-    let output = ""
+    const output = new BoundedProcessOutput(MAX_OUTPUT_LENGTH)
     let timedOut = false
     let settled = false
     let aborted = false
@@ -120,7 +107,7 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
       signal?.removeEventListener("abort", onAbort)
       resolve({
         exitCode: timedOut || aborted || registrationFailed ? -1 : (code ?? -1),
-        output: boundOutput(output),
+        output: output.finish(),
         timedOut,
         ...(aborted ? { aborted: true } : {}),
       })
@@ -143,7 +130,7 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
     }
     const onAbort = () => {
       aborted = true
-      output = `${output}\nVerification cancelled.`
+      output.append("\nVerification cancelled.")
       stopProcess()
     }
 
@@ -155,14 +142,16 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
     if (signal?.aborted) onAbort()
 
     proc.stdout?.on("data", (chunk: Buffer) => {
-      output += stripAnsi(chunk.toString())
+      if (!settled) output.write("stdout", chunk)
     })
     proc.stderr?.on("data", (chunk: Buffer) => {
-      output += stripAnsi(chunk.toString())
+      if (!settled) output.write("stderr", chunk)
     })
+    proc.stdout?.once("end", () => output.end("stdout"))
+    proc.stderr?.once("end", () => output.end("stderr"))
 
     proc.once("error", (err) => {
-      output = `${output}\n${stripAnsi(String(err))}`
+      output.append(`\n${String(err)}`)
       finish(-1)
     })
 
@@ -176,7 +165,7 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
       onSpawned?.(proc.pid)
     } catch (error) {
       registrationFailed = true
-      output = `${output}\n${stripAnsi(String(error))}`
+      output.append(`\n${String(error)}`)
       stopProcess()
     }
   })
