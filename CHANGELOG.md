@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.2.0](https://github.com/first-fluke/agent-valley/compare/v4.1.0...v4.2.0) (2026-10-30)
+
+
+### Features
+
+* **chief:** pin operator pre-push policy for unattended delivery ([ed964c3](https://github.com/first-fluke/agent-valley/commit/ed964c334dc0ceddff5da362c1937da61e8fb299))
+
 ## [4.1.0](https://github.com/first-fluke/agent-valley/compare/v4.0.1...v4.1.0) (2026-10-30)
 
 
