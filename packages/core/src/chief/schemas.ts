@@ -25,6 +25,7 @@ import { isAbsolute } from "node:path"
 import { z } from "zod"
 import { actorSchema, actorSkillAssignmentsSchema, actorTaskSchema } from "./actor-contract"
 import { capturePolicySchema, captureResultSchema } from "./capture"
+import { codeDeliverySchema } from "./code-delivery-contract"
 import { containerObservationPolicySchema, containerObservationSnapshotSchema } from "./container-observation-policy"
 import { refineMissionContainerState } from "./container-observation-state"
 import { CDO_ROLE } from "./design-lead"
@@ -106,6 +107,7 @@ export const missionSchema = z
     goalBrief: goalBriefSchema.optional(),
     supervision: supervisionSchema.optional(),
     report: chiefReportSchema.optional(),
+    codeDelivery: codeDeliverySchema.optional(),
     verifyCommand: z.string().trim().max(32_000),
     timeoutSec: z.number().int().min(1).max(86_400),
     maxRepairs: z.number().int().min(0).max(10),

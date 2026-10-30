@@ -44,6 +44,10 @@ export interface OrderOptions {
   worker?: boolean
   missionId?: string
   supervise?: boolean
+  deliver?: string
+  deliveryPaths?: string
+  deliveryMessage?: string
+  deliveryRemote?: string
   /** Internal accepted operation snapshot; never changes the configuration repository. */
   baselineWorkspace?: string
   operationId?: string
@@ -52,6 +56,17 @@ export interface OrderOptions {
 }
 
 const agents = new Set<string>(AGENT_TYPES)
+
+export function deliveryPaths(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (Array.isArray(parsed) && parsed.every((path) => typeof path === "string")) return parsed
+  } catch {
+    // The operator must name exact files; do not reinterpret malformed JSON as a glob.
+  }
+  throw new Error('Set --delivery-paths to a JSON array of exact product files, for example ["src/main.ts"].')
+}
 
 export function defaultPersonas(agentType: string, oma: boolean): Persona[] {
   const persona = (id: string, role: string, skill?: string): Persona => ({

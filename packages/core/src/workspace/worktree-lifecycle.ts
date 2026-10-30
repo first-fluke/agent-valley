@@ -33,7 +33,14 @@ export interface RunCommandOptions {
  * program, or fsmonitor command would otherwise execute on the host outside
  * the sandbox during auto-commit/rebase.
  */
-const GIT_SAFETY_ARGS = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false"]
+export const GIT_SAFETY_ARGS = Object.freeze([
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "commit.gpgsign=false",
+  "-c",
+  "core.fsmonitor=false",
+])
 
 /** Run a command and return its exit code, stdout, and stderr. */
 export function runCommand(cmd: string, args: string[], options: RunCommandOptions = {}): Promise<CommandResult> {

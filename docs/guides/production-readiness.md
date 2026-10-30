@@ -1,6 +1,6 @@
 # Production readiness
 
-Start with a bounded, supervised change in a development repository. Select a trusted verification command before execution, retain the Mission ID, and review the actual diff and checks before merging.
+For pre-authorized automatic integration, use [unattended code delivery](unattended-delivery.md). It retains the goal and execution budget, gates source integration on independent reviews and trusted checks, and records commit and remote observations. A bounded supervised pilot remains available when delivery has not been authorized.
 
 ## Current acceptance evidence
 

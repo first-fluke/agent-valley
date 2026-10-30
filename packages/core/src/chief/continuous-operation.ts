@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
+import { pendingCodeDelivery, successfulCodeDelivery } from "./code-delivery-contract"
 import type { ContainerObservationSnapshot } from "./container-observation-policy"
 import { containersHealthy, validateContainerObservation } from "./container-observation-state"
 import {
@@ -57,6 +58,7 @@ export async function runContinuousOperation(
   const pause = async (message: string) => {
     if (operation.phase !== "paused" && operation.phase !== "completed") operation.resumePhase = operation.phase
     operation.phase = "paused"
+    operation.pauseKind = ports.signal?.aborted ? "interrupted" : "blocked"
     operation.error = message.slice(0, 16_000)
     await save()
     return operation
@@ -187,6 +189,7 @@ export async function runContinuousOperation(
     operation.phase =
       operation.resumePhase ?? (operation.currentMissionId ? "running" : operation.nextRunAt ? "waiting" : "deciding")
     operation.resumePhase = undefined
+    operation.pauseKind = undefined
     operation.error = undefined
     await save()
   }
@@ -258,6 +261,17 @@ export async function runContinuousOperation(
             `Completed child ${id} lacks a passing verification and final review or has an unknown effect. Restore and reconcile its verified mission record before accepting its snapshot.`,
           )
         }
+        if (pendingCodeDelivery(mission)) {
+          if (!mission.executionPolicy?.autoResume)
+            return pause(`Child ${id} has pending code delivery with automatic recovery disabled.`)
+          await waitForRecovery(mission.codeDelivery?.nextRunAt, mission)
+          await ports.runMission(operation, id, decision.goal, operation.baseline.path)
+          continue
+        }
+        if (!successfulCodeDelivery(mission))
+          return pause(
+            `Child ${id} has blocked code delivery. ${mission.codeDelivery?.error ?? "Preserve its delivery checkpoint before continuing."}`,
+          )
         if (operation.containerObservationPolicy?.enabled) {
           if (
             !containersHealthy(mission.containerObservationPolicy, mission.containerObservation) ||

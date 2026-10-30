@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
+import { pendingCodeDelivery } from "@agent-valley/core/chief/code-delivery-contract"
 import { automaticMissionRecovery } from "@agent-valley/core/chief/continuous-recovery"
 import { assertExecutionDeadline, executionState, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
 import { fallbackReport } from "@agent-valley/core/chief/reports"
@@ -8,6 +9,7 @@ import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import type { OrderOptions } from "./chief-config"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
+import { reobserveLocalExecutions } from "./chief-local-recovery"
 import { orderExitCode } from "./chief-outcome"
 import { assertNotManagedRun } from "./managed-run"
 
@@ -92,23 +94,99 @@ export async function superviseOrder(
   }
   let args = orderWorkerArgs(goal, options, id)
   let returned: Mission | undefined
+  const waitForOwner = async () => {
+    let observed = false
+    while (await store.isLocked(id)) {
+      observed = true
+      if (controller.signal.aborted) break
+      try {
+        await (dependencies.delay ?? abortableDelay)(5_000, controller.signal)
+      } catch (error) {
+        if (!controller.signal.aborted) throw error
+      }
+    }
+    return observed
+  }
   try {
     while (!controller.signal.aborted) {
-      const workerExit = await (dependencies.runWorker ?? runWorker)(args, root, controller.signal)
-      const mission = await store.load(id).catch(() => undefined)
+      if (await waitForOwner()) {
+        const current = await store.load(id)
+        returned = current
+        if (
+          controller.signal.aborted ||
+          (current.status === "completed" && !pendingCodeDelivery(current)) ||
+          (["paused", "failed"].includes(current.status) && !automaticMissionRecovery(current).retry)
+        )
+          return current
+        args = orderWorkerArgs(undefined, { resume: id }, id)
+      }
+      if (controller.signal.aborted) break
+      let workerExit = await (dependencies.runWorker ?? runWorker)(args, root, controller.signal)
+      const competingOwner = await waitForOwner()
+      let mission = await store.load(id).catch(() => undefined)
       if (!mission)
         throw new Error(
           "Order could not be initialized. Correct its configuration and retry; no automatic initialization replay was attempted.",
         )
       returned = mission
+      if (competingOwner) workerExit = orderExitCode(mission)
       const terminal = ["completed", "failed", "paused"].includes(mission.status)
-      if (!controller.signal.aborted && terminal && workerExit !== 0 && workerExit !== orderExitCode(mission))
+      if (
+        !controller.signal.aborted &&
+        terminal &&
+        workerExit !== 0 &&
+        workerExit !== orderExitCode(mission) &&
+        !(mission.status === "completed" && pendingCodeDelivery(mission))
+      )
         throw new Error(
           `Order worker exited ${workerExit === null ? "by signal" : `with code ${workerExit}`} after saving ${mission.status} for ${id}. ` +
             (mission.status === "completed"
               ? `Verified work remains completed. Inspect .agent-valley/reports/${id}.md and the worker log; use av reports retry for pending deliveries.`
               : `The saved outcome remains unresolved. Checkpoint: .agent-valley/missions/${id}.json; report: .agent-valley/reports/${id}.md.`),
         )
+      if (!controller.signal.aborted) mission = await reobserveLocalExecutions(mission, store)
+      if (
+        !controller.signal.aborted &&
+        mission.status === "completed" &&
+        pendingCodeDelivery(mission) &&
+        mission.executionPolicy?.autoResume
+      ) {
+        if (mission.operations?.runs.some((run) => run.executionState && run.executionState !== "settled"))
+          return mission
+        if (workerExit !== 0 && workerExit !== 2) {
+          const unlock = await store.lock(id)
+          try {
+            const latest = await store.load(id)
+            if (!latest.execution || !latest.codeDelivery)
+              throw new MissionPause("Restore the original delivery execution checkpoint.", "integrity")
+            latest.execution.crashRestarts = (latest.execution.crashRestarts ?? 0) + 1
+            if (latest.execution.crashRestarts > (latest.executionPolicy?.maxRetries ?? 3)) {
+              latest.codeDelivery.phase = "blocked"
+              latest.codeDelivery.error =
+                "Delivery worker recovery exhausted its bounded crash restarts. Preserve the completed work and inspect its delivery checkpoint."
+              delete latest.codeDelivery.nextRunAt
+              await store.save(latest)
+              returned = latest
+              return latest
+            }
+            latest.codeDelivery.nextRunAt = new Date(Date.now() + 1_000).toISOString()
+            await store.save(latest)
+            mission = latest
+          } finally {
+            await unlock()
+          }
+        }
+        while (mission.codeDelivery?.nextRunAt && Date.parse(mission.codeDelivery.nextRunAt) > Date.now()) {
+          assertExecutionDeadline(mission)
+          await (dependencies.delay ?? abortableDelay)(
+            Math.min(Date.parse(mission.codeDelivery.nextRunAt) - Date.now(), 30_000),
+            controller.signal,
+          )
+        }
+        assertExecutionDeadline(mission)
+        args = orderWorkerArgs(undefined, { resume: id }, id)
+        continue
+      }
       const recovery = automaticMissionRecovery(mission)
       if (controller.signal.aborted || !mission.executionPolicy?.autoResume || (terminal && !recovery.retry))
         return mission
@@ -161,10 +239,23 @@ export async function superviseOrder(
     returned = await store.load(id)
     return returned
   } catch (error) {
+    if (await store.isLocked(id)) {
+      if (!controller.signal.aborted) await waitForOwner()
+      returned = await store.load(id)
+      return returned
+    }
     if (error instanceof MissionPause && !controller.signal.aborted) {
       const unlock = await store.lock(id)
       try {
         const latest = await store.load(id)
+        if (latest.status === "completed" && latest.codeDelivery && pendingCodeDelivery(latest)) {
+          latest.codeDelivery.phase = "blocked"
+          latest.codeDelivery.error = error.message
+          delete latest.codeDelivery.nextRunAt
+          await store.save(latest)
+          returned = latest
+          return latest
+        }
         recordPause(latest, error)
         latest.report = fallbackReport(latest)
         await store.save(latest)
@@ -181,9 +272,24 @@ export async function superviseOrder(
     returned = existing
     return existing
   } finally {
-    if (controller.signal.aborted) {
+    if (controller.signal.aborted && !(await store.isLocked(id))) {
       const existing = await store.load(id).catch(() => undefined)
-      if (existing && existing.status !== "completed") {
+      if (existing?.status === "completed" && existing.codeDelivery && pendingCodeDelivery(existing)) {
+        const unlock = await store.lock(id)
+        try {
+          const latest = await store.load(id)
+          if (latest.codeDelivery && pendingCodeDelivery(latest)) {
+            latest.codeDelivery.phase = "blocked"
+            latest.codeDelivery.error =
+              "Operator stopped code delivery supervision. Inspect its checkpoint before resuming."
+            delete latest.codeDelivery.nextRunAt
+            await store.save(latest)
+            if (returned) Object.assign(returned, latest)
+          }
+        } finally {
+          await unlock()
+        }
+      } else if (existing && existing.status !== "completed") {
         const unlock = await store.lock(id)
         try {
           const latest = await store.load(id)

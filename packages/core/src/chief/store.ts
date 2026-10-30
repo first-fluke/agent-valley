@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile } from "node:fs/promises"
+import { constants } from "node:fs"
+import { mkdir, open, readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { writeJsonAtomic } from "../util/atomic-json"
 import { lockRecord } from "../util/record-lock"
@@ -14,6 +15,35 @@ export class MissionStore {
   processGuard(id: string, runId?: string): ActiveMissionProcess {
     this.path(id)
     return new ActiveMissionProcess(this.directory, id, runId)
+  }
+
+  /** Observation only; acquisition and dead-owner reclamation remain atomic in lock(). */
+  async isLocked(id: string): Promise<boolean> {
+    const path = `${this.path(id)}.lock`
+    let file: Awaited<ReturnType<typeof open>> | undefined
+    try {
+      file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+      const stat = await file.stat()
+      if (!stat.isFile() || stat.size < 1 || stat.size > 1024) return true
+      const bytes = Buffer.alloc(1025)
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0)
+      if (bytesRead > 1024) return true
+      const lock = JSON.parse(bytes.subarray(0, bytesRead).toString("utf8")) as { pid?: unknown; token?: unknown }
+      if (typeof lock.token !== "string" || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(lock.token))
+        return true
+      if (typeof lock.pid !== "number" || !Number.isInteger(lock.pid) || lock.pid < 2 || lock.pid > 2147483647)
+        return true
+      try {
+        process.kill(lock.pid, 0)
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code !== "ESRCH"
+      }
+      return true
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== "ENOENT"
+    } finally {
+      await file?.close().catch(() => {})
+    }
   }
 
   async recoverProcesses(id: string, mission?: Mission): Promise<void> {
@@ -85,7 +115,7 @@ export class MissionStore {
     )
   }
 
-  /** A second CLI cannot resume a live mission. Dead-owner locks fail closed to avoid a reclaim race. */
+  /** Acquisition rechecks ownership atomically and reclaims only proven-dead owners. */
   async lock(id: string): Promise<() => Promise<void>> {
     return lockRecord(`${this.path(id)}.lock`, `Mission ${id}`, "mission")
   }

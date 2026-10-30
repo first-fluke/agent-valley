@@ -13,7 +13,8 @@ import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { type Command, Option } from "commander"
-import { type OrderOptions, resolveOrderConfig } from "./chief-config"
+import { deliverMissionCode, prepareCodeDelivery } from "./chief-code-delivery"
+import { deliveryPaths, type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { createMissionContainerPorts } from "./chief-containers"
 import {
   type ContinuousOptions,
@@ -27,8 +28,10 @@ import { createMissionMetricPorts } from "./chief-metrics"
 import { orderExitCode, printOrderOutcome } from "./chief-outcome"
 import { registerMissionReconciliation } from "./chief-reconcile"
 import { applyResumeOptions, validateResumeOptions } from "./chief-resume"
-import { abortableDelay, superviseOrder } from "./chief-supervisor"
+import { superviseOrder } from "./chief-supervisor"
 import { prepareChiefToolConfig } from "./chief-tool-config"
+import { watchOrders } from "./chief-watch"
+import { prepareMissionDependencies } from "./chief-workspace-dependencies"
 import { assertNotManagedRun } from "./managed-run"
 
 async function organizationContext(repository: string, mission: Mission) {
@@ -48,6 +51,15 @@ export async function runOrder(
   root = process.cwd(),
 ): Promise<Mission> {
   assertNotManagedRun()
+  if (
+    options.resume &&
+    [options.deliver, options.deliveryPaths, options.deliveryMessage, options.deliveryRemote].some(
+      (value) => value !== undefined,
+    )
+  )
+    throw new Error(
+      "Code delivery retains its saved branch, paths and commit message. Resume without replacement delivery options.",
+    )
   if (
     !options.resume &&
     [options.retry, options.resolveEffect, options.effectResult, options.accountRun, options.accountCost].some(
@@ -100,6 +112,10 @@ export async function runOrder(
           "Order goal exceeds 32 KB. Put supporting details in repository files and reference them in a shorter goal.",
         )
       const config = await resolveOrderConfig(root, options)
+      const codeDelivery = await prepareCodeDelivery(config.workspace, {
+        ...options,
+        deliveryPaths: deliveryPaths(options.deliveryPaths),
+      })
       const operation = options.operationId
         ? await operationStore(await realpath(root)).load(options.operationId)
         : undefined
@@ -125,9 +141,11 @@ export async function runOrder(
               id,
               goal,
             )
-          : await new WorkspaceManager(config.workspace).create(missionIssue(id, goal))
+          : await new WorkspaceManager(
+              codeDelivery ? join(config.workspace, ".agent-valley", "workspaces") : config.workspace,
+            ).create(missionIssue(id, goal))
       if (options.operationId) await restoreOperationOrigin(config.workspace, workspace.path)
-      await prepareMissionSkills(config.workspace, workspace.path)
+      if (!codeDelivery) await prepareMissionSkills(config.workspace, workspace.path)
       const now = new Date().toISOString()
       mission = {
         id,
@@ -140,7 +158,7 @@ export async function runOrder(
         marketingLeadId: config.marketingLeadId,
         personas: config.personas,
         ...(config.availableAgents ? { availableAgents: config.availableAgents } : {}),
-        availableSkills: await discoverMissionSkills(workspace.path),
+        ...(!codeDelivery ? { availableSkills: await discoverMissionSkills(workspace.path) } : { codeDelivery }),
         verifyCommand: config.verifyCommand,
         timeoutSec: config.timeoutSec,
         maxRepairs: config.maxRepairs,
@@ -149,6 +167,7 @@ export async function runOrder(
         operatingPolicy: config.operatingPolicy,
         verificationMode: config.verifyCommand.trim() ? "operator" : "chief",
         executionPolicy: config.executionPolicy,
+        ...(codeDelivery ? { execution: { startedAt: now, runsStarted: 0, retries: 0, crashRestarts: 0 } } : {}),
         metricSourcePolicy: config.metricSourcePolicy,
         containerObservationPolicy: operation
           ? operation.containerObservationPolicy
@@ -168,6 +187,20 @@ export async function runOrder(
     if (!mission.plan && mission.availableAgents)
       console.log(`Automatic team planning with: ${mission.availableAgents.join(", ")}`)
     const repository = mission.repositoryRoot ?? root
+    if (mission.codeDelivery && mission.status === "completed") {
+      await runtime.close()
+      await deliverMissionCode(mission, store, abortController.signal)
+      await saveAndDeliverMissionReport(mission, root)
+      reportSaved = true
+      return mission
+    }
+    if (mission.codeDelivery) {
+      await prepareMissionSkills(repository, mission.workspace.path)
+      await prepareMissionDependencies(repository, mission.workspace.path)
+      if (mission.availableSkills === undefined)
+        mission.availableSkills = await discoverMissionSkills(mission.workspace.path)
+      await store.save(mission)
+    }
     if (mission.status !== "completed")
       await prepareChiefToolConfig(await realpath(repository), await realpath(mission.workspace.path))
     if (mission.executionPolicy) {
@@ -233,6 +266,10 @@ export async function runOrder(
       },
     })
     await finishCapture()
+    if (result.codeDelivery) {
+      await runtime.close()
+      await deliverMissionCode(result, store, abortController.signal)
+    }
     await saveAndDeliverMissionReport(result, root)
     reportSaved = true
     return result
@@ -349,6 +386,13 @@ export function registerChiefCommands(program: Command): void {
     .option("--interval <seconds>", "Wait before selecting again when no new goal is justified (default 300)")
     .option("--workspace <path>", "Target Git repository (defaults to av.yaml)")
     .option("--verify <command>", "Trusted completion check (defaults to av.yaml)")
+    .option("--deliver <branch>", "Commit and push only verified, reviewed work to the selected source branch")
+    .option("--delivery-paths <json>", "JSON array of exact product files allowed for code delivery")
+    .option(
+      "--delivery-message <text>",
+      "Commit message for the approved delivery, including required repository trailers",
+    )
+    .option("--delivery-remote <name>", "Configured Git remote for code delivery (default origin)")
     .option("--actor <type>", "Chief Director CLI (default: saved actor.type, otherwise an authenticated CLI)")
     .option("--model <id>", "Chief Director model (default: actor.model from config, otherwise the CLI default)")
     .option("--director <id>", "Chief Director Actor ID")
@@ -397,33 +441,7 @@ export function registerChiefCommands(program: Command): void {
     .option("--watch", "Resume due or interrupted orders from their saved checkpoints")
     .action(async (options: { watch?: boolean }) => {
       if (options.watch) {
-        assertNotManagedRun()
-        const controller = new AbortController()
-        const stop = () => controller.abort()
-        process.once("SIGINT", stop)
-        process.once("SIGTERM", stop)
-        try {
-          while (!controller.signal.aborted) {
-            const store = new MissionStore(join(process.cwd(), ".agent-valley/missions"))
-            for (const mission of await store.list()) {
-              if (controller.signal.aborted) break
-              if (["completed", "failed", "paused"].includes(mission.status) || !mission.executionPolicy?.autoResume)
-                continue
-              if (mission.execution?.nextRunAt && Date.parse(mission.execution.nextRunAt) > Date.now()) continue
-              await superviseOrder(undefined, { resume: mission.id }, process.cwd(), {
-                signal: controller.signal,
-              })
-                .then(printOrderOutcome)
-                .catch((error: unknown) => console.error(String(error)))
-            }
-            await abortableDelay(5_000, controller.signal)
-          }
-        } catch (error) {
-          if (!controller.signal.aborted) throw error
-        } finally {
-          process.removeListener("SIGINT", stop)
-          process.removeListener("SIGTERM", stop)
-        }
+        await watchOrders(process.cwd())
         return
       }
       const missions = await new MissionStore(join(process.cwd(), ".agent-valley/missions")).list()

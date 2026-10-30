@@ -1,5 +1,6 @@
 import type { Workspace } from "../domain/models"
 import type { CapturePolicy, CaptureResult } from "./capture"
+import type { CodeDelivery } from "./code-delivery-contract"
 import type { ContainerObservationPolicy, ContainerObservationSnapshot } from "./container-observation-policy"
 import type {
   AdvisoryReview,
@@ -49,6 +50,7 @@ export interface Mission {
   goalBrief?: GoalBrief
   supervision?: MissionSupervision
   report?: ChiefReport
+  codeDelivery?: CodeDelivery
   verifyCommand: string
   timeoutSec: number
   maxRepairs: number

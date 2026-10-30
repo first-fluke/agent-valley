@@ -18,6 +18,7 @@ import { writeTextAtomic } from "@agent-valley/core/util/atomic-json"
 import { type Command, Option } from "commander"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { decideContinuousGoal } from "./chief-continuous-decision"
+import { reobserveLocalExecutions } from "./chief-local-recovery"
 import { applyResumeOptions } from "./chief-resume"
 import { abortableDelay, superviseOrder } from "./chief-supervisor"
 import { assertNotManagedRun } from "./managed-run"
@@ -39,6 +40,10 @@ const orderKeys = [
   "duration",
   "cost",
   "nativeModel",
+  "deliver",
+  "deliveryPaths",
+  "deliveryMessage",
+  "deliveryRemote",
 ] as const
 const decisionBudgetKeys = ["runs", "duration", "cost", "accountRun", "accountCost"] as const
 
@@ -324,11 +329,13 @@ export async function runOperation(
       decide:
         dependencies.decide ??
         ((current, decisionId) => decideContinuousGoal(current, decisionId, root, { signal: controller.signal })),
-      findMission: (missionId) =>
-        missions.load(missionId).catch((error: NodeJS.ErrnoException) => {
+      findMission: async (missionId) => {
+        const saved = await missions.load(missionId).catch((error: NodeJS.ErrnoException) => {
           if (error.code === "ENOENT") return undefined
           throw error
-        }),
+        })
+        return saved ? reobserveLocalExecutions(saved, missions) : undefined
+      },
       runMission:
         dependencies.runMission ??
         (async (current, missionId, goal, baselinePath) => {
