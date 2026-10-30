@@ -26,12 +26,12 @@ Repeat or list `--oauth-scope` and `--oauth-subject` values for additional scope
 
 The same settings can come from the server environment:
 
-| Variable | Value |
-|---|---|
-| `AGENT_VALLEY_MCP_PUBLIC_URL` | Canonical HTTPS URL ending in `/mcp` |
-| `AGENT_VALLEY_MCP_OAUTH_ISSUER` | Exact external issuer URL |
-| `AGENT_VALLEY_MCP_OAUTH_AUDIENCE` | Optional; must equal the public URL |
-| `AGENT_VALLEY_MCP_OAUTH_SCOPES` | Space- or comma-separated required scopes |
+| Variable                          | Value                                      |
+| --------------------------------- | ------------------------------------------ |
+| `AGENT_VALLEY_MCP_PUBLIC_URL`     | Canonical HTTPS URL ending in `/mcp`       |
+| `AGENT_VALLEY_MCP_OAUTH_ISSUER`   | Exact external issuer URL                  |
+| `AGENT_VALLEY_MCP_OAUTH_AUDIENCE` | Optional; must equal the public URL        |
+| `AGENT_VALLEY_MCP_OAUTH_SCOPES`   | Space- or comma-separated required scopes  |
 | `AGENT_VALLEY_MCP_OAUTH_SUBJECTS` | Comma-separated permitted user subject IDs |
 
 Explicit CLI values take priority over environment defaults. Supplying incomplete OAuth configuration fails with the missing setting and its fix. OAuth mode does not accept the static `AGENT_VALLEY_MCP_TOKEN` as a substitute for a user access token. Local stdio remains available without OAuth configuration.

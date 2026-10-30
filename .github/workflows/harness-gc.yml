@@ -20,18 +20,18 @@ name: Harness GC
 on:
   schedule:
     # Weekly on Sunday at 00:00 UTC
-    - cron: '0 0 * * 0'
+    - cron: "0 0 * * 0"
   workflow_dispatch:
     inputs:
       gc_days:
-        description: 'Retention period in days (default: 30)'
+        description: "Retention period in days (default: 30)"
         required: false
-        default: '30'
+        default: "30"
         type: string
       dry_run:
-        description: 'Dry run — list targets without deleting'
+        description: "Dry run — list targets without deleting"
         required: false
-        default: 'false'
+        default: "false"
         type: boolean
 
 jobs:

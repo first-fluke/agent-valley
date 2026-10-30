@@ -22,11 +22,11 @@ Dependencies are only allowed in the top-down direction. Reverse direction is fo
 
 ## Role of Each Layer
 
-| Layer | Role | Symphony context examples |
-|---|---|---|
-| **Presentation** | Receives external requests and formats responses. No business logic. | Router, Handler, CLI entry point |
-| **Application** | Orchestrates use cases. Composes domain objects to complete workflows. | Orchestrator, WorkspaceManager |
-| **Domain** | Core business rules and models. No framework dependencies. | Issue, Workspace, RunAttempt |
+| Layer              | Role                                                                        | Symphony context examples                   |
+| ------------------ | --------------------------------------------------------------------------- | ------------------------------------------- |
+| **Presentation**   | Receives external requests and formats responses. No business logic.        | Router, Handler, CLI entry point            |
+| **Application**    | Orchestrates use cases. Composes domain objects to complete workflows.      | Orchestrator, WorkspaceManager              |
+| **Domain**         | Core business rules and models. No framework dependencies.                  | Issue, Workspace, RunAttempt                |
 | **Infrastructure** | External system integration. Concrete implementations of domain interfaces. | Linear API Client, File System, Git, Logger |
 
 ---
@@ -107,7 +107,7 @@ Correct approach: Domain defines interfaces only. LinearClient is implemented in
 export class LinearApiClient {
   async fetchIssue(id: string) {
     if (this.retryCount > 3) {
-      return this.cancelWorkspace(); // ← business decision: violation
+      return this.cancelWorkspace() // ← business decision: violation
     }
   }
 }

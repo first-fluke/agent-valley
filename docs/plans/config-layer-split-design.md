@@ -57,7 +57,7 @@ workspace:
   root: /Users/gracefullight/workspace/mapple
 
 agent:
-  type: claude  # override global default
+  type: claude # override global default
 
 delivery:
   mode: merge
@@ -107,15 +107,15 @@ scoring:
 
 ### Key Changes by Component
 
-| Component | Change |
-|---|---|
-| `packages/core/src/config/env.ts` | Replace env-based `loadConfig()` with YAML loader + merger |
-| `packages/core/src/config/workflow-loader.ts` | Simplify to read `prompt` field from `valley.yaml` only |
-| `apps/cli/src/setup.ts` | Write to `~/.config/agent-valley/settings.yaml` + `valley.yaml` |
-| `apps/dashboard/src/lib/env.ts` | Replace `@t3-oss/env-nextjs` with shared YAML config loader |
-| `apps/dashboard/src/lib/bootstrap.ts` | Use new config loader |
-| `scripts/dev.sh` | Validate `settings.yaml` + `valley.yaml` instead of `.env` |
-| `scripts/install.sh` | Generate `valley.yaml` template instead of copying `.env.example` |
+| Component                                     | Change                                                            |
+| --------------------------------------------- | ----------------------------------------------------------------- |
+| `packages/core/src/config/env.ts`             | Replace env-based `loadConfig()` with YAML loader + merger        |
+| `packages/core/src/config/workflow-loader.ts` | Simplify to read `prompt` field from `valley.yaml` only           |
+| `apps/cli/src/setup.ts`                       | Write to `~/.config/agent-valley/settings.yaml` + `valley.yaml`   |
+| `apps/dashboard/src/lib/env.ts`               | Replace `@t3-oss/env-nextjs` with shared YAML config loader       |
+| `apps/dashboard/src/lib/bootstrap.ts`         | Use new config loader                                             |
+| `scripts/dev.sh`                              | Validate `settings.yaml` + `valley.yaml` instead of `.env`        |
+| `scripts/install.sh`                          | Generate `valley.yaml` template instead of copying `.env.example` |
 
 ### New CLI Flow
 

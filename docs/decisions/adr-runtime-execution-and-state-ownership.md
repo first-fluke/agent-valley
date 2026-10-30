@@ -13,25 +13,25 @@ The concrete gaps are narrower: Chief bypasses the existing `AgentRunnerPort`; t
 
 ## Options
 
-| Option | Benefit | Cost and risk | Disposition |
-| --- | --- | --- | --- |
-| Keep direct Chief process orchestration | No migration work | Two execution contracts; port consumers lose early completion and accurate liveness | Reject for the local path |
-| Extend the existing execution port and preserve AV state ownership | Reuses one contract; exposes result, cancellation differences and uncertainty | Adapter lifecycle and concurrency tests; recovery schema extension | Implement local path |
-| Expand LangGraph persistence or replace the core with Mastra | Potential framework facilities | No demonstrated missing capability; changes checkpoint ownership and migration scope | Defer |
-| Add an independent A2A backend with explicit endpoint and artifact contracts | Remote interoperability through the existing execution port | Durable remote records, constrained file delivery, trusted local verification and endpoint qualification | Implement as an opt-in backend; qualify each production endpoint separately |
+| Option                                                                       | Benefit                                                                       | Cost and risk                                                                                            | Disposition                                                                 |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Keep direct Chief process orchestration                                      | No migration work                                                             | Two execution contracts; port consumers lose early completion and accurate liveness                      | Reject for the local path                                                   |
+| Extend the existing execution port and preserve AV state ownership           | Reuses one contract; exposes result, cancellation differences and uncertainty | Adapter lifecycle and concurrency tests; recovery schema extension                                       | Implement local path                                                        |
+| Expand LangGraph persistence or replace the core with Mastra                 | Potential framework facilities                                                | No demonstrated missing capability; changes checkpoint ownership and migration scope                     | Defer                                                                       |
+| Add an independent A2A backend with explicit endpoint and artifact contracts | Remote interoperability through the existing execution port                   | Durable remote records, constrained file delivery, trusted local verification and endpoint qualification | Implement as an opt-in backend; qualify each production endpoint separately |
 
 These are qualitative comparisons, not measured return on investment. Reconsider the backend choice when a concrete remote workload and comparable implementation/operating costs are available.
 
 ## Contract and ownership
 
-| Concern | Authority |
-| --- | --- |
-| Mission/task transitions, budgets, retries, checkpoints | AV coordinator and `MissionStore` |
-| Stage routing | LangGraph adapter; it does not own Mission persistence |
-| Execution observation, result and intervention capabilities | `AgentRunnerPort` and its runtime adapter |
-| Local PID identity, process groups and disposal | Local adapter and process guard |
-| Applying changes, workspace fingerprint, review and final verification | Existing AV delivery and verification gates |
-| Unknown execution outcome and operator reconciliation | Durable AV execution record; never a transport retry decision |
+| Concern                                                                    | Authority                                                                   |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Mission/task transitions, budgets, retries, checkpoints                    | AV coordinator and `MissionStore`                                           |
+| Stage routing                                                              | LangGraph adapter; it does not own Mission persistence                      |
+| Execution observation, result and intervention capabilities                | `AgentRunnerPort` and its runtime adapter                                   |
+| Local PID identity, process groups and disposal                            | Local adapter and process guard                                             |
+| Applying changes, workspace fingerprint, review and final verification     | Existing AV delivery and verification gates                                 |
+| Unknown execution outcome and operator reconciliation                      | Durable AV execution record; never a transport retry decision               |
 | Independent A2A request, remote reference and artifact application journal | AV execution service and `A2aJobStore`; remote Task state is an observation |
 
 `RunHandle.result` carries the full `RunAttempt`, including output and observed usage. `AgentRunError` retains the observed attempt and explicitly marks an unknown outcome. A local result settles after that attempt's startup and cleanup have joined. Cancelling one attempt must not stop another attempt sharing a service.
@@ -91,26 +91,26 @@ Interactive: [adr-runtime-execution-and-state-ownership.archify.html](./adr-runt
 
 ## Validation
 
-| Scenario | Acceptance evidence |
-| --- | --- |
-| Actor completes while `spawn` is returning | A later subscriber receives ordered start and terminal events; result retains output/usage; liveness becomes false |
-| Cancellation races delayed session startup | No result or reviewer access before the late process has been disposed |
-| A terminal message races natural process exit | Reconcile transient cleanup errors only with proof that the full process group stopped; retain uncertainty on a live group's permission denial |
-| Two attempts share a service | Cancelling one joins only its cleanup; the other remains active |
-| Runtime reports an unknown submission/stop result | Mission pauses; no retry, review or verification dispatch follows |
-| Coordinator restarts with a reconciliation-required run | Durable record remains uncertain; unfinished work is not silently reset for replay |
-| External package enters domain, or LangChain enters a module outside the routing adapter | `bun run check:imports` fails |
-| A2A accepts a submission and loses its response | Persisted uncertainty blocks another submission; taskless `resume` never calls `SendMessage` |
-| AV restarts with a saved A2A Task reference | A new service instance uses `GetTask` and the original execution identity; no replacement submission |
-| Remote artifacts are tampered, stale or escape the allowed paths | Hash/binding/path/symlink checks reject them before application; partial application resumes only from recorded file images |
-| A remote success claim conflicts with local verification | The execution remains failed; explicit resume rechecks the saved response without submitting again |
-| Local verification cannot confirm process cleanup | The execution remains unknown and blocks another repository writer |
-| Cancellation arrives during submission checkpoint persistence | No new request is transmitted; the saved checkpoint records the absence of submission |
-| Cancellation races a Message response containing a Task ID | The remote reference is saved before cancellation and remains available for confirmation |
-| A different saved execution is resumed while another outcome is unknown | The repository barrier blocks submission and file application |
-| Direct handle cancellation races artifact application or verification | Cancellation reaches the local gate; unconfirmed cleanup remains unknown |
-| Codex progress precedes a structured final answer | Live progress remains observable; only the completed answer reaches the Chief JSON parser; late prior-thread messages are excluded |
-| A CLI endpoint or prompt path is a named pipe | The command rejects it as a nonregular file without waiting for a writer |
+| Scenario                                                                                 | Acceptance evidence                                                                                                                            |
+| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Actor completes while `spawn` is returning                                               | A later subscriber receives ordered start and terminal events; result retains output/usage; liveness becomes false                             |
+| Cancellation races delayed session startup                                               | No result or reviewer access before the late process has been disposed                                                                         |
+| A terminal message races natural process exit                                            | Reconcile transient cleanup errors only with proof that the full process group stopped; retain uncertainty on a live group's permission denial |
+| Two attempts share a service                                                             | Cancelling one joins only its cleanup; the other remains active                                                                                |
+| Runtime reports an unknown submission/stop result                                        | Mission pauses; no retry, review or verification dispatch follows                                                                              |
+| Coordinator restarts with a reconciliation-required run                                  | Durable record remains uncertain; unfinished work is not silently reset for replay                                                             |
+| External package enters domain, or LangChain enters a module outside the routing adapter | `bun run check:imports` fails                                                                                                                  |
+| A2A accepts a submission and loses its response                                          | Persisted uncertainty blocks another submission; taskless `resume` never calls `SendMessage`                                                   |
+| AV restarts with a saved A2A Task reference                                              | A new service instance uses `GetTask` and the original execution identity; no replacement submission                                           |
+| Remote artifacts are tampered, stale or escape the allowed paths                         | Hash/binding/path/symlink checks reject them before application; partial application resumes only from recorded file images                    |
+| A remote success claim conflicts with local verification                                 | The execution remains failed; explicit resume rechecks the saved response without submitting again                                             |
+| Local verification cannot confirm process cleanup                                        | The execution remains unknown and blocks another repository writer                                                                             |
+| Cancellation arrives during submission checkpoint persistence                            | No new request is transmitted; the saved checkpoint records the absence of submission                                                          |
+| Cancellation races a Message response containing a Task ID                               | The remote reference is saved before cancellation and remains available for confirmation                                                       |
+| A different saved execution is resumed while another outcome is unknown                  | The repository barrier blocks submission and file application                                                                                  |
+| Direct handle cancellation races artifact application or verification                    | Cancellation reaches the local gate; unconfirmed cleanup remains unknown                                                                       |
+| Codex progress precedes a structured final answer                                        | Live progress remains observable; only the completed answer reaches the Chief JSON parser; late prior-thread messages are excluded             |
+| A CLI endpoint or prompt path is a named pipe                                            | The command rejects it as a nonregular file without waiting for a writer                                                                       |
 
 Run `bun run test`, `bun run typecheck`, `bun run lint` and `bun run check:imports`; the repository coverage thresholds remain applicable. These checks include actual local HTTP JSON-RPC fixtures, source CLI processes, native-protocol stdio fixtures and real Git/file/verification operations. They do not certify a production A2A endpoint.
 

@@ -42,21 +42,22 @@ class Issue:
 ```typescript
 // presentation/issueRouter.ts
 router.post("/issues/:id/run", async (req, res) => {
-  const issue = await linearClient.getIssue(req.params.id);
-  if (issue.retryCount > 3) {          // Forbidden: business decision
-    await workspace.cancel(issue.id);   // Forbidden: domain operation
+  const issue = await linearClient.getIssue(req.params.id)
+  if (issue.retryCount > 3) {
+    // Forbidden: business decision
+    await workspace.cancel(issue.id) // Forbidden: domain operation
   }
-  res.json({ status: "ok" });
-});
+  res.json({ status: "ok" })
+})
 ```
 
 **Correct approach:**
 ```typescript
 // presentation/issueRouter.ts
 router.post("/issues/:id/run", async (req, res) => {
-  const result = await orchestrator.handleIssue(req.params.id); // Delegate to Application
-  res.json(result);
-});
+  const result = await orchestrator.handleIssue(req.params.id) // Delegate to Application
+  res.json(result)
+})
 ```
 
 ---
@@ -90,15 +91,15 @@ client := linear.NewClient(apiKey)
 **Violation example:**
 ```typescript
 // Forbidden: inserting issue body directly into prompt without validation
-const prompt = `${workflowTemplate}\n\n${issue.description}`;
-await agentRunner.run(prompt);
+const prompt = `${workflowTemplate}\n\n${issue.description}`
+await agentRunner.run(prompt)
 ```
 
 **Correct approach:**
 ```typescript
 // Validate at Presentation layer boundary, then pass to Application
-const sanitizedDescription = sanitizeIssueBody(issue.description); // Length limit, injection pattern removal
-await orchestrator.runIssue({ ...issue, description: sanitizedDescription });
+const sanitizedDescription = sanitizeIssueBody(issue.description) // Length limit, injection pattern removal
+await orchestrator.runIssue({ ...issue, description: sanitizedDescription })
 ```
 
 ---
@@ -175,11 +176,11 @@ Error: WORKSPACE_ROOT must be an absolute path.
 
 ## Enforcement Automation
 
-| Stack | Tool | Configuration docs |
-|---|---|---|
+| Stack      | Tool                                                             | Configuration docs                            |
+| ---------- | ---------------------------------------------------------------- | --------------------------------------------- |
 | TypeScript | `scripts/check-import-rules.mjs` (dependency-cruiser equivalent) | `docs/architecture/enforcement/typescript.md` |
-| Python | import-linter + Ruff | `docs/architecture/enforcement/python.md` |
-| Go | golangci-lint + go vet | `docs/architecture/enforcement/go.md` |
+| Python     | import-linter + Ruff                                             | `docs/architecture/enforcement/python.md`     |
+| Go         | golangci-lint + go vet                                           | `docs/architecture/enforcement/go.md`         |
 
 CI runs these tools automatically (see `.github/workflows/ci.yml`); the
 TypeScript import gate runs as `bun run check:imports`.

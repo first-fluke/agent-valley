@@ -61,8 +61,8 @@ constructor(
 `apps/dashboard/src/lib/bootstrap.ts` adds 4 lines:
 ```ts
 const workspaceManager = new WorkspaceManager(config.workspaceRoot)
-const tracker  = new LinearTrackerAdapter(config.linearApiKey, config.linearTeamId, config.linearTeamUuid)
-const webhook  = new LinearWebhookReceiver(config.linearWebhookSecret)
+const tracker = new LinearTrackerAdapter(config.linearApiKey, config.linearTeamId, config.linearTeamUuid)
+const webhook = new LinearWebhookReceiver(config.linearWebhookSecret)
 const workspace = new FileSystemWorkspaceGateway(workspaceManager)
 const orchestrator = new Orchestrator(config, tracker, webhook, workspace)
 ```
@@ -79,13 +79,13 @@ const orchestrator = new Orchestrator(config, tracker, webhook, workspace)
 
 5 scenarios that were previously impossible without heavy `vi.mock`:
 
-| T# | Scenario | Assertion |
-|---|---|---|
-| T1 | invalid HMAC | response 403, zero tracker calls |
-| T2 | Todo event | `tracker.updateIssueState(_, workflowStates.inProgress)` called |
-| T3 | DAG blocker | workspace not created, `state.waitingIssues.has(id)` true |
-| T4 | concurrency cap | retry queue size = 1 |
-| T5 | startup sync | `fetchIssuesByStates` called with both states |
+| T#  | Scenario        | Assertion                                                       |
+| --- | --------------- | --------------------------------------------------------------- |
+| T1  | invalid HMAC    | response 403, zero tracker calls                                |
+| T2  | Todo event      | `tracker.updateIssueState(_, workflowStates.inProgress)` called |
+| T3  | DAG blocker     | workspace not created, `state.waitingIssues.has(id)` true       |
+| T4  | concurrency cap | retry queue size = 1                                            |
+| T5  | startup sync    | `fetchIssuesByStates` called with both states                   |
 
 ### 4.3 Existing test migration
 

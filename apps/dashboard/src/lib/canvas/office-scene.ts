@@ -11,6 +11,7 @@ import { IssueBubble } from "@/lib/canvas/issue-bubble"
 import { OfficeCockatoo } from "@/lib/canvas/office-cockatoo"
 import { OfficePuppy } from "@/lib/canvas/office-puppy"
 import { getFurnitureTexture, getPoopTexture } from "@/lib/canvas/sprite-generator"
+import { requireCanvasValue } from "./required-value"
 
 // S-8: Named constants for layout offsets
 const MONITOR_Y_OFFSET = -10
@@ -115,7 +116,7 @@ export class OfficeScene {
   }
 
   private drawFloor() {
-    const { cols } = this.layout!
+    const { cols } = requireCanvasValue(this.layout, "an initialized office layout")
     const texture = getFurnitureTexture("floor")
 
     for (let row = 2; row < OFFICE_ROWS - 1; row++) {
@@ -129,7 +130,7 @@ export class OfficeScene {
   }
 
   private drawWalls() {
-    const { cols } = this.layout!
+    const { cols } = requireCanvasValue(this.layout, "an initialized office layout")
     const texture = getFurnitureTexture("wall")
 
     for (let col = 0; col < cols; col++) {
@@ -163,7 +164,7 @@ export class OfficeScene {
   }
 
   private drawFurniture() {
-    for (const item of this.layout!.furniture) {
+    for (const item of requireCanvasValue(this.layout, "an initialized office layout").furniture) {
       const texture = getFurnitureTexture(item.type)
       const sprite = new Sprite(texture)
       sprite.x = item.col * TILE_SIZE
@@ -173,7 +174,7 @@ export class OfficeScene {
   }
 
   private createDesks() {
-    const { desks } = this.layout!
+    const { desks } = requireCanvasValue(this.layout, "an initialized office layout")
 
     for (let i = 0; i < desks.length; i++) {
       const desk = desks[i]
@@ -226,7 +227,10 @@ export class OfficeScene {
   }
 
   private createCharacters() {
-    const { desks, walkableTiles, interestPoints, coffeePoints, cols } = this.layout!
+    const { desks, walkableTiles, interestPoints, coffeePoints, cols } = requireCanvasValue(
+      this.layout,
+      "an initialized office layout",
+    )
     const skins = pickRandomSkins(desks.length)
 
     // Bathroom semaphore — locate the bathroom interest point
@@ -289,10 +293,12 @@ export class OfficeScene {
     this.characterLayer.addChild(this.puppy.container)
 
     // Cockatoo — perches on plant furniture
-    const plantPositions = this.layout!.furniture.filter((f) => f.type === "plant").map((f) => ({
-      col: f.col,
-      row: f.row,
-    }))
+    const plantPositions = requireCanvasValue(this.layout, "an initialized office layout")
+      .furniture.filter((f) => f.type === "plant")
+      .map((f) => ({
+        col: f.col,
+        row: f.row,
+      }))
     if (plantPositions.length >= 2) {
       this.cockatoo = new OfficeCockatoo(plantPositions, this.app.ticker)
       this.characterLayer.addChild(this.cockatoo.container)

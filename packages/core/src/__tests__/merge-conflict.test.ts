@@ -304,7 +304,8 @@ describe("mergeAndPush — rebase-based delivery", () => {
         ">>>>>>> 2c83c4e",
         "",
         "export const store = {}",
-      ].join("\n") + "\n",
+        "",
+      ].join("\n"),
     )
     git(repoDir, ["add", "."])
     git(repoDir, ["commit", "-m", "feat(web,api): integrate better-auth for authentication"])
@@ -342,7 +343,8 @@ describe("mergeAndPush — rebase-based delivery", () => {
         '  "dependencies": { "right-pad": "2.0.0" }',
         ">>>>>>>",
         "}",
-      ].join("\n") + "\n",
+        "",
+      ].join("\n"),
     )
     git(repoDir, ["add", "."])
     git(repoDir, ["commit", "-m", "feat: add dependencies"])

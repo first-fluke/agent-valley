@@ -7,10 +7,10 @@
 
 ## 1. Static vs Dynamic Context
 
-| Type | Location | Update Frequency | Role |
-|---|---|---|---|
-| **Static** | `AGENTS.md` | Manually updated by humans | Immutable rules always read on agent entry |
-| **Dynamic** | Logs, metrics, CI results | Real-time | Basis for decisions during agent execution |
+| Type        | Location                  | Update Frequency           | Role                                       |
+| ----------- | ------------------------- | -------------------------- | ------------------------------------------ |
+| **Static**  | `AGENTS.md`               | Manually updated by humans | Immutable rules always read on agent entry |
+| **Dynamic** | Logs, metrics, CI results | Real-time                  | Basis for decisions during agent execution |
 
 ### Single Source of Truth
 
@@ -71,12 +71,12 @@ Upon discovery, immediately add them to `docs/architecture/CONSTRAINTS.md` and m
 Track agent throughput and harness efficiency numerically.
 Without metrics, there is no way to know whether improvement is occurring.
 
-| Metric | Collection Point | Target |
-|---|---|---|
-| Time to PR | `git log` (issue assignment -> PR creation timestamp) | Decreasing trend |
-| CI pass rate | GitHub Actions execution logs | > 90% |
-| Review time per PR | GitHub API (review submitted timestamp) | Decreasing trend |
-| Documentation freshness | `git log AGENTS.md` latest commit date | < 7 days |
+| Metric                  | Collection Point                                      | Target           |
+| ----------------------- | ----------------------------------------------------- | ---------------- |
+| Time to PR              | `git log` (issue assignment -> PR creation timestamp) | Decreasing trend |
+| CI pass rate            | GitHub Actions execution logs                         | > 90%            |
+| Review time per PR      | GitHub API (review submitted timestamp)               | Decreasing trend |
+| Documentation freshness | `git log AGENTS.md` latest commit date                | < 7 days         |
 
 ### Documentation Freshness Threshold
 

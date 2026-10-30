@@ -27,10 +27,10 @@ interface WebhookReceiver<TEvent = unknown> {
 
 Both ports are implemented by two adapters:
 
-| Adapter | Endpoint / Transport | Source |
-|---|---|---|
+| Adapter                                          | Endpoint / Transport                                                                            | Source                                           |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------ |
 | `LinearTrackerAdapter` + `LinearWebhookReceiver` | `POST https://api.linear.app/graphql` (GraphQL) + HMAC-SHA256 webhook header `Linear-Signature` | `packages/core/src/tracker/adapters/linear-*.ts` |
-| `GitHubTrackerAdapter` + `GitHubWebhookReceiver` | `https://api.github.com/...` (REST v3 + `X-Hub-Signature-256` HMAC) | `packages/core/src/tracker/adapters/github-*.ts` |
+| `GitHubTrackerAdapter` + `GitHubWebhookReceiver` | `https://api.github.com/...` (REST v3 + `X-Hub-Signature-256` HMAC)                             | `packages/core/src/tracker/adapters/github-*.ts` |
 
 The selector is `tracker.kind` in `av.yaml` (defaults to `linear`).
 Each adapter is exercised against `runIssueTrackerContract` /
@@ -131,13 +131,7 @@ On Orchestrator startup, fetch all current Todo and In Progress issues to recove
 
 ```graphql
 query GetIssuesByState($teamId: String!, $stateIds: [ID!]!) {
-  issues(
-    filter: {
-      team: { id: { eq: $teamId } }
-      state: { id: { in: $stateIds } }
-    }
-    first: 50
-  ) {
+  issues(filter: { team: { id: { eq: $teamId } }, state: { id: { in: $stateIds } } }, first: 50) {
     nodes {
       id
       identifier
@@ -172,12 +166,12 @@ Convert returned nodes to the `Issue` domain model from `domain-models.md`.
 
 ## Workflow State IDs
 
-| State | ID | Description |
-|---|---|---|
-| TODO | `{LINEAR_WORKFLOW_STATE_TODO}` | Issue ready for pickup |
-| IN_PROGRESS | `{LINEAR_WORKFLOW_STATE_IN_PROGRESS}` | Agent is running |
-| DONE | `{LINEAR_WORKFLOW_STATE_DONE}` | Agent completed successfully |
-| CANCELLED | `{LINEAR_WORKFLOW_STATE_CANCELLED}` | Agent failed or cancelled |
+| State       | ID                                    | Description                  |
+| ----------- | ------------------------------------- | ---------------------------- |
+| TODO        | `{LINEAR_WORKFLOW_STATE_TODO}`        | Issue ready for pickup       |
+| IN_PROGRESS | `{LINEAR_WORKFLOW_STATE_IN_PROGRESS}` | Agent is running             |
+| DONE        | `{LINEAR_WORKFLOW_STATE_DONE}`        | Agent completed successfully |
+| CANCELLED   | `{LINEAR_WORKFLOW_STATE_CANCELLED}`   | Agent failed or cancelled    |
 
 **State transition authority:**
 
@@ -194,12 +188,12 @@ Agents focus on business logic (code writing, PR creation).
 
 ## Trust Levels
 
-| Data Source | Trust Level | Handling |
-|---|---|---|
-| `WORKFLOW.md` | High — trusted | Use as-is |
-| Linear API response (id, status, team) | Medium — internal trust | Type-validate before use |
-| `Issue.title`, `Issue.description` | Low — suspect | Escape before prompt insertion. See `docs/harness/SAFETY.md` |
-| Webhook payload | Medium — verify signature | Reject if signature mismatch |
+| Data Source                            | Trust Level               | Handling                                                     |
+| -------------------------------------- | ------------------------- | ------------------------------------------------------------ |
+| `WORKFLOW.md`                          | High — trusted            | Use as-is                                                    |
+| Linear API response (id, status, team) | Medium — internal trust   | Type-validate before use                                     |
+| `Issue.title`, `Issue.description`     | Low — suspect             | Escape before prompt insertion. See `docs/harness/SAFETY.md` |
+| Webhook payload                        | Medium — verify signature | Reject if signature mismatch                                 |
 
 ---
 

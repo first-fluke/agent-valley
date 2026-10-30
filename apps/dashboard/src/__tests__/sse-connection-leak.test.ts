@@ -35,6 +35,11 @@ const { GET: eventsGET } = await import("@/app/api/events/route")
 
 const localRequest = () => new Request("http://localhost:3000/api/events", { headers: { host: "localhost:3000" } })
 
+function responseBody(response: Response) {
+  if (!response.body) throw new Error("Expected a readable SSE response body")
+  return response.body
+}
+
 describe("SSE /api/events — interval cleanup", () => {
   beforeEach(() => {
     getStatusCallCount = 0
@@ -56,7 +61,7 @@ describe("SSE /api/events — interval cleanup", () => {
 
   test("interval stops after stream is cancelled", async () => {
     const res = await eventsGET(localRequest())
-    const reader = res.body!.getReader()
+    const reader = responseBody(res).getReader()
 
     // Read initial events (state + keepalive)
     await reader.read()
@@ -76,7 +81,7 @@ describe("SSE /api/events — interval cleanup", () => {
 
   test("interval self-terminates when send throws", async () => {
     const res = await eventsGET(localRequest())
-    const reader = res.body!.getReader()
+    const reader = responseBody(res).getReader()
 
     // Read initial events
     await reader.read()
@@ -95,8 +100,8 @@ describe("SSE /api/events — interval cleanup", () => {
   test("multiple concurrent SSE connections each get their own cleanup", async () => {
     const res1 = await eventsGET(localRequest())
     const res2 = await eventsGET(localRequest())
-    const reader1 = res1.body!.getReader()
-    const reader2 = res2.body!.getReader()
+    const reader1 = responseBody(res1).getReader()
+    const reader2 = responseBody(res2).getReader()
 
     await reader1.read()
     await reader2.read()
@@ -124,7 +129,7 @@ describe("SSE /api/events — interval cleanup", () => {
   test("startup failure reports unavailable instead of sending invalid configuration as state", async () => {
     mockOrchestrator = null
     const response = await eventsGET(localRequest())
-    const reader = response.body!.getReader()
+    const reader = responseBody(response).getReader()
     const first = new TextDecoder().decode((await reader.read()).value)
     expect(first).toContain("event: unavailable")
     expect(first).toContain("av doctor")
@@ -136,7 +141,7 @@ describe("SSE /api/events — interval cleanup", () => {
   test("a connection opened before startup observes a runtime that appears later", async () => {
     mockOrchestrator = null
     const response = await eventsGET(localRequest())
-    const reader = response.body!.getReader()
+    const reader = responseBody(response).getReader()
     await reader.read()
     await reader.read()
     mockOrchestrator = { getStatus: () => ({ isRunning: true, activeAgents: 2 }), on: vi.fn(), off: vi.fn() }
@@ -152,7 +157,7 @@ describe("SSE /api/events — interval cleanup", () => {
     const previous = { getStatus: () => ({ isRunning: false }), on: vi.fn(), off: vi.fn() }
     mockOrchestrator = previous
     const response = await eventsGET(localRequest())
-    const reader = response.body!.getReader()
+    const reader = responseBody(response).getReader()
     await reader.read()
     await reader.read()
     const replacement = { getStatus: () => ({ isRunning: true, activeAgents: 3 }), on: vi.fn(), off: vi.fn() }
@@ -173,7 +178,7 @@ describe("SSE /api/events — interval cleanup", () => {
     const response = await eventsGET(
       new Request("http://localhost/api/events", { headers: { host: "localhost" }, signal: controller.signal }),
     )
-    const reader = response.body!.getReader()
+    const reader = responseBody(response).getReader()
     await reader.read()
     await reader.read()
     controller.abort()

@@ -38,11 +38,11 @@ composes — not inherits — the existing `WorkspaceManager` facade.
 `WorkspaceManager` is now a thin facade over three focused modules
 (`packages/core/src/workspace/`):
 
-| Module | Role |
-|---|---|
+| Module                  | Role                                                                                                            |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `worktree-lifecycle.ts` | Worktree creation, lookup, metadata persistence, cleanup, branch / key derivation, diff-against-main detection. |
-| `delivery-strategy.ts` | `merge` mode fast-forward rebase + push; `pr` mode branch push + safety-net draft PR (via `gh` CLI). |
-| `safety-net.ts` | Auto-commit of uncommitted agent work before delivery; regeneratable-lockfile conflict retry hints. |
+| `delivery-strategy.ts`  | `merge` mode fast-forward rebase + push; `pr` mode branch push + safety-net draft PR (via `gh` CLI).            |
+| `safety-net.ts`         | Auto-commit of uncommitted agent work before delivery; regeneratable-lockfile conflict retry hints.             |
 
 The split keeps every file under the 500-line constraint and lets each
 module be tested independently (`worktree-lifecycle.test.ts`,
@@ -60,13 +60,13 @@ Replace all characters outside the `[A-Za-z0-9._-]` range in `Issue.identifier` 
 key = identifier.replace(/[^A-Za-z0-9._-]/g, '_')
 ```
 
-| Input (identifier) | Output (key) |
-|---|---|
-| `ACR-42` | `ACR-42` |
-| `ACR 42` | `ACR_42` |
-| `ACR/42` | `ACR_42` |
-| `ACR#42` | `ACR_42` |
-| `ACR.feature.1` | `ACR.feature.1` |
+| Input (identifier) | Output (key)    |
+| ------------------ | --------------- |
+| `ACR-42`           | `ACR-42`        |
+| `ACR 42`           | `ACR_42`        |
+| `ACR/42`           | `ACR_42`        |
+| `ACR#42`           | `ACR_42`        |
+| `ACR.feature.1`    | `ACR.feature.1` |
 
 ---
 

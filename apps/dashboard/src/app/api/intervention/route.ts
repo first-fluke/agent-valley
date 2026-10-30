@@ -70,7 +70,7 @@ export async function POST(request: Request): Promise<Response> {
   if ("error" in parsed) return badRequest(parsed.error)
 
   const orchestrator = getOrchestrator()
-  if (!orchestrator || !orchestrator.intervention) {
+  if (!orchestrator?.intervention) {
     return Response.json({ error: "Unavailable", message: "Orchestrator not initialized" }, { status: 503 })
   }
 

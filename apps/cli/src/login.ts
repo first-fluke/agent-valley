@@ -1,6 +1,6 @@
 /** User team tokens are verified by the gateway; database credentials stay on the server. */
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 import { normalizeTeamRelayUrl } from "@agent-valley/core/config/team-schema"
 import { loadGlobalConfig, loadProjectConfig } from "@agent-valley/core/config/yaml-loader"
 import {

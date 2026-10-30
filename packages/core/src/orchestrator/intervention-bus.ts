@@ -133,7 +133,7 @@ export class InterventionBus {
     }
 
     const session = this.runner.getSession(attemptId)
-    if (!session || !session.isAlive()) {
+    if (!session?.isAlive()) {
       return {
         ok: false,
         reason: "terminated",

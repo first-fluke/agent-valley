@@ -94,10 +94,9 @@ task:
 
 `bun av dev` prints the local dashboard URL and the tunnel URL. The dashboard uses `server.port` from YAML (default 9741); `SERVER_PORT` overrides it. The public tunnel forwards webhook endpoints only.
 
-| Tracker | Webhook path | Configuration |
-|---|---|---|
-| Linear | `/api/webhook` | Team/API key and Todo/In Progress/Done/Cancelled state IDs. The CLI attempts webhook registration after tunnel startup. Resolve a registration error before relying on incoming issues. |
-| GitHub | `/api/webhook/github` | Owner, repository, `github.token_env`, signing secret and state labels. Export the named token environment variable. Register an Issues webhook with JSON payloads; use `github.webhook_secret` from `av.yaml`. |
+- **Linear** (`/api/webhook`): Team/API key and Todo/In Progress/Done/Cancelled state IDs. The CLI attempts webhook registration after tunnel startup. Resolve a registration error before relying on incoming issues.
+
+- **GitHub** (`/api/webhook/github`): Owner, repository, `github.token_env`, signing secret and state labels. Export the named token environment variable. Register an Issues webhook with JSON payloads; use `github.webhook_secret` from `av.yaml`.
 
 The default tunnel provider is ngrok. The wizard can select Cloudflare or `none`; install the selected tunnel executable. With `none`, provide your own webhook ingress. Existing runnable issues are reconciled at startup, but new changes still need webhook delivery while the runtime is running.
 
@@ -114,16 +113,16 @@ The default tunnel provider is ngrok. The wizard can select Cloudflare or `none`
 
 ## Troubleshooting
 
-| Symptom | Check and action |
-|---|---|
-| `av up` exits or never becomes healthy | Read `.av.log` in the Agent Valley checkout. Run `bun av doctor`; check dashboard dependencies, port conflicts, and required configuration. |
-| Actor never starts | Check operations-panel blockers/retry time, concurrency, budget limits, selected actor executable/authentication, and webhook delivery in the tracker. |
-| Task retries after producing code | Read the verification/delivery error. Run the configured check in the retained worktree; check Git remote and `gh` authentication. |
-| Process exits without a result | Run the actor interactively once to authenticate and confirm its installed version. Update incompatible CLIs. The task fails promptly instead of waiting for the full task timeout. |
+| Symptom                                           | Check and action                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `av up` exits or never becomes healthy            | Read `.av.log` in the Agent Valley checkout. Run `bun av doctor`; check dashboard dependencies, port conflicts, and required configuration.                                                                                                                                                                               |
+| Actor never starts                                | Check operations-panel blockers/retry time, concurrency, budget limits, selected actor executable/authentication, and webhook delivery in the tracker.                                                                                                                                                                    |
+| Task retries after producing code                 | Read the verification/delivery error. Run the configured check in the retained worktree; check Git remote and `gh` authentication.                                                                                                                                                                                        |
+| Process exits without a result                    | Run the actor interactively once to authenticate and confirm its installed version. Update incompatible CLIs. The task fails promptly instead of waiting for the full task timeout.                                                                                                                                       |
 | Codex cannot initialize state in a custom profile | Confirm the Actor's `CODEX_HOME` names an existing absolute, dedicated profile directory. Sandbox planning uses the same forwarded environment as the Codex subprocess and permits that active profile. A home directory or its ancestor is rejected; preserve the intended account and correct the configured directory. |
-| Dashboard says unavailable | Run `bun av doctor` and inspect `.av.log` or the foreground output for the initialization failure. Fix it and restart. A connected SSE socket does not imply a healthy scheduler. |
-| Runtime restarted while an actor was alive | Recovery reserves that task until the old process exits, then retries retained work. Inspect a stuck process before terminating it. |
-| Read-only user cannot control actors | Sign in separately for controls with the intervention token. Viewing status does not require that token. |
+| Dashboard says unavailable                        | Run `bun av doctor` and inspect `.av.log` or the foreground output for the initialization failure. Fix it and restart. A connected SSE socket does not imply a healthy scheduler.                                                                                                                                         |
+| Runtime restarted while an actor was alive        | Recovery reserves that task until the old process exits, then retries retained work. Inspect a stuck process before terminating it.                                                                                                                                                                                       |
+| Read-only user cannot control actors              | Sign in separately for controls with the intervention token. Viewing status does not require that token.                                                                                                                                                                                                                  |
 
 Run `bun run test`, `bun run typecheck`, `bun run lint`, and `./scripts/harness/validate.sh` for repository checks. `validate.sh` checks source safety, architecture and coverage; `av doctor` checks runtime configuration and prerequisites. Use `bun run test` for the Vitest suite; bare `bun test` selects Bun's different test runner.
 
@@ -154,14 +153,14 @@ Without configured access tokens, local dashboard requests are accepted.
 If a token is configured, its scope requires authentication even on localhost.
 Remote dashboard access also needs a reachable bind address and these settings:
 
-| Env var | Effect |
-|---|---|
-| `SYMPHONY_DASHBOARD_TOKEN=<token>` | Require a bearer token or browser sign-in for status, events, metrics and team data, including local requests. CLI status/top send the token from their environment. |
-| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | Requires `SYMPHONY_DASHBOARD_TOKEN` even for local requests; without it, every request is rejected. |
-| `SYMPHONY_INTERVENTION_TOKEN=<token>` | Require a bearer token or browser session for all intervention requests. A valid token authorizes local or remote requests without a remote flag. Use a separate token from the status token. |
-| `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | Requires a configured intervention token; without it, every intervention request is rejected. This flag alone does not grant access. |
-| `SYMPHONY_DASHBOARD_HOST=<host>` | CLI-managed dashboard bind address. Non-loopback values require both dashboard and intervention tokens. |
-| `SYMPHONY_WEBHOOK_PORT=<port>` | Override the webhook-only listener port; default is `SERVER_PORT + 1`. Point any named tunnel at this port. |
+| Env var                                | Effect                                                                                                                                                                                        |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SYMPHONY_DASHBOARD_TOKEN=<token>`     | Require a bearer token or browser sign-in for status, events, metrics and team data, including local requests. CLI status/top send the token from their environment.                          |
+| `SYMPHONY_ALLOW_REMOTE_STATUS=1`       | Requires `SYMPHONY_DASHBOARD_TOKEN` even for local requests; without it, every request is rejected.                                                                                           |
+| `SYMPHONY_INTERVENTION_TOKEN=<token>`  | Require a bearer token or browser session for all intervention requests. A valid token authorizes local or remote requests without a remote flag. Use a separate token from the status token. |
+| `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | Requires a configured intervention token; without it, every intervention request is rejected. This flag alone does not grant access.                                                          |
+| `SYMPHONY_DASHBOARD_HOST=<host>`       | CLI-managed dashboard bind address. Non-loopback values require both dashboard and intervention tokens.                                                                                       |
+| `SYMPHONY_WEBHOOK_PORT=<port>`         | Override the webhook-only listener port; default is `SERVER_PORT + 1`. Point any named tunnel at this port.                                                                                   |
 
 `/api/intervention` controls pause/resume/append_prompt/abort on a live run.
 With `SYMPHONY_INTERVENTION_TOKEN` set, matching credentials authorize requests

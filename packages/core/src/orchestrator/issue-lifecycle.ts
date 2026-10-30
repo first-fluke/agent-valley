@@ -11,7 +11,7 @@
 
 import { resolveRouteWithScore } from "../config/routing"
 import { renderPrompt } from "../config/workflow-loader"
-import type { Issue, RetryCategory, RunAttempt, Workspace } from "../domain/models"
+import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 import { buildOmaGuidance, prepareOmaAttempt } from "../oma/receipt-adapter"
 import { formatBudgetBlockComment } from "./budget-service"

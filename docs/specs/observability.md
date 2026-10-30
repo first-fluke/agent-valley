@@ -38,13 +38,13 @@ LOG_FORMAT=text   → Human-readable text (default, for development)
 
 Every log event must include:
 
-| Field | Type | Description |
-|---|---|---|
-| `timestamp` | ISO8601 | Event time (UTC) |
-| `level` | string | Log level |
-| `component` | string | Component that emitted the log |
-| `message` | string | Event description |
-| `issueId` | string | Issue ID (when relevant) |
+| Field       | Type    | Description                    |
+| ----------- | ------- | ------------------------------ |
+| `timestamp` | ISO8601 | Event time (UTC)               |
+| `level`     | string  | Log level                      |
+| `component` | string  | Component that emitted the log |
+| `message`   | string  | Event description              |
+| `issueId`   | string  | Issue ID (when relevant)       |
 
 **Optional fields:** `attemptId`, `workspacePath`, `exitCode`, `durationMs`, `error`
 
@@ -54,12 +54,12 @@ Every log event must include:
 
 Controlled by `LOG_LEVEL` environment variable. Only messages at or above the set level are output.
 
-| Level | When to use |
-|---|---|
-| `debug` | Webhook payload details, RPC request/response, state transitions |
-| `info` | Agent start/complete, workspace create/delete, startup sync, server ready |
-| `warn` | Retry triggered, rate limit response, config values near boundary |
-| `error` | Agent failure, Linear API auth error, unhandled exception |
+| Level   | When to use                                                               |
+| ------- | ------------------------------------------------------------------------- |
+| `debug` | Webhook payload details, RPC request/response, state transitions          |
+| `info`  | Agent start/complete, workspace create/delete, startup sync, server ready |
+| `warn`  | Retry triggered, rate limit response, config values near boundary         |
+| `error` | Agent failure, Linear API auth error, unhandled exception                 |
 
 Default: `info`
 
@@ -94,17 +94,17 @@ Events that must be logged during implementation:
 
 Collect metrics at these events:
 
-| Metric | When | Unit |
-|---|---|---|
-| `webhook_events_received` | Each webhook received | count |
-| `webhook_events_processed` | Each webhook successfully handled | count |
-| `webhook_signature_failures` | Signature verification failed | count |
-| `agent_duration_ms` | RunAttempt completed | milliseconds |
-| `agent_success_count` | exitCode == 0 | count |
-| `agent_failure_count` | exitCode != 0 | count |
-| `retry_count` | Retry queue entry added | count |
-| `active_workspaces` | After each event processed | gauge |
-| `linear_api_errors` | Linear API error occurred | count |
+| Metric                       | When                              | Unit         |
+| ---------------------------- | --------------------------------- | ------------ |
+| `webhook_events_received`    | Each webhook received             | count        |
+| `webhook_events_processed`   | Each webhook successfully handled | count        |
+| `webhook_signature_failures` | Signature verification failed     | count        |
+| `agent_duration_ms`          | RunAttempt completed              | milliseconds |
+| `agent_success_count`        | exitCode == 0                     | count        |
+| `agent_failure_count`        | exitCode != 0                     | count        |
+| `retry_count`                | Retry queue entry added           | count        |
+| `active_workspaces`          | After each event processed        | gauge        |
+| `linear_api_errors`          | Linear API error occurred         | count        |
 
 ---
 
@@ -160,7 +160,7 @@ Enable per deployment via `av.yaml`:
 observability:
   otel:
     enabled: true
-    endpoint: http://localhost:4318     # OTLP HTTP collector
+    endpoint: http://localhost:4318 # OTLP HTTP collector
     service_name: agent-valley
 ```
 
@@ -185,16 +185,16 @@ observability:
     path: /api/metrics
 ```
 
-| Metric | Type | Description |
-|---|---|---|
-| `agent_valley_active_agents` | gauge | Agents currently running |
-| `agent_valley_retry_queue_size` | gauge | Pending retry entries |
-| `agent_valley_agent_started_total` | counter | Spawn events, labelled by `agent_type` |
-| `agent_valley_agent_done_total` | counter | Successful completions |
-| `agent_valley_agent_failed_total` | counter | Failures with `retryable` label |
-| `agent_valley_agent_cancelled_total` | counter | Cancellations |
-| `agent_valley_agent_duration_ms` | histogram | Agent run duration |
-| `agent_valley_dag_cycles_total` | counter | DAG cycle detections |
+| Metric                               | Type      | Description                            |
+| ------------------------------------ | --------- | -------------------------------------- |
+| `agent_valley_active_agents`         | gauge     | Agents currently running               |
+| `agent_valley_retry_queue_size`      | gauge     | Pending retry entries                  |
+| `agent_valley_agent_started_total`   | counter   | Spawn events, labelled by `agent_type` |
+| `agent_valley_agent_done_total`      | counter   | Successful completions                 |
+| `agent_valley_agent_failed_total`    | counter   | Failures with `retryable` label        |
+| `agent_valley_agent_cancelled_total` | counter   | Cancellations                          |
+| `agent_valley_agent_duration_ms`     | histogram | Agent run duration                     |
+| `agent_valley_dag_cycles_total`      | counter   | DAG cycle detections                   |
 
 Served as text/plain from `GET /api/metrics` through the Presentation
 layer (`apps/dashboard/src/app/api/metrics/route.ts`). When Prometheus is

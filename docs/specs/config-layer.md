@@ -26,7 +26,7 @@ The Config Layer substitutes it with the actual value at load time.
 
 ```yaml
 tracker:
-  apiKey: $LINEAR_API_KEY      # → resolved to process.env.LINEAR_API_KEY
+  apiKey: $LINEAR_API_KEY # → resolved to process.env.LINEAR_API_KEY
   teamId: $LINEAR_TEAM_ID
 workspace:
   rootPath: $WORKSPACE_ROOT
@@ -83,17 +83,17 @@ Config {
 
 Refuse to start if any of the following are missing or empty.
 
-| Config Key | Env Var | Description |
-|---|---|---|
-| `tracker.apiKey` | `LINEAR_API_KEY` | Linear Personal API key |
-| `tracker.teamId` | `LINEAR_TEAM_ID` | Linear team identifier |
-| `tracker.teamUuid` | `LINEAR_TEAM_UUID` | Linear team UUID |
-| `tracker.webhookSecret` | `LINEAR_WEBHOOK_SECRET` | Linear webhook signing secret |
-| `workspace.rootPath` | `WORKSPACE_ROOT` | Workspace root absolute path |
-| `workflowStates.todo` | `LINEAR_WORKFLOW_STATE_TODO` | "Todo" state UUID |
-| `workflowStates.inProgress` | `LINEAR_WORKFLOW_STATE_IN_PROGRESS` | "In Progress" state UUID |
-| `workflowStates.done` | `LINEAR_WORKFLOW_STATE_DONE` | "Done" state UUID |
-| `workflowStates.cancelled` | `LINEAR_WORKFLOW_STATE_CANCELLED` | "Cancelled" state UUID |
+| Config Key                  | Env Var                             | Description                   |
+| --------------------------- | ----------------------------------- | ----------------------------- |
+| `tracker.apiKey`            | `LINEAR_API_KEY`                    | Linear Personal API key       |
+| `tracker.teamId`            | `LINEAR_TEAM_ID`                    | Linear team identifier        |
+| `tracker.teamUuid`          | `LINEAR_TEAM_UUID`                  | Linear team UUID              |
+| `tracker.webhookSecret`     | `LINEAR_WEBHOOK_SECRET`             | Linear webhook signing secret |
+| `workspace.rootPath`        | `WORKSPACE_ROOT`                    | Workspace root absolute path  |
+| `workflowStates.todo`       | `LINEAR_WORKFLOW_STATE_TODO`        | "Todo" state UUID             |
+| `workflowStates.inProgress` | `LINEAR_WORKFLOW_STATE_IN_PROGRESS` | "In Progress" state UUID      |
+| `workflowStates.done`       | `LINEAR_WORKFLOW_STATE_DONE`        | "Done" state UUID             |
+| `workflowStates.cancelled`  | `LINEAR_WORKFLOW_STATE_CANCELLED`   | "Cancelled" state UUID        |
 
 ---
 
@@ -128,18 +128,18 @@ Symphony cannot start until all config errors are resolved.
 
 See `.env.example`. Key items:
 
-| Env Var | Required | Default | Description |
-|---|---|---|---|
-| `LINEAR_API_KEY` | Y | — | Linear Personal API key |
-| `LINEAR_TEAM_ID` | Y | — | Linear team identifier (e.g. `ACR`) |
-| `LINEAR_TEAM_UUID` | Y | — | Linear team UUID |
-| `LINEAR_WEBHOOK_SECRET` | Y | — | Linear webhook signing secret |
-| `LINEAR_WORKFLOW_STATE_TODO` | Y | — | "Todo" state UUID |
-| `LINEAR_WORKFLOW_STATE_IN_PROGRESS` | Y | — | "In Progress" state UUID |
-| `LINEAR_WORKFLOW_STATE_DONE` | Y | — | "Done" state UUID |
-| `LINEAR_WORKFLOW_STATE_CANCELLED` | Y | — | "Cancelled" state UUID |
-| `WORKSPACE_ROOT` | Y | — | Workspace root absolute path |
-| `AGENT_TYPE` | Y | `claude` | Agent to use: claude, gemini, codex |
-| `LOG_LEVEL` | N | `info` | Log level (debug/info/warn/error) |
-| `LOG_FORMAT` | N | `text` | Log format (text/json) |
-| `OTEL_ENDPOINT` | N | — | OpenTelemetry collector endpoint |
+| Env Var                             | Required | Default  | Description                         |
+| ----------------------------------- | -------- | -------- | ----------------------------------- |
+| `LINEAR_API_KEY`                    | Y        | —        | Linear Personal API key             |
+| `LINEAR_TEAM_ID`                    | Y        | —        | Linear team identifier (e.g. `ACR`) |
+| `LINEAR_TEAM_UUID`                  | Y        | —        | Linear team UUID                    |
+| `LINEAR_WEBHOOK_SECRET`             | Y        | —        | Linear webhook signing secret       |
+| `LINEAR_WORKFLOW_STATE_TODO`        | Y        | —        | "Todo" state UUID                   |
+| `LINEAR_WORKFLOW_STATE_IN_PROGRESS` | Y        | —        | "In Progress" state UUID            |
+| `LINEAR_WORKFLOW_STATE_DONE`        | Y        | —        | "Done" state UUID                   |
+| `LINEAR_WORKFLOW_STATE_CANCELLED`   | Y        | —        | "Cancelled" state UUID              |
+| `WORKSPACE_ROOT`                    | Y        | —        | Workspace root absolute path        |
+| `AGENT_TYPE`                        | Y        | `claude` | Agent to use: claude, gemini, codex |
+| `LOG_LEVEL`                         | N        | `info`   | Log level (debug/info/warn/error)   |
+| `LOG_FORMAT`                        | N        | `text`   | Log format (text/json)              |
+| `OTEL_ENDPOINT`                     | N        | —        | OpenTelemetry collector endpoint    |

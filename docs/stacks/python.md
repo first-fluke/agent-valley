@@ -7,17 +7,17 @@
 
 ## Recommended Stack
 
-| Role | Choice |
-|---|---|
-| Language | Python 3.12+ |
-| HTTP Server | FastAPI |
-| ORM | SQLAlchemy 2.0 |
-| Schema Validation | Pydantic v2 |
-| Migrations | Alembic |
-| Testing | pytest + pytest-asyncio |
-| Package Manager | uv |
-| Architecture Linter | import-linter |
-| Code Linter | Ruff |
+| Role                | Choice                  |
+| ------------------- | ----------------------- |
+| Language            | Python 3.12+            |
+| HTTP Server         | FastAPI                 |
+| ORM                 | SQLAlchemy 2.0          |
+| Schema Validation   | Pydantic v2             |
+| Migrations          | Alembic                 |
+| Testing             | pytest + pytest-asyncio |
+| Package Manager     | uv                      |
+| Architecture Linter | import-linter           |
+| Code Linter         | Ruff                    |
 
 ---
 

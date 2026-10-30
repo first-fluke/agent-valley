@@ -10,15 +10,15 @@
 
 ## 1. 결정 요약
 
-| 축 | 결정 | 근거 |
-|---|---|---|
-| 스코프 (안정성) | 도메인 포트 PR1~PR4 + PR0 Characterization | PRD v0.2 후보 + 리팩터 리스크 선제 제거 |
-| 스코프 (신기능) | A GitHub Issues 어댑터 / B 비용·토큰 예산 / C 라이브 인터벤션 / D OTel·Prometheus | 포트 설계와의 시너지 + 사용자 가치 |
-| 보류 | E 세션 기록·재생 | PR4 위에서 v0.3 로 자연스럽게 올리기 |
-| 릴리스 전략 | α 빅뱅 (단일 v0.2) + 내부 M0~M3 체크포인트 | 메시징 명확, 포트/기능 정합 |
-| 실행 접근법 | 2 Outside-in / Risk-first | 포트 오설계를 실어댑터(A) 로 가장 먼저 검증 |
-| TDD 강도 | L3 — 변경 파일 라인 80% / 브랜치 70% CI 게이트 | 빅뱅의 회귀 리스크를 커버리지로 방어 |
-| 조직 원칙 | Characterization → 포트 → 실어댑터 → 내부 분할 → 기능 레이어 | PR2·PR3 리팩터의 안전망 확보 |
+| 축              | 결정                                                                              | 근거                                        |
+| --------------- | --------------------------------------------------------------------------------- | ------------------------------------------- |
+| 스코프 (안정성) | 도메인 포트 PR1~PR4 + PR0 Characterization                                        | PRD v0.2 후보 + 리팩터 리스크 선제 제거     |
+| 스코프 (신기능) | A GitHub Issues 어댑터 / B 비용·토큰 예산 / C 라이브 인터벤션 / D OTel·Prometheus | 포트 설계와의 시너지 + 사용자 가치          |
+| 보류            | E 세션 기록·재생                                                                  | PR4 위에서 v0.3 로 자연스럽게 올리기        |
+| 릴리스 전략     | α 빅뱅 (단일 v0.2) + 내부 M0~M3 체크포인트                                        | 메시징 명확, 포트/기능 정합                 |
+| 실행 접근법     | 2 Outside-in / Risk-first                                                         | 포트 오설계를 실어댑터(A) 로 가장 먼저 검증 |
+| TDD 강도        | L3 — 변경 파일 라인 80% / 브랜치 70% CI 게이트                                    | 빅뱅의 회귀 리스크를 커버리지로 방어        |
+| 조직 원칙       | Characterization → 포트 → 실어댑터 → 내부 분할 → 기능 레이어                      | PR2·PR3 리팩터의 안전망 확보                |
 
 ---
 
@@ -161,9 +161,7 @@ export interface WorkspaceGateway {
 }
 
 export type DeliveryMode = "merge" | "pr"
-export type DeliveryResult =
-  | { kind: "merged"; commitSha: string }
-  | { kind: "pr"; url: string }
+export type DeliveryResult = { kind: "merged"; commitSha: string } | { kind: "pr"; url: string }
 ```
 
 **결정**
@@ -221,9 +219,9 @@ export type TokenUsage = { input: number; output: number; costUsd: number }
 ```yaml
 budget:
   per_issue: { tokens: 500000, usd: 2.0 }
-  per_day:   { tokens: 5000000, usd: 20.0 }
-  on_exceed: block          # block | warn
-  allow_override_label: false  # 기본 off (E18)
+  per_day: { tokens: 5000000, usd: 20.0 }
+  on_exceed: block # block | warn
+  allow_override_label: false # 기본 off (E18)
   pricing:
     claude-sonnet: { input_per_mtok: 3.0, output_per_mtok: 15.0 }
     # 미정의 모델은 0 처리 + WARN
@@ -258,7 +256,9 @@ export function runIssueTrackerContract(
   label: string,
   makeTracker: () => Promise<{ tracker: IssueTracker; seedIssue: (init: Issue) => Promise<string> }>,
 ) {
-  describe(`IssueTracker contract — ${label}`, () => { /* 15 케이스 */ })
+  describe(`IssueTracker contract — ${label}`, () => {
+    /* 15 케이스 */
+  })
 }
 ```
 
@@ -323,7 +323,7 @@ workspace-manager.ts (shell, ~150줄)
 
 ```yaml
 tracker:
-  kind: linear     # linear | github
+  kind: linear # linear | github
 github:
   token_env: GITHUB_TOKEN
   owner: first-fluke
@@ -336,7 +336,7 @@ github:
     cancelled: "valley:cancelled"
 budget:
   per_issue: { tokens: 500000, usd: 2.0 }
-  per_day:   { tokens: 5000000, usd: 20.0 }
+  per_day: { tokens: 5000000, usd: 20.0 }
   on_exceed: block
   allow_override_label: false
   pricing:
@@ -349,7 +349,7 @@ observability:
     enabled: false
     path: /api/metrics
 workspace:
-  stale_after_hours: 24  # E29
+  stale_after_hours: 24 # E29
 ```
 
 ### 5.6 `validate.sh` 변경  [구현됨 — v0.2 M3]
@@ -378,67 +378,67 @@ workspace:
 
 ### 6.1 포트/어댑터 경계
 
-| # | 상황 | 대응 |
-|---|---|---|
-| E1 | GitHub 이슈 label 없이 등록 | 스킵 + WARN + `issue.untagged` 메트릭 |
-| E2 | Linear `workflow_states` UUID 불일치 | startup 즉시 실패, 수정 위치 포함 에러 |
-| E3 | 두 tracker 동시 활성 | Zod XOR 강제, config 에러 |
-| E4 | Webhook 서명 실패 | 403 + WARN + payload 해시만 로그 |
-| E5 | GitHub `ping` 등 비도메인 이벤트 | `parseEvent` → null, Orchestrator 무시 |
-| E6 | Tracker API 일시 장애 (502/429) | `RetryExhaustReason` 분리 — `infra_failure` 는 pending 유지, `agent_failure` 만 Cancelled |
+| #   | 상황                                 | 대응                                                                                      |
+| --- | ------------------------------------ | ----------------------------------------------------------------------------------------- |
+| E1  | GitHub 이슈 label 없이 등록          | 스킵 + WARN + `issue.untagged` 메트릭                                                     |
+| E2  | Linear `workflow_states` UUID 불일치 | startup 즉시 실패, 수정 위치 포함 에러                                                    |
+| E3  | 두 tracker 동시 활성                 | Zod XOR 강제, config 에러                                                                 |
+| E4  | Webhook 서명 실패                    | 403 + WARN + payload 해시만 로그                                                          |
+| E5  | GitHub `ping` 등 비도메인 이벤트     | `parseEvent` → null, Orchestrator 무시                                                    |
+| E6  | Tracker API 일시 장애 (502/429)      | `RetryExhaustReason` 분리 — `infra_failure` 는 pending 유지, `agent_failure` 만 Cancelled |
 
 ### 6.2 DAG & 생명주기
 
-| # | 상황 | 대응 |
-|---|---|---|
-| E7 | `blocked_by` 삭제됨 | DAG 재계산에서 무시, INFO |
-| E8 | 사이클 | 로그 + 보류 + `av_dag_cycles_total` |
-| E9 | spawn 중 외부 상태 변경 | spawn 직후 재확인 → in_progress 아니면 kill + cleanup |
-| E10 | Todo 웹훅 중복 수신 | `parsed.eventId` 기반 idempotency 캐시 60초 |
+| #   | 상황                    | 대응                                                  |
+| --- | ----------------------- | ----------------------------------------------------- |
+| E7  | `blocked_by` 삭제됨     | DAG 재계산에서 무시, INFO                             |
+| E8  | 사이클                  | 로그 + 보류 + `av_dag_cycles_total`                   |
+| E9  | spawn 중 외부 상태 변경 | spawn 직후 재확인 → in_progress 아니면 kill + cleanup |
+| E10 | Todo 웹훅 중복 수신     | `parsed.eventId` 기반 idempotency 캐시 60초           |
 
 ### 6.3 Intervention (C)
 
-| # | 상황 | 대응 |
-|---|---|---|
-| E11 | 세션 종료 직전 pause | `RunAlreadyTerminatedError` + UI silent |
-| E12 | Claude 에 pause | `capabilities()` 사전 조회로 UI 차단, 서버는 `InterventionUnsupportedError` |
-| E13 | cancel timeout | 5s 후 SIGKILL → 새 세션 |
-| E14 | 진행 중 예산 초과 | 진행 세션 완주, 신규 spawn 차단 |
-| E15 | 충돌 명령 동시 전송 | FIFO 큐 + 마지막 승자 |
+| #   | 상황                 | 대응                                                                        |
+| --- | -------------------- | --------------------------------------------------------------------------- |
+| E11 | 세션 종료 직전 pause | `RunAlreadyTerminatedError` + UI silent                                     |
+| E12 | Claude 에 pause      | `capabilities()` 사전 조회로 UI 차단, 서버는 `InterventionUnsupportedError` |
+| E13 | cancel timeout       | 5s 후 SIGKILL → 새 세션                                                     |
+| E14 | 진행 중 예산 초과    | 진행 세션 완주, 신규 spawn 차단                                             |
+| E15 | 충돌 명령 동시 전송  | FIFO 큐 + 마지막 승자                                                       |
 
 ### 6.4 Budget (B)
 
-| # | 상황 | 대응 |
-|---|---|---|
-| E16 | 일일 상한 초과 | 기존 세션 완주, 이후 차단 + 코멘트 |
-| E17 | pricing 맵 누락 모델 | 0 처리 + WARN |
-| E18 | `override:budget` 라벨 | 기본 off. `allow_override_label: true` 옵트인 시 audit log 남기고 bypass |
-| E19 | 토큰 사용량 미보고 (Gemini 일부) | null → 차감 skip + WARN 메트릭 |
+| #   | 상황                             | 대응                                                                     |
+| --- | -------------------------------- | ------------------------------------------------------------------------ |
+| E16 | 일일 상한 초과                   | 기존 세션 완주, 이후 차단 + 코멘트                                       |
+| E17 | pricing 맵 누락 모델             | 0 처리 + WARN                                                            |
+| E18 | `override:budget` 라벨           | 기본 off. `allow_override_label: true` 옵트인 시 audit log 남기고 bypass |
+| E19 | 토큰 사용량 미보고 (Gemini 일부) | null → 차감 skip + WARN 메트릭                                           |
 
 ### 6.5 리팩터 / 마이그레이션
 
-| # | 상황 | 대응 |
-|---|---|---|
-| E20 | characterization 실패 | PR 블록. 의도된 변경이면 characterization 수정 커밋 선행 |
-| E21 | ParsedWebhookEvent 승격으로 `webhook-handler.test.ts` 깨짐 | 도메인 승격과 테스트 마이그레이션 한 덩어리 |
-| E22 | grandfather 제거 후 다른 파일 초과 | validate.sh 즉시 차단, 사전 full scan |
+| #   | 상황                                                       | 대응                                                     |
+| --- | ---------------------------------------------------------- | -------------------------------------------------------- |
+| E20 | characterization 실패                                      | PR 블록. 의도된 변경이면 characterization 수정 커밋 선행 |
+| E21 | ParsedWebhookEvent 승격으로 `webhook-handler.test.ts` 깨짐 | 도메인 승격과 테스트 마이그레이션 한 덩어리              |
+| E22 | grandfather 제거 후 다른 파일 초과                         | validate.sh 즉시 차단, 사전 full scan                    |
 
 ### 6.6 Observability (D)
 
-| # | 상황 | 대응 |
-|---|---|---|
-| E23 | OTel 엔드포인트 실패 | 내부 swallow + 카운터. hot path 영향 0 |
+| #   | 상황                     | 대응                                    |
+| --- | ------------------------ | --------------------------------------- |
+| E23 | OTel 엔드포인트 실패     | 내부 swallow + 카운터. hot path 영향 0  |
 | E24 | `/api/metrics` 내부 예외 | 빈 메트릭 + 에러 카운터 (500 반환 금지) |
-| E25 | 비활성 상태 | 초기화 skip, no-op 보장 |
+| E25 | 비활성 상태              | 초기화 skip, no-op 보장                 |
 
 ### 6.7 워크스페이스
 
-| # | 상황 | 대응 |
-|---|---|---|
-| E26 | 디스크 부족 | `WorkspaceError.retryable=false` → Cancelled + 코멘트 |
-| E27 | 머지 충돌 | 기존 safety-net → PR 모드 폴백 + 리뷰 요청 |
-| E28 | abort 시 uncommitted | safety-net 선행 커밋 → cleanup, delivery 스킵 |
-| E29 | stale worktree | `workspace.stale_after_hours`(기본 24h) 초과 시 force cleanup + INFO |
+| #   | 상황                 | 대응                                                                 |
+| --- | -------------------- | -------------------------------------------------------------------- |
+| E26 | 디스크 부족          | `WorkspaceError.retryable=false` → Cancelled + 코멘트                |
+| E27 | 머지 충돌            | 기존 safety-net → PR 모드 폴백 + 리뷰 요청                           |
+| E28 | abort 시 uncommitted | safety-net 선행 커밋 → cleanup, delivery 스킵                        |
+| E29 | stale worktree       | `workspace.stale_after_hours`(기본 24h) 초과 시 force cleanup + INFO |
 
 ### 6.8 에러 메시지 컨벤션
 
@@ -450,7 +450,9 @@ class ValleyError extends Error {
     public context: Record<string, unknown>,
     public fixHint: string,
     public retryable: boolean,
-  ) { super(message) }
+  ) {
+    super(message)
+  }
 }
 ```
 

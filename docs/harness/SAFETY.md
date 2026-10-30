@@ -44,10 +44,10 @@ If an agent calls an unapproved external service, data leakage and unpredictable
 
 ### Approved Endpoints
 
-| Service | Endpoint | Purpose |
-|---|---|---|
-| Linear | `https://api.linear.app/graphql` | Issue queries + state changes |
-| Codex server | `localhost:{port}` (local) | Agent execution |
+| Service      | Endpoint                         | Purpose                       |
+| ------------ | -------------------------------- | ----------------------------- |
+| Linear       | `https://api.linear.app/graphql` | Issue queries + state changes |
+| Codex server | `localhost:{port}` (local)       | Agent execution               |
 
 ### Handling Unapproved External Calls
 
@@ -84,9 +84,9 @@ spawn through an OS-level sandbox so containment comes from the kernel:
   current platform, the spawn is refused with an actionable error
   instead of falling back to unsandboxed execution.
 
-| Env var | Effect |
-|---|---|
-| `SYMPHONY_ALLOW_UNSANDBOXED=1` | Opt-in escape hatch: run without an OS sandbox when one isn't available on the host. NOT the default. Every unsandboxed spawn logs a loud WARN naming exactly what's missing and what it grants (full host filesystem + network access to a prompt-injected issue body). Set in the orchestrator process environment, not in `av.yaml`. |
+| Env var                              | Effect                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SYMPHONY_ALLOW_UNSANDBOXED=1`       | Opt-in escape hatch: run without an OS sandbox when one isn't available on the host. NOT the default. Every unsandboxed spawn logs a loud WARN naming exactly what's missing and what it grants (full host filesystem + network access to a prompt-injected issue body). Set in the orchestrator process environment, not in `av.yaml`.          |
 | `SYMPHONY_SANDBOX_NETWORK_ALLOWLIST` | Comma-separated extra hostnames appended to the default egress allowlist (`api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com`, `github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `registry.npmjs.org`). See the residual gap below — this allowlist is not fully enforced on macOS. |
 
 **Residual gaps (tracked, not silent shortfalls):**
@@ -95,7 +95,7 @@ spawn through an OS-level sandbox so containment comes from the kernel:
    `sandbox-exec`'s profile grammar only accepts `*` (any host) or
    `localhost` in `(remote tcp ...)` rules — it cannot filter by literal
    hostname. The sandbox therefore allows outbound TCP on ports 443/80 to
-   *any* host, which blocks raw-socket exfiltration/backdoor ports but
+   _any_ host, which blocks raw-socket exfiltration/backdoor ports but
    cannot stop HTTPS traffic to an attacker-controlled domain. On Linux,
    `bwrap` enforces filesystem confinement only — network egress is not
    restricted at all on that platform. Real domain-scoped enforcement
@@ -119,7 +119,7 @@ spawn through an OS-level sandbox so containment comes from the kernel:
    `~/.config/gcloud`) and other tools' dotfiles under `$HOME` remain
    readable by the sandboxed process — combined with the allowed HTTPS
    egress above, a compromised agent process could still read and
-   exfiltrate those even though filesystem *writes* stay confined to the
+   exfiltrate those even though filesystem _writes_ stay confined to the
    workspace directory + the curated per-agent-CLI write allowlist (which
    no longer includes a blanket `~/.config`, for the same reason).
 
@@ -133,13 +133,13 @@ the issue author can arbitrarily manipulate agent behavior.
 
 ### Trust Level Classification
 
-| Source | Trust Level | Reason |
-|---|---|---|
-| `WORKFLOW.md` | Trusted | Version-controlled, written by engineers |
-| `AGENTS.md`, `docs/` | Trusted | Verified files within the repository |
-| Issue body | Suspect | External input, cannot be verified |
-| Issue comments | Suspect | External input, cannot be verified |
-| PR description | Suspect | May be external input |
+| Source               | Trust Level | Reason                                   |
+| -------------------- | ----------- | ---------------------------------------- |
+| `WORKFLOW.md`        | Trusted     | Version-controlled, written by engineers |
+| `AGENTS.md`, `docs/` | Trusted     | Verified files within the repository     |
+| Issue body           | Suspect     | External input, cannot be verified       |
+| Issue comments       | Suspect     | External input, cannot be verified       |
+| PR description       | Suspect     | May be external input                    |
 
 ### Defense Rules
 
@@ -190,7 +190,7 @@ not claim to be one. **The actual containment boundary is the OS-level
 sandbox** (`packages/core/src/sessions/sandbox.ts`, §1 above): it limits
 what a fully compromised agent process can do to the host regardless of
 what text made it into the prompt. This sanitizer exists to reduce the
-odds that an agent *decides* to act on injected instructions, not to
+odds that an agent _decides_ to act on injected instructions, not to
 guarantee it can't.
 
 ---
@@ -206,12 +206,12 @@ those with a forged localhost `Host`. Browser login exchanges tokens for
 HttpOnly, SameSite cookies; intervention cookie requests require a matching
 `Origin`. CLI status/top use Bearer authentication:
 
-| Env var | Endpoint(s) | Effect |
-|---|---|---|
-| `SYMPHONY_DASHBOARD_TOKEN` | `/api/status`, `/api/events` | When set, every request needs a matching Bearer token or browser session cookie. |
-| `SYMPHONY_ALLOW_REMOTE_STATUS=1` | `/api/status`, `/api/events` | Requires `SYMPHONY_DASHBOARD_TOKEN`; without it, **all** requests (including local ones) are rejected. |
-| `SYMPHONY_INTERVENTION_TOKEN` | `/api/intervention` | Same pattern as `SYMPHONY_DASHBOARD_TOKEN`, scoped to the intervention endpoint (pause/resume/append_prompt/abort). |
-| `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | `/api/intervention` | Same pattern as `SYMPHONY_ALLOW_REMOTE_STATUS`, fail-closed without `SYMPHONY_INTERVENTION_TOKEN`. |
+| Env var                                | Endpoint(s)                  | Effect                                                                                                              |
+| -------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `SYMPHONY_DASHBOARD_TOKEN`             | `/api/status`, `/api/events` | When set, every request needs a matching Bearer token or browser session cookie.                                    |
+| `SYMPHONY_ALLOW_REMOTE_STATUS=1`       | `/api/status`, `/api/events` | Requires `SYMPHONY_DASHBOARD_TOKEN`; without it, **all** requests (including local ones) are rejected.              |
+| `SYMPHONY_INTERVENTION_TOKEN`          | `/api/intervention`          | Same pattern as `SYMPHONY_DASHBOARD_TOKEN`, scoped to the intervention endpoint (pause/resume/append_prompt/abort). |
+| `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | `/api/intervention`          | Same pattern as `SYMPHONY_ALLOW_REMOTE_STATUS`, fail-closed without `SYMPHONY_INTERVENTION_TOKEN`.                  |
 
 Policy order per request: (1) remote flag without its token rejects every
 request; (2) a configured token requires valid Bearer or signed cookie;

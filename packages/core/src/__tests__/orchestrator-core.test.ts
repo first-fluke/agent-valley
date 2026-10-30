@@ -250,7 +250,6 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
     handleIssueTodo: (issue: Issue) => Promise<void>
     handleIssueInProgress: (issue: Issue) => Promise<void>
   }
-  let reevaluateCalls: number
 
   beforeEach(() => {
     dispatcher = {
@@ -263,14 +262,11 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
         dispatcher.ipCalls.push(issue)
       },
     }
-    reevaluateCalls = 0
   })
 
   test("start emits node.join with config summary and flips isRunning", async () => {
     const { core, events } = buildCore()
-    core.attachLifecycle(dispatcher, async () => {
-      reevaluateCalls++
-    })
+    core.attachLifecycle(dispatcher, async () => undefined)
     await core.start()
 
     expect(core.state.isRunning).toBe(true)
@@ -286,9 +282,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
 
   test("stop emits node.leave with reason=graceful", async () => {
     const { core, events } = buildCore()
-    core.attachLifecycle(dispatcher, async () => {
-      reevaluateCalls++
-    })
+    core.attachLifecycle(dispatcher, async () => undefined)
     await core.start()
     await core.stop()
 
@@ -313,9 +307,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
       flush: budgetFlush,
     }
     const { core } = buildCore({}, { runStatePersistence, budget })
-    core.attachLifecycle(dispatcher, async () => {
-      reevaluateCalls++
-    })
+    core.attachLifecycle(dispatcher, async () => undefined)
     await core.start()
 
     const runStateFlushSpy = vi.spyOn(runStatePersistence, "flush")
@@ -343,9 +335,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
       // Deliberately no `flush` — simulates a hand-rolled test fake predating this method.
     } as BudgetService
     const { core } = buildCore({}, { budget })
-    core.attachLifecycle(dispatcher, async () => {
-      reevaluateCalls++
-    })
+    core.attachLifecycle(dispatcher, async () => undefined)
     await core.start()
 
     await expect(core.stop()).resolves.toBeUndefined()
@@ -353,9 +343,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
 
   test("processRetryQueue re-queues entries if tracker fetch fails", async () => {
     const { core, tracker } = buildCore()
-    core.attachLifecycle(dispatcher, async () => {
-      reevaluateCalls++
-    })
+    core.attachLifecycle(dispatcher, async () => undefined)
     // Seed a retry entry that is immediately ready (attemptCount 0 → backoff*1 = 60s).
     // Force the entry to expose, set nextRetryAt manually by manipulating via add then draining timing.
     core.enqueueRetry("i1", 1, "boom")
@@ -380,9 +368,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
 
   test("fillVacantSlots skips already-active issues but still dispatches unblocked ones", async () => {
     const { core, tracker } = buildCore({ maxParallel: 2 })
-    core.attachLifecycle(dispatcher, async () => {
-      reevaluateCalls++
-    })
+    core.attachLifecycle(dispatcher, async () => undefined)
     const a = makeIssue({
       id: "a",
       identifier: "PROJ-1",
@@ -406,9 +392,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
 
   test("fillVacantSlots is a no-op when no slots are available", async () => {
     const { core, tracker } = buildCore({ maxParallel: 0 })
-    core.attachLifecycle(dispatcher, async () => {
-      reevaluateCalls++
-    })
+    core.attachLifecycle(dispatcher, async () => undefined)
     tracker.seedIssue(
       makeIssue({ id: "a", identifier: "PROJ-1", status: { id: "state-todo", name: "Todo", type: "unstarted" } }),
     )
@@ -420,9 +404,7 @@ describe("OrchestratorCore — lifecycle & dispatcher wiring", () => {
 
   test("runStartupSync routes Todo and InProgress issues to the dispatcher", async () => {
     const { core, tracker } = buildCore()
-    core.attachLifecycle(dispatcher, async () => {
-      reevaluateCalls++
-    })
+    core.attachLifecycle(dispatcher, async () => undefined)
     const todo = makeIssue({
       id: "t",
       identifier: "PROJ-1",

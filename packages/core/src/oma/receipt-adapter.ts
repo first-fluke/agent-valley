@@ -296,8 +296,7 @@ export function validateOmaEvidence(
   }
   const lastCheck = latestChecks.get(JSON.stringify([["sh", "-c", request.verifyCommand], root]))
   if (
-    !lastCheck ||
-    lastCheck.checkId !== "valley-verify" ||
+    lastCheck?.checkId !== "valley-verify" ||
     lastCheck.exitCode !== 0 ||
     lastCheck.before !== run.after ||
     lastCheck.after !== run.after

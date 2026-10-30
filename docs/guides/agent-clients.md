@@ -17,12 +17,12 @@ The source installer's deferred-setup path runs this integration step before the
 
 <!-- oma-docs:ignore-start -->
 <!-- The following paths are installation outputs in the user's target repository. -->
-| Client | Project skill | Project MCP configuration |
-|---|---|---|
-| Codex | `.agents/skills/av/SKILL.md` | `.codex/config.toml` |
-| Claude Code | `.claude/skills/av/SKILL.md` | `.mcp.json` |
-| Qwen Code | `.qwen/skills/av/SKILL.md` | `.qwen/settings.json` |
-| Cursor | `.cursor/skills/av/SKILL.md` | `.cursor/mcp.json` |
+| Client      | Project skill                | Project MCP configuration |
+| ----------- | ---------------------------- | ------------------------- |
+| Codex       | `.agents/skills/av/SKILL.md` | `.codex/config.toml`      |
+| Claude Code | `.claude/skills/av/SKILL.md` | `.mcp.json`               |
+| Qwen Code   | `.qwen/skills/av/SKILL.md`   | `.qwen/settings.json`     |
+| Cursor      | `.cursor/skills/av/SKILL.md` | `.cursor/mcp.json`        |
 | Antigravity | `.agents/skills/av/SKILL.md` | `.agents/mcp_config.json` |
 <!-- oma-docs:ignore-end -->
 
@@ -42,19 +42,19 @@ To check a live connection, read `av_missions` and compare `project` with the AV
 
 Ask the client, for example: “Use AV to implement the checkout goal in this repository, verify it, and explain the result.” The skill carries your constraints into `av_order`. For one task only, explicitly ask for a single-goal run; the client sets `once: true`. It can inspect saved operations and missions, read status and reports, resume authorized work, and cancel when asked.
 
-| MCP tool | Purpose |
-|---|---|
-| `av_order` | Start continuous improvement; `once: true` runs one goal. Optional workspace, stable request ID, trusted verification, cycles/interval and run/time/cost limits |
-| `av_operations` | List continuous operations |
-| `av_operation_status` | Inspect an operation and its current child mission |
-| `av_operation_report` | Read decisions, progress and child evidence references |
-| `av_operation_resume` | Resume the saved operating charter |
-| `av_operation_cancel` | Stop the continuous operation and its active work |
-| `av_missions` | List saved missions in the bound repository |
-| `av_status` | Inspect progress, actual state, and blockers by mission ID |
-| `av_report` | Read the saved report and evidence |
-| `av_resume` | Continue an existing mission; optional retry, request ID, and authorized budget/round overrides |
-| `av_cancel` | Stop the specified mission |
+| MCP tool              | Purpose                                                                                                                                                         |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `av_order`            | Start continuous improvement; `once: true` runs one goal. Optional workspace, stable request ID, trusted verification, cycles/interval and run/time/cost limits |
+| `av_operations`       | List continuous operations                                                                                                                                      |
+| `av_operation_status` | Inspect an operation and its current child mission                                                                                                              |
+| `av_operation_report` | Read decisions, progress and child evidence references                                                                                                          |
+| `av_operation_resume` | Resume the saved operating charter                                                                                                                              |
+| `av_operation_cancel` | Stop the continuous operation and its active work                                                                                                               |
+| `av_missions`         | List saved missions in the bound repository                                                                                                                     |
+| `av_status`           | Inspect progress, actual state, and blockers by mission ID                                                                                                      |
+| `av_report`           | Read the saved report and evidence                                                                                                                              |
+| `av_resume`           | Continue an existing mission; optional retry, request ID, and authorized budget/round overrides                                                                 |
+| `av_cancel`           | Stop the specified mission                                                                                                                                      |
 
 `av_order` and `av_resume` accept work asynchronously: an accepted or `starting` response is still incomplete. Keep the returned `operationId` for default continuous work or `missionId` for `once: true`, and inspect the corresponding status/report tools. Generate and retain a `requestId` before the first submission; reuse that ID and identical input on retries. A new request ID represents a new submission. If a response is uncertain, inspect saved operations and missions before creating another order. Reconnecting to MCP does not restart or cancel independently supervised work; inspect or resume the saved operation or mission rather than submitting the goal again.
 

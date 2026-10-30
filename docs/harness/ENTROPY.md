@@ -71,10 +71,10 @@ Manual execution:
 
 ### GC Targets
 
-| Target | Criteria | Action |
-|---|---|---|
-| Completed worktrees | Remaining after PR merge | `git worktree remove` |
-| Unused branches | Last commit older than 30 days | `git branch -d` (including remote) |
+| Target                 | Criteria                                  | Action                              |
+| ---------------------- | ----------------------------------------- | ----------------------------------- |
+| Completed worktrees    | Remaining after PR merge                  | `git worktree remove`               |
+| Unused branches        | Last commit older than 30 days            | `git branch -d` (including remote)  |
 | Unreferenced utilities | No import references + older than 30 days | Flag and request human confirmation |
 
 ### Caution

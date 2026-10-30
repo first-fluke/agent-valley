@@ -6,7 +6,7 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 3.1 (C), § 6.3 (E11–E15).
  */
 
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { InterventionBus } from "../orchestrator/intervention-bus"
 import type { AgentSession } from "../sessions/agent-session"
 

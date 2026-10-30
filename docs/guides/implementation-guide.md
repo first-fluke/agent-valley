@@ -27,23 +27,23 @@ Full rules: `docs/architecture/LAYERS.md`
 
 Read `docs/architecture/CONSTRAINTS.md` for complete examples. Summary:
 
-| # | Rule |
-|---|---|
-| 1 | No framework/ORM/SDK imports in Domain layer |
-| 2 | No business logic in Router/Handler (Presentation layer) |
-| 3 | No hardcoded secrets — use env vars only |
-| 4 | Issue body is untrusted — sanitize before inserting into prompts |
-| 5 | No file exceeding 500 lines |
-| 6 | No shared mutable state outside Orchestrator |
-| 7 | Error messages must include fix instructions, not just describe the problem |
+| #   | Rule                                                                        |
+| --- | --------------------------------------------------------------------------- |
+| 1   | No framework/ORM/SDK imports in Domain layer                                |
+| 2   | No business logic in Router/Handler (Presentation layer)                    |
+| 3   | No hardcoded secrets — use env vars only                                    |
+| 4   | Issue body is untrusted — sanitize before inserting into prompts            |
+| 5   | No file exceeding 500 lines                                                 |
+| 6   | No shared mutable state outside Orchestrator                                |
+| 7   | Error messages must include fix instructions, not just describe the problem |
 
 ### Architecture Enforcement Tools
 
-| Stack | Tool | Config location |
-|---|---|---|
-| TypeScript | dependency-cruiser | `docs/architecture/enforcement/typescript.md` |
-| Python | import-linter + Ruff | `docs/architecture/enforcement/python.md` |
-| Go | golangci-lint + go vet | `docs/architecture/enforcement/go.md` |
+| Stack      | Tool                   | Config location                               |
+| ---------- | ---------------------- | --------------------------------------------- |
+| TypeScript | dependency-cruiser     | `docs/architecture/enforcement/typescript.md` |
+| Python     | import-linter + Ruff   | `docs/architecture/enforcement/python.md`     |
+| Go         | golangci-lint + go vet | `docs/architecture/enforcement/go.md`         |
 
 ---
 
@@ -57,15 +57,15 @@ Before implementing any component:
 
 ### Component Index
 
-| Component | Layer | Spec file | Key responsibility |
-|---|---|---|---|
-| Workflow Loader | Infrastructure | `docs/specs/workflow-loader.md` | Parse `WORKFLOW.md` YAML + body, resolve `$VAR` |
-| Config Layer | Infrastructure | `docs/specs/config-layer.md` | Build typed `Config` object, fail-fast on missing vars |
-| Issue Tracker Client | Infrastructure | `docs/specs/tracker-client.md` | Linear webhook parsing, signature verification, startup sync |
-| Orchestrator | Application | `docs/specs/orchestrator.md` | Webhook event handler, state machine, retry queue |
-| Workspace Manager | Application | `docs/specs/workspace-manager.md` | `git worktree` per issue, lifecycle hooks |
-| Agent Runner | Application | `docs/specs/agent-runner.md` | AgentSession abstraction, native protocol per agent, timeout |
-| Observability | Infrastructure | `docs/specs/observability.md` | Structured JSON logs, event catalog |
+| Component            | Layer          | Spec file                         | Key responsibility                                           |
+| -------------------- | -------------- | --------------------------------- | ------------------------------------------------------------ |
+| Workflow Loader      | Infrastructure | `docs/specs/workflow-loader.md`   | Parse `WORKFLOW.md` YAML + body, resolve `$VAR`              |
+| Config Layer         | Infrastructure | `docs/specs/config-layer.md`      | Build typed `Config` object, fail-fast on missing vars       |
+| Issue Tracker Client | Infrastructure | `docs/specs/tracker-client.md`    | Linear webhook parsing, signature verification, startup sync |
+| Orchestrator         | Application    | `docs/specs/orchestrator.md`      | Webhook event handler, state machine, retry queue            |
+| Workspace Manager    | Application    | `docs/specs/workspace-manager.md` | `git worktree` per issue, lifecycle hooks                    |
+| Agent Runner         | Application    | `docs/specs/agent-runner.md`      | AgentSession abstraction, native protocol per agent, timeout |
+| Observability        | Infrastructure | `docs/specs/observability.md`     | Structured JSON logs, event catalog                          |
 
 ### Domain Models (shared by all components)
 
@@ -123,8 +123,8 @@ Full spec including restart recovery: `docs/specs/orchestrator.md`
 
 ```typescript
 // TypeScript
-const key = issue.identifier.replace(/[^A-Za-z0-9._-]/g, '_');
-const path = `${config.workspace.rootPath}/${key}`;
+const key = issue.identifier.replace(/[^A-Za-z0-9._-]/g, "_")
+const path = `${config.workspace.rootPath}/${key}`
 ```
 
 ```python
@@ -149,14 +149,14 @@ path := filepath.Join(config.Workspace.RootPath, key)
 ```typescript
 function sanitizeIssueBody(description: string): string {
   // 1. Length limit
-  const truncated = description.slice(0, 8000);
+  const truncated = description.slice(0, 8000)
   // 2. Remove injection patterns
   const sanitized = truncated
-    .replace(/ignore previous instructions/gi, '[REDACTED]')
-    .replace(/you are now/gi, '[REDACTED]')
-    .replace(/system:/gi, '[REDACTED]');
+    .replace(/ignore previous instructions/gi, "[REDACTED]")
+    .replace(/you are now/gi, "[REDACTED]")
+    .replace(/system:/gi, "[REDACTED]")
   // 3. Wrap in boundary markers
-  return `--- ISSUE DESCRIPTION START ---\n${sanitized}\n--- ISSUE DESCRIPTION END ---`;
+  return `--- ISSUE DESCRIPTION START ---\n${sanitized}\n--- ISSUE DESCRIPTION END ---`
 }
 ```
 
@@ -194,19 +194,22 @@ npx tsc --init
 
 Config validation with Zod:
 ```typescript
-import { z } from "zod";
+import { z } from "zod"
 const envSchema = z.object({
   LINEAR_API_KEY: z.string().min(1, {
-    message: "LINEAR_API_KEY is not set.\n  Fix: Add LINEAR_API_KEY=lin_api_xxx to .env"
+    message: "LINEAR_API_KEY is not set.\n  Fix: Add LINEAR_API_KEY=lin_api_xxx to .env",
   }),
-  WORKSPACE_ROOT: z.string().refine(v => v.startsWith("/"), {
-    message: "WORKSPACE_ROOT must be an absolute path.\n  Fix: Set WORKSPACE_ROOT=/absolute/path in .env"
+  WORKSPACE_ROOT: z.string().refine((v) => v.startsWith("/"), {
+    message: "WORKSPACE_ROOT must be an absolute path.\n  Fix: Set WORKSPACE_ROOT=/absolute/path in .env",
   }),
   // ... other vars
-});
-const parsed = envSchema.safeParse(process.env);
-if (!parsed.success) { console.error(parsed.error.issues); process.exit(1); }
-export const config = parsed.data;
+})
+const parsed = envSchema.safeParse(process.env)
+if (!parsed.success) {
+  console.error(parsed.error.issues)
+  process.exit(1)
+}
+export const config = parsed.data
 ```
 
 ### Python

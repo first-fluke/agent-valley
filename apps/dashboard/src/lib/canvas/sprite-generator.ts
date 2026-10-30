@@ -1,5 +1,6 @@
 import { Texture } from "pixi.js"
 import type { AgentType, CharacterSkin, WorkspaceStatus } from "@/features/office/types/agent"
+import { requireCanvasValue } from "./required-value"
 
 const SPRITE_SIZE = 32
 
@@ -283,7 +284,7 @@ function generateAgentSprite(
   skin: CharacterSkin,
 ): OffscreenCanvas {
   const canvas = createCanvas()
-  const ctx = canvas.getContext("2d")!
+  const ctx = requireCanvasValue(canvas.getContext("2d"), "an OffscreenCanvas 2D context")
   const colors = AGENT_COLORS[agentType]
 
   ctx.clearRect(0, 0, SPRITE_SIZE, SPRITE_SIZE)
@@ -341,7 +342,7 @@ function generateFurnitureSprite(
     | "wall",
 ): OffscreenCanvas {
   const canvas = createCanvas()
-  const ctx = canvas.getContext("2d")!
+  const ctx = requireCanvasValue(canvas.getContext("2d"), "an OffscreenCanvas 2D context")
   ctx.clearRect(0, 0, SPRITE_SIZE, SPRITE_SIZE)
 
   switch (type) {
@@ -553,7 +554,7 @@ export function getPuppyTexture(frame: number, isWalking: boolean): Texture {
   let texture = puppyTextureCache.get(key)
   if (!texture) {
     const canvas = createPuppyCanvas()
-    const ctx = canvas.getContext("2d")!
+    const ctx = requireCanvasValue(canvas.getContext("2d"), "an OffscreenCanvas 2D context")
     ctx.clearRect(0, 0, PUPPY_SIZE, PUPPY_SIZE)
     if (isWalking) {
       drawPuppyWalking(ctx, frame)
@@ -610,7 +611,7 @@ export function getPoopTexture(frame: number): Texture {
   let texture = poopTextureCache.get(key)
   if (!texture) {
     const canvas = createPoopCanvas()
-    const ctx = canvas.getContext("2d")!
+    const ctx = requireCanvasValue(canvas.getContext("2d"), "an OffscreenCanvas 2D context")
     ctx.clearRect(0, 0, POOP_SIZE, POOP_SIZE)
     drawPoop(ctx, frame)
     texture = Texture.from(canvas)
@@ -710,7 +711,7 @@ export function getCockatooTexture(frame: number, isFlying: boolean): Texture {
   let texture = cockatooTextureCache.get(key)
   if (!texture) {
     const canvas = createCockatooCanvas()
-    const ctx = canvas.getContext("2d")!
+    const ctx = requireCanvasValue(canvas.getContext("2d"), "an OffscreenCanvas 2D context")
     ctx.clearRect(0, 0, COCKATOO_SIZE, COCKATOO_SIZE)
     if (isFlying) {
       drawCockatooFlying(ctx, frame)
@@ -771,7 +772,7 @@ export function getCoffeeCupTexture(frame: number): Texture {
   let texture = coffeeCupTextureCache.get(key)
   if (!texture) {
     const canvas = createCoffeeCupCanvas()
-    const ctx = canvas.getContext("2d")!
+    const ctx = requireCanvasValue(canvas.getContext("2d"), "an OffscreenCanvas 2D context")
     ctx.clearRect(0, 0, COFFEE_CUP_SIZE, COFFEE_CUP_SIZE)
     drawCoffeeCup(ctx, frame)
     texture = Texture.from(canvas)

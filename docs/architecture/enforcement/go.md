@@ -6,11 +6,11 @@
 
 ## Tools
 
-| Tool | Role |
-|---|---|
-| `go vet` | Standard static analysis. Catches bug patterns the compiler misses. |
+| Tool            | Role                                                                      |
+| --------------- | ------------------------------------------------------------------------- |
+| `go vet`        | Standard static analysis. Catches bug patterns the compiler misses.       |
 | `golangci-lint` | Unified linter for layer import restrictions, complexity, and code style. |
-| `deadcode` | Detects unreachable code. |
+| `deadcode`      | Detects unreachable code.                                                 |
 
 ---
 

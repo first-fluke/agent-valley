@@ -49,7 +49,7 @@ function event(seq: number, type: string, payload: Record<string, unknown>) {
   return {
     v: 1,
     seq,
-    nodeId: userId + ":desktop",
+    nodeId: `${userId}:desktop`,
     type,
     payload,
     clientTimestamp: "2026-10-21T00:00:00Z",

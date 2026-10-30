@@ -21,7 +21,6 @@ linear:
     # in_progress: state-uuid       # "In Progress" workflow state ID
     # done: state-uuid              # "Done" workflow state ID
     # cancelled: state-uuid         # "Cancelled" workflow state ID
-
 # ── GitHub Issues Tracker (v0.2+, optional) ───────────────────────────
 # Used when tracker.kind = github. Labels are used instead of workflow
 # states — see packages/core/src/tracker/adapters/github-adapter.ts for
@@ -40,7 +39,6 @@ linear:
 # ── Workspace ─────────────────────────────────────────────────────────
 workspace:
   # root: /absolute/path/to/target-repo # Existing Git repository; worktrees are created inside it
-
 # ── Actor ─────────────────────────────────────────────────────────────
 # actor:
 #   type: claude                    # claude | codex | antigravity | cursor | grok | kimi | opencode
@@ -51,7 +49,7 @@ workspace:
 
 # ── Delivery ──────────────────────────────────────────────────────────
 delivery:
-  mode: merge                       # merge (auto merge+push) | pr (create PR for review)
+  mode: merge # merge (auto merge+push) | pr (create PR for review)
 
 # ── Prompt Template ───────────────────────────────────────────────────
 # Template variables: {{issue.identifier}}, {{issue.title}}, {{issue.description}},
@@ -92,7 +90,7 @@ prompt: |
 # Omit both to let the Chief Director design executable checks for the goal.
 verify:
   command: "bun run typecheck && bun run test" # use commands from the target repository
-  timeout_sec: 600                          # kill the command after N seconds (default 600)
+  timeout_sec: 600 # kill the command after N seconds (default 600)
 
 # For report-only work, choose analysis instead of the default code task.
 # The report path must be inside the worktree and include {{attempt.id}}.

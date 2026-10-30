@@ -17,15 +17,15 @@ Linear의 sub-issue(parent/child)와 issue relation(blocks/blocked by)을 모두
 
 ## Design Decisions
 
-| # | 항목 | 결정 | 이유 |
-|---|---|---|---|
-| 1 | 관계 소스 | Sub-issue + Relation 둘 다 | sub-issue만으로는 child 간 순서 표현 불가, relation만으로는 그룹핑 불가 |
-| 2 | 팀 스코프 | 같은 팀 내 이슈만 | 현재 단일 팀 구조, 크로스 팀은 향후 확장 |
-| 3 | 이슈 분해 | CLI에서 Claude 자동 분해 + 사용자 확인 후 일괄 생성 | 서버 자동 분해는 예측 불가능 |
-| 4 | Parent 완료 | 모든 child Done 시 자동 Done + 종합 요약 코멘트 | child PR 링크, 결과 요약 포함 |
-| 5 | 선행 이슈 취소 시 | 대기 유지 + "선행 이슈 취소됨" 알림 코멘트 | 취소 의도가 다양하므로 사람이 판단 |
-| 6 | DAG 상태 관리 | 로컬 JSON 캐시 + 웹훅 기반 부분 갱신 + startup sync 검증 | 재시작 시 빠른 복구, 해시 비교 불필요 |
-| 7 | DAG 노드 범위 | 열린 이슈만 (Todo + InProgress + waiting) | Done/Cancelled 이슈는 DAG에 포함하지 않음. DAG에 없는 blocker = 이미 해소 |
+| #   | 항목              | 결정                                                     | 이유                                                                      |
+| --- | ----------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 1   | 관계 소스         | Sub-issue + Relation 둘 다                               | sub-issue만으로는 child 간 순서 표현 불가, relation만으로는 그룹핑 불가   |
+| 2   | 팀 스코프         | 같은 팀 내 이슈만                                        | 현재 단일 팀 구조, 크로스 팀은 향후 확장                                  |
+| 3   | 이슈 분해         | CLI에서 Claude 자동 분해 + 사용자 확인 후 일괄 생성      | 서버 자동 분해는 예측 불가능                                              |
+| 4   | Parent 완료       | 모든 child Done 시 자동 Done + 종합 요약 코멘트          | child PR 링크, 결과 요약 포함                                             |
+| 5   | 선행 이슈 취소 시 | 대기 유지 + "선행 이슈 취소됨" 알림 코멘트               | 취소 의도가 다양하므로 사람이 판단                                        |
+| 6   | DAG 상태 관리     | 로컬 JSON 캐시 + 웹훅 기반 부분 갱신 + startup sync 검증 | 재시작 시 빠른 복구, 해시 비교 불필요                                     |
+| 7   | DAG 노드 범위     | 열린 이슈만 (Todo + InProgress + waiting)                | Done/Cancelled 이슈는 DAG에 포함하지 않음. DAG에 없는 blocker = 이미 해소 |
 
 ## Architecture
 
@@ -49,8 +49,8 @@ interface DagNode {
   status: "waiting" | "ready" | "running" | "done" | "cancelled"
   parentId: string | null
   children: string[]
-  blockedBy: string[]       // 이 이슈가 기다리는 이슈 IDs
-  blocks: string[]          // 이 이슈가 막고 있는 이슈 IDs (역방향 인덱스)
+  blockedBy: string[] // 이 이슈가 기다리는 이슈 IDs
+  blocks: string[] // 이 이슈가 막고 있는 이슈 IDs (역방향 인덱스)
 }
 
 interface DagCache {
@@ -83,14 +83,14 @@ interface IssueRelation {
 interface OrchestratorRuntimeState {
   isRunning: boolean
   activeWorkspaces: Map<string, Workspace>
-  waitingIssues: Map<string, WaitingEntry>   // NEW: blocked by dependencies
+  waitingIssues: Map<string, WaitingEntry> // NEW: blocked by dependencies
   lastEventAt: string | null
 }
 
 interface WaitingEntry {
   issueId: string
   identifier: string
-  blockedBy: string[]     // 아직 Done이 아닌 blocker IDs
+  blockedBy: string[] // 아직 Done이 아닌 blocker IDs
   enqueuedAt: string
 }
 ```
@@ -254,17 +254,33 @@ nodes {
 
 ```graphql
 # Sub-issue 생성
-mutation CreateSubIssue($teamId: String!, $parentId: String!, $title: String!, $description: String!, $stateId: String!) {
-  issueCreate(input: { teamId: $teamId, parentId: $parentId, title: $title, description: $description, stateId: $stateId }) {
+mutation CreateSubIssue(
+  $teamId: String!
+  $parentId: String!
+  $title: String!
+  $description: String!
+  $stateId: String!
+) {
+  issueCreate(
+    input: { teamId: $teamId, parentId: $parentId, title: $title, description: $description, stateId: $stateId }
+  ) {
     success
-    issue { id identifier title url }
+    issue {
+      id
+      identifier
+      title
+      url
+    }
   }
 }
 
 # Relation 생성
 mutation CreateIssueRelation($issueId: String!, $relatedIssueId: String!, $type: String!) {
   issueRelationCreate(input: { issueId: $issueId, relatedIssueId: $relatedIssueId, type: $type }) {
-    issueRelation { id type }
+    issueRelation {
+      id
+      type
+    }
   }
 }
 ```
@@ -292,30 +308,30 @@ bun av issue "인증 시스템 구축" --breakdown
 
 ## Edge Cases
 
-| 케이스 | 처리 |
-|---|---|
-| 사이클 (A blocks B, B blocks A) | 위상 정렬로 탐지, 경고 코멘트 + 해당 엣지 무시 |
-| 이미 running인 이슈에 blocked by 추가 | 무시 (이미 실행 중), 코멘트로 경고만 |
-| blocker가 Done 아닌 상태로 삭제(remove) | blocker 해제로 간주 → 대기 이슈 재평가 |
-| 모든 children Done 후 새 child 추가 | parent 상태 변경 없음, 새 child만 독립 실행 |
-| startup sync 시 캐시 vs Linear 불일치 | Linear를 source of truth로, 캐시 덮어쓰기 |
-| 외부 blocker (Symphony 미추적 이슈) | DAG에 노드 없음 = 해소로 간주. 단, 해당 이슈가 실제로 열려있으면 웹훅으로 DAG에 추가됨 |
-| Done/Cancelled 이슈가 blocker에 있음 | DAG에 노드 없으므로 자동 해소 — 추가 API 호출 불필요 |
-| --breakdown 중간 실패 (부분 생성) | 생성된 이슈 ID 목록 출력, 수동 정리 안내 |
+| 케이스                                  | 처리                                                                                   |
+| --------------------------------------- | -------------------------------------------------------------------------------------- |
+| 사이클 (A blocks B, B blocks A)         | 위상 정렬로 탐지, 경고 코멘트 + 해당 엣지 무시                                         |
+| 이미 running인 이슈에 blocked by 추가   | 무시 (이미 실행 중), 코멘트로 경고만                                                   |
+| blocker가 Done 아닌 상태로 삭제(remove) | blocker 해제로 간주 → 대기 이슈 재평가                                                 |
+| 모든 children Done 후 새 child 추가     | parent 상태 변경 없음, 새 child만 독립 실행                                            |
+| startup sync 시 캐시 vs Linear 불일치   | Linear를 source of truth로, 캐시 덮어쓰기                                              |
+| 외부 blocker (Symphony 미추적 이슈)     | DAG에 노드 없음 = 해소로 간주. 단, 해당 이슈가 실제로 열려있으면 웹훅으로 DAG에 추가됨 |
+| Done/Cancelled 이슈가 blocker에 있음    | DAG에 노드 없으므로 자동 해소 — 추가 API 호출 불필요                                   |
+| --breakdown 중간 실패 (부분 생성)       | 생성된 이슈 ID 목록 출력, 수동 정리 안내                                               |
 
 ## Affected Files
 
-| File | Change Type |
-|---|---|
-| `src/domain/models.ts` | Issue 확장 (parentId, children, relations), DagNode/DagCache 타입 추가, WaitingEntry 추가 |
-| `src/orchestrator/dag-scheduler.ts` | **NEW** — DAG 구성, 쿼리, 갱신, 캐시 I/O, 사이클 탐지 |
-| `src/orchestrator/orchestrator.ts` | handleIssueTodo 분기 추가, waitingIssues 관리, relation 웹훅 라우팅 |
-| `src/orchestrator/completion-handler.ts` | 연쇄 트리거, parent 자동 완료 + 요약 코멘트 |
-| `src/tracker/linear-client.ts` | GraphQL 쿼리 확장 (relations, parent, children), mutation 추가 (createSubIssue, createRelation) |
-| `src/tracker/webhook-handler.ts` | IssueRelation 웹훅 파싱, WebhookEvent 타입 확장 |
-| `src/tracker/types.ts` | LinearIssueNode 확장, RelationWebhookEvent 타입 추가 |
-| `src/cli/issue.ts` | --parent, --blocked-by, --breakdown 옵션 추가 |
-| `src/config/env.ts` | DAG 캐시 파일 경로 설정 (선택) |
+| File                                     | Change Type                                                                                     |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `src/domain/models.ts`                   | Issue 확장 (parentId, children, relations), DagNode/DagCache 타입 추가, WaitingEntry 추가       |
+| `src/orchestrator/dag-scheduler.ts`      | **NEW** — DAG 구성, 쿼리, 갱신, 캐시 I/O, 사이클 탐지                                           |
+| `src/orchestrator/orchestrator.ts`       | handleIssueTodo 분기 추가, waitingIssues 관리, relation 웹훅 라우팅                             |
+| `src/orchestrator/completion-handler.ts` | 연쇄 트리거, parent 자동 완료 + 요약 코멘트                                                     |
+| `src/tracker/linear-client.ts`           | GraphQL 쿼리 확장 (relations, parent, children), mutation 추가 (createSubIssue, createRelation) |
+| `src/tracker/webhook-handler.ts`         | IssueRelation 웹훅 파싱, WebhookEvent 타입 확장                                                 |
+| `src/tracker/types.ts`                   | LinearIssueNode 확장, RelationWebhookEvent 타입 추가                                            |
+| `src/cli/issue.ts`                       | --parent, --blocked-by, --breakdown 옵션 추가                                                   |
+| `src/config/env.ts`                      | DAG 캐시 파일 경로 설정 (선택)                                                                  |
 
 ## Implementation Order
 
@@ -329,9 +345,9 @@ bun av issue "인증 시스템 구축" --breakdown
 
 ## WaitingIssues vs RetryQueue
 
-| | RetryQueue | waitingIssues |
-|---|---|---|
-| 목적 | 일시적 실패 재시도 | 구조적 의존성 대기 |
-| 트리거 | 시간 경과 (exponential backoff) | 선행 이슈 완료 이벤트 |
-| 최대 횟수 | maxRetries 후 Cancelled | 제한 없음 (blocker 완료까지) |
-| 재시작 시 | 인메모리, 소실됨 | DAG 캐시에서 복구 |
+|           | RetryQueue                      | waitingIssues                |
+| --------- | ------------------------------- | ---------------------------- |
+| 목적      | 일시적 실패 재시도              | 구조적 의존성 대기           |
+| 트리거    | 시간 경과 (exponential backoff) | 선행 이슈 완료 이벤트        |
+| 최대 횟수 | maxRetries 후 Cancelled         | 제한 없음 (blocker 완료까지) |
+| 재시작 시 | 인메모리, 소실됨                | DAG 캐시에서 복구            |

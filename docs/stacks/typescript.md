@@ -7,16 +7,16 @@
 
 ## Recommended Stack
 
-| Role | Choice |
-|---|---|
-| Runtime | Node.js 26.10.0 |
-| Language | TypeScript 7+ |
-| HTTP Server | Express or Hono |
-| ORM | Prisma |
-| Schema Validation | Zod |
-| Testing | Jest + ts-jest |
+| Role                | Choice             |
+| ------------------- | ------------------ |
+| Runtime             | Node.js 26.10.0    |
+| Language            | TypeScript 7+      |
+| HTTP Server         | Express or Hono    |
+| ORM                 | Prisma             |
+| Schema Validation   | Zod                |
+| Testing             | Jest + ts-jest     |
 | Architecture Linter | dependency-cruiser |
-| Code Linter | ESLint + Prettier |
+| Code Linter         | ESLint + Prettier  |
 
 ---
 
@@ -122,44 +122,39 @@ src/
 
 ```typescript
 // src/infrastructure/config.ts
-import dotenv from "dotenv";
-import { z } from "zod";
+import dotenv from "dotenv"
+import { z } from "zod"
 
-dotenv.config();
+dotenv.config()
 
 const envSchema = z.object({
   LINEAR_API_KEY: z.string().min(1, {
     message:
-      "LINEAR_API_KEY is not set. Add it to .env (see .env.example).\n" +
-      "  Format: LINEAR_API_KEY=lin_api_xxxxxxxx",
+      "LINEAR_API_KEY is not set. Add it to .env (see .env.example).\n" + "  Format: LINEAR_API_KEY=lin_api_xxxxxxxx",
   }),
   LINEAR_TEAM_ID: z.string().min(1, {
-    message:
-      "LINEAR_TEAM_ID is not set. Add it to .env.\n" +
-      "  Find it in Linear: Settings → Members → Team",
+    message: "LINEAR_TEAM_ID is not set. Add it to .env.\n" + "  Find it in Linear: Settings → Members → Team",
   }),
   WORKSPACE_ROOT: z
     .string()
     .min(1)
     .refine((v) => v.startsWith("/"), {
-      message:
-        "WORKSPACE_ROOT must be an absolute path.\n" +
-        "  Fix: Set WORKSPACE_ROOT=/absolute/path in .env",
+      message: "WORKSPACE_ROOT must be an absolute path.\n" + "  Fix: Set WORKSPACE_ROOT=/absolute/path in .env",
     }),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-});
+})
 
-const parsed = envSchema.safeParse(process.env);
+const parsed = envSchema.safeParse(process.env)
 
 if (!parsed.success) {
-  console.error("Configuration error:\n");
+  console.error("Configuration error:\n")
   parsed.error.issues.forEach((issue) => {
-    console.error(`  ${issue.path.join(".")}: ${issue.message}\n`);
-  });
-  process.exit(1);
+    console.error(`  ${issue.path.join(".")}: ${issue.message}\n`)
+  })
+  process.exit(1)
 }
 
-export const config = parsed.data;
+export const config = parsed.data
 ```
 
 ---
@@ -169,18 +164,15 @@ export const config = parsed.data;
 ### ESLint — eslint.config.mjs
 
 ```js
-import tseslint from "typescript-eslint";
+import tseslint from "typescript-eslint"
 
-export default tseslint.config(
-  tseslint.configs.strict,
-  {
-    rules: {
-      "@typescript-eslint/no-explicit-any": "error",
-      "@typescript-eslint/explicit-function-return-type": "warn",
-      "no-console": ["warn", { allow: ["error"] }],
-    },
-  }
-);
+export default tseslint.config(tseslint.configs.strict, {
+  rules: {
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/explicit-function-return-type": "warn",
+    "no-console": ["warn", { allow: ["error"] }],
+  },
+})
 ```
 
 ### Prettier — .prettierrc

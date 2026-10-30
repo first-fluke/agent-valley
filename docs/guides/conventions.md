@@ -154,17 +154,17 @@ symphony-reviewer     — Code review using PR template as framework
 
 ## Common Mistakes to Avoid
 
-| Mistake | Correct approach |
-|---|---|
-| Importing `LinearClient` in a Domain model | Define an interface in `domain/ports/`, implement it in `infrastructure/` |
-| Writing `if retryCount > 3` in a Router | Move the decision to Application layer (Orchestrator) |
-| `console.log("API Key:", config.linearApiKey)` | Never log secrets. Use `"linear_connected": true` instead |
-| `prompt = f"Fix this: {issue.description}"` | Use `sanitizeIssueBody(issue.description)` first |
-| `orchestrator.ts` grows to 900 lines | Split into `webhookHandler.ts`, `stateMachine.ts`, `retryQueue.ts` |
-| `ERROR: config invalid` | `ERROR: WORKSPACE_ROOT must be absolute.\n  Fix: Set WORKSPACE_ROOT=/path in .env` |
-| Writing to `/workspaces/OTHER-42/` | Only write within your assigned workspace path |
-| `git push --force origin main` | Never force push to main. Use PRs only. |
-| Redefining `Issue` type in workspace-manager | Import from `domain/issue` — one definition, no duplication |
+| Mistake                                        | Correct approach                                                                   |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Importing `LinearClient` in a Domain model     | Define an interface in `domain/ports/`, implement it in `infrastructure/`          |
+| Writing `if retryCount > 3` in a Router        | Move the decision to Application layer (Orchestrator)                              |
+| `console.log("API Key:", config.linearApiKey)` | Never log secrets. Use `"linear_connected": true` instead                          |
+| `prompt = f"Fix this: {issue.description}"`    | Use `sanitizeIssueBody(issue.description)` first                                   |
+| `orchestrator.ts` grows to 900 lines           | Split into `webhookHandler.ts`, `stateMachine.ts`, `retryQueue.ts`                 |
+| `ERROR: config invalid`                        | `ERROR: WORKSPACE_ROOT must be absolute.\n  Fix: Set WORKSPACE_ROOT=/path in .env` |
+| Writing to `/workspaces/OTHER-42/`             | Only write within your assigned workspace path                                     |
+| `git push --force origin main`                 | Never force push to main. Use PRs only.                                            |
+| Redefining `Issue` type in workspace-manager   | Import from `domain/issue` — one definition, no duplication                        |
 
 ---
 
@@ -172,14 +172,14 @@ symphony-reviewer     — Code review using PR template as framework
 
 When working in this repository, follow these rules for each file type:
 
-| File | Rule |
-|---|---|
-| `AGENTS.md` | Update when adding new conventions, shared utilities, or forbidden patterns. Keep under ~150 lines. |
-| `WORKFLOW.md` | Edit only the YAML config section for tuning. Do not change prompt template without team review. |
-| `docs/specs/*.md` | These are interface contracts. Only update if the interface changes. |
-| `docs/architecture/CONSTRAINTS.md` | Add new rules here when a repeated violation is discovered. Always include code examples. |
-| `src/` | Your implementation lives here. Follow the stack guide. |
-| `.agents/skills/` | Do not modify existing skills. Add new ones if you need new capabilities. |
-| `.claude/agents/` | Do not modify sub-agent system prompts without understanding the impact on all tasks they handle. |
-| `.env` | Never commit. Values are local only. |
-| `.env.example` | Keep in sync with `.env` key names. Never put real values here. |
+| File                               | Rule                                                                                                |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `AGENTS.md`                        | Update when adding new conventions, shared utilities, or forbidden patterns. Keep under ~150 lines. |
+| `WORKFLOW.md`                      | Edit only the YAML config section for tuning. Do not change prompt template without team review.    |
+| `docs/specs/*.md`                  | These are interface contracts. Only update if the interface changes.                                |
+| `docs/architecture/CONSTRAINTS.md` | Add new rules here when a repeated violation is discovered. Always include code examples.           |
+| `src/`                             | Your implementation lives here. Follow the stack guide.                                             |
+| `.agents/skills/`                  | Do not modify existing skills. Add new ones if you need new capabilities.                           |
+| `.claude/agents/`                  | Do not modify sub-agent system prompts without understanding the impact on all tasks they handle.   |
+| `.env`                             | Never commit. Values are local only.                                                                |
+| `.env.example`                     | Keep in sync with `.env` key names. Never put real values here.                                     |

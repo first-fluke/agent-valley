@@ -16,7 +16,7 @@ export function GET(request: Request): Response {
   const unauthorized = authorizeStatusRequest(request)
   if (unauthorized) return unauthorized
   const endpoint = getMetricsEndpoint()
-  if (!endpoint || !endpoint.enabled) {
+  if (!endpoint?.enabled) {
     return new Response("Not found", { status: 404 })
   }
 

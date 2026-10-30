@@ -24,12 +24,12 @@ git worktree add {WORKSPACE_ROOT}/{key} -b issue/{key}
 
 ### Lifecycle
 
-| Phase | Action |
-|---|---|
-| Issue assignment | Execute `git worktree add` |
-| Agent execution | Work only within the assigned worktree path |
-| PR merge | Remove worktree + delete branch |
-| 30 days unused | GC agent auto-cleans (see `docs/harness/ENTROPY.md`) |
+| Phase            | Action                                               |
+| ---------------- | ---------------------------------------------------- |
+| Issue assignment | Execute `git worktree add`                           |
+| Agent execution  | Work only within the assigned worktree path          |
+| PR merge         | Remove worktree + delete branch                      |
+| 30 days unused   | GC agent auto-cleans (see `docs/harness/ENTROPY.md`) |
 
 ### Implementation Reference
 
@@ -54,12 +54,12 @@ chromium --remote-debugging-port=9222
 
 ### What Agents Can Do with CDP
 
-| Capability | Usage Example |
-|---|---|
-| Screenshot capture | Inspect rendering results and decide the next action |
-| Network logs | Verify API requests/responses |
-| DOM queries | Check element existence |
-| Console log collection | Detect runtime errors |
+| Capability             | Usage Example                                        |
+| ---------------------- | ---------------------------------------------------- |
+| Screenshot capture     | Inspect rendering results and decide the next action |
+| Network logs           | Verify API requests/responses                        |
+| DOM queries            | Check element existence                              |
+| Console log collection | Detect runtime errors                                |
 
 ### When It Is Useful
 
@@ -84,9 +84,9 @@ you cannot determine the right moment for human intervention.
 
 ### Components
 
-| Component | Form | Purpose |
-|---|---|---|
-| Structured logs | JSON (stdout) | Agent action timeline |
+| Component           | Form                 | Purpose                  |
+| ------------------- | -------------------- | ------------------------ |
+| Structured logs     | JSON (stdout)        | Agent action timeline    |
 | HTTP status surface | Optional, local port | Real-time status queries |
 
 ### Structured Log Format

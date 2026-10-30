@@ -97,7 +97,7 @@ chief:
 The endpoint receives a GET with an optional bearer token and returns measured numeric data, for example:
 
 ```json
-{"conversion":{"value":0.24,"unit":"fraction","timestamp":"2026-10-03T00:02:00Z"}}
+{ "conversion": { "value": 0.24, "unit": "fraction", "timestamp": "2026-10-03T00:02:00Z" } }
 ```
 
 `json-file` reads the same payload with `file: analytics/metrics.json`; it needs no endpoint or token. Dot-separated paths support array indexes. Optional `window_start_path` and `window_end_path` preserve a measured window. Responses and exports are bounded to 2 MB. HTTP uses HTTPS, with HTTP allowed on localhost. Redirects, embedded URL credentials, repository escapes and file/directory symlinks are rejected. Applications inject custom adapters through `createMetricSourceRegistry` and `MetricCollectionDependencies.registry`.
@@ -152,15 +152,15 @@ chief:
 
 The CLI sends readable text and an actual Markdown report attachment. Captured PNGs, the timestamp manifest and an encoded MP4 are also uploaded as files. Local paths do not substitute for uploads.
 
-| Channel | Attachment configuration | Native operation |
-| --- | --- | --- |
-| Slack | `token_env`, `channel_id_env` | [External file upload](https://docs.slack.dev/reference/methods/files.getUploadURLExternal/) and [completion shared to the channel](https://docs.slack.dev/reference/methods/files.completeUploadExternal/) |
-| Discord | `url_env` | [Multipart webhook upload with `wait=true` message confirmation](https://docs.discord.com/developers/resources/webhook#execute-webhook) |
-| Telegram | `token_env`, `chat_id_env` | Bot [photo](https://core.telegram.org/bots/api#sendphoto), [video](https://core.telegram.org/bots/api#sendvideo) or [document](https://core.telegram.org/bots/api#senddocument) upload |
-| Teams | `token_env`, `team_id_env`, `channel_id_env`, `drive_id_env` | Upload to the [channel's files folder](https://learn.microsoft.com/en-us/graph/api/channel-get-filesfolder?view=graph-rest-1.0) and send a [native file attachment](https://learn.microsoft.com/en-us/graph/api/chatmessage-post?view=graph-rest-1.0) |
-| Google Chat | `token_env`, `space_env` | [Media upload and message attachment](https://developers.google.com/workspace/chat/upload-media-attachments); the space value is `spaces/SPACE_ID` |
-| Mattermost | `token_env`, `base_url_env`, `channel_id_env` | [File upload](https://docs.mattermost.com/api/reference/upload-file) and [post with file IDs](https://docs.mattermost.com/api/reference/create-post); the base URL is the HTTPS server origin |
-| Webhook | `url_env`, optional `token_env` | Multipart `files` bytes and JSON `payload_json` |
+| Channel     | Attachment configuration                                     | Native operation                                                                                                                                                                                                                                      |
+| ----------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Slack       | `token_env`, `channel_id_env`                                | [External file upload](https://docs.slack.dev/reference/methods/files.getUploadURLExternal/) and [completion shared to the channel](https://docs.slack.dev/reference/methods/files.completeUploadExternal/)                                           |
+| Discord     | `url_env`                                                    | [Multipart webhook upload with `wait=true` message confirmation](https://docs.discord.com/developers/resources/webhook#execute-webhook)                                                                                                               |
+| Telegram    | `token_env`, `chat_id_env`                                   | Bot [photo](https://core.telegram.org/bots/api#sendphoto), [video](https://core.telegram.org/bots/api#sendvideo) or [document](https://core.telegram.org/bots/api#senddocument) upload                                                                |
+| Teams       | `token_env`, `team_id_env`, `channel_id_env`, `drive_id_env` | Upload to the [channel's files folder](https://learn.microsoft.com/en-us/graph/api/channel-get-filesfolder?view=graph-rest-1.0) and send a [native file attachment](https://learn.microsoft.com/en-us/graph/api/chatmessage-post?view=graph-rest-1.0) |
+| Google Chat | `token_env`, `space_env`                                     | [Media upload and message attachment](https://developers.google.com/workspace/chat/upload-media-attachments); the space value is `spaces/SPACE_ID`                                                                                                    |
+| Mattermost  | `token_env`, `base_url_env`, `channel_id_env`                | [File upload](https://docs.mattermost.com/api/reference/upload-file) and [post with file IDs](https://docs.mattermost.com/api/reference/create-post); the base URL is the HTTPS server origin                                                         |
+| Webhook     | `url_env`, optional `token_env`                              | Multipart `files` bytes and JSON `payload_json`                                                                                                                                                                                                       |
 
 Slack requires `files:write` and channel access; text delivery through its bot token also requires [`chat:write`](https://docs.slack.dev/reference/methods/chat.postMessage/). An optional `url_env` uses an incoming webhook for text while the token uploads files. Teams requires a delegated Graph token with [`ChannelMessage.Send`](https://learn.microsoft.com/en-us/graph/api/chatmessage-post?view=graph-rest-1.0) and permission to read and [write the channel's files](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0); application-only migration tokens do not send ordinary channel messages. Google Chat file upload requires a [user OAuth token with `chat.messages.create` or `chat.messages`](https://developers.google.com/workspace/chat/api/reference/rest/v1/media/upload). Incoming text webhooks alone cannot upload native files for Slack, Teams, Google Chat or Mattermost. Missing attachment credentials leave delivery pending. Provider limits apply; this Telegram adapter permits uploads up to 50 MB.
 

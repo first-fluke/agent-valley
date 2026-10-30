@@ -161,7 +161,7 @@ describe("GithubTrackerAdapter — fetchIssuesByState", () => {
 
     // Auth headers present
     expect(requests[0]?.headers.authorization).toBe("Bearer ghp_test")
-    expect(requests[0]?.headers["accept"]).toBe("application/vnd.github+json")
+    expect(requests[0]?.headers.accept).toBe("application/vnd.github+json")
     expect(requests[0]?.headers["x-github-api-version"]).toBe("2022-11-28")
   })
 
@@ -289,12 +289,13 @@ describe("GithubTrackerAdapter — updateIssueState", () => {
     await adapter.updateIssueState("7", LABELS.todo)
 
     const patch = requests.find((r) => r.method === "PATCH")
+    if (!patch) throw new Error("Expected the adapter to send a PATCH request")
     expect(patch).toBeDefined()
-    expect(patch!.body).toMatchObject({
+    expect(patch.body).toMatchObject({
       labels: expect.arrayContaining(["scope:backend", LABELS.todo]),
       state: "open",
     })
-    const labels = (patch!.body as { labels: string[] }).labels
+    const labels = (patch.body as { labels: string[] }).labels
     expect(labels).not.toContain(LABELS.inProgress)
   })
 
@@ -315,7 +316,8 @@ describe("GithubTrackerAdapter — updateIssueState", () => {
     await adapter.updateIssueState("9", LABELS.done)
 
     const patch = requests.find((r) => r.method === "PATCH")
-    expect(patch!.body).toMatchObject({
+    if (!patch) throw new Error("Expected the adapter to send a PATCH request")
+    expect(patch.body).toMatchObject({
       state: "closed",
       state_reason: "completed",
     })
@@ -337,7 +339,8 @@ describe("GithubTrackerAdapter — updateIssueState", () => {
     await adapter.updateIssueState("3", LABELS.cancelled)
 
     const patch = requests.find((r) => r.method === "PATCH")
-    expect(patch!.body).toMatchObject({ state: "closed", state_reason: "not_planned" })
+    if (!patch) throw new Error("Expected the adapter to send a PATCH request")
+    expect(patch.body).toMatchObject({ state: "closed", state_reason: "not_planned" })
   })
 
   test("throws when stateId is not one of the configured labels", async () => {

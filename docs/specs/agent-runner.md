@@ -172,15 +172,15 @@ Orchestrator → AgentRunner → AgentSession interface
 
 Select via `AGENT_TYPE` environment variable (or `agent.type` in `WORKFLOW.md`).
 
-| `AGENT_TYPE` | Session | Native Protocol | Model Override |
-|---|---|---|---|
-| `codex` | `CodexSession` | JSON-RPC 2.0 over stdio (`codex app-server`) | `CODEX_MODEL` |
-| `claude` | `ClaudeSession` | NDJSON streaming (`claude --print --input-format=stream-json`) | `CLAUDE_MODEL` |
-| `antigravity` | `AgySession` | One-shot print mode, plain text stdout (`agy -p --dangerously-skip-permissions`) | via `config.model` (no `AGENT_MODEL` env override) |
-| `cursor` | `CursorSession` | Streaming NDJSON (`cursor-agent -p --output-format stream-json`) | via `config.model` (no `AGENT_MODEL` env override) |
-| `grok` | `GrokSession` | Streaming NDJSON (`grok --single --output-format streaming-json`) | not supported — Grok Build has no per-invocation `--model` flag |
-| `kimi` | `KimiSession` | Streaming NDJSON (`kimi -p --output-format stream-json`) | via `config.model` (no `AGENT_MODEL` env override) |
-| `opencode` | `OpencodeSession` | Streaming NDJSON, multi-provider (75+ backends) | via `config.model` (no `AGENT_MODEL` env override) |
+| `AGENT_TYPE`  | Session           | Native Protocol                                                                  | Model Override                                                  |
+| ------------- | ----------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `codex`       | `CodexSession`    | JSON-RPC 2.0 over stdio (`codex app-server`)                                     | `CODEX_MODEL`                                                   |
+| `claude`      | `ClaudeSession`   | NDJSON streaming (`claude --print --input-format=stream-json`)                   | `CLAUDE_MODEL`                                                  |
+| `antigravity` | `AgySession`      | One-shot print mode, plain text stdout (`agy -p --dangerously-skip-permissions`) | via `config.model` (no `AGENT_MODEL` env override)              |
+| `cursor`      | `CursorSession`   | Streaming NDJSON (`cursor-agent -p --output-format stream-json`)                 | via `config.model` (no `AGENT_MODEL` env override)              |
+| `grok`        | `GrokSession`     | Streaming NDJSON (`grok --single --output-format streaming-json`)                | not supported — Grok Build has no per-invocation `--model` flag |
+| `kimi`        | `KimiSession`     | Streaming NDJSON (`kimi -p --output-format stream-json`)                         | via `config.model` (no `AGENT_MODEL` env override)              |
+| `opencode`    | `OpencodeSession` | Streaming NDJSON, multi-provider (75+ backends)                                  | via `config.model` (no `AGENT_MODEL` env override)              |
 
 ### SessionFactory
 
@@ -188,7 +188,7 @@ Select via `AGENT_TYPE` environment variable (or `agent.type` in `WORKFLOW.md`).
 import { createSession, registerSession } from "./sessions"
 
 // Built-in sessions are registered at startup
-const session = createSession("claude")  // → ClaudeSession
+const session = createSession("claude") // → ClaudeSession
 
 // Community extensions
 registerSession("aider", () => new AiderSession())
@@ -213,21 +213,21 @@ interface AgentSession {
 
 ### Events
 
-| Event | Description |
-|---|---|
-| `output` | Streaming text chunk from agent |
-| `toolUse` | Agent invoked a tool (shell, file edit, etc.) |
-| `fileChange` | Agent created/modified/deleted a file |
-| `heartbeat` | Agent is alive (derived from protocol activity) |
-| `complete` | Agent finished execution (includes RunResult) |
-| `error` | Agent failed (includes AgentError with recoverable flag) |
+| Event        | Description                                              |
+| ------------ | -------------------------------------------------------- |
+| `output`     | Streaming text chunk from agent                          |
+| `toolUse`    | Agent invoked a tool (shell, file edit, etc.)            |
+| `fileChange` | Agent created/modified/deleted a file                    |
+| `heartbeat`  | Agent is alive (derived from protocol activity)          |
+| `complete`   | Agent finished execution (includes RunResult)            |
+| `error`      | Agent failed (includes AgentError with recoverable flag) |
 
 ### RunResult
 
 ```typescript
 interface RunResult {
   exitCode: number
-  output: string          // max 10KB, truncated
+  output: string // max 10KB, truncated
   durationMs: number
   filesChanged: string[]
   tokenUsage?: { input: number; output: number }
@@ -371,20 +371,20 @@ attempt.filesChanged = result.filesChanged
 
 ## SPEC Section 17 Test Matrix
 
-| # | Scenario | Input | Expected | Verification |
-|---|---|---|---|---|
-| 17.1 | Normal execution | Valid issue + workspace | complete event, exitCode: 0 | RunAttempt.exitCode == 0 |
-| 17.2 | Agent failure | Unprocessable issue | error event, recoverable: true | RetryEntry created |
-| 17.3 | Timeout | timeout=5s, long task | cancel → kill | exitCode: -1, error.code == "TIMEOUT" |
-| 17.4 | Process crash | Agent abnormal exit | error event, code: "CRASH" | RunAttempt.exitCode != 0 |
-| 17.5 | Concurrency limit | maxParallel=2, 3 issues | Only 2 sessions started | 3rd waits |
-| 17.6 | Retry queue | Failure + nextRetryAt reached | Re-executed | attemptCount incremented |
-| 17.7 | Max retries exceeded | maxAttempts=3, 3 failures | Halted | Workspace.status == "failed" |
-| 17.8 | Restart recovery | Orchestrator restart | Startup sync | Existing workspace reused |
-| 17.9 | WORKFLOW.md change | File change detected | Rolling restart | Current sessions complete first |
-| 17.10 | Prompt injection | Malicious issue body | Sanitized | Sanitize before session.execute() |
-| 17.11 | Graceful shutdown | SIGTERM | Complete current sessions | No in-progress attempt lost |
-| 17.12 | Env isolation | Agent process env | Minimal allowlist | No host secrets leaked |
+| #     | Scenario             | Input                         | Expected                       | Verification                          |
+| ----- | -------------------- | ----------------------------- | ------------------------------ | ------------------------------------- |
+| 17.1  | Normal execution     | Valid issue + workspace       | complete event, exitCode: 0    | RunAttempt.exitCode == 0              |
+| 17.2  | Agent failure        | Unprocessable issue           | error event, recoverable: true | RetryEntry created                    |
+| 17.3  | Timeout              | timeout=5s, long task         | cancel → kill                  | exitCode: -1, error.code == "TIMEOUT" |
+| 17.4  | Process crash        | Agent abnormal exit           | error event, code: "CRASH"     | RunAttempt.exitCode != 0              |
+| 17.5  | Concurrency limit    | maxParallel=2, 3 issues       | Only 2 sessions started        | 3rd waits                             |
+| 17.6  | Retry queue          | Failure + nextRetryAt reached | Re-executed                    | attemptCount incremented              |
+| 17.7  | Max retries exceeded | maxAttempts=3, 3 failures     | Halted                         | Workspace.status == "failed"          |
+| 17.8  | Restart recovery     | Orchestrator restart          | Startup sync                   | Existing workspace reused             |
+| 17.9  | WORKFLOW.md change   | File change detected          | Rolling restart                | Current sessions complete first       |
+| 17.10 | Prompt injection     | Malicious issue body          | Sanitized                      | Sanitize before session.execute()     |
+| 17.11 | Graceful shutdown    | SIGTERM                       | Complete current sessions      | No in-progress attempt lost           |
+| 17.12 | Env isolation        | Agent process env             | Minimal allowlist              | No host secrets leaked                |
 
 ---
 
@@ -392,6 +392,7 @@ attempt.filesChanged = result.filesChanged
 
 1. Implement the `AgentSession` interface in `src/sessions/your-session.ts`
 2. Register in `src/sessions/session-factory.ts`:
+
    ```typescript
    registerSession("your-agent", () => new YourSession())
    ```

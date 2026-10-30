@@ -261,7 +261,8 @@ describe("IssueLifecycle.handleIssueLeftInProgress", () => {
     const issue = makeIssue({ id: "live1", identifier: "PROJ-60" })
     await h.lifecycle.handleIssueInProgress(issue)
     expect(h.core.getActiveWorkspace("live1")).toBeDefined()
-    const session = FakeAgentSession.instances[0]!
+    const session = FakeAgentSession.instances[0]
+    if (!session) throw new Error("Expected an active fake Actor session")
 
     h.core.dagScheduler.buildFromIssues([issue])
 

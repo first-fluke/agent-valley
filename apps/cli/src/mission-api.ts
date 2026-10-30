@@ -22,7 +22,7 @@ import {
 } from "./mcp-contract"
 import type { MissionApiDependencies } from "./mission-api-types"
 import { digest, ensureAvDirectory, type JobLiveness, jobLiveness, type MissionJob, MissionJobs } from "./mission-jobs"
-import { launchMission, type MissionLaunch } from "./mission-launcher"
+import { launchMission } from "./mission-launcher"
 import { OperationApi } from "./operation-api"
 
 export type { MissionApiDependencies }

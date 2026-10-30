@@ -170,12 +170,12 @@ AV token, log in, and restart their publishers.
 
 ## HTTP and dashboard behavior
 
-| Endpoint | Authentication | Result |
-|---|---|---|
-| `GET /api/team/session?team_id=UUID` | AV team bearer token | Authenticated identity and expiry |
-| `GET /api/team/relay?team_id=UUID&after=0&limit=1000` | AV team bearer token | Ordered events after the sequence cursor |
-| `POST /api/team/relay` | AV team bearer token | Publish `{teamId,eventId,event}` with idempotent event IDs |
-| `GET /api/team/ledger` | Local dashboard status token/HMAC cookie rules | Replayed state for its browser |
+| Endpoint                                              | Authentication                                 | Result                                                     |
+| ----------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------- |
+| `GET /api/team/session?team_id=UUID`                  | AV team bearer token                           | Authenticated identity and expiry                          |
+| `GET /api/team/relay?team_id=UUID&after=0&limit=1000` | AV team bearer token                           | Ordered events after the sequence cursor                   |
+| `POST /api/team/relay`                                | AV team bearer token                           | Publish `{teamId,eventId,event}` with idempotent event IDs |
+| `GET /api/team/ledger`                                | Local dashboard status token/HMAC cookie rules | Replayed state for its browser                             |
 
 Browser writes must present the dashboard's own Origin. Originless CLI writes
 still require a valid AV bearer token. Query parameters and JSON bodies are

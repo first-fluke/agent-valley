@@ -65,13 +65,13 @@ Configure the [OAuth gateway](./web-mcp.md) before connecting remote clients. Th
 
 <!-- oma-docs:ignore-start -->
 <!-- These paths are generated beneath the requested export directory. -->
-| Platform | Exported location | Entry files |
-|---|---|---|
-| OpenAI / Codex | `portable/av` | `plugin.json`, `mcp.json`, `skills/av/SKILL.md` |
-| Claude | `claude/plugins/av` | `.claude-plugin/plugin.json`, `.mcp.json`, `skills/av/SKILL.md` |
-| Cursor | `cursor/plugins/av` | `.cursor-plugin/plugin.json`, `mcp.json`, `skills/av/SKILL.md` |
-| Qwen Code | `qwen/av` | `qwen-extension.json`, `skills/av/SKILL.md` |
-| Antigravity | `antigravity/av` | `plugin.json`, `mcp_config.json`, `skills/av/SKILL.md` |
+| Platform       | Exported location   | Entry files                                                     |
+| -------------- | ------------------- | --------------------------------------------------------------- |
+| OpenAI / Codex | `portable/av`       | `plugin.json`, `mcp.json`, `skills/av/SKILL.md`                 |
+| Claude         | `claude/plugins/av` | `.claude-plugin/plugin.json`, `.mcp.json`, `skills/av/SKILL.md` |
+| Cursor         | `cursor/plugins/av` | `.cursor-plugin/plugin.json`, `mcp.json`, `skills/av/SKILL.md`  |
+| Qwen Code      | `qwen/av`           | `qwen-extension.json`, `skills/av/SKILL.md`                     |
+| Antigravity    | `antigravity/av`    | `plugin.json`, `mcp_config.json`, `skills/av/SKILL.md`          |
 <!-- oma-docs:ignore-end -->
 
 The portable package uses Agent Plugins v1. Claude and Cursor exports include their marketplace catalogs, and the portable export includes a Codex local marketplace catalog. Product source lives in `integrations/`; generated exports do not modify the repository's managed OMA definitions. The exporter refuses unowned files, changed owned files, and symlinks. Re-exporting an unchanged AV-owned package updates it from the product source.

@@ -143,7 +143,8 @@ describe("Intervention flow — claude stateless fallback", () => {
     expect(result.ok).toBe(true)
     expect(requestRetry).toHaveBeenCalledWith("add tests")
     // The fake claude session's cancel was invoked too.
-    const fake = FakeAgentSession.instances.at(-1)!
+    const fake = FakeAgentSession.instances.at(-1)
+    if (!fake) throw new Error("Expected a spawned fake Actor session")
     expect(fake.cancelCalls).toBeGreaterThanOrEqual(1)
   })
 })

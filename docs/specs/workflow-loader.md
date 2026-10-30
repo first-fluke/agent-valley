@@ -52,14 +52,17 @@ server:
 You are a software engineer working on issue {{issue.identifier}}: {{issue.title}}.
 
 ## Context
+
 - Issue: {{issue.url}}
 - Workspace: {{workspace_path}}
 - Attempt: {{attempt.id}} (retry count: {{retry_count}})
 
 ## Description
+
 {{issue.description}}
 
 ## Task
+
 Complete the issue as described above.
 ```
 
@@ -68,9 +71,11 @@ Complete the issue as described above.
 ## Parsing Responsibility
 
 ### Input
+
 - `WORKFLOW.md` file path (absolute path)
 
 ### Output
+
 ```
 WorkflowConfig {
   raw      : object       // Raw object parsed from YAML front matter
@@ -95,17 +100,17 @@ WorkflowConfig {
 
 Variables available in the prompt body. They are substituted at agent execution time.
 
-| Variable | Substitution Value | Source |
-|---|---|---|
-| `{{issue}}` | Full Issue JSON | `domain-models.md` Issue |
-| `{{issue.identifier}}` | Issue identifier (e.g., `ACR-42`) | Issue.identifier |
-| `{{issue.title}}` | Issue title | Issue.title |
-| `{{issue.description}}` | Issue body | Issue.description — **untrusted source** |
-| `{{issue.url}}` | Linear issue URL | Issue.url |
-| `{{attempt}}` | Full RunAttempt JSON | `domain-models.md` RunAttempt |
-| `{{attempt.id}}` | RunAttempt ID | RunAttempt.id |
-| `{{workspace_path}}` | Workspace absolute path | Workspace.path |
-| `{{retry_count}}` | Cumulative retry count | RetryEntry.attemptCount (0 if absent) |
+| Variable                | Substitution Value                | Source                                   |
+| ----------------------- | --------------------------------- | ---------------------------------------- |
+| `{{issue}}`             | Full Issue JSON                   | `domain-models.md` Issue                 |
+| `{{issue.identifier}}`  | Issue identifier (e.g., `ACR-42`) | Issue.identifier                         |
+| `{{issue.title}}`       | Issue title                       | Issue.title                              |
+| `{{issue.description}}` | Issue body                        | Issue.description — **untrusted source** |
+| `{{issue.url}}`         | Linear issue URL                  | Issue.url                                |
+| `{{attempt}}`           | Full RunAttempt JSON              | `domain-models.md` RunAttempt            |
+| `{{attempt.id}}`        | RunAttempt ID                     | RunAttempt.id                            |
+| `{{workspace_path}}`    | Workspace absolute path           | Workspace.path                           |
+| `{{retry_count}}`       | Cumulative retry count            | RetryEntry.attemptCount (0 if absent)    |
 
 **Security note:** `{{issue.description}}` is an external input susceptible to prompt injection.
 Escaping or sandboxing must be applied before insertion. Details: `docs/harness/SAFETY.md`.
@@ -125,12 +130,12 @@ Escaping or sandboxing must be applied before insertion. Details: `docs/harness/
 
 On parse failure, refuse to start the Orchestrator. Include remediation instructions in the error message.
 
-| Error Condition | Error Message Format |
-|---|---|
-| File not found | `WORKFLOW.md not found at {path}. Create it from the template: cp WORKFLOW.md.example WORKFLOW.md` |
-| Missing `---` delimiters | `WORKFLOW.md missing YAML front matter. Add --- delimiters at the top of the file.` |
-| YAML parse failure | `WORKFLOW.md YAML parse error at line {n}: {detail}. Fix the YAML syntax and restart.` |
-| Missing required key | `WORKFLOW.md missing required key: {key}. Add it under the {section} section.` |
-| Unset environment variable | `WORKFLOW.md references unset env var: {VAR}. Set it in .env or export it before starting.` |
+| Error Condition            | Error Message Format                                                                               |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| File not found             | `WORKFLOW.md not found at {path}. Create it from the template: cp WORKFLOW.md.example WORKFLOW.md` |
+| Missing `---` delimiters   | `WORKFLOW.md missing YAML front matter. Add --- delimiters at the top of the file.`                |
+| YAML parse failure         | `WORKFLOW.md YAML parse error at line {n}: {detail}. Fix the YAML syntax and restart.`             |
+| Missing required key       | `WORKFLOW.md missing required key: {key}. Add it under the {section} section.`                     |
+| Unset environment variable | `WORKFLOW.md references unset env var: {VAR}. Set it in .env or export it before starting.`        |
 
 On error, the process terminates immediately (exit code 1).

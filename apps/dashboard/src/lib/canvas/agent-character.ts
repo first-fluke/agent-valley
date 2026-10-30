@@ -3,6 +3,7 @@ import type { AgentType, CharacterSkin, WorkspaceStatus } from "@/features/offic
 import { STATE_ANIMATION_MAP } from "@/features/office/utils/animations"
 import { TILE_SIZE } from "@/features/office/utils/office-layout"
 import { getAgentTexture, getCoffeeCupTexture } from "@/lib/canvas/sprite-generator"
+import { requireCanvasValue } from "./required-value"
 
 const WANDER_SPEED = 1.2
 const RETURN_SPEED = 2.0
@@ -126,7 +127,7 @@ export class AgentCharacter {
       this.cleanupTimer -= dt
       if (this.cleanupTimer <= 0) {
         this.isCleaningUp = false
-        const target = this.cleanupTarget!
+        const target = requireCanvasValue(this.cleanupTarget, "a cleanup target")
         this.cleanupTarget = null
         this.pauseRemaining = 500
         this.onCleanupDone?.(target.x, target.y)
@@ -215,7 +216,9 @@ export class AgentCharacter {
 
     if (this.interestPoints.length > 0 && Math.random() < INTEREST_POINT_CHANCE) {
       const available = this.isInterestPointAvailable
-        ? this.interestPoints.filter((p) => this.isInterestPointAvailable!(p.col, p.row))
+        ? this.interestPoints.filter((p) =>
+            requireCanvasValue(this.isInterestPointAvailable, "an interest-point predicate").call(this, p.col, p.row),
+          )
         : this.interestPoints
       tile = available.length > 0 ? pickRandom(available) : pickRandom(this.walkableTiles)
     } else {

@@ -31,48 +31,42 @@ module.exports = {
   forbidden: [
     {
       name: "no-domain-to-infrastructure",
-      comment:
-        "Domain layer must not import from Infrastructure. See LAYERS.md.",
+      comment: "Domain layer must not import from Infrastructure. See LAYERS.md.",
       severity: "error",
       from: { path: "^src/domain" },
       to: { path: "^src/infrastructure" },
     },
     {
       name: "no-domain-to-application",
-      comment:
-        "Domain layer must not import from Application. See LAYERS.md.",
+      comment: "Domain layer must not import from Application. See LAYERS.md.",
       severity: "error",
       from: { path: "^src/domain" },
       to: { path: "^src/application" },
     },
     {
       name: "no-domain-to-presentation",
-      comment:
-        "Domain layer must not import from Presentation. See LAYERS.md.",
+      comment: "Domain layer must not import from Presentation. See LAYERS.md.",
       severity: "error",
       from: { path: "^src/domain" },
       to: { path: "^src/presentation" },
     },
     {
       name: "no-infrastructure-to-application",
-      comment:
-        "Infrastructure layer must not import from Application. See LAYERS.md.",
+      comment: "Infrastructure layer must not import from Application. See LAYERS.md.",
       severity: "error",
       from: { path: "^src/infrastructure" },
       to: { path: "^src/application" },
     },
     {
       name: "no-infrastructure-to-presentation",
-      comment:
-        "Infrastructure layer must not import from Presentation. See LAYERS.md.",
+      comment: "Infrastructure layer must not import from Presentation. See LAYERS.md.",
       severity: "error",
       from: { path: "^src/infrastructure" },
       to: { path: "^src/presentation" },
     },
     {
       name: "no-application-to-presentation",
-      comment:
-        "Application layer must not import from Presentation. See LAYERS.md.",
+      comment: "Application layer must not import from Presentation. See LAYERS.md.",
       severity: "error",
       from: { path: "^src/application" },
       to: { path: "^src/presentation" },
@@ -92,7 +86,7 @@ module.exports = {
       },
     },
   },
-};
+}
 ```
 
 ---
@@ -140,9 +134,7 @@ Or integrate with `lint-staged` in `package.json`:
 ```json
 {
   "lint-staged": {
-    "src/**/*.ts": [
-      "npx depcruise --config .dependency-cruiser.cjs"
-    ]
+    "src/**/*.ts": ["npx depcruise --config .dependency-cruiser.cjs"]
   }
 }
 ```

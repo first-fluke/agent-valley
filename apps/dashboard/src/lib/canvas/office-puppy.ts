@@ -1,6 +1,7 @@
 import { Container, Sprite, type Ticker } from "pixi.js"
 import { TILE_SIZE } from "@/features/office/utils/office-layout"
 import { getPuppyTexture } from "@/lib/canvas/sprite-generator"
+import { requireCanvasValue } from "./required-value"
 
 const WANDER_SPEED = 0.6
 const WALK_FRAME_INTERVAL = 250
@@ -31,7 +32,10 @@ export class OfficePuppy {
     this.container.addChild(this.sprite)
 
     // Start at a random walkable tile
-    const startTile = walkableTiles[Math.floor(Math.random() * walkableTiles.length)]!
+    const startTile = requireCanvasValue(
+      walkableTiles[Math.floor(Math.random() * walkableTiles.length)],
+      "a starting walkable tile",
+    )
     this.container.x = startTile.col * TILE_SIZE + 6
     this.container.y = startTile.row * TILE_SIZE + 6
     this.targetX = this.container.x
@@ -104,7 +108,10 @@ export class OfficePuppy {
   }
 
   private pickTarget() {
-    const tile = this.walkableTiles[Math.floor(Math.random() * this.walkableTiles.length)]!
+    const tile = requireCanvasValue(
+      this.walkableTiles[Math.floor(Math.random() * this.walkableTiles.length)],
+      "a target walkable tile",
+    )
     this.targetX = tile.col * TILE_SIZE + 6
     this.targetY = tile.row * TILE_SIZE + 6
     this.isMoving = true

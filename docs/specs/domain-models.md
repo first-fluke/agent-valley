@@ -53,12 +53,12 @@ Workspace {
 Replace all characters outside the `[A-Za-z0-9._-]` range in `Issue.identifier` with `_`.
 
 | Input (identifier) | Output (key) |
-|---|---|
-| `ACR-42` | `ACR-42` |
-| `ACR 42` | `ACR_42` |
-| `ACR/42` | `ACR_42` |
-| `ACR#42` | `ACR_42` |
-| `ACR.42` | `ACR.42` |
+| ------------------ | ------------ |
+| `ACR-42`           | `ACR-42`     |
+| `ACR 42`           | `ACR_42`     |
+| `ACR/42`           | `ACR_42`     |
+| `ACR#42`           | `ACR_42`     |
+| `ACR.42`           | `ACR.42`     |
 
 Directory path: `{WORKSPACE_ROOT}/{workspace_key}/`
 

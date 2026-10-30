@@ -7,15 +7,15 @@
 
 ## Recommended Stack
 
-| Role | Choice |
-|---|---|
-| Language | Go 1.22+ |
-| HTTP Server | Echo v4 |
-| SQL Queries | sqlx |
-| DB Migrations | golang-migrate |
-| Testing | testify |
-| Environment Variables | godotenv |
-| Architecture/Code Linter | golangci-lint |
+| Role                     | Choice         |
+| ------------------------ | -------------- |
+| Language                 | Go 1.22+       |
+| HTTP Server              | Echo v4        |
+| SQL Queries              | sqlx           |
+| DB Migrations            | golang-migrate |
+| Testing                  | testify        |
+| Environment Variables    | godotenv       |
+| Architecture/Code Linter | golangci-lint  |
 
 ---
 

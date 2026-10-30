@@ -1,6 +1,7 @@
 import { Container, Sprite, type Ticker } from "pixi.js"
 import { TILE_SIZE } from "@/features/office/utils/office-layout"
 import { getCockatooTexture } from "@/lib/canvas/sprite-generator"
+import { requireCanvasValue } from "./required-value"
 
 const FLY_SPEED = 1.8
 const FLY_FRAME_INTERVAL = 150
@@ -31,7 +32,7 @@ export class OfficeCockatoo {
 
     // Start perched on a random plant
     this.currentPlantIndex = Math.floor(Math.random() * plantPositions.length)
-    const startPlant = plantPositions[this.currentPlantIndex]!
+    const startPlant = requireCanvasValue(plantPositions[this.currentPlantIndex], "a starting plant")
     this.container.x = startPlant.col * TILE_SIZE + 8
     this.container.y = startPlant.row * TILE_SIZE + PERCH_Y_OFFSET
     this.targetX = this.container.x
@@ -100,7 +101,7 @@ export class OfficeCockatoo {
   }
 
   private flyDistance(): number {
-    const plant = this.plantPositions[this.currentPlantIndex]!
+    const plant = requireCanvasValue(this.plantPositions[this.currentPlantIndex], "a target plant")
     const tx = plant.col * TILE_SIZE + 8
     const ty = plant.row * TILE_SIZE + PERCH_Y_OFFSET
     const dx = tx - this.container.x
@@ -121,7 +122,7 @@ export class OfficeCockatoo {
     } while (nextIndex === this.currentPlantIndex)
 
     this.currentPlantIndex = nextIndex
-    const plant = this.plantPositions[this.currentPlantIndex]!
+    const plant = requireCanvasValue(this.plantPositions[this.currentPlantIndex], "a target plant")
     this.targetX = plant.col * TILE_SIZE + 8
     this.targetY = plant.row * TILE_SIZE + PERCH_Y_OFFSET
     this.isFlying = true
