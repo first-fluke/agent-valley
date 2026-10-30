@@ -4,7 +4,6 @@ import { open, readdir, realpath, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, sep } from "node:path"
 import { parseDocument } from "yaml"
 import { discoverMissionSkills, loadMissionSkillBodies } from "./skills"
-import type { Mission, Persona } from "./types"
 
 export interface PreparedOmaActor {
   agentId: string
@@ -19,10 +18,10 @@ export function requiresOmaActor(mission: { oma?: boolean; availableSkills?: rea
 }
 
 /** A fixed roster may select installed skills without replacing its Actor identities. */
-export function assignFixedActorSkills(
-  mission: Pick<Mission, "personas" | "availableSkills">,
+export function assignFixedActorSkills<TActor extends { id: string; skills: string[] }>(
+  mission: { personas: TActor[]; availableSkills?: readonly { name: string }[] },
   assignments: Record<string, string[]> | undefined,
-): Persona[] {
+): TActor[] {
   if (!assignments) return mission.personas
   const catalog = new Set(mission.availableSkills?.map((skill) => skill.name))
   const selected = new Map(Object.entries(assignments))
