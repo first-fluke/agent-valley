@@ -1,5 +1,7 @@
 # Install and operate Agent Valley
 
+For bounded real-code pilots, recovery and npm release acceptance, follow [production readiness](./production-readiness.md). It records the independently accepted AV code patch separately from its interrupted, incomplete native Mission. Publication has its own acceptance checks.
+
 ## Set up with a local agent
 
 Give your local agent [AGENT_SETUP.md](../../AGENT_SETUP.md) and the target repository. That single document contains the complete installation procedure. The user-facing initiating agent becomes the Chief Director using its trusted runtime identity. It pins the exact active session model only when confirmed; otherwise it passes `--model ''` to clear a stale pin and save the CLI's native default. An installer worker preserves that initiating session's vendor/model. Installed CLIs, OMA configuration, login state, and price do not select the Chief Director.

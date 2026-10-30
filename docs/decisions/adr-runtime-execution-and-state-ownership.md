@@ -9,7 +9,7 @@ The supplied `Agent_Valley_ATAM_CBAM_ADR.md` reconstructs a historical recommend
 
 This review uses repository baseline `f213d150678ec6480c5a6b95c77d24f278919730`. Current code already has durable Mission JSON, execution budgets, process identity checks, recovery of orphaned local processes, and reconciliation of uncertain external effects. LangGraph routes Chief stages through `coordinator-graph.ts`; AV stages and `MissionStore` own domain transitions and checkpoints. [0001](0001-turso-team-ledger.md) remains in effect.
 
-The concrete gaps are narrower: Chief bypasses the existing `AgentRunnerPort`; the spawn adapter loses lifecycle events emitted before subscription, reports completed handles as alive, and omits the full execution result. Local process cleanup must finish before a reviewer reads the workspace. A future runtime that continues after a coordinator restart also needs a durable barrier against resubmission.
+At that baseline, Chief bypassed the existing `AgentRunnerPort`; the spawn adapter lost lifecycle events emitted before subscription, reported completed handles as alive, and omitted the full execution result. The implemented local path addresses those gaps. Local process cleanup must finish before a reviewer reads the workspace. A future runtime that continues after a coordinator restart also needs a durable barrier against resubmission.
 
 ## Options
 
@@ -114,14 +114,30 @@ Interactive: [adr-runtime-execution-and-state-ownership.archify.html](./adr-runt
 
 Run `bun run test`, `bun run typecheck`, `bun run lint` and `bun run check:imports`; the repository coverage thresholds remain applicable. These checks include actual local HTTP JSON-RPC fixtures, source CLI processes, native-protocol stdio fixtures and real Git/file/verification operations. They do not certify a production A2A endpoint.
 
-The separate native-agent interruption/restart smoke remains incomplete. On
-2026-10-23, two real Codex calls completed, but the Mission stopped on an advisory
-JSON parsing error before work began. Its raw response was not retained, so that
-failure does not prove a particular message-format cause. The output-selection
-fix is covered by stdio regressions. A subsequent real-Mission attempt was denied
-by the local owner's runtime gate before execution. Actual work, interruption,
-same-Mission restart and final verification still require their own runtime
-evidence; automated fixtures do not establish that result.
+On 2026-10-28, a bounded real-Codex arithmetic fixture completed work interruption,
+operator reconciliation, same-Mission resume and trusted final verification. The
+original 1,200-second/16-run budget remained unchanged; 13 runs were used and 77.4
+seconds remained. Observed owned PIDs, process groups and active markers were
+clear. Its full-trace observer and host evidence publisher were validation-fixture
+controls, not general tracing enabled for ordinary orders. Earlier failed and
+denied attempts remain retained as separate evidence.
+
+On 2026-10-30, an AV code patch was independently accepted and applied to main.
+Its task review, fixed backend verification and five-criterion Chief final review
+passed; the operator independently confirmed seven tests, 21 preserved assertions
+and lint. The full native pilot remained incomplete: the precommitted
+1,770-second observation boundary interrupted reporting, the CLI exited 2 and the
+Mission stayed paused. All 12 spent runs settled, with known owned processes and
+active markers clear; the original goal, verifier, start and 1,800-second/20-run
+budget were preserved. The evidence retains source repairs, same-Mission retries
+and controller observation gaps. Exact native model and actual cost remain
+unknown, and npm publication is assessed separately.
+
+These bounded cases do not qualify other native providers, unattended continuous
+operation or production endpoints. This ADR remains Proposed; its economic and
+deployment-specific assessments remain open. See
+[production readiness](../guides/production-readiness.md) for supervised use,
+evidence retention and release acceptance.
 
 ## Remote backend gates
 
