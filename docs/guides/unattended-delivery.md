@@ -16,13 +16,15 @@ av order "Implement the scoped change" --once \
 
 The saved policy pins the branch, remote, original base, exact paths and message. A resume uses that policy rather than replacement delivery flags. Private settings, credentials and runtime paths cannot be delivered. A changed path outside the allowlist, a symlink, stale verification or an unexpected source change stops delivery while preserving the work.
 
+An operator can add `--delivery-skip-pre-push` alongside `--deliver` to authorize `git push --no-verify`. This skips only the pre-push hook; normal commit hooks and the Mission's independent reviews and trusted verification remain enabled. The optional setting is saved with the delivery policy and continuing-order settings, cannot be added or replaced on resume, and cannot be changed by an Actor. The push attempt records this authorization in Mission history and the rendered report without claiming that skipped checks passed. Omit the flag to keep normal push hooks.
+
 ## Completion and recovery
 
 The coordinator requires completed tasks, independent reviews, trusted verification and a current workspace fingerprint. A verified report is rendered from those records without another Actor call. Its final fingerprint, health and cancellation checks still apply.
 
 Director advice and the initial Chief plan allow one correction of a malformed structured response. The saved attempt count survives restarts, and both calls use the original run and time allowances. Advice that still cannot be parsed is recorded as unavailable for the Chief to assess. Task reviews, final review and trusted verification retain their completion gates.
 
-Delivery then records the patch digest, expected tree and unique nonce before changing the source. It runs the repository's normal commit and push hooks. The saved commit is bound to its original parent, tree, message and Mission nonce. Git output capture has a fixed size limit and timeout.
+Delivery then records the patch digest, expected tree and unique nonce before changing the source. By default, it runs the repository's normal commit and push hooks. The saved commit is bound to its original parent, tree, message and Mission nonce. Git output capture has a fixed size limit and timeout.
 
 The delivery phases are `pending`, `prepared`, `committed`, `pushed`, `unchanged` and `blocked`. A pending delivery keeps the verified work and resumes only delivery; it does not rerun the implementation. A completed-work order exits 2 until delivery succeeds or is explicitly recorded as unchanged. Source drift or a nonrecoverable condition remains blocked.
 

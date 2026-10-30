@@ -37,6 +37,7 @@ export const codeDeliveryPolicySchema = z.strictObject({
     .refine((paths) => new Set(paths).size === paths.length, "Select each delivery path once."),
   message: z.string().trim().min(1).max(8_000),
   baseSha: sha,
+  skipPrePush: z.boolean().optional(),
 })
 
 export const codeDeliverySchema = z

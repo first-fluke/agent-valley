@@ -48,6 +48,7 @@ export interface OrderOptions {
   deliveryPaths?: string
   deliveryMessage?: string
   deliveryRemote?: string
+  deliverySkipPrePush?: boolean
   /** Internal accepted operation snapshot; never changes the configuration repository. */
   baselineWorkspace?: string
   operationId?: string

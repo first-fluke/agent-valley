@@ -53,12 +53,16 @@ export async function runOrder(
   assertNotManagedRun()
   if (
     options.resume &&
-    [options.deliver, options.deliveryPaths, options.deliveryMessage, options.deliveryRemote].some(
-      (value) => value !== undefined,
-    )
+    [
+      options.deliver,
+      options.deliveryPaths,
+      options.deliveryMessage,
+      options.deliveryRemote,
+      options.deliverySkipPrePush,
+    ].some((value) => value !== undefined)
   )
     throw new Error(
-      "Code delivery retains its saved branch, paths and commit message. Resume without replacement delivery options.",
+      "Code delivery retains its saved branch, paths, commit message and hook policy. Resume without replacement delivery options.",
     )
   if (
     !options.resume &&
@@ -395,6 +399,7 @@ export function registerChiefCommands(program: Command): void {
       "Commit message for the approved delivery, including required repository trailers",
     )
     .option("--delivery-remote <name>", "Configured Git remote for code delivery (default origin)")
+    .option("--delivery-skip-pre-push", "Authorize git push --no-verify for this delivery; commit hooks remain enabled")
     .option("--actor <type>", "Chief Director CLI (default: saved actor.type, otherwise an authenticated CLI)")
     .option("--model <id>", "Chief Director model (default: actor.model from config, otherwise the CLI default)")
     .option("--director <id>", "Chief Director Actor ID")

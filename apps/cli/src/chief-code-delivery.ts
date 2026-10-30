@@ -23,6 +23,7 @@ export interface CodeDeliveryOptions {
   deliveryPaths?: string[]
   deliveryMessage?: string
   deliveryRemote?: string
+  deliverySkipPrePush?: boolean
 }
 
 async function repositoryRoot(repository: string): Promise<string> {
@@ -52,7 +53,12 @@ export async function prepareCodeDelivery(
   options: CodeDeliveryOptions,
 ): Promise<CodeDelivery | undefined> {
   if (!options.deliver) {
-    if (options.deliveryPaths || options.deliveryMessage || options.deliveryRemote)
+    if (
+      options.deliveryPaths ||
+      options.deliveryMessage ||
+      options.deliveryRemote ||
+      options.deliverySkipPrePush !== undefined
+    )
       throw new Error("Set --deliver <branch> with explicit --delivery-paths before requesting code delivery.")
     return undefined
   }
@@ -72,6 +78,7 @@ export async function prepareCodeDelivery(
     paths: options.deliveryPaths,
     message: options.deliveryMessage ?? "fix: apply verified Agent Valley mission",
     baseSha: (await gitRead(root, ["rev-parse", "HEAD"])).trim(),
+    ...(options.deliverySkipPrePush !== undefined ? { skipPrePush: options.deliverySkipPrePush } : {}),
   })
   await gitRead(root, ["remote", "get-url", policy.remote])
   return { policy, phase: "pending", attempts: 0, updatedAt: new Date().toISOString() }
@@ -366,12 +373,26 @@ export async function deliverMissionCode(mission: Mission, store: MissionStore, 
       await save()
     }
     if ((await remoteState(mission, store, root, delivery, signal)) !== "delivered") {
+      if (delivery.policy.skipPrePush) {
+        mission.history.push({
+          at: new Date().toISOString(),
+          stage: "code-delivery-pre-push",
+          message:
+            "The operator authorized --delivery-skip-pre-push. This push attempt omits the pre-push hook; no pre-push check result is claimed. Commit hooks remain enabled.",
+        })
+        await save()
+      }
       try {
         await managedGit(
           mission,
           store,
           root,
-          ["push", delivery.policy.remote, `${delivery.commitSha}:refs/heads/${delivery.policy.branch}`],
+          [
+            "push",
+            ...(delivery.policy.skipPrePush ? ["--no-verify"] : []),
+            delivery.policy.remote,
+            `${delivery.commitSha}:refs/heads/${delivery.policy.branch}`,
+          ],
           signal,
         )
       } catch (error) {

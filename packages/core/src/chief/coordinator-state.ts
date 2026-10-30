@@ -3,6 +3,7 @@ import type { Mission } from "./types"
 export class ContractViolation extends Error {}
 
 export function createMissionContract(mission: Mission) {
+  const originalDelivery = mission.codeDelivery ? structuredClone(mission.codeDelivery) : undefined
   const immutable = {
     goal: mission.goal,
     verifyCommand: mission.verifyCommand,
@@ -10,6 +11,7 @@ export function createMissionContract(mission: Mission) {
     executionPolicy: JSON.stringify(mission.executionPolicy),
     metricSourcePolicy: JSON.stringify(mission.metricSourcePolicy),
     containerObservationPolicy: JSON.stringify(mission.containerObservationPolicy),
+    codeDeliveryPolicy: JSON.stringify(mission.codeDelivery?.policy),
   }
   let brief = mission.goalBrief ? JSON.stringify(mission.goalBrief) : undefined
   let checks = mission.verificationContract ? JSON.stringify(mission.verificationContract) : undefined
@@ -28,6 +30,7 @@ export function createMissionContract(mission: Mission) {
         JSON.stringify(mission.executionPolicy) === immutable.executionPolicy &&
         JSON.stringify(mission.metricSourcePolicy) === immutable.metricSourcePolicy &&
         JSON.stringify(mission.containerObservationPolicy) === immutable.containerObservationPolicy &&
+        JSON.stringify(mission.codeDelivery?.policy) === immutable.codeDeliveryPolicy &&
         (!brief || JSON.stringify(mission.goalBrief) === brief) &&
         (!checks || JSON.stringify(mission.verificationContract) === checks) &&
         mission.verificationContractSha256 === digest
@@ -41,6 +44,10 @@ export function createMissionContract(mission: Mission) {
       mission.containerObservationPolicy = immutable.containerObservationPolicy
         ? JSON.parse(immutable.containerObservationPolicy)
         : undefined
+      if (originalDelivery && immutable.codeDeliveryPolicy) {
+        mission.codeDelivery ??= structuredClone(originalDelivery)
+        mission.codeDelivery.policy = JSON.parse(immutable.codeDeliveryPolicy)
+      } else delete mission.codeDelivery
       if (brief) mission.goalBrief = JSON.parse(brief)
       if (checks) mission.verificationContract = JSON.parse(checks)
       mission.verificationContractSha256 = digest

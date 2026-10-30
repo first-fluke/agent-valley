@@ -44,6 +44,7 @@ const orderKeys = [
   "deliveryPaths",
   "deliveryMessage",
   "deliveryRemote",
+  "deliverySkipPrePush",
 ] as const
 const decisionBudgetKeys = ["runs", "duration", "cost", "accountRun", "accountCost"] as const
 
@@ -100,6 +101,8 @@ async function newOperation(
   root: string,
   id: string,
 ): Promise<ContinuousOperation> {
+  if (options.deliverySkipPrePush !== undefined && !options.deliver)
+    throw new Error("Set --deliver <branch> with --delivery-skip-pre-push before starting an order.")
   if (options.accountRun !== undefined || options.accountCost !== undefined)
     throw new Error("Use --resume <operation-id> to reconcile an active decision run's observed cost.")
   if (!charter?.trim() || charter.length > 32_000)
