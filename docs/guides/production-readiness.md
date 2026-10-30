@@ -12,6 +12,8 @@ The original Mission started at `00:05:19.601 UTC`, with 20 runs, 1,800 seconds 
 
 The evidence retains two task-contract/Actor-skill source repairs and two normal retries of the same Mission. It also retains a controller correction for PID-less startup markers and the first CLI exit code's missing observation. The exact native model remains unconfirmed and actual cost is null. Private records, including `patch-acceptance.json`, remain under `.agents/results/runtime/real-code-pilot-20261030/`. The operator-owned verifier was outside the Actor's writable workspace; existing dependency links were reused without dependency or browser installation.
 
+Release-please owns the generated `CHANGELOG.md` format. Biome skips formatting for that file while retaining its other checks and formatting ordinary source and documentation.
+
 ## Supervised real-code procedure
 
 1. Record the source/base revision, intended files, selected Actor/vendor/model, permissions and trusted verification command. Keep production deployment, payment and posting access outside a file-change pilot. Prepare required OMA agent definitions and assigned skills before dispatch; a readiness failure remains unresolved.

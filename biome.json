@@ -33,6 +33,12 @@
   },
   "overrides": [
     {
+      "includes": ["CHANGELOG.md"],
+      "formatter": {
+        "enabled": false
+      }
+    },
+    {
       "includes": [
         "integrations/plugin.json",
         "integrations/.claude-plugin/plugin.json",
