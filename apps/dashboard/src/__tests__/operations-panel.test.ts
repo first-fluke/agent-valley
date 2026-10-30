@@ -6,6 +6,18 @@ import { ActiveAgentsPanel } from "@/features/orchestrator/components/active-age
 import { OperationsPanel } from "@/features/orchestrator/components/operations-panel"
 import { useLocalOrchestrator } from "@/features/team/hooks/use-local-orchestrator"
 
+type LocalOrchestratorHarnessProps = {
+  state: Parameters<typeof useLocalOrchestrator>[0]
+  status: Parameters<typeof useLocalOrchestrator>[1]
+  capture: (result: ReturnType<typeof useLocalOrchestrator>) => void
+}
+
+function LocalOrchestratorHarness({ state, status, capture }: LocalOrchestratorHarnessProps) {
+  const result = useLocalOrchestrator(state, status)
+  capture(result)
+  return null
+}
+
 const state: OrchestratorState = {
   isRunning: true,
   lastEventAt: null,
@@ -92,20 +104,21 @@ describe("operator dashboard rendering", () => {
 
   test("local team state uses routed agent types and excludes finished workspaces", () => {
     let result: ReturnType<typeof useLocalOrchestrator> | undefined
-    function Probe() {
-      result = useLocalOrchestrator(
-        {
+    renderToStaticMarkup(
+      createElement(LocalOrchestratorHarness, {
+        state: {
           ...state,
           activeWorkspaces: [
             { issueId: "1", key: "AV-1", status: "running", startedAt: "today", agentType: "claude" },
             { issueId: "2", key: "AV-2", status: "failed", startedAt: "today" },
           ],
         },
-        "open",
-      )
-      return null
-    }
-    renderToStaticMarkup(createElement(Probe))
+        status: "open",
+        capture: (value) => {
+          result = value
+        },
+      }),
+    )
     expect(result?.teamState?.nodes[0]?.activeIssues).toEqual([
       { issueId: "1", issueKey: "AV-1", agentType: "claude", startedAt: "today" },
     ])
@@ -113,11 +126,15 @@ describe("operator dashboard rendering", () => {
 
   test("a closed SSE connection marks the local node offline", () => {
     let result: ReturnType<typeof useLocalOrchestrator> | undefined
-    function Probe() {
-      result = useLocalOrchestrator(state, "closed")
-      return null
-    }
-    renderToStaticMarkup(createElement(Probe))
+    renderToStaticMarkup(
+      createElement(LocalOrchestratorHarness, {
+        state,
+        status: "closed",
+        capture: (value) => {
+          result = value
+        },
+      }),
+    )
     expect(result?.status).toBe("disconnected")
     expect(result?.teamState?.nodes[0]?.online).toBe(false)
   })
