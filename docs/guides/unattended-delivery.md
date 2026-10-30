@@ -38,7 +38,9 @@ av missions --watch
 
 The watcher checks saved Missions and continuing operations. It skips live owners and operation children handled by their parent. Matching local process markers can prove termination and permit the Chief to reassess the original task. Missing, reused, remote or uninspectable process identities do not authorize replay. Explicit operator stops and exhausted budgets remain stopped; automatic recovery retains the original start and spent allowances.
 
-Use an OS process supervisor for the watcher itself. On macOS, a user LaunchAgent can run the command with `RunAtLoad`, `KeepAlive.SuccessfulExit: false` and a restart throttle. Pin the executable and working directory, pass credential paths rather than secret values, and send logs to a managed log sink. The OS restarts a crashed watcher; the product watcher resumes saved work. A deliberate graceful stop can exit normally without an immediate restart.
+The supervisor observes the original deadline while its worker initializes or runs. A deadline requests termination of the owned worker, with bounded escalation if it ignores the first signal, and records a budget failure after confirmed exit. Unconfirmed termination preserves the lock and process evidence and returns an unresolved error. External cancellation keeps its separate interrupted outcome.
+
+Use an OS process supervisor for the watcher itself. On macOS, a user LaunchAgent can run the command with `RunAtLoad`, `KeepAlive.SuccessfulExit: false`, `ProcessType: Interactive` and a restart throttle. Background QoS can delay CLI initialization by minutes; the controlled 2026-10-30 comparison completed the same read-only command in 3.12 seconds with Interactive QoS while Background did not finish within 30 seconds. Pin the executable and working directory, pass credential paths rather than secret values, and send logs to a managed log sink. The OS restarts a crashed watcher; the product watcher resumes saved work. A deliberate graceful stop can exit normally without an immediate restart.
 
 ## Release acceptance
 

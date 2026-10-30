@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { pendingCodeDelivery } from "@agent-valley/core/chief/code-delivery-contract"
@@ -7,10 +6,13 @@ import { assertExecutionDeadline, executionState, MissionPause, recordPause } fr
 import { fallbackReport } from "@agent-valley/core/chief/reports"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
+import { markOperatingRunUnknown } from "@agent-valley/core/chief/usage"
 import type { OrderOptions } from "./chief-config"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
 import { reobserveLocalExecutions } from "./chief-local-recovery"
 import { orderExitCode } from "./chief-outcome"
+import { createDeadlineWorkerRunner } from "./chief-worker-deadline"
+import { runOrderWorker, WorkerTerminationError } from "./chief-worker-lifecycle"
 import { assertNotManagedRun } from "./managed-run"
 
 export function orderWorkerArgs(goal: string | undefined, options: OrderOptions, id: string): string[] {
@@ -52,28 +54,6 @@ export interface OrderSupervisorDependencies {
   signal?: AbortSignal
 }
 
-function runWorker(args: string[], root: string, signal: AbortSignal): Promise<number | null> {
-  return new Promise((resolveExit, reject) => {
-    const entry = process.argv[1]
-    if (!entry) {
-      reject(new Error("CLI entry point is unavailable. Run av order from the installed CLI."))
-      return
-    }
-    const child = spawn(process.execPath, [entry, ...args], { cwd: root, stdio: "inherit" })
-    const interrupt = () => child.kill("SIGTERM")
-    signal.addEventListener("abort", interrupt, { once: true })
-    if (signal.aborted) interrupt()
-    child.once("error", (error) => {
-      signal.removeEventListener("abort", interrupt)
-      reject(error)
-    })
-    child.once("exit", (code) => {
-      signal.removeEventListener("abort", interrupt)
-      resolveExit(code)
-    })
-  })
-}
-
 /** Parent owns restart scheduling; child owns the mission lock and every Actor process. */
 export async function superviseOrder(
   goal: string | undefined,
@@ -92,6 +72,7 @@ export async function superviseOrder(
     process.once("SIGINT", interrupt)
     process.once("SIGTERM", interrupt)
   }
+  const runWorker = createDeadlineWorkerRunner(store, id, controller.signal)
   let args = orderWorkerArgs(goal, options, id)
   let returned: Mission | undefined
   const waitForOwner = async () => {
@@ -121,7 +102,7 @@ export async function superviseOrder(
         args = orderWorkerArgs(undefined, { resume: id }, id)
       }
       if (controller.signal.aborted) break
-      let workerExit = await (dependencies.runWorker ?? runWorker)(args, root, controller.signal)
+      let workerExit = await runWorker(dependencies.runWorker ?? runOrderWorker, args, root)
       const competingOwner = await waitForOwner()
       let mission = await store.load(id).catch(() => undefined)
       if (!mission)
@@ -239,6 +220,8 @@ export async function superviseOrder(
     returned = await store.load(id)
     return returned
   } catch (error) {
+    // A child that could not be joined is not a competing owner to await indefinitely.
+    if (error instanceof WorkerTerminationError) throw error
     if (await store.isLocked(id)) {
       if (!controller.signal.aborted) await waitForOwner()
       returned = await store.load(id)
@@ -257,6 +240,25 @@ export async function superviseOrder(
           return latest
         }
         recordPause(latest, error)
+        if (error.kind === "budget") {
+          for (const run of latest.operations?.runs ?? []) {
+            if (!run.finishedAt && run.executionState !== "settled")
+              markOperatingRunUnknown(
+                run,
+                "The worker stopped at its original Mission deadline; runtime termination still requires process-guard proof.",
+              )
+          }
+          await store.save(latest)
+          try {
+            await store.recoverProcesses(id, latest)
+          } catch (cleanupError) {
+            latest.history.push({
+              at: new Date().toISOString(),
+              stage: "worker-cleanup-blocked",
+              message: String(cleanupError).slice(0, 2_000),
+            })
+          }
+        }
         latest.report = fallbackReport(latest)
         await store.save(latest)
         await saveAndDeliverMissionReport(latest, root)

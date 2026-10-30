@@ -105,7 +105,7 @@ describe("completed work with pending delivery", () => {
       expect(result.codeDelivery?.phase).toBe("blocked")
       expect(result.execution).toEqual(mission.execution)
       expect(result.tasks).toEqual(mission.tasks)
-      expect(worker).toHaveBeenCalledOnce()
+      expect(worker).toHaveBeenCalledTimes(kind === "expired" ? 0 : 1)
     },
   )
 
