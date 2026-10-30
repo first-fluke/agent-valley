@@ -231,6 +231,10 @@ export async function superviseOrder(
       const unlock = await store.lock(id)
       try {
         const latest = await store.load(id)
+        if (error.kind === "budget" && latest.status === "completed" && !pendingCodeDelivery(latest)) {
+          returned = latest
+          return latest
+        }
         if (latest.status === "completed" && latest.codeDelivery && pendingCodeDelivery(latest)) {
           latest.codeDelivery.phase = "blocked"
           latest.codeDelivery.error = error.message

@@ -1,3 +1,4 @@
+import { pendingCodeDelivery } from "@agent-valley/core/chief/code-delivery-contract"
 import { MissionPause } from "@agent-valley/core/chief/execution"
 import type { MissionStore } from "@agent-valley/core/chief/store"
 import { WorkerTerminationError } from "./chief-worker-lifecycle"
@@ -32,6 +33,8 @@ export function createDeadlineWorkerRunner(store: MissionStore, id: string, pare
           throw error
         })
         if (finished || controller.signal.aborted) return
+        // Reporting an already terminal outcome still goes through normal worker option validation.
+        if (mission?.status === "completed" && !pendingCodeDelivery(mission)) return
         if (mission?.executionPolicy && mission.execution) {
           deadline = Date.parse(mission.execution.startedAt) + mission.executionPolicy.maxDurationSec * 1_000
           if (!Number.isFinite(deadline))

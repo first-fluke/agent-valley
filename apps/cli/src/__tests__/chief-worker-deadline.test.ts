@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { CodeDelivery } from "@agent-valley/core/chief/code-delivery-contract"
 import { executionPolicySchema } from "@agent-valley/core/chief/execution"
 import { mission as missionFixture } from "@agent-valley/core/chief/reports.fixture"
 import { MissionStore } from "@agent-valley/core/chief/store"
@@ -21,7 +23,76 @@ afterEach(async () => {
 })
 type Worker = NonNullable<OrderSupervisorDependencies["runWorker"]>
 
+function pushedDelivery(): CodeDelivery {
+  return {
+    policy: {
+      branch: "main",
+      remote: "origin",
+      paths: ["allowed.ts"],
+      message: "fix: deliver",
+      baseSha: "a".repeat(40),
+    },
+    phase: "pushed",
+    attempts: 1,
+    nonce: randomUUID(),
+    treeSha: "b".repeat(40),
+    patchSha256: "c".repeat(64),
+    verifiedFingerprint: "d".repeat(64),
+    commitSha: "e".repeat(40),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
 describe("Mission deadline during worker execution", () => {
+  it.each([false, true])("retains an old completed outcome through the normal worker (pushed=%s)", async (pushed) => {
+    root = await mkdtemp(join(tmpdir(), "av-completed-deadline-"))
+    const store = new MissionStore(join(root, ".agent-valley", "missions"))
+    const mission = missionFixture()
+    mission.status = "completed"
+    mission.executionPolicy = executionPolicySchema.parse({ maxDurationSec: 1 })
+    mission.execution = { startedAt: new Date(Date.now() - 60_000).toISOString(), runsStarted: 4, retries: 1 }
+    if (pushed) mission.codeDelivery = pushedDelivery()
+    await store.save(mission)
+    const worker = vi.fn<Worker>().mockImplementation(async (args) => {
+      expect(args).toEqual(["order", "--once", "--worker", "--resume", mission.id])
+      return 0
+    })
+    const result = await superviseOrder(undefined, { resume: mission.id }, root, { runWorker: worker })
+    expect(result.status).toBe("completed")
+    expect(result.execution).toEqual(mission.execution)
+    expect(result.codeDelivery).toEqual(mission.codeDelivery)
+    expect(worker).toHaveBeenCalledOnce()
+  })
+
+  it.each([false, true])("preserves completion saved before a reporting stall (pushed=%s)", async (pushed) => {
+    root = await mkdtemp(join(tmpdir(), "av-reporting-deadline-"))
+    const store = new MissionStore(join(root, ".agent-valley", "missions"))
+    const mission = missionFixture()
+    mission.status = "executing"
+    mission.executionPolicy = executionPolicySchema.parse({ maxDurationSec: 1 })
+    mission.execution = { startedAt: new Date(Date.now() - 500).toISOString(), runsStarted: 4, retries: 1 }
+    await store.save(mission)
+    let completed: typeof mission | undefined
+    const worker = vi.fn<Worker>().mockImplementation(async (_args, _root, signal) => {
+      const latest = await store.load(mission.id)
+      latest.status = "completed"
+      if (pushed) latest.codeDelivery = pushedDelivery()
+      await store.save(latest)
+      completed = latest
+      await new Promise<void>((resolveExit) => {
+        signal.addEventListener("abort", () => resolveExit(), { once: true })
+        if (signal.aborted) resolveExit()
+      })
+      return null
+    })
+    const result = await superviseOrder(undefined, { resume: mission.id }, root, { runWorker: worker })
+    expect(result).toEqual(completed)
+    expect(result.status).toBe("completed")
+    expect(result.execution).toEqual(mission.execution)
+    expect(result.tasks).toEqual(mission.tasks)
+    expect(worker).toHaveBeenCalledOnce()
+  })
+
   it.each([
     { initial: false, rejectsOnAbort: false },
     { initial: true, rejectsOnAbort: false },
@@ -107,6 +178,7 @@ describe("Mission deadline during worker execution", () => {
     root = await mkdtemp(join(tmpdir(), "av-worker-deadline-pin-"))
     const store = new MissionStore(join(root, ".agent-valley", "missions"))
     const mission = missionFixture()
+    mission.status = "executing"
     mission.executionPolicy = executionPolicySchema.parse({ maxDurationSec: 1 })
     mission.execution = { startedAt: new Date(Date.now() - 500).toISOString(), runsStarted: 4, retries: 1 }
     await store.save(mission)
