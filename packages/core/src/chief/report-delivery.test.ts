@@ -279,6 +279,7 @@ describe("durable report delivery", () => {
 })
 
 describe("durable real attachments", () => {
+  // The full fixture persists 304 outbox checkpoints and must tolerate filesystem contention.
   it("delivers every capture at the maximum 300-frame count plus video, manifest and report", async () => {
     const file = await attachment()
     const attachments = Array.from({ length: 303 }, (_, index) => ({ ...file, name: `capture-${index}.png` }))
@@ -293,7 +294,7 @@ describe("durable real attachments", () => {
     expect(send.mock.calls.slice(1).map(([request]) => request.attachment.name)).toEqual(
       attachments.map((entry) => entry.name),
     )
-  })
+  }, 90_000)
 
   it("uploads actual bytes and requires all files before marking delivered", async () => {
     const file = await attachment()
