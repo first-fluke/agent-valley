@@ -87,13 +87,16 @@ describe("Chief Director permanent Technical Director advice", () => {
       runAgent.mockImplementation(async (...args) => {
         if (args[3] === "plan" && !planFailed) {
           planFailed = true
-          return "invalid planning response"
+          throw new Error("Planning interrupted before response")
         }
         return (await original?.(...args)) ?? ""
       })
-      await expect(coordinate(mission, ports)).rejects.toThrow("not valid JSON")
+      await coordinate(mission, ports)
+      expect(mission.status).toBe("paused")
+      expect(mission.error).toContain("Planning interrupted before response")
       expect(mission.plan).toBeUndefined()
       expect(mission.technicalReview).toBeDefined()
+      expect(runAgent.mock.calls.some((call) => call[3] === "work")).toBe(false)
       if (changed) mutate("external-change-before-plan")
       runAgent.mockClear()
       const resumed = validateMission(structuredClone(mission))
@@ -111,11 +114,14 @@ describe("Chief Director permanent Technical Director advice", () => {
     runAgent.mockImplementation(async (...args) => {
       if (args[3] === "plan" && !failed) {
         failed = true
-        return "invalid JSON"
+        throw new Error("Planning interrupted before response")
       }
       return (await original?.(...args)) ?? ""
     })
-    await expect(coordinate(mission, ports)).rejects.toThrow()
+    await coordinate(mission, ports)
+    expect(mission.status).toBe("paused")
+    expect(mission.error).toContain("Planning interrupted before response")
+    expect(runAgent.mock.calls.some((call) => call[3] === "work")).toBe(false)
     const resumed = validateMission(structuredClone(mission))
     const worker = resumed.personas.find((persona) => persona.id === "worker") as Persona
     worker.agentType = "claude"

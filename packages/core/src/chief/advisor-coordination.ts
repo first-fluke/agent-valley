@@ -1,6 +1,7 @@
 import { designPlanKey, designReviewPrompt } from "./design-lead"
 import { marketingPlanKey, marketingReviewPrompt } from "./marketing-lead"
 import { parseReview } from "./schemas"
+import { runStructuredStage, StructuredStageError } from "./structured-stage"
 import { technicalPlanKey, technicalReviewPrompt } from "./technical-lead"
 import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
 
@@ -47,8 +48,35 @@ export async function consultDirectors(
     await hooks.save(entry.stage, `${actor.id} is providing advice before the Chief Director chooses a plan.`)
     let review: ReturnType<typeof parseReview>
     try {
-      review = parseReview(await hooks.run(actor, entry.prompt(mission), entry.stage))
+      review = await runStructuredStage({
+        mission,
+        stage: entry.stage,
+        scopeKey: `${actor.id}:${planKey}:${fingerprint}`,
+        prompt: entry.prompt(mission),
+        run: (prompt) => hooks.run(actor, prompt, entry.stage),
+        parse: parseReview,
+        save: hooks.save,
+      })
     } catch (error) {
+      if (error instanceof StructuredStageError) {
+        delete mission[entry.field]
+        mission.history.push({
+          at: new Date().toISOString(),
+          stage: "director-advice-unavailable",
+          message: JSON.stringify({
+            stage: entry.stage,
+            reviewerId: actor.id,
+            planKey,
+            fingerprint,
+            reason: error.message.slice(0, 2_000),
+          }),
+        })
+        await hooks.save(
+          "advisory-unavailable",
+          `${actor.id} supplied no validated advisory response after bounded correction. The Chief must treat this as unavailable evidence, not approval.`,
+        )
+        return
+      }
       if (hooks.unavailable && (await hooks.unavailable(actor, entry.stage, error))) return
       throw error
     }

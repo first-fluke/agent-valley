@@ -11,6 +11,7 @@ import {
 } from "./execution"
 import { planPrompt } from "./prompts"
 import { parsePlanningResponse } from "./schemas"
+import { runStructuredStage } from "./structured-stage"
 
 export async function resumeMission(context: CoordinatorContext): Promise<StageTransition> {
   const { mission, ports, operatorGoal, operatorVerify, checkAbort, invalidate, save } = context
@@ -70,7 +71,15 @@ export async function planMission(context: CoordinatorContext): Promise<StageTra
       await save("container-observation", "Collected configured container evidence for mission planning.")
     await consultDirectors(mission, ports, { run, save })
     await checkpoint.transition("planning", "plan", "Chief Director is planning the mission.")
-    const planned = parsePlanningResponse(await run(persona(mission.chiefId), planPrompt(mission), "plan"), mission)
+    const planned = await runStructuredStage({
+      mission,
+      stage: "plan",
+      prompt: planPrompt(mission),
+      scopeKey: mission.initialFingerprint,
+      run: (prompt) => run(persona(mission.chiefId), prompt, "plan"),
+      parse: (output) => parsePlanningResponse(output, mission),
+      save,
+    })
     applyPlanningResult(mission, planned)
     contract.pin()
     await save("plan", `Chief Director planned ${mission.tasks.length} tasks.`)

@@ -20,6 +20,8 @@ The saved policy pins the branch, remote, original base, exact paths and message
 
 The coordinator requires completed tasks, independent reviews, trusted verification and a current workspace fingerprint. A verified report is rendered from those records without another Actor call. Its final fingerprint, health and cancellation checks still apply.
 
+Director advice and the initial Chief plan allow one correction of a malformed structured response. The saved attempt count survives restarts, and both calls use the original run and time allowances. Advice that still cannot be parsed is recorded as unavailable for the Chief to assess. Task reviews, final review and trusted verification retain their completion gates.
+
 Delivery then records the patch digest, expected tree and unique nonce before changing the source. It runs the repository's normal commit and push hooks. The saved commit is bound to its original parent, tree, message and Mission nonce. Git output capture has a fixed size limit and timeout.
 
 The delivery phases are `pending`, `prepared`, `committed`, `pushed`, `unchanged` and `blocked`. A pending delivery keeps the verified work and resumes only delivery; it does not rerun the implementation. A completed-work order exits 2 until delivery succeeds or is explicitly recorded as unchanged. Source drift or a nonrecoverable condition remains blocked.

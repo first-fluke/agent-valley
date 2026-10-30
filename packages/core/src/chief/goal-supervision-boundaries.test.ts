@@ -58,7 +58,9 @@ describe("Chief Director goal supervision boundaries", () => {
   it("requires interpretation, assumptions and observable criteria in the first planning response", async () => {
     const { mission, ports, runAgent } = fixture()
     runAgent.mockImplementationOnce(async () => JSON.stringify(plan))
+    runAgent.mockImplementationOnce(async () => JSON.stringify(plan))
     await expect(coordinate(mission, ports)).rejects.toThrow()
+    expect(runAgent.mock.calls.filter((call) => call[3] === "plan")).toHaveLength(2)
     expect(runAgent.mock.calls.some((call) => call[3] === "work")).toBe(false)
     expect(mission.goalBrief).toBeUndefined()
     expect(mission.report?.eli5).toBeTruthy()

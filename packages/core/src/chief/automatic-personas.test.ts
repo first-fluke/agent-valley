@@ -208,12 +208,14 @@ describe("automatic Actor planning", () => {
     const original = structuredClone(mission.personas)
     const { tasks } = planning()
     runAgent.mockImplementationOnce(async () => JSON.stringify({ tasks }))
+    runAgent.mockImplementationOnce(async () => JSON.stringify({ tasks }))
 
     await expect(coordinate(mission, ports)).rejects.toThrow()
 
     expect(mission.personas).toEqual(original)
     expect(mission.plan).toBeUndefined()
     expect(mission.tasks).toEqual([])
+    expect(runAgent.mock.calls.filter((call) => call[3] === "plan")).toHaveLength(2)
     expect(runAgent.mock.calls.some((call) => call[3] === "work")).toBe(false)
   })
 

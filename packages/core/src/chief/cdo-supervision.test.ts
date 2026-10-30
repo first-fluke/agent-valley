@@ -82,11 +82,15 @@ describe("Chief Director permanent Design Director advice", () => {
       runAgent.mockImplementation(async (...args) => {
         if (args[3] === "plan" && !failed) {
           failed = true
-          return "invalid plan"
+          throw new Error("Planning interrupted before response")
         }
         return (await original?.(...args)) ?? ""
       })
-      await expect(coordinate(mission, ports)).rejects.toThrow("not valid JSON")
+      await coordinate(mission, ports)
+      expect(mission.status).toBe("paused")
+      expect(mission.error).toContain("Planning interrupted before response")
+      expect(mission.plan).toBeUndefined()
+      expect(runAgent.mock.calls.some((call) => call[3] === "work")).toBe(false)
       if (changed) mutate("external-change")
       runAgent.mockClear()
       const resumed = validateMission(structuredClone(mission))
