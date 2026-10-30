@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.2.1](https://github.com/first-fluke/agent-valley/compare/v4.2.0...v4.2.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **chief:** resume service-owned work after OS shutdown ([0642bd6](https://github.com/first-fluke/agent-valley/commit/0642bd6fa29bbb923c6abdb5a30bdee961f6d8eb))
+
 ## [4.2.0](https://github.com/first-fluke/agent-valley/compare/v4.1.0...v4.2.0) (2026-10-30)
 
 
