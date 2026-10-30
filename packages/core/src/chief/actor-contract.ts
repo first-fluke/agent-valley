@@ -23,17 +23,23 @@ export const actorSchema = z
   })
   .transform(({ actorType, agentType, ...actor }): Actor => ({ ...actor, agentType: actorType ?? agentType ?? "" }))
 
-export const actorTaskSchema = z
-  .strictObject({
-    id,
-    title: text,
-    actorId: id.optional(),
-    personaId: id.optional(),
-    instructions: text,
-    acceptance: z.array(text).min(1).max(20),
-    dependencies: z.array(id).max(11),
-    effectScope: z.enum(["workspace", "external"]).optional(),
-  })
+const actorTaskInputSchema = z.strictObject({
+  id,
+  title: text,
+  actorId: id.optional(),
+  personaId: id.optional(),
+  instructions: text,
+  acceptance: z.array(text).min(1).max(20),
+  dependencies: z.array(id).max(11),
+  effectScope: z.enum(["workspace", "external"]).optional(),
+})
+
+/** Prompt keys come from the strict input schema, excluding the legacy assignment alias. */
+export const canonicalTaskResponseKeys = Object.freeze(
+  actorTaskInputSchema.keyof().options.filter((key) => key !== "personaId"),
+)
+
+export const actorTaskSchema = actorTaskInputSchema
   .superRefine((task, ctx) => {
     if (!task.actorId && !task.personaId)
       ctx.addIssue({ code: "custom", path: ["actorId"], message: "Assign a configured actorId to this task." })

@@ -131,6 +131,35 @@ describe("Director and Actor contract compatibility", () => {
     expect(JSON.stringify(mission)).toBe(before)
   })
 
+  it.each([false, true])("specifies the nested Task contract with generated roster=%s", (generated) => {
+    const { mission } = fixture()
+    if (generated) mission.availableAgents = ["codex", "cursor", "claude"]
+    const prompt = planPrompt(mission)
+    expect(prompt).toContain(
+      'Allowed keys for each tasks[] object: ["id","title","actorId","instructions","acceptance","dependencies","effectScope"].',
+    )
+    expect(prompt).toContain("skills, model and role are Actor fields, never Task fields")
+    expect(prompt).toContain("Use actorId for new responses; personaId is accepted only for legacy compatibility")
+  })
+
+  it.each([{ skills: [] }, { model: "codex" }, { role: "Worker" }])(
+    "rejects Actor metadata on a Task without changing the Mission: %j",
+    (metadata) => {
+      const { mission } = fixture()
+      const response = { ...actorPlanData(plan), goalBrief: brief }
+      const before = JSON.stringify(mission)
+      expect(() =>
+        parsePlanningResponse(
+          JSON.stringify({ ...response, tasks: [{ ...response.tasks?.[0], ...metadata }] }),
+          mission,
+        ),
+      ).toThrow(/Unrecognized key/)
+      expect(JSON.stringify(mission)).toBe(before)
+      expect(parsePlanningResponse(JSON.stringify(response), mission).plan).toEqual(plan)
+      expect(parsePlanningResponse(JSON.stringify({ ...plan, goalBrief: brief }), mission).plan).toEqual(plan)
+    },
+  )
+
   it("accepts canonical recovery assignments and preserves legacy task state IDs", () => {
     const { mission } = fixture()
     mission.plan = structuredClone(plan)

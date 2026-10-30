@@ -1,4 +1,4 @@
-import { actorData, actorPlanData, actorTaskData } from "./actor-contract"
+import { actorData, actorPlanData, actorTaskData, canonicalTaskResponseKeys } from "./actor-contract"
 import { requiresOmaActor } from "./oma-actor"
 import { operationsEvidence } from "./operations-report"
 import { reviewResponseFormat } from "./review-response"
@@ -97,13 +97,15 @@ export function planPrompt(mission: Mission): string {
         ]
       : []),
     `Allowed top-level response keys for this mode: ${JSON.stringify(responseKeys)}. Return no other root keys.`,
+    `Allowed keys for each tasks[] object: ${JSON.stringify(canonicalTaskResponseKeys)}. Return no other Task keys. Use actorId for new responses; personaId is accepted only for legacy compatibility.`,
+    "skills, model and role are Actor fields, never Task fields. Assign skills to the Actor roster entry, not to its tasks. With a fixed roster, use its existing Actor capabilities without adding Actor fields to tasks.",
     "Mission input identity fields are metadata, not response fields. Do not copy chiefId, technicalLeadId, designLeadId or marketingLeadId into the response root, or copy other Mission metadata. When generating a roster, retain nominated companions only as entries in actors with their supplied ids. With a fixed roster, use configured Actor ids without returning actors.",
     ...(mission.availableAgents
       ? [
           `The operator's Chief Director CLI is fixed: ${JSON.stringify({ id: mission.chiefId, actorType: chief?.agentType })}. Do not replace it with another vendor. Omit model from every response Actor; the scheduler retains the selected Chief Director model and Actors use their CLI defaults.`,
           mission.availableSkills?.length
             ? "Select relevant skills only from the verified installed catalog. Assign tasks to generated Actor ids. Return actors, tasks and the requested goalBrief together in one JSON object within the 8,000-character limit."
-            : "Set skills: [] because no installed skill capabilities were supplied; describe expertise in role. Assign tasks to generated Actor ids. Return actors, tasks and any requested goalBrief together in one JSON object within the 8,000-character limit.",
+            : "Set skills: [] on each Actor because no installed skill capabilities were supplied; describe expertise in role. Assign tasks to generated Actor ids. Return actors, tasks and any requested goalBrief together in one JSON object within the 8,000-character limit.",
           'Return ONLY JSON: {"actors":[{"id":"...","name":"...","role":"...","actorType":"...","skills":[]}],"tasks":[{"id":"task-1","title":"...","actorId":"...","instructions":"...","acceptance":["..."],"dependencies":[]}]}',
         ]
       : [
