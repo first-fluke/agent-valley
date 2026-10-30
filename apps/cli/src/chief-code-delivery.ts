@@ -257,6 +257,23 @@ export async function deliverMissionCode(mission: Mission, store: MissionStore, 
         throw new DeliveryBlocked(
           "Source HEAD or its clean index changed since delivery was authorized. Preserve edits and restore the pinned source before resuming.",
         )
+      const baseObject = ["cat-file", "-e", `${delivery.policy.baseSha}^{commit}`]
+      if (
+        !(await gitRead(mission.workspace.path, baseObject).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        // Continuing snapshots can predate the commit created by the previous source delivery.
+        await managedGit(
+          mission,
+          store,
+          mission.workspace.path,
+          ["fetch", "--no-tags", "--no-write-fetch-head", "--", root, delivery.policy.baseSha],
+          signal,
+        )
+        await gitRead(mission.workspace.path, baseObject)
+      }
       const prepared = await prepareDeliveryPatch(
         mission.workspace.path,
         delivery.policy.baseSha,
