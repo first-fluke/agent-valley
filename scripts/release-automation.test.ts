@@ -14,7 +14,7 @@ function releasePull() {
     state: "open",
     merged: false,
     draft: false,
-    title: "chore(main): release agent-valley 0.4.0",
+    title: "chore(main): release agent-valley 4.0.1",
     user: { login: "github-actions[bot]", type: "Bot" },
     labels: [{ name: "autorelease: pending" }],
     head: { ref: branch, sha: headSha, repo: { ...repository } },
@@ -22,6 +22,13 @@ function releasePull() {
   }
 }
 type Pull = ReturnType<typeof releasePull>
+
+function releaseFiles(version: string): Record<string, string | undefined> {
+  return {
+    "package.json": JSON.stringify({ version }),
+    ".release-please-manifest.json": JSON.stringify({ ".": version }),
+  }
+}
 
 function fixture() {
   const state = {
@@ -32,6 +39,10 @@ function fixture() {
     headTree: "d".repeat(40),
     mergedTree: "d".repeat(40),
     merge: { merged: true, sha: mergeSha, message: "Pull Request successfully merged" },
+    files: {
+      [mainSha]: releaseFiles("4.0.0"),
+      [headSha]: releaseFiles("4.0.1"),
+    } as Record<string, Record<string, string | undefined>>,
   }
   const github = {
     paginate: vi.fn(async () => state.listed),
@@ -48,6 +59,11 @@ function fixture() {
         })),
       },
       repos: {
+        getContent: vi.fn(async ({ ref, path }: { ref: string; path: string }) => {
+          const content = state.files[ref]?.[path]
+          if (content === undefined) throw new Error("404 Not Found")
+          return { data: { type: "file", path, encoding: "base64", content: Buffer.from(content).toString("base64") } }
+        }),
         compareCommitsWithBasehead: vi.fn(async () => ({
           data: { base_commit: { sha: mainSha }, merge_base_commit: { sha: state.mergeBase } },
         })),
@@ -91,6 +107,11 @@ describe("release PR discovery", () => {
       ...context.repo,
       basehead: `${mainSha}...${headSha}`,
     })
+    for (const ref of [mainSha, headSha]) {
+      for (const path of ["package.json", ".release-please-manifest.json"]) {
+        expect(f.github.rest.repos.getContent).toHaveBeenCalledWith({ ...context.repo, ref, path })
+      }
+    }
   })
 
   it("supports release-please's root branch", async () => {
@@ -132,6 +153,7 @@ describe("release PR discovery", () => {
   it("uses the live head rather than the stale list response", async () => {
     const f = fixture()
     f.state.live.head.sha = "d".repeat(40)
+    f.state.files[f.state.live.head.sha] = releaseFiles("4.0.1")
     await expect(discoverReleaseCandidate(f)).resolves.toMatchObject({ headSha: "d".repeat(40) })
   })
 
@@ -158,6 +180,7 @@ describe("verified release PR merge", () => {
     expect(f.github.rest.pulls.get).toHaveBeenCalledTimes(2)
     expect(f.github.rest.git.getRef).toHaveBeenCalledTimes(2)
     expect(f.github.rest.repos.compareCommitsWithBasehead).toHaveBeenCalledTimes(2)
+    expect(f.github.rest.repos.getContent).toHaveBeenCalledTimes(8)
     expect(f.github.rest.pulls.merge).toHaveBeenCalledWith({
       ...context.repo,
       pull_number: 16,
@@ -268,4 +291,96 @@ describe("verified release PR merge", () => {
     expect(f.github.rest.pulls.get).not.toHaveBeenCalled()
     expect(f.github.rest.pulls.merge).not.toHaveBeenCalled()
   })
+})
+
+describe.each(["discovery", "merge"] as const)("%s release version guard", (operation) => {
+  const run = (f: ReturnType<typeof fixture>) =>
+    operation === "discovery"
+      ? discoverReleaseCandidate(f)
+      : mergeReleaseCandidate({ ...f, candidate: verifiedCandidate() })
+
+  it.each([
+    ["4.0.0", "1.0.0"],
+    ["4.0.0", "4.0.0"],
+    ["4.0.0+old", "4.0.0+new"],
+    ["4.0.1", "4.0.1-rc.1"],
+    ["4.0.1-rc.10", "4.0.1-rc.2"],
+    ["4.0.1-alpha", "4.0.1-2"],
+    ["4.0.1-alpha.1", "4.0.1-alpha"],
+  ])("refuses non-increasing SemVer %s -> %s before any merge", async (base, candidate) => {
+    const f = fixture()
+    f.state.files[mainSha] = releaseFiles(base)
+    f.state.files[headSha] = releaseFiles(candidate)
+    await expect(run(f)).rejects.toThrow("must be greater than current main")
+    expect(f.github.rest.pulls.merge).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["4.0.9", "4.0.10"],
+    ["4.9.99", "4.10.0"],
+    ["9.99.99", "10.0.0"],
+    ["4.0.1-alpha", "4.0.1-alpha.1"],
+    ["4.0.1-alpha.1", "4.0.1-alpha.beta"],
+    ["4.0.1-beta.2", "4.0.1-beta.11"],
+    ["4.0.1-rc.1", "4.0.1"],
+    ["4.0.0", "4.0.1+build.2"],
+    ["4.0.9007199254740992", "4.0.9007199254740993"],
+  ])("accepts strictly increasing SemVer %s -> %s", async (base, candidate) => {
+    const f = fixture()
+    f.state.files[mainSha] = releaseFiles(base)
+    f.state.files[headSha] = releaseFiles(candidate)
+    await expect(run(f)).resolves.toBeDefined()
+  })
+
+  it.each([
+    ["type", "dir"],
+    ["path", "unrelated.json"],
+    ["encoding", "utf-8"],
+  ])("refuses an invalid GitHub content response %s", async (key, value) => {
+    const f = fixture()
+    f.github.rest.repos.getContent.mockResolvedValueOnce({
+      data: { type: "file", path: "package.json", encoding: "base64", content: "e30=", [key]: value },
+    })
+    await expect(run(f)).rejects.toThrow("cannot read valid package.json")
+    expect(f.github.rest.pulls.merge).not.toHaveBeenCalled()
+  })
+
+  describe.each([mainSha, headSha])("at pinned commit %s", (ref) => {
+    it.each(["1.0", "v4.0.1", "04.0.1", "4.0.1-01", "4.0.1-", "4.0.1+", " 4.0.1", "4.0.1\n"])(
+      "rejects malformed SemVer %j with repair instructions",
+      async (version) => {
+        const f = fixture()
+        f.state.files[ref] = releaseFiles(version)
+        await expect(run(f)).rejects.toThrow(/valid SemVer.*release-please/i)
+        expect(f.github.rest.pulls.merge).not.toHaveBeenCalled()
+      },
+    )
+
+    it("rejects divergent manifest and project versions", async () => {
+      const f = fixture()
+      f.state.files[ref][".release-please-manifest.json"] = JSON.stringify({ ".": "4.0.2" })
+      await expect(run(f)).rejects.toThrow("versions disagree")
+      expect(f.github.rest.pulls.merge).not.toHaveBeenCalled()
+    })
+
+    it.each(["package.json", ".release-please-manifest.json"])(
+      "fails closed when %s is missing or invalid",
+      async (path) => {
+        for (const content of [undefined, "{", "[]", "null", "{}", JSON.stringify({ version: 4, ".": null })]) {
+          const f = fixture()
+          f.state.files[ref][path] = content
+          await expect(run(f)).rejects.toThrow(new RegExp(`${path.replaceAll(".", "\\.")}.*release-please`, "i"))
+          expect(f.github.rest.pulls.merge).not.toHaveBeenCalled()
+        }
+      },
+    )
+  })
+})
+
+it("rereads version contents after discovery instead of trusting candidate metadata", async () => {
+  const f = fixture()
+  const candidate = await discoverReleaseCandidate(f)
+  f.state.files[headSha] = releaseFiles("1.0.0")
+  await expect(mergeReleaseCandidate({ ...f, candidate })).rejects.toThrow("must be greater than current main")
+  expect(f.github.rest.pulls.merge).not.toHaveBeenCalled()
 })
