@@ -4,6 +4,7 @@ import { open, readdir, realpath, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, sep } from "node:path"
 import { parseDocument } from "yaml"
 import { discoverMissionSkills, loadMissionSkillBodies } from "./skills"
+import type { Mission, Persona } from "./types"
 
 export interface PreparedOmaActor {
   agentId: string
@@ -15,6 +16,26 @@ export interface PreparedOmaActor {
 /** Receipt enforcement is optional; an installed OMA catalog always requires OMA execution inputs. */
 export function requiresOmaActor(mission: { oma?: boolean; availableSkills?: readonly unknown[] }): boolean {
   return Boolean(mission.oma || mission.availableSkills?.length)
+}
+
+/** A fixed roster may select installed skills without replacing its Actor identities. */
+export function assignFixedActorSkills(
+  mission: Pick<Mission, "personas" | "availableSkills">,
+  assignments: Record<string, string[]> | undefined,
+): Persona[] {
+  if (!assignments) return mission.personas
+  const catalog = new Set(mission.availableSkills?.map((skill) => skill.name))
+  const selected = new Map(Object.entries(assignments))
+  for (const [actorId, skills] of selected) {
+    if (!mission.personas.some((actor) => actor.id === actorId))
+      throw new Error(`Unknown fixed Actor ${actorId}. Select an existing Actor id in actorSkills.`)
+    for (const name of skills)
+      if (!catalog.has(name))
+        throw new Error(
+          `Actor ${actorId} skill ${name} is not in the installed skill catalog. Select a supplied skill.`,
+        )
+  }
+  return mission.personas.map((actor) => ({ ...actor, skills: [...(selected.get(actor.id) ?? actor.skills)] }))
 }
 
 interface InstalledProfile {

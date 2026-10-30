@@ -3,6 +3,18 @@ import type { Actor, ChiefPlan, ChiefTask } from "./types"
 
 const id = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/)
 const text = z.string().trim().min(1).max(32_000)
+const skillName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/)
+
+export const actorSkillAssignmentsSchema = z.record(
+  id,
+  z
+    .array(skillName)
+    .min(1)
+    .max(30)
+    .refine((skills) => new Set(skills).size === skills.length, {
+      message: "Duplicate Actor skill assignment. Select each installed skill once.",
+    }),
+)
 
 /** Canonical actor input is normalized to the native and saved agentType field. */
 export const actorSchema = z
@@ -13,7 +25,7 @@ export const actorSchema = z
     actorType: text.optional(),
     agentType: text.optional(),
     model: text.optional(),
-    skills: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/)).max(30),
+    skills: z.array(skillName).max(30),
   })
   .superRefine((actor, ctx) => {
     if (!actor.actorType && !actor.agentType)

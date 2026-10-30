@@ -43,6 +43,7 @@ export function planPrompt(mission: Mission): string {
     ...(mission.availableAgents ? ["actors"] : []),
     ...(mission.supervision ? ["goalBrief"] : []),
     ...(mission.verificationMode === "chief" ? ["verificationContract"] : []),
+    ...(!mission.availableAgents && requiresOmaActor(mission) ? ["actorSkills"] : []),
   ]
   return [
     "You are the Chief Director coordinating this mission. Understand the user's intent and the actual business and product context, then decide a strategy and plan the requested work.",
@@ -98,7 +99,12 @@ export function planPrompt(mission: Mission): string {
       : []),
     `Allowed top-level response keys for this mode: ${JSON.stringify(responseKeys)}. Return no other root keys.`,
     `Allowed keys for each tasks[] object: ${JSON.stringify(canonicalTaskResponseKeys)}. Return no other Task keys. Use actorId for new responses; personaId is accepted only for legacy compatibility.`,
-    "skills, model and role are Actor fields, never Task fields. Assign skills to the Actor roster entry, not to its tasks. With a fixed roster, use its existing Actor capabilities without adding Actor fields to tasks.",
+    "skills, model and role are Actor fields, never Task fields. When generating a roster, assign skills to its Actor entry. For a fixed roster, use the actorSkills contract when available and otherwise retain existing capabilities.",
+    ...(!mission.availableAgents && requiresOmaActor(mission)
+      ? [
+          'For a fixed roster, assign relevant supplied catalog skills through "actorSkills":{"existing-actor-id":["installed-skill-name"]}. Only skills may change; preserve every Actor id, CLI, model, name and role. Do not return an actors roster or put skills on tasks. Duplicate skills, unknown Actor ids and skills outside the supplied catalog are rejected.',
+        ]
+      : []),
     "Mission input identity fields are metadata, not response fields. Do not copy chiefId, technicalLeadId, designLeadId or marketingLeadId into the response root, or copy other Mission metadata. When generating a roster, retain nominated companions only as entries in actors with their supplied ids. With a fixed roster, use configured Actor ids without returning actors.",
     ...(mission.availableAgents
       ? [

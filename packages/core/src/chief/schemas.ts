@@ -23,7 +23,7 @@ export { reviewSchema } from "./mission-state-schema"
 
 import { isAbsolute } from "node:path"
 import { z } from "zod"
-import { actorSchema, actorTaskSchema } from "./actor-contract"
+import { actorSchema, actorSkillAssignmentsSchema, actorTaskSchema } from "./actor-contract"
 import { capturePolicySchema, captureResultSchema } from "./capture"
 import { containerObservationPolicySchema, containerObservationSnapshotSchema } from "./container-observation-policy"
 import { refineMissionContainerState } from "./container-observation-state"
@@ -32,7 +32,7 @@ import { executionPolicySchema, executionStateSchema } from "./execution"
 import { validateFinalReview } from "./goal-evidence"
 import { CMO_ROLE } from "./marketing-lead"
 import { metricSourcePolicySchema } from "./metric-source-policy"
-import { requiresOmaActor } from "./oma-actor"
+import { assignFixedActorSkills, requiresOmaActor } from "./oma-actor"
 import { chiefOperatingPolicySchema, chiefOperationsSchema } from "./operations"
 import { organizationContextSchema } from "./organization"
 import { chiefReportSchema } from "./reports"
@@ -184,7 +184,7 @@ export function parsePlanningResponse(
   goalBrief?: GoalBrief
   verificationContract?: import("./verification-contract").GoalVerificationContract
 } {
-  if (!mission.availableAgents && !mission.supervision) {
+  if (!mission.availableAgents && !mission.supervision && !requiresOmaActor(mission)) {
     const plan = parsePlan(source, mission.personas)
     validateOmaAssignments(plan, mission.personas, mission)
     return { personas: mission.personas, plan }
@@ -209,6 +209,10 @@ export function parsePlanningResponse(
     .strictObject({
       actors: roster,
       personas: roster,
+      actorSkills:
+        !mission.availableAgents && requiresOmaActor(mission)
+          ? actorSkillAssignmentsSchema.optional()
+          : z.never().optional(),
       tasks: planSchema.shape.tasks,
       goalBrief: mission.supervision ? goalBriefSchema : z.never().optional(),
       verificationContract:
@@ -223,7 +227,7 @@ export function parsePlanningResponse(
         ctx.addIssue({ code: "custom", path: ["actors"], message: "Return actors or legacy Actors, not both rosters." })
     })
     .parse(parseJson(source, "Planning"))
-  const personas = response.actors ?? response.personas ?? mission.personas
+  const personas = response.actors ?? response.personas ?? assignFixedActorSkills(mission, response.actorSkills)
   if (mission.availableAgents) validateAutomaticPersonas(personas, mission, true)
   const plan: ChiefPlan = { tasks: response.tasks }
   validatePlan(plan, personas)
