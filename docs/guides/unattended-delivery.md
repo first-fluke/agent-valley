@@ -42,18 +42,18 @@ This read-only command prints only a JSON array, without starting or resuming wo
 
 Each array row contains exactly these fields:
 
-| Field | Saved value |
-| --- | --- |
-| `id` | Mission ID |
-| `status` | Mission status |
-| `goal` | Full goal text, without truncation |
-| `workspacePath` | Mission workspace path |
-| `branch` | Mission workspace branch |
-| `completedTasks` | Number of tasks whose status is `completed` |
-| `totalTasks` | Number of saved tasks |
-| `reason` | `codeDelivery.error ?? execution.pauseReason ?? mission.error ?? null` |
-| `nextRunAt` | `codeDelivery.nextRunAt ?? execution.nextRunAt ?? null` |
-| `delivery` | `null` when no code delivery is recorded; otherwise exactly `{phase, commitSha}`, with `commitSha: null` when absent |
+| Field            | Saved value                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `id`             | Mission ID                                                                                                           |
+| `status`         | Mission status                                                                                                       |
+| `goal`           | Full goal text, without truncation                                                                                   |
+| `workspacePath`  | Mission workspace path                                                                                               |
+| `branch`         | Mission workspace branch                                                                                             |
+| `completedTasks` | Number of tasks whose status is `completed`                                                                          |
+| `totalTasks`     | Number of saved tasks                                                                                                |
+| `reason`         | `codeDelivery.error ?? execution.pauseReason ?? mission.error ?? null`                                               |
+| `nextRunAt`      | `codeDelivery.nextRunAt ?? execution.nextRunAt ?? null`                                                              |
+| `delivery`       | `null` when no code delivery is recorded; otherwise exactly `{phase, commitSha}`, with `commitSha: null` when absent |
 
 Delivery errors and schedules take precedence over execution pause reasons and schedules; the Mission error is the final reason fallback. Recorded strings and dates are preserved. `null` means no value was recorded and does not establish health or retry eligibility.
 
