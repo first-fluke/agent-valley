@@ -6,6 +6,18 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.3.0](https://github.com/first-fluke/agent-valley/compare/v4.2.1...v4.3.0) (2026-10-30)
+
+
+### Features
+
+* **cli:** expose machine-readable mission status ([0e1f6e9](https://github.com/first-fluke/agent-valley/commit/0e1f6e9099bb149004b6b62bf53e4072144a061c))
+
+
+### Bug Fixes
+
+* **dev:** check markdown before unattended delivery ([3325f48](https://github.com/first-fluke/agent-valley/commit/3325f480f371713fabd622e9f8a8838e16e0b5d3))
+
 ## [4.2.1](https://github.com/first-fluke/agent-valley/compare/v4.2.0...v4.2.1) (2026-10-30)
 
 
