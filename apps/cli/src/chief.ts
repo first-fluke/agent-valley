@@ -30,12 +30,11 @@ import {
 } from "./chief-continuous"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
 import { createMissionMetricPorts } from "./chief-metrics"
+import { registerMissionCommands } from "./chief-missions"
 import { orderExitCode, printOrderOutcome } from "./chief-outcome"
-import { registerMissionReconciliation } from "./chief-reconcile"
 import { applyResumeOptions, validateResumeOptions } from "./chief-resume"
 import { superviseOrder } from "./chief-supervisor"
 import { prepareChiefToolConfig } from "./chief-tool-config"
-import { watchOrders } from "./chief-watch"
 import { prepareMissionDependencies } from "./chief-workspace-dependencies"
 import { assertNotManagedRun } from "./managed-run"
 
@@ -456,25 +455,5 @@ export function registerChiefCommands(program: Command): void {
       }
     })
 
-  const missions = program
-    .command("missions")
-    .description("List saved Chief Director orders and their workspaces")
-    .option("--watch", "Resume due or interrupted orders from their saved checkpoints")
-    .option("--service", "Treat watcher SIGTERM as recoverable service shutdown; requires --watch")
-    .action(async (options: { watch?: boolean; service?: boolean }) => {
-      if (options.service && !options.watch) throw new Error("Use --service with av missions --watch.")
-      if (options.watch) {
-        await watchOrders(process.cwd(), { service: options.service })
-        return
-      }
-      const missions = await new MissionStore(join(process.cwd(), ".agent-valley/missions")).list()
-      if (!missions.length) console.log("No orders yet. Run bun av order --help.")
-      for (const mission of missions) {
-        console.log(
-          `${mission.id}  ${mission.status}  ${mission.tasks.filter((task) => task.status === "completed").length}/${mission.tasks.length}  ${mission.goal.slice(0, 100)}`,
-        )
-        console.log(`  ${mission.workspace.path}${mission.error ? `\n  ${mission.error}` : ""}`)
-      }
-    })
-  registerMissionReconciliation(missions)
+  registerMissionCommands(program)
 }

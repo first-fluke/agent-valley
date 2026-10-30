@@ -32,6 +32,33 @@ Before retrying a push, AV observes the remote branch. A confirmed commit, inclu
 
 ## Persistent watcher
 
+Controllers can read a single saved-status snapshot from the order-store working directory, where `.agent-valley/missions` holds the Mission records:
+
+```sh
+av missions --json
+```
+
+This read-only command prints only a JSON array, without starting or resuming work. Run it from the same directory used to create the orders, rather than their isolated Mission workspaces. An absent store or a store with no orders returns `[]`; unreadable or invalid records remain command errors rather than an empty result. `av missions` retains its human-readable output. Combining `--json` with `--watch` is rejected before the watcher starts; `--service` still requires `--watch`.
+
+Each array row contains exactly these fields:
+
+| Field | Saved value |
+| --- | --- |
+| `id` | Mission ID |
+| `status` | Mission status |
+| `goal` | Full goal text, without truncation |
+| `workspacePath` | Mission workspace path |
+| `branch` | Mission workspace branch |
+| `completedTasks` | Number of tasks whose status is `completed` |
+| `totalTasks` | Number of saved tasks |
+| `reason` | `codeDelivery.error ?? execution.pauseReason ?? mission.error ?? null` |
+| `nextRunAt` | `codeDelivery.nextRunAt ?? execution.nextRunAt ?? null` |
+| `delivery` | `null` when no code delivery is recorded; otherwise exactly `{phase, commitSha}`, with `commitSha: null` when absent |
+
+Delivery errors and schedules take precedence over execution pause reasons and schedules; the Mission error is the final reason fallback. Recorded strings and dates are preserved. `null` means no value was recorded and does not establish health or retry eligibility.
+
+Controllers must assess work completion and delivery separately. A `0/0` task count does not establish completion, and completed tasks alone do not establish successful delivery. For recorded code delivery, `pushed` and `unchanged` are successful phases; a commit SHA alone does not establish a push, deployment or publication.
+
 Set `chief.execution.auto_resume: true` in the `av.yaml` used by the order store, and keep the native CLI credentials available to the service account. Run the watcher from that same directory:
 
 ```sh
