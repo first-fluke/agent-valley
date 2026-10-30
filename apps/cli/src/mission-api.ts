@@ -229,7 +229,7 @@ export class MissionApi implements MissionApiPort {
             "Supervisor identity changed during cancellation. Inspect the original process; no signal was sent.",
           )
         if (current === "stopped") return { ...(await this.status(id)), cancelRequested: false }
-        ;(this.dependencies.signal ?? ((pid) => process.kill(pid, "SIGTERM")))(job.pid)
+        ;(this.dependencies.signal ?? ((pid) => process.kill(pid, "SIGINT")))(job.pid)
       }
       return { ...(await this.status(id)), cancelRequested: liveness === "running" }
     })

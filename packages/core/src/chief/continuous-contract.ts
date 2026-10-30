@@ -62,7 +62,7 @@ export const operationSchema = z
     charter: z.string().trim().min(1).max(32_000),
     settings: z.record(z.string().min(1).max(80), z.union([z.string().max(32_000), z.boolean()])),
     phase: z.enum(["deciding", "running", "accepting", "waiting", "paused", "completed"]),
-    pauseKind: z.enum(["interrupted", "blocked"]).optional(),
+    pauseKind: z.enum(["interrupted", "blocked", "service-shutdown"]).optional(),
     createdAt: timestampSchema,
     updatedAt: timestampSchema,
     completedCycles: z.number().int().min(0),

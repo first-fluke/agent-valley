@@ -12,6 +12,7 @@ import { prepareContinuousBaseline } from "@agent-valley/core/chief/continuous-w
 import { finalizeAbandonedRuns } from "@agent-valley/core/chief/execution"
 import { clearedGitEnvironment } from "@agent-valley/core/chief/parallel-git"
 import { markdown } from "@agent-valley/core/chief/reports"
+import { serviceShutdownPause } from "@agent-valley/core/chief/service-shutdown"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { writeTextAtomic } from "@agent-valley/core/util/atomic-json"
@@ -249,12 +250,13 @@ export async function runOperation(
   const storage = operationStore(root)
   const unlock = await storage.lock(id)
   const controller = new AbortController()
-  const stop = () => controller.abort()
+  const stop = () => controller.abort(dependencies.signal?.reason)
+  const terminate = () => controller.abort(options.service ? serviceShutdownPause() : undefined)
   dependencies.signal?.addEventListener("abort", stop, { once: true })
   if (dependencies.signal?.aborted) stop()
   if (!dependencies.signal) {
     process.once("SIGINT", stop)
-    process.once("SIGTERM", stop)
+    process.once("SIGTERM", terminate)
   }
   try {
     let operation: ContinuousOperation
@@ -349,13 +351,14 @@ export async function runOperation(
           return superviseOrder(
             saved ? undefined : goal,
             saved
-              ? { resume: missionId, once: true }
+              ? { resume: missionId, once: true, ...(options.service ? { service: true } : {}) }
               : {
                   ...(current.settings as OrderOptions),
                   once: true,
                   missionId,
                   baselineWorkspace: baselinePath,
                   operationId: current.id,
+                  ...(options.service ? { service: true } : {}),
                 },
             root,
             { signal: controller.signal },
@@ -380,7 +383,7 @@ export async function runOperation(
     dependencies.signal?.removeEventListener("abort", stop)
     if (!dependencies.signal) {
       process.removeListener("SIGINT", stop)
-      process.removeListener("SIGTERM", stop)
+      process.removeListener("SIGTERM", terminate)
     }
     await unlock()
   }
@@ -397,6 +400,7 @@ export function registerContinuousCommands(program: Command): void {
     .option("--director <id>", "Chief Director Actor ID")
     .option("--actors <file>", "Configured YAML Actor roster")
     .option("--oma", "Require OMA completion receipts for workers")
+    .option("--service", "Resume after OS service SIGTERM within saved limits; SIGINT still cancels")
     .option("--timeout <seconds>", "Timeout per Actor/check")
     .option("--repairs <count>", "Repair limit per task/final review")
     .option("--rounds <count>", "Recovery decision limit per improvement")

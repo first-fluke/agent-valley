@@ -38,6 +38,8 @@ Set `chief.execution.auto_resume: true` in the `av.yaml` used by the order store
 av missions --watch
 ```
 
+For an OS-owned job, add `--service` to both its initial `av order ... --service` command and `av missions --watch --service`. Only SIGTERM becomes a recorded service shutdown: the next watcher re-observes the same Mission or decision checkpoint, retains its goal, model, start and spent limits, and resumes eligible work or pending delivery. SIGINT and explicit API cancellation remain operator stops. Budget and integrity failures, uncertain external effects and unconfirmed process identities still prevent automatic replay; service shutdown does not establish termination or successful work. Without `--service`, SIGTERM retains its ordinary cancellation behavior.
+
 The watcher checks saved Missions and continuing operations. It skips live owners and operation children handled by their parent. Matching local process markers can prove termination and permit the Chief to reassess the original task. Missing, reused, remote or uninspectable process identities do not authorize replay. Explicit operator stops and exhausted budgets remain stopped; automatic recovery retains the original start and spent allowances.
 
 The supervisor observes the original deadline while its worker initializes or runs. A deadline requests termination of the owned worker, with bounded escalation if it ignores the first signal, and records a budget failure after confirmed exit. Unconfirmed termination preserves the lock and process evidence and returns an unresolved error. External cancellation keeps its separate interrupted outcome.

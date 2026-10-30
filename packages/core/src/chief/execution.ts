@@ -229,7 +229,7 @@ export function recordPause(mission: Mission, pause: MissionPause): void {
   state.pauseReason = pause.message
   state.failureKind = pause.kind
   if (pause.nextRunAt) state.nextRunAt = pause.nextRunAt
-  else delete state.nextRunAt
+  else if (pause.kind !== "service-shutdown") delete state.nextRunAt
   mission.status = pause.nextRunAt ? "waiting" : "paused"
   mission.error = pause.message
 }

@@ -119,7 +119,7 @@ export class OperationApi {
         await this.jobs.save(job)
         const checked = (this.dependencies.liveness ?? jobLiveness)(job)
         if (checked === "unknown") throw new Error("Operation process identity changed. No signal was sent.")
-        if (checked === "running") (this.dependencies.signal ?? ((pid) => process.kill(pid, "SIGTERM")))(job.pid)
+        if (checked === "running") (this.dependencies.signal ?? ((pid) => process.kill(pid, "SIGINT")))(job.pid)
       }
       return { ...(await this.status(id)), cancelRequested: current === "running" }
     })

@@ -13,6 +13,7 @@ export function validateResumeOptions(goal: string | undefined, options: OrderOp
     "resume",
     "worker",
     "supervise",
+    "service",
     "retry",
     "runs",
     "duration",

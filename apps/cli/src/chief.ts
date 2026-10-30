@@ -8,6 +8,11 @@ import { coordinate } from "@agent-valley/core/chief/coordinator"
 import { executionState, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
 import { loadOrganizationContext } from "@agent-valley/core/chief/organization"
 import { ChiefRuntime, missionIssue } from "@agent-valley/core/chief/runtime"
+import {
+  isServiceShutdown,
+  recordServiceShutdown,
+  serviceShutdownPause,
+} from "@agent-valley/core/chief/service-shutdown"
 import { discoverMissionSkills, prepareMissionSkills } from "@agent-valley/core/chief/skills"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
@@ -82,11 +87,12 @@ export async function runOrder(
         "interrupted",
       ),
     )
+  const terminate = () => (options.service ? abortController.abort(serviceShutdownPause()) : interrupt())
   const runtime = new ChiefRuntime(store, abortController.signal, (stage, persona) =>
     console.log(`[${stage}] ${persona.name} (${persona.agentType})`),
   )
   process.once("SIGINT", interrupt)
-  process.once("SIGTERM", interrupt)
+  process.once("SIGTERM", terminate)
   let mission: Mission | undefined
   let capture: MissionCapture | undefined
   let reportSaved = false
@@ -299,12 +305,19 @@ export async function runOrder(
   } finally {
     clearTimeout(deadlineTimer)
     process.removeListener("SIGINT", interrupt)
-    process.removeListener("SIGTERM", interrupt)
+    process.removeListener("SIGTERM", terminate)
     try {
       try {
         await finishCapture()
       } finally {
-        await runtime.close()
+        try {
+          await runtime.close()
+        } finally {
+          if (mission && isServiceShutdown(abortController.signal)) {
+            recordServiceShutdown(mission)
+            await store.save(mission)
+          }
+        }
       }
     } finally {
       await unlock()
@@ -424,6 +437,7 @@ export function registerChiefCommands(program: Command): void {
     .option("--resolve-effect <task-id>", "Reconcile an interrupted external action before resuming")
     .option("--effect-result <result>", "External destination inspection result: completed or not-applied")
     .option("--no-supervise", "With --once, run directly without worker crash restart or observation polling")
+    .option("--service", "Resume after OS service SIGTERM within saved limits; SIGINT still cancels")
     .addOption(new Option("--worker", "Internal supervised worker").hideHelp())
     .addOption(new Option("--mission-id <id>", "Internal mission identity").hideHelp())
     .addOption(new Option("--baseline-workspace <path>", "Internal accepted operation snapshot").hideHelp())
@@ -446,9 +460,11 @@ export function registerChiefCommands(program: Command): void {
     .command("missions")
     .description("List saved Chief Director orders and their workspaces")
     .option("--watch", "Resume due or interrupted orders from their saved checkpoints")
-    .action(async (options: { watch?: boolean }) => {
+    .option("--service", "Treat watcher SIGTERM as recoverable service shutdown; requires --watch")
+    .action(async (options: { watch?: boolean; service?: boolean }) => {
+      if (options.service && !options.watch) throw new Error("Use --service with av missions --watch.")
       if (options.watch) {
-        await watchOrders(process.cwd())
+        await watchOrders(process.cwd(), { service: options.service })
         return
       }
       const missions = await new MissionStore(join(process.cwd(), ".agent-valley/missions")).list()

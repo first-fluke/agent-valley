@@ -9,6 +9,7 @@ import {
 import { assertExecutionDeadline, MissionPause } from "@agent-valley/core/chief/execution"
 import { withMissionDeadline } from "@agent-valley/core/chief/execution-signal"
 import { finishLocalProcess } from "@agent-valley/core/chief/local-runner"
+import { interruptionPause, isServiceShutdown } from "@agent-valley/core/chief/service-shutdown"
 import type { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { runVerificationGate } from "@agent-valley/core/orchestrator/verification-gate"
@@ -101,6 +102,10 @@ async function privateDirectory(root: string, id: string): Promise<string> {
 }
 
 function assertLive(mission: Mission, signal?: AbortSignal) {
+  if (isServiceShutdown(signal)) {
+    assertExecutionDeadline(mission)
+    throw interruptionPause(signal, "Code delivery service is shutting down.")
+  }
   if (signal?.aborted)
     throw new DeliveryBlocked(
       "Code delivery was explicitly interrupted. Preserve its checkpoint and inspect the target before resuming.",
@@ -409,11 +414,16 @@ export async function deliverMissionCode(mission: Mission, store: MissionStore, 
     delete delivery.error
     await save()
   } catch (error) {
-    if (delivery.attempts === previousAttempts) delivery.attempts = Math.min(3, previousAttempts + 1)
     const deadline =
       mission.execution &&
       mission.executionPolicy &&
       Date.now() >= Date.parse(mission.execution.startedAt) + mission.executionPolicy.maxDurationSec * 1000
+    if (error instanceof MissionPause && error.kind === "service-shutdown" && !deadline) {
+      delivery.error = error.message
+      await save()
+      return
+    }
+    if (delivery.attempts === previousAttempts) delivery.attempts = Math.min(3, previousAttempts + 1)
     const blocked = error instanceof DeliveryBlocked || error instanceof MissionPause || signal?.aborted || deadline
     if (blocked || delivery.attempts >= 3) delivery.phase = "blocked"
     else delivery.nextRunAt = new Date(Date.now() + 5_000).toISOString()

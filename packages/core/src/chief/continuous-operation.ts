@@ -18,6 +18,7 @@ import {
   verifiedMissionEvidence,
 } from "./continuous-recovery"
 import { assertExecutionDeadline, classifyFailure, MissionPause } from "./execution"
+import { interruptionPause, isServiceShutdown } from "./service-shutdown"
 import type { Mission } from "./types"
 
 export interface ContinuousOperationPorts {
@@ -58,8 +59,13 @@ export async function runContinuousOperation(
   const pause = async (message: string) => {
     if (operation.phase !== "paused" && operation.phase !== "completed") operation.resumePhase = operation.phase
     operation.phase = "paused"
-    operation.pauseKind = ports.signal?.aborted ? "interrupted" : "blocked"
-    operation.error = message.slice(0, 16_000)
+    const shutdown = isServiceShutdown(ports.signal)
+    operation.pauseKind = shutdown ? "service-shutdown" : ports.signal?.aborted ? "interrupted" : "blocked"
+    operation.error = (
+      shutdown
+        ? "The OS-owned service is shutting down. The operation retained its child, decision and recovery checkpoints for automatic resumption within their original limits."
+        : message
+    ).slice(0, 16_000)
     await save()
     return operation
   }
@@ -94,10 +100,18 @@ export async function runContinuousOperation(
         mission?.executionPolicy && mission.execution
           ? Date.parse(mission.execution.startedAt) + mission.executionPolicy.maxDurationSec * 1000 - Date.parse(now())
           : Infinity
-      await ports.delay(Math.min(Date.parse(nextRunAt) - Date.parse(now()), remaining, 30_000), ports.signal)
+      try {
+        await ports.delay(Math.min(Date.parse(nextRunAt) - Date.parse(now()), remaining, 30_000), ports.signal)
+      } catch (error) {
+        if (mission) assertExecutionDeadline(mission, Date.parse(now()))
+        if (error instanceof MissionPause && error.kind !== "interrupted" && error.kind !== "service-shutdown")
+          throw error
+        if (ports.signal?.aborted) throw interruptionPause(ports.signal, "Operation recovery interrupted.")
+        throw error
+      }
     }
     if (mission) assertExecutionDeadline(mission, Date.parse(now()))
-    if (ports.signal?.aborted) throw new MissionPause("Operation recovery interrupted.", "interrupted")
+    if (ports.signal?.aborted) throw interruptionPause(ports.signal, "Operation recovery interrupted.")
   }
   const recoverChild = async (mission: Mission, context?: AutomaticRecoveryContext) => {
     const disposition = automaticMissionRecovery(mission, Date.parse(now()), context)
@@ -139,17 +153,31 @@ export async function runContinuousOperation(
     }
     await save()
     await waitForRecovery(disposition.waitUntil, mission)
+    const pendingRecovery = structuredClone(operation.recovery)
     operation.recovery.attempts += 1
     if (!continuation) operation.recovery.failedAttempts = failedAttempts + 1
     operation.recovery.disposition = "retrying"
     delete operation.recovery.nextRunAt
     await save()
     if (!operation.baseline) throw new Error("The original accepted baseline is missing from the recovery checkpoint.")
-    await ports.runMission(operation, mission.id, mission.goal, operation.baseline.path)
+    try {
+      const resumed = await ports.runMission(operation, mission.id, mission.goal, operation.baseline.path)
+      if (isServiceShutdown(ports.signal) && resumed.execution?.failureKind === "service-shutdown") {
+        operation.recovery = pendingRecovery
+        throw interruptionPause(ports.signal, "Operation child recovery interrupted.")
+      }
+    } catch (error) {
+      if (error instanceof MissionPause && error.kind === "service-shutdown") operation.recovery = pendingRecovery
+      throw error
+    }
     return true
   }
   const selectDecision = async (id: string): Promise<ContinuousDecision> => {
     while (true) {
+      const previous =
+        operation.recovery?.target === "decision" && operation.recovery.checkpointId === id
+          ? structuredClone(operation.recovery)
+          : undefined
       const prior =
         operation.recovery?.target === "decision" && operation.recovery.checkpointId === id
           ? operation.recovery.attempts
@@ -170,6 +198,16 @@ export async function runContinuousOperation(
       try {
         return continuousDecisionSchema.parse(await ports.decide(operation, id))
       } catch (error) {
+        if (error instanceof MissionPause && error.kind === "service-shutdown") {
+          operation.recovery = previous ?? {
+            target: "decision",
+            checkpointId: id,
+            attempts: prior,
+            disposition: "waiting",
+            reason: error.message.slice(0, 16_000),
+          }
+          throw error
+        }
         const reason = error instanceof Error ? error.message : String(error)
         const kind = error instanceof MissionPause ? error.kind : classifyFailure(reason)
         const invalid =
@@ -406,7 +444,7 @@ export async function runContinuousOperation(
       await save()
     }
   } catch (error) {
-    if (operation.recovery && error instanceof MissionPause) {
+    if (operation.recovery && error instanceof MissionPause && error.kind !== "service-shutdown") {
       operation.recovery.disposition = "protected"
       operation.recovery.reason = error.message.slice(0, 16_000)
     }

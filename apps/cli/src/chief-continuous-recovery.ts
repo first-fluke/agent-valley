@@ -9,6 +9,7 @@ import {
   MissionPause,
   recordPause,
 } from "@agent-valley/core/chief/execution"
+import { interruptionPause } from "@agent-valley/core/chief/service-shutdown"
 import type { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { abortableDelay } from "./chief-supervisor"
@@ -19,7 +20,8 @@ export function assertContinuousDecisionRecovery(mission: Mission): void {
     mission.status === "paused" &&
     state.failureKind !== "implementation" &&
     state.failureKind !== "provider" &&
-    state.failureKind !== "rate-limit"
+    state.failureKind !== "rate-limit" &&
+    state.failureKind !== "service-shutdown"
   )
     throw new MissionPause(
       mission.error ?? state.pauseReason ?? "The saved decision remains unresolved.",
@@ -38,7 +40,11 @@ export async function runContinuousDecision(
 ): Promise<ContinuousDecision> {
   assertContinuousDecisionRecovery(mission)
   const state = executionState(mission)
-  if (mission.status === "paused" && state.retries >= (mission.executionPolicy?.maxRetries ?? 0))
+  if (
+    mission.status === "paused" &&
+    state.failureKind !== "service-shutdown" &&
+    state.retries >= (mission.executionPolicy?.maxRetries ?? 0)
+  )
     throw new MissionPause(
       mission.error ?? "Bounded Chief decision recovery exhausted its attempts.",
       state.failureKind ?? "implementation",
@@ -52,7 +58,7 @@ export async function runContinuousDecision(
         : Infinity
       await delay(Math.min(Date.parse(state.nextRunAt) - Date.now(), remaining, 30_000), signal)
     }
-    if (signal?.aborted) throw new MissionPause("Operation decision interrupted.", "interrupted")
+    if (signal?.aborted) throw interruptionPause(signal, "Operation decision interrupted.")
     mission.status = "planning"
     delete mission.error
     delete state.pauseReason

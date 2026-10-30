@@ -44,6 +44,7 @@ export interface OrderOptions {
   worker?: boolean
   missionId?: string
   supervise?: boolean
+  service?: boolean
   deliver?: string
   deliveryPaths?: string
   deliveryMessage?: string

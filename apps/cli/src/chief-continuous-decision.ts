@@ -9,6 +9,7 @@ import { captureParallelBaseline } from "@agent-valley/core/chief/parallel-git"
 import { CHIEF_DECISION_RESPONSIBILITY, CHIEF_DIRECTOR_ROLE } from "@agent-valley/core/chief/prompts"
 import { renderReport } from "@agent-valley/core/chief/reports"
 import { ChiefRuntime } from "@agent-valley/core/chief/runtime"
+import { interruptionPause, isServiceShutdown, recordServiceShutdown } from "@agent-valley/core/chief/service-shutdown"
 import { discoverMissionSkills, prepareMissionSkills } from "@agent-valley/core/chief/skills"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { ChiefPorts, Mission } from "@agent-valley/core/chief/types"
@@ -125,8 +126,20 @@ export async function decideContinuousGoal(
       return parseContinuousDecision(result.message)
     }
     if (mission) {
+      const serviceRuns =
+        mission.history.at(-1)?.stage === "service-shutdown" && mission.execution?.failureKind === "unknown-effect"
+          ? (mission.operations?.runs.filter((run) => run.executionState === "unknown") ?? [])
+          : []
       await store.recoverProcesses(decisionId, mission)
       finalizeAbandonedRuns(mission)
+      if (
+        serviceRuns.length &&
+        serviceRuns.every((run) => run.executionRecovery === "local-process" && run.executionState === "settled") &&
+        !mission.tasks.some((task) => task.effectState === "unknown") &&
+        mission.execution
+      ) {
+        mission.execution.failureKind = "service-shutdown"
+      }
       assertContinuousDecisionRecovery(mission)
       // Automatic continuation retains the saved failure disposition and every spent reservation.
       await store.save(mission)
@@ -212,7 +225,8 @@ export async function decideContinuousGoal(
           )
       },
       () => {
-        if (dependencies.signal?.aborted) throw new MissionPause("Operation decision interrupted.", "interrupted")
+        if (dependencies.signal?.aborted)
+          throw interruptionPause(dependencies.signal, "Operation decision interrupted.")
       },
     )
     await consultContinuousDirectors(mission, ports, run)
@@ -260,7 +274,14 @@ export async function decideContinuousGoal(
     throw error
   } finally {
     try {
-      await runtime.close()
+      try {
+        await runtime.close()
+      } finally {
+        if (mission && isServiceShutdown(dependencies.signal)) {
+          recordServiceShutdown(mission)
+          await store.save(mission)
+        }
+      }
     } finally {
       await unlock()
     }

@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { pendingCodeDelivery } from "@agent-valley/core/chief/code-delivery-contract"
 import { automaticMissionRecovery, verifiedMissionEvidence } from "@agent-valley/core/chief/continuous-recovery"
+import { serviceShutdownPause } from "@agent-valley/core/chief/service-shutdown"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { operationStore, runOperation } from "./chief-continuous"
 import { reobserveLocalExecutions } from "./chief-local-recovery"
@@ -9,6 +10,7 @@ import { abortableDelay, superviseOrder } from "./chief-supervisor"
 import { assertNotManagedRun } from "./managed-run"
 
 interface WatchDependencies {
+  service?: boolean
   signal?: AbortSignal
   delay?: typeof abortableDelay
   mission?: typeof superviseOrder
@@ -18,12 +20,13 @@ interface WatchDependencies {
 export async function watchOrders(root = process.cwd(), dependencies: WatchDependencies = {}): Promise<void> {
   assertNotManagedRun()
   const controller = new AbortController()
-  const stop = () => controller.abort()
+  const stop = () => controller.abort(dependencies.signal?.reason)
+  const terminate = () => controller.abort(dependencies.service ? serviceShutdownPause() : undefined)
   dependencies.signal?.addEventListener("abort", stop, { once: true })
   if (dependencies.signal?.aborted) stop()
   if (!dependencies.signal) {
     process.once("SIGINT", stop)
-    process.once("SIGTERM", stop)
+    process.once("SIGTERM", terminate)
   }
   const missions = new MissionStore(join(root, ".agent-valley", "missions"))
   try {
@@ -44,16 +47,26 @@ export async function watchOrders(root = process.cwd(), dependencies: WatchDepen
               (mission.codeDelivery?.nextRunAt && Date.parse(mission.codeDelivery.nextRunAt) > Date.now())
             )
               continue
-            await (dependencies.mission ?? superviseOrder)(undefined, { resume: mission.id }, root, {
-              signal: controller.signal,
-            }).then(printOrderOutcome)
+            await (dependencies.mission ?? superviseOrder)(
+              undefined,
+              { resume: mission.id, ...(dependencies.service ? { service: true } : {}) },
+              root,
+              {
+                signal: controller.signal,
+              },
+            ).then(printOrderOutcome)
             continue
           }
           const recovery = automaticMissionRecovery(mission)
           if (!recovery.retry || (recovery.waitUntil && Date.parse(recovery.waitUntil) > Date.now())) continue
-          await (dependencies.mission ?? superviseOrder)(undefined, { resume: mission.id }, root, {
-            signal: controller.signal,
-          }).then(printOrderOutcome)
+          await (dependencies.mission ?? superviseOrder)(
+            undefined,
+            { resume: mission.id, ...(dependencies.service ? { service: true } : {}) },
+            root,
+            {
+              signal: controller.signal,
+            },
+          ).then(printOrderOutcome)
         } catch (error) {
           console.error(String(error))
         }
@@ -64,24 +77,35 @@ export async function watchOrders(root = process.cwd(), dependencies: WatchDepen
         if (operation.currentMissionId && (await missions.isLocked(operation.currentMissionId))) continue
         // Legacy and explicitly cancelled pauses remain operator-controlled.
         if (operation.phase === "paused") {
-          if (operation.pauseKind !== "blocked" || !operation.currentMissionId) continue
-          try {
-            const child = await reobserveLocalExecutions(await missions.load(operation.currentMissionId), missions)
-            if (child.codeDelivery?.phase === "blocked") continue
-            if (
-              !automaticMissionRecovery(child).retry &&
-              !(child.status === "completed" && verifiedMissionEvidence(child))
-            )
-              continue
-          } catch (error) {
-            console.error(String(error))
+          if (
+            operation.pauseKind !== "service-shutdown" &&
+            (operation.pauseKind !== "blocked" || !operation.currentMissionId)
+          )
             continue
+          if (operation.currentMissionId) {
+            try {
+              const child = await reobserveLocalExecutions(await missions.load(operation.currentMissionId), missions)
+              if (child.codeDelivery?.phase === "blocked") continue
+              if (
+                !automaticMissionRecovery(child).retry &&
+                !(child.status === "completed" && verifiedMissionEvidence(child))
+              )
+                continue
+            } catch (error) {
+              console.error(String(error))
+              continue
+            }
           }
         }
         try {
-          await (dependencies.operation ?? runOperation)(undefined, { resume: operation.id }, root, {
-            signal: controller.signal,
-          })
+          await (dependencies.operation ?? runOperation)(
+            undefined,
+            { resume: operation.id, ...(dependencies.service ? { service: true } : {}) },
+            root,
+            {
+              signal: controller.signal,
+            },
+          )
         } catch (error) {
           console.error(String(error))
         }
@@ -94,7 +118,7 @@ export async function watchOrders(root = process.cwd(), dependencies: WatchDepen
     dependencies.signal?.removeEventListener("abort", stop)
     if (!dependencies.signal) {
       process.removeListener("SIGINT", stop)
-      process.removeListener("SIGTERM", stop)
+      process.removeListener("SIGTERM", terminate)
     }
   }
 }

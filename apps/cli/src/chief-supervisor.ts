@@ -4,6 +4,11 @@ import { pendingCodeDelivery } from "@agent-valley/core/chief/code-delivery-cont
 import { automaticMissionRecovery } from "@agent-valley/core/chief/continuous-recovery"
 import { assertExecutionDeadline, executionState, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
 import { fallbackReport } from "@agent-valley/core/chief/reports"
+import {
+  isServiceShutdown,
+  recordServiceShutdown,
+  serviceShutdownPause,
+} from "@agent-valley/core/chief/service-shutdown"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { markOperatingRunUnknown } from "@agent-valley/core/chief/usage"
@@ -34,7 +39,7 @@ export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> 
     const abort = () => {
       clearTimeout(timer)
       signal?.removeEventListener("abort", abort)
-      reject(new Error("Order supervision interrupted."))
+      reject(signal?.reason instanceof MissionPause ? signal.reason : new Error("Order supervision interrupted."))
     }
     const timer = setTimeout(
       () => {
@@ -65,16 +70,27 @@ export async function superviseOrder(
   const id = options.resume ?? options.missionId ?? randomUUID()
   const store = new MissionStore(join(root, ".agent-valley/missions"))
   const controller = new AbortController()
-  const interrupt = () => controller.abort()
+  const interrupt = () => controller.abort(dependencies.signal?.reason)
+  const terminate = () => controller.abort(options.service ? serviceShutdownPause() : undefined)
   dependencies.signal?.addEventListener("abort", interrupt, { once: true })
   if (dependencies.signal?.aborted) interrupt()
   if (!dependencies.signal) {
     process.once("SIGINT", interrupt)
-    process.once("SIGTERM", interrupt)
+    process.once("SIGTERM", terminate)
   }
   const runWorker = createDeadlineWorkerRunner(store, id, controller.signal)
-  let args = orderWorkerArgs(goal, options, id)
+  const workerArgs = (goal: string | undefined, current: OrderOptions) =>
+    orderWorkerArgs(
+      goal,
+      {
+        ...current,
+        ...(options.service ? { service: true } : {}),
+      },
+      id,
+    )
+  let args = workerArgs(goal, options)
   let returned: Mission | undefined
+  let terminationFailure: WorkerTerminationError | undefined
   const waitForOwner = async () => {
     let observed = false
     while (await store.isLocked(id)) {
@@ -99,7 +115,7 @@ export async function superviseOrder(
           (["paused", "failed"].includes(current.status) && !automaticMissionRecovery(current).retry)
         )
           return current
-        args = orderWorkerArgs(undefined, { resume: id }, id)
+        args = workerArgs(undefined, { resume: id })
       }
       if (controller.signal.aborted) break
       let workerExit = await runWorker(dependencies.runWorker ?? runOrderWorker, args, root)
@@ -165,7 +181,7 @@ export async function superviseOrder(
           )
         }
         assertExecutionDeadline(mission)
-        args = orderWorkerArgs(undefined, { resume: id }, id)
+        args = workerArgs(undefined, { resume: id })
         continue
       }
       const recovery = automaticMissionRecovery(mission)
@@ -215,13 +231,16 @@ export async function superviseOrder(
         await (dependencies.delay ?? abortableDelay)(Math.min(1_000, remainingTime()), controller.signal)
       }
       assertExecutionDeadline(mission)
-      args = orderWorkerArgs(undefined, { resume: id }, id)
+      args = workerArgs(undefined, { resume: id })
     }
     returned = await store.load(id)
     return returned
   } catch (error) {
     // A child that could not be joined is not a competing owner to await indefinitely.
-    if (error instanceof WorkerTerminationError) throw error
+    if (error instanceof WorkerTerminationError) {
+      terminationFailure = error
+      throw error
+    }
     if (await store.isLocked(id)) {
       if (!controller.signal.aborted) await waitForOwner()
       returned = await store.load(id)
@@ -280,7 +299,17 @@ export async function superviseOrder(
   } finally {
     if (controller.signal.aborted && !(await store.isLocked(id))) {
       const existing = await store.load(id).catch(() => undefined)
-      if (existing?.status === "completed" && existing.codeDelivery && pendingCodeDelivery(existing)) {
+      if (existing && isServiceShutdown(controller.signal)) {
+        const unlock = await store.lock(id)
+        try {
+          const latest = await store.load(id)
+          recordServiceShutdown(latest, terminationFailure)
+          await store.save(latest)
+          if (returned) Object.assign(returned, latest)
+        } finally {
+          await unlock()
+        }
+      } else if (existing?.status === "completed" && existing.codeDelivery && pendingCodeDelivery(existing)) {
         const unlock = await store.lock(id)
         try {
           const latest = await store.load(id)
@@ -323,7 +352,7 @@ export async function superviseOrder(
     dependencies.signal?.removeEventListener("abort", interrupt)
     if (!dependencies.signal) {
       process.removeListener("SIGINT", interrupt)
-      process.removeListener("SIGTERM", interrupt)
+      process.removeListener("SIGTERM", terminate)
     }
   }
 }

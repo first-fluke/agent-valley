@@ -162,6 +162,7 @@ export const executionStateSchema = z.strictObject({
       "unknown-effect",
       "budget",
       "interrupted",
+      "service-shutdown",
       "chief-wait",
       "chief-unavailable",
       "integrity",
