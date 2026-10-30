@@ -48,7 +48,6 @@ describe("Chief Director permanent Marketing Director advice", () => {
       ["worker", "work"],
       ["cto", "review"],
       ["chief", "final-review"],
-      ["chief", "report"],
     ])
     expect(snapshots.find((value) => value.marketingReview)?.plan).toBeUndefined()
     expect(mission.marketingReview).toMatchObject({

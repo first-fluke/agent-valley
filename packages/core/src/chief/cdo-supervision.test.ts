@@ -44,7 +44,6 @@ describe("Chief Director permanent Design Director advice", () => {
       ["worker", "work"],
       ["cto", "review"],
       ["chief", "final-review"],
-      ["chief", "report"],
     ])
     expect(snapshots.find((value) => value.designReview)?.plan).toBeUndefined()
     expect(mission.designReview).toMatchObject({ reviewerId: "cdo", fingerprint: "initial", review: { passed: false } })

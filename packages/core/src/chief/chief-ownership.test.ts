@@ -144,7 +144,7 @@ describe("Chief owns mission recovery", () => {
       expect(calls(value, "work")).toHaveLength(1)
       expect(calls(value, "supervise")).toHaveLength(0)
       expect(calls(value, "plan")).toHaveLength(0)
-      expect(restored.execution).toMatchObject({ retries: 2, runsStarted: 7, startedAt: new Date(now).toISOString() })
+      expect(restored.execution).toMatchObject({ retries: 2, runsStarted: 6, startedAt: new Date(now).toISOString() })
     } finally {
       await rm(directory, { recursive: true, force: true })
     }

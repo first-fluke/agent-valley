@@ -63,7 +63,7 @@ describe("LangGraph Chief stage orchestration", () => {
       verification: { ok: true, fingerprint: "change-1" },
       finalReview: { passed: true },
     })
-    expect(runAgent.mock.calls.map((call) => call[3])).toEqual(["plan", "work", "review", "final-review", "report"])
+    expect(runAgent.mock.calls.map((call) => call[3])).toEqual(["plan", "work", "review", "final-review"])
     expect(verify).toHaveBeenCalledOnce()
   })
 
@@ -94,9 +94,9 @@ describe("LangGraph Chief stage orchestration", () => {
     expect(mission.tasks[0]?.attempts).toBe(11)
     expect(mission.repairRound).toBe(10)
     expect(mission.supervision?.rounds).toBe(0)
-    expect(reservedCalls).toEqual(Array.from({ length: 25 }, (_, index) => index + 8))
-    expect(mission.execution?.runsStarted).toBe(32)
-    expect(snapshots.at(-1)?.execution?.runsStarted).toBe(32)
+    expect(reservedCalls).toEqual(Array.from({ length: 24 }, (_, index) => index + 8))
+    expect(mission.execution?.runsStarted).toBe(31)
+    expect(snapshots.at(-1)?.execution?.runsStarted).toBe(31)
     const repairPrompts = runAgent.mock.calls.filter((call) => call[3] === "work").slice(1)
     repairPrompts.forEach((call, index) => {
       expect(call[1]).toContain(`Acceptance failure ${index + 1}`)
@@ -242,7 +242,7 @@ describe("LangGraph Chief stage orchestration", () => {
       await coordinate(second.mission, second.ports)
 
       expect(second.mission.status).toBe("completed")
-      expect(second.mission.execution?.runsStarted).toBe(14)
+      expect(second.mission.execution?.runsStarted).toBe(13)
       expect(first.mission.status).toBe("executing")
       expect(first.mission.execution?.runsStarted).toBe(5)
       expect(first.mission.fingerprint).toBe("initial")
@@ -255,11 +255,11 @@ describe("LangGraph Chief stage orchestration", () => {
       await running
     }
     expect(first.mission.status).toBe("completed")
-    expect(first.mission.execution?.runsStarted).toBe(8)
+    expect(first.mission.execution?.runsStarted).toBe(7)
     expect(first.runAgent.mock.calls.every((call) => call[2] === first.mission)).toBe(true)
     expect(second.runAgent.mock.calls.every((call) => call[2] === second.mission)).toBe(true)
-    expect(first.snapshots.at(-1)?.execution?.runsStarted).toBe(8)
-    expect(second.snapshots.at(-1)?.execution?.runsStarted).toBe(14)
+    expect(first.snapshots.at(-1)?.execution?.runsStarted).toBe(7)
+    expect(second.snapshots.at(-1)?.execution?.runsStarted).toBe(13)
   })
 
   it.each([

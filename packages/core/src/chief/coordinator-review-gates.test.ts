@@ -58,7 +58,6 @@ describe("configured Chief review gates", () => {
       "gate-review",
       "verify",
       "final-review",
-      "report",
     ])
     const gateCalls = runAgent.mock.calls.filter((call) => call[3] === "gate-review")
     expect(gateCalls.every((call) => call[0].id !== "worker")).toBe(true)
@@ -155,7 +154,7 @@ describe("configured Chief review gates", () => {
       await coordinate(resumed, ports)
 
       expect(resumed.status).toBe("completed")
-      expect(resumed.execution?.runsStarted).toBe(12)
+      expect(resumed.execution?.runsStarted).toBe(11)
       expect(resumed.supervision?.rounds).toBe(1)
       expect(resumed.gateReviews).toHaveLength(1)
       expect(resumed.gateReviews?.[0]?.review.passed).toBe(true)
@@ -202,17 +201,7 @@ describe("configured Chief review gates", () => {
 
     await coordinate(mission, ports)
 
-    expect(order).toEqual([
-      "plan",
-      "work",
-      "review",
-      "gate-review",
-      "verify",
-      "gate-review",
-      "verify",
-      "final-review",
-      "report",
-    ])
+    expect(order).toEqual(["plan", "work", "review", "gate-review", "verify", "gate-review", "verify", "final-review"])
     expect(mission.status).toBe("completed")
     expect(mission.gateReviews?.[0]?.fingerprint).toBe("verification-generated-report")
     expect(mission.gateReviews?.[0]?.fingerprint).toBe(mission.verification?.fingerprint)

@@ -133,6 +133,18 @@ function fixture() {
   return { mission, ports, runAgent }
 }
 
+function delayReportFinalization(ports: ChiefPorts, advance: () => void) {
+  const fingerprint = ports.fingerprint
+  let advanced = false
+  ports.fingerprint = async (mission) => {
+    if (!advanced && mission.report && mission.status === "reviewing") {
+      advanced = true
+      advance()
+    }
+    return fingerprint(mission)
+  }
+}
+
 describe("configured service recovery completion", () => {
   it.each(["final-review", "report", "metrics"] as const)(
     "refreshes expired health after long %s and completes only with a healthy new sample",
@@ -147,6 +159,10 @@ describe("configured service recovery completion", () => {
           saved.push(current.status)
         }
         const original = runAgent.getMockImplementation()
+        if (stage === "report")
+          delayReportFinalization(ports, () => {
+            clock += 60_000
+          })
         runAgent.mockImplementation(async (...args) => {
           if (args[3] === "report") {
             expect(args[2].status).toBe("reviewing")
@@ -188,6 +204,10 @@ describe("configured service recovery completion", () => {
         let observed = 0
         ports.observeContainers = vi.fn(async () => snapshot(++observed < 3 ? "healthy" : "unhealthy"))
         const original = runAgent.getMockImplementation()
+        if (stage === "report")
+          delayReportFinalization(ports, () => {
+            clock += 60_000
+          })
         runAgent.mockImplementation(async (...args) => {
           if (args[3] === "supervise")
             return JSON.stringify({
@@ -219,7 +239,7 @@ describe("configured service recovery completion", () => {
     },
   )
 
-  it("pauses source unavailability discovered after a long report without saving completion", async () => {
+  it("pauses source unavailability discovered during report finalization without saving completion", async () => {
     const { mission, ports, runAgent } = fixture()
     let clock = Date.now()
     const time = vi.spyOn(Date, "now").mockImplementation(() => clock)
@@ -232,6 +252,9 @@ describe("configured service recovery completion", () => {
         saved.push(current.status)
       }
       const original = runAgent.getMockImplementation()
+      delayReportFinalization(ports, () => {
+        clock += 60_000
+      })
       runAgent.mockImplementation(async (...args) => {
         if (args[3] === "supervise") {
           expect(args[1]).toContain("Docker context access unavailable")

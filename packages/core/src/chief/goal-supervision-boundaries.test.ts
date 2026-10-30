@@ -184,7 +184,7 @@ describe("Chief Director goal supervision boundaries", () => {
     expect(reviewPrompt(mission)).toContain(plan.tasks[0]?.acceptance[0])
   })
 
-  it.each(["plan", "review", "final-review", "supervise", "report"] as const)(
+  it.each(["plan", "review", "final-review", "supervise"] as const)(
     "fails immediately if %s mutates files then throws, with no later model stages",
     async (stage) => {
       const { mission, ports, runAgent, mutate } = fixture()
@@ -206,19 +206,37 @@ describe("Chief Director goal supervision boundaries", () => {
     },
   )
 
+  it("rejects product mutation at the final report fingerprint without later model stages", async () => {
+    const { mission, ports, runAgent, mutate } = fixture()
+    const fingerprint = ports.fingerprint
+    let mutated = false
+    ports.fingerprint = async (current) => {
+      if (current.report && current.status === "reviewing" && !mutated) {
+        mutated = true
+        mutate("unauthorized-change")
+      }
+      return fingerprint(current)
+    }
+    await expect(coordinate(mission, ports)).rejects.toThrow("Worktree changed after the Chief Director report")
+    expect(mission.status).toBe("failed")
+    expect(runAgent.mock.calls.at(-1)?.[3]).toBe("final-review")
+    expect(mission.report?.eli5).toBeTruthy()
+    expect(mission.verification).toBeUndefined()
+    expect(mission.tasks.every((task) => task.status === "pending")).toBe(true)
+  })
+
   it("refreshes all task approvals after a report mutation rather than trusting previously completed tasks", async () => {
     const { mission, ports, runAgent, mutate } = fixture()
-    const original = runAgent.getMockImplementation()
+    const fingerprint = ports.fingerprint
     let mutated = false
-    runAgent.mockImplementation(async (...args) => {
-      const result = (await original?.(...args)) ?? ""
-      if (args[3] === "report" && !mutated) {
+    ports.fingerprint = async (current) => {
+      if (current.report && current.status === "reviewing" && !mutated) {
         mutated = true
         mutate("report-mutated-product")
       }
-      return result
-    })
-    await expect(coordinate(mission, ports)).rejects.toThrow("report Actor changed")
+      return fingerprint(current)
+    }
+    await expect(coordinate(mission, ports)).rejects.toThrow("Worktree changed after the Chief Director report")
     expect(mission.status).toBe("failed")
     expect(mission.finalReview).toBeUndefined()
     runAgent.mockClear()
@@ -228,7 +246,7 @@ describe("Chief Director goal supervision boundaries", () => {
   })
 
   it.each(["malformed", "process failure"])(
-    "uses an honest evidence report on report %s without changing completion",
+    "renders an honest evidence report without invoking a %s report Actor",
     async (kind) => {
       const { mission, ports, runAgent } = fixture()
       const original = runAgent.getMockImplementation()
@@ -240,6 +258,7 @@ describe("Chief Director goal supervision boundaries", () => {
         return (await original?.(...args)) ?? ""
       })
       await coordinate(mission, ports)
+      expect(runAgent.mock.calls.some((call) => call[3] === "report")).toBe(false)
       expect(mission.status).toBe("completed")
       expect(mission.report?.eli5).toBeTruthy()
       expect(mission.report?.checks.length).toBeGreaterThan(0)

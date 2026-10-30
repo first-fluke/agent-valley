@@ -14,7 +14,7 @@ describe("durable Chief Director goal supervision", () => {
     expect(mission.status).toBe("completed")
     expect(mission.finalReview?.criteria?.map((entry) => entry.criterion)).toEqual(finalCriteria(mission))
     expect(mission.report?.eli5.length).toBeGreaterThan(20)
-    expect(runAgent.mock.calls.at(-1)?.[3]).toBe("report")
+    expect(runAgent.mock.calls.at(-1)?.[3]).toBe("final-review")
     expect(runAgent.mock.calls.at(-1)?.[2].status).toBe("completed")
     expect(mission.supervision?.rounds).toBe(0)
   })

@@ -41,20 +41,18 @@ describe("Chief execution boundary characterization", () => {
 
     await coordinate(mission, ports)
 
-    expect(order).toEqual(["plan", "work", "review", "verify", "final-review", "report"])
+    expect(order).toEqual(["plan", "work", "review", "verify", "final-review"])
     expect(calls.map(({ actor, stage, taskId }) => ({ actor, stage, taskId }))).toEqual([
       { actor: "chief", stage: "plan", taskId: undefined },
       { actor: "worker", stage: "work", taskId: "onboarding" },
       { actor: "reviewer", stage: "review", taskId: "onboarding" },
       { actor: "chief", stage: "final-review", taskId: undefined },
-      { actor: "chief", stage: "report", taskId: undefined },
     ])
     expect(calls.map(({ stage, saved }) => [stage, saved?.status, saved?.history.at(-1)?.stage])).toEqual([
       ["plan", "planning", "plan"],
       ["work", "executing", "work"],
       ["review", "reviewing", "review"],
       ["final-review", "reviewing", "final-review"],
-      ["report", "reviewing", "final-review"],
     ])
     expect(calls[1]?.saved).toMatchObject({
       goalBrief: brief,
@@ -70,8 +68,8 @@ describe("Chief execution boundary characterization", () => {
       fingerprint: "change-1",
     })
     expect(calls[3]?.prompt).toContain("Onboarding acceptance check passed")
-    expect(calls[4]?.saved?.finalReview?.passed).toBe(true)
-    expect(calls[4]?.input.status).toBe("reviewing")
+    expect(mission.finalReview?.passed).toBe(true)
+    expect(mission.report).toBeDefined()
     expect(snapshots.at(-1)).toMatchObject({ status: "completed", report: mission.report })
   })
 
@@ -111,7 +109,7 @@ describe("Chief execution boundary characterization", () => {
 
     await coordinate(mission, ports)
 
-    expect(order).toEqual(["plan", "work", "review", "verify", "work", "review", "verify", "final-review", "report"])
+    expect(order).toEqual(["plan", "work", "review", "verify", "work", "review", "verify", "final-review"])
     expect(mission.verification).toEqual({
       ok: true,
       output: "Repaired onboarding acceptance passed",
@@ -148,7 +146,7 @@ describe("Chief execution boundary characterization", () => {
 
     await coordinate(resumed, ports)
 
-    expect(order).toEqual(["verify", "final-review", "report"])
+    expect(order).toEqual(["verify", "final-review"])
     expect(resumed.tasks[0]?.attempts).toBe(1)
     expect(resumed.initialFingerprint).toBe("initial")
     expect(verify).toHaveBeenCalledOnce()

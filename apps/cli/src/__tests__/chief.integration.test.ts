@@ -315,9 +315,11 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect(mission.marketingReview?.review.summary).toContain("ROI data")
     expect(mission.plan?.tasks[0]?.personaId).toBe("writer")
     expect(mission.goalBrief?.successCriteria).toEqual(["deliverable.txt contains accepted"])
-    expect(mission.report?.eli5).toBe("The requested file is ready and passed its check.")
+    const expectedReport =
+      "“Create a verified deliverable”을 위한 결과물을 만들고, 다른 담당자의 점검과 지정한 확인 절차를 마쳤습니다. 결과물은 아래 작업 경로에 보관되어 있어 직접 확인할 수 있습니다."
+    expect(mission.report?.eli5).toBe(expectedReport)
     const report = await readFile(join(root, ".agent-valley/reports", `${mission.id}.md`), "utf8")
-    expect(report).toContain("The requested file is ready")
+    expect(report).toContain("지정한 확인 절차를 마쳤습니다")
     expect(mission.personas.find((persona) => persona.id === mission.chiefId)?.model).toBe("selected-chief-model")
     expect(
       mission.personas.filter((persona) => persona.id !== mission.chiefId).every((persona) => !persona.model),
@@ -330,7 +332,6 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
       false,
       false,
       true,
-      true,
     ])
     expect(discoverAgents).toHaveBeenCalledOnce()
     expect(mission.workspace.path).not.toBe(repo)
@@ -339,7 +340,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     await expect(readFile(join(repo, "deliverable.txt"))).rejects.toMatchObject({ code: "ENOENT" })
     const stages = (await calls()).map((call) => call.stage)
     expect(stages.slice(0, 3).sort()).toEqual(["design-review", "marketing-review", "technical-review"])
-    expect(stages.slice(3)).toEqual(["plan", "work", "review", "final-review", "report"])
+    expect(stages.slice(3)).toEqual(["plan", "work", "review", "final-review"])
     const canonicalWorkspace = await realpath(mission.workspace.path)
     expect((await calls()).every((call) => call.cwd === canonicalWorkspace)).toBe(true)
     expect(await new MissionStore(join(root, ".agent-valley/missions")).load(mission.id)).toEqual(mission)
@@ -351,15 +352,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect(discoverAgents).toHaveBeenCalledOnce()
     const resumedStages = (await calls()).map((call) => call.stage)
     expect(resumedStages.slice(0, 3).sort()).toEqual(["design-review", "marketing-review", "technical-review"])
-    expect(resumedStages.slice(3)).toEqual([
-      "plan",
-      "work",
-      "review",
-      "final-review",
-      "report",
-      "final-review",
-      "report",
-    ])
+    expect(resumedStages.slice(3)).toEqual(["plan", "work", "review", "final-review", "final-review"])
     expect(await readdir(join(root, ".agent-valley/missions"))).toEqual([`${mission.id}.json`])
     expect(process.listenerCount("SIGINT")).toBe(sigint)
   }, 60_000)
@@ -442,7 +435,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
       const stages = (await calls()).map((call) => call.stage)
       expect(stages.slice(0, 3)).toEqual(directorOrder)
       expect(stages.slice(0, 3).sort()).toEqual(["design-review", "marketing-review", "technical-review"])
-      expect(stages.slice(3)).toEqual(["plan", "work", "review", "work", "review", "final-review", "report"])
+      expect(stages.slice(3)).toEqual(["plan", "work", "review", "work", "review", "final-review"])
       expect(await readFile(join(mission.workspace.path, "deliverable.txt"), "utf8")).toBe("accepted")
     },
     20_000,

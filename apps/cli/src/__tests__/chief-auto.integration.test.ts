@@ -114,7 +114,7 @@ process.stdin.on('end',()=>{
     expect(new Set(workers.map((call) => call.cwd)).size).toBe(2)
     expect(workers.every((call) => call.cwd !== mission.workspace.path)).toBe(true)
     expect(await readFile(join(fixtureRoot, ".agent-valley/reports", `${mission.id}.md`), "utf8")).toContain(
-      "Both requested files",
+      "지정한 확인 절차를 마쳤습니다",
     )
     const stored = await new MissionStore(join(fixtureRoot, ".agent-valley/missions")).load(mission.id)
     expect(stored.verificationContract).toEqual(mission.verificationContract)

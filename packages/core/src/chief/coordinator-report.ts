@@ -21,14 +21,16 @@ export function createMissionReporter(
       mission.verification?.ok &&
       mission.finalReview?.passed &&
       reviewGatesAreCurrent(mission, mission.verification.fingerprint)
+    if (draft) {
+      // The final scheduler checks still own completion; prose generation needs no extra Actor budget.
+      mission.report = fallbackReport({ ...mission, status: "completed" })
+      return
+    }
     try {
-      const prompt = draft
-        ? `${reportPrompt({ ...mission, status: "completed" })}\n\nDraft the verified outcome; completion is still pending the scheduler's final live-service and fingerprint checks. A late failure overrides this draft.`
-        : reportPrompt(mission)
-      mission.report = parseReport(await run(persona(mission.chiefId), prompt, "report"))
+      mission.report = parseReport(await run(persona(mission.chiefId), reportPrompt(mission), "report"))
     } catch (error) {
       if (fatal(error)) throw error
-      mission.report = fallbackReport(draft ? { ...mission, status: "completed" } : mission)
+      mission.report = fallbackReport(mission)
     }
   }
 }

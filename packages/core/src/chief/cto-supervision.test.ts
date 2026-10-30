@@ -40,7 +40,6 @@ describe("Chief Director permanent Technical Director advice", () => {
       ["worker", "work"],
       ["cto", "review"],
       ["chief", "final-review"],
-      ["chief", "report"],
     ])
     expect(snapshots.find((value) => value.technicalReview)?.plan).toBeUndefined()
     expect(mission.technicalReview).toMatchObject({
