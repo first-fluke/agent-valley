@@ -6,6 +6,28 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.1.0](https://github.com/first-fluke/agent-valley/compare/v4.0.1...v4.1.0) (2026-10-30)
+
+
+### Features
+
+* **chief:** supervise and deliver verified orders unattended ([50081f9](https://github.com/first-fluke/agent-valley/commit/50081f93ac69aad8dbeb6923cf2f3fe194a45fe7))
+
+
+### Bug Fixes
+
+* **chief:** bound malformed planning response recovery ([a5c5d94](https://github.com/first-fluke/agent-valley/commit/a5c5d94dc64adf4cfa675d34e9258902d096c07e))
+* **chief:** enforce mission deadlines while awaiting workers ([b3b0d59](https://github.com/first-fluke/agent-valley/commit/b3b0d59bd6f2a635ad4d8ffcabe8910747c2e7fc))
+* **chief:** finalize verified work without another actor ([7e27c45](https://github.com/first-fluke/agent-valley/commit/7e27c4599ba3cfbb581e243f74b263261e96d6b2))
+* **chief:** import source bases for continuing delivery ([8a66b7c](https://github.com/first-fluke/agent-valley/commit/8a66b7c21e35cd71f5871c9baa5405ef4c4f2237))
+* **chief:** preserve completed missions after elapsed deadlines ([db5d6d6](https://github.com/first-fluke/agent-valley/commit/db5d6d6c0fc79c963075ce785f946c2c069200d9))
+* **workspace:** separate repository and mission destination ([e9098d1](https://github.com/first-fluke/agent-valley/commit/e9098d1c8a7f8571a3c51c028ec23c2b1ad93639))
+
+
+### Tests
+
+* **chief:** allow filesystem load in maximum capture delivery ([f4641d5](https://github.com/first-fluke/agent-valley/commit/f4641d53ced0ca5ec1f486230ea2f6736b9a8795))
+
 ## [4.0.1](https://github.com/first-fluke/agent-valley/compare/v4.0.0...v4.0.1) (2026-10-30)
 
 
