@@ -141,9 +141,11 @@ export async function runOrder(
               id,
               goal,
             )
-          : await new WorkspaceManager(
-              codeDelivery ? join(config.workspace, ".agent-valley", "workspaces") : config.workspace,
-            ).create(missionIssue(id, goal))
+          : await new WorkspaceManager(config.workspace).create(
+              missionIssue(id, goal),
+              undefined,
+              codeDelivery ? join(config.workspace, ".agent-valley", "workspaces") : undefined,
+            )
       if (options.operationId) await restoreOperationOrigin(config.workspace, workspace.path)
       if (!codeDelivery) await prepareMissionSkills(config.workspace, workspace.path)
       const now = new Date().toISOString()

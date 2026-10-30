@@ -11,6 +11,7 @@
 import { spawn } from "node:child_process"
 import { lstatSync, realpathSync } from "node:fs"
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 
@@ -210,15 +211,17 @@ export async function createWorkspace(
   root: string,
   issue: Issue,
   platform: NodeJS.Platform = process.platform,
+  workspaceRoot: string = root,
 ): Promise<Workspace> {
   const key = deriveKey(issue.identifier)
-  const path = `${root}/${key}`
+  const path = join(workspaceRoot, key)
   const branch = deriveBranchName(issue.identifier, issue.title)
 
+  await mkdir(workspaceRoot, { recursive: true })
   await removeEmptyDirectory(path)
 
   if (platform === "linux") {
-    const existing = await getWorkspace(root, issue.id)
+    const existing = await getWorkspace(workspaceRoot, issue.id)
     if (existing) {
       await validateReusableWorkspace(existing, platform)
       return existing
@@ -242,7 +245,7 @@ export async function createWorkspace(
   }
 
   if (exitCode !== 0) {
-    const existing = await getWorkspace(root, issue.id)
+    const existing = await getWorkspace(workspaceRoot, issue.id)
     if (existing) {
       await validateReusableWorkspace(existing, platform)
       logger.info("workspace-manager", "Reusing existing workspace", { issueId: issue.id, workspacePath: path })

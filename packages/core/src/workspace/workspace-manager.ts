@@ -39,8 +39,8 @@ export class WorkspaceManager {
     return deriveKeyImpl(identifier)
   }
 
-  create(issue: Issue, rootOverride?: string): Promise<Workspace> {
-    return createWorkspace(rootOverride ?? this.rootPath, issue)
+  create(issue: Issue, rootOverride?: string, workspaceRoot?: string): Promise<Workspace> {
+    return createWorkspace(rootOverride ?? this.rootPath, issue, process.platform, workspaceRoot)
   }
 
   get(issueId: string, rootOverride?: string): Promise<Workspace | null> {
