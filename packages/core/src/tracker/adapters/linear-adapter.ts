@@ -61,6 +61,15 @@ export class LinearTrackerAdapter implements IssueTracker {
     return fetchIssueFn(this.config.apiKey, issueId)
   }
 
+  async findIssueByIdentifier(identifier: string): Promise<Issue | null> {
+    // Linear's issue(id:) also accepts the human identifier. Only this team's
+    // issues count, and other shapes never reach the API.
+    const match = /^([A-Za-z][A-Za-z0-9_]*)-[1-9]\d*$/.exec(identifier)
+    if (match?.[1]?.toUpperCase() !== this.config.teamId.toUpperCase()) return null
+    const issue = await fetchIssueFn(this.config.apiKey, identifier)
+    return issue && issue.identifier.toUpperCase() === identifier.toUpperCase() ? issue : null
+  }
+
   fetchIssueLabels(issueId: string): Promise<string[]> {
     return fetchIssueLabelsFn(this.config.apiKey, issueId)
   }

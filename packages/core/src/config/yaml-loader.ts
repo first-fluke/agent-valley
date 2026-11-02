@@ -11,16 +11,16 @@ import {
 } from "./actor-schema"
 import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
 import { chiefConfigSchema, mergeChiefConfig } from "./chief-schema"
-import {
-  buildCommentRelayConfig,
-  commentRelayMergedSchema,
-  commentRelayProjectSchema,
-  githubCommentRelayProjectSchema,
-} from "./comment-relay-schema"
+import { buildCommentRelayConfig, commentRelayMergedSchema, commentRelayProjectSchema } from "./comment-relay-schema"
 import { detectHardware } from "./hardware"
 import { resolveMaxParallel } from "./merge-helpers"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
 import { resolveProjectConfigPath } from "./project-config-path"
+import {
+  buildPullRequestReviewsConfig,
+  pullRequestReviewsMergedSchema,
+  pullRequestReviewsProjectSchema,
+} from "./pull-request-reviews-schema"
 import { resolvedTaskSchema, taskSchema } from "./task-schema"
 import { assertTeamConfigMigrated, teamConfigSchema, teamRelayUrlSchema } from "./team-schema"
 import { buildTunnelConfig, tunnelMergedSchema, tunnelProjectSchema } from "./tunnel-schema"
@@ -97,8 +97,8 @@ export const projectConfigSchema = z
             cancelled: z.string().min(1).optional(),
           })
           .optional(),
-        /** Relay maintainer comments and, optionally, pull request reviews into the actor. Off by default. */
-        comment_relay: githubCommentRelayProjectSchema.optional(),
+        /** Relay maintainer comments on a running issue into its actor. Off by default. */
+        comment_relay: commentRelayProjectSchema.optional(),
       })
       .optional(),
     workspace: z
@@ -111,6 +111,8 @@ export const projectConfigSchema = z
     delivery: z
       .object({
         mode: z.enum(["merge", "pr"]).optional(),
+        /** Follow up on reviews of Agent Valley pull requests. Off by default. */
+        pull_request_reviews: pullRequestReviewsProjectSchema.optional(),
       })
       .optional(),
     logging: z
@@ -198,6 +200,7 @@ const mergedConfigSchema = z
     logLevel: z.enum(["debug", "info", "warn", "error"]),
     logFormat: z.enum(["json", "text"]),
     deliveryMode: z.enum(["merge", "pr"]),
+    pullRequestReviews: pullRequestReviewsMergedSchema,
     promptTemplate: z.string().min(1, "prompt is not set.\n  Fix: Add prompt field to av.yaml"),
     routingRules: z.array(
       z.object({
@@ -408,6 +411,11 @@ function mergeConfigs(
     logLevel: project?.logging?.level ?? global?.logging?.level ?? defaults.logLevel,
     logFormat: project?.logging?.format ?? global?.logging?.format ?? defaults.logFormat,
     deliveryMode: project?.delivery?.mode ?? defaults.deliveryMode,
+    pullRequestReviews: buildPullRequestReviewsConfig(
+      project?.delivery?.pull_request_reviews,
+      trackerKind,
+      project?.github?.webhook_secret,
+    ),
     promptTemplate: project?.prompt ?? "",
     routingRules: (project?.routing?.rules ?? []).map((r) => ({
       label: r.label,

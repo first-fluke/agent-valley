@@ -31,7 +31,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "Orchestrator not initialized" }, { status: 503 })
   }
 
-  const result = await orchestrator.handleWebhook(payload, signature, deliveryId)
+  const handle = orchestrator.handleGithubWebhook ?? orchestrator.handleWebhook
+  const result = await handle(payload, signature, deliveryId)
   return new Response(result.body, {
     status: result.status,
     headers: { "Content-Type": "application/json" },

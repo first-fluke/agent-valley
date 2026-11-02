@@ -41,7 +41,6 @@ linear:
 #   comment_relay:                  # Relay maintainer comments on a running issue into its actor (off by default)
 #     enabled: false                # Subscribe the webhook to "Issue comments" too; stateless actors restart with the comment
 #     ignore_authors: []            # Logins never relayed, e.g. the account behind GITHUB_TOKEN
-#     pull_request_reviews: false   # Reviews of Agent Valley PRs become follow-up work; subscribe to "Pull request reviews"
 
 # ── Workspace ─────────────────────────────────────────────────────────
 workspace:
@@ -57,6 +56,10 @@ workspace:
 # ── Delivery ──────────────────────────────────────────────────────────
 delivery:
   mode: merge # merge (auto merge+push) | pr (create PR for review)
+  # pull_request_reviews:           # Reviews of Agent Valley PRs become follow-up work (off by default)
+  #   enabled: false                # GitHub webhook on each code repo -> /api/webhook/github, "Pull request reviews"
+  #   webhook_secret: whsec_xxx     # That webhook's secret; Linear tracker only (GitHub tracker uses github.webhook_secret)
+  #   ignore_authors: []            # GitHub logins never followed up
 
 # ── Prompt Template ───────────────────────────────────────────────────
 # Template variables: {{issue.identifier}}, {{issue.title}}, {{issue.description}},

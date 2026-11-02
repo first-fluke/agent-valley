@@ -15,17 +15,20 @@
 
 import type { Issue } from "../../domain/models"
 import { parseScoreFromLabels } from "../../domain/models"
-import {
-  type CommentAuthorTrust,
-  isAgentValleyCommentBody,
-  type ParsedWebhookEvent,
-  type PullRequestReviewVerdict,
-} from "../../domain/parsed-webhook-event"
+import { isAgentValleyCommentBody, type ParsedWebhookEvent } from "../../domain/parsed-webhook-event"
 import type { IssueStateType, WebhookReceiver } from "../../domain/ports/tracker"
 import { logger } from "../../observability/logger"
 import { hashPayloadSha256Hex, WebhookDedupCache } from "../dedup-cache"
 import { verifyHmacSha256Hex } from "../hmac-verify"
 import type { GithubStateLabels } from "./github-adapter"
+import {
+  commentAuthorTrust,
+  type GithubCommentPayload,
+  type GithubReviewDeliveryPayload,
+  isReviewDelivery,
+  sanitizeAtBoundary,
+  toReviewEvent,
+} from "./github-payload"
 
 export interface GithubWebhookReceiverConfig {
   /** Webhook signing secret from GitHub (matches repository webhook settings). */
@@ -52,40 +55,10 @@ interface GithubIssuePayload {
   pull_request?: unknown
 }
 
-interface GithubCommentPayload {
-  id?: number
-  body?: string | null
-  user?: { login?: string; type?: string }
-  author_association?: string
-  performed_via_github_app?: unknown
-}
-
-interface GithubReviewPayload extends GithubCommentPayload {
-  state?: string
-  html_url?: string
-}
-
-interface GithubPullRequestPayload {
-  number?: number
-  state?: "open" | "closed"
-  html_url?: string
-  head?: { ref?: string; repo?: { full_name?: string } | null }
-}
-
-interface GithubRepositoryPayload {
-  owner?: { login?: string }
-  name?: string
-  full_name?: string
-}
-
-interface GithubWebhookPayload {
-  action?: string
+interface GithubWebhookPayload extends GithubReviewDeliveryPayload {
   issue?: GithubIssuePayload
   label?: { name: string }
   comment?: GithubCommentPayload
-  review?: GithubReviewPayload
-  pull_request?: GithubPullRequestPayload
-  repository?: GithubRepositoryPayload
   changes?: Record<string, unknown>
   zen?: string
 }
@@ -138,7 +111,7 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
     const dedupKey = deliveryId ? `delivery:${deliveryId}` : `body:${hashPayloadSha256Hex(payload)}`
     if (!this.dedupCache.checkAndRecord(dedupKey)) {
       logger.warn("tracker-github", "Webhook rejected: duplicate delivery", {
-        issueId: event.issueId,
+        issueId: "issueId" in event ? event.issueId : undefined,
         dedupKey: deliveryId ?? "body-hash",
       })
       return null
@@ -159,12 +132,8 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
     if (raw.zen && !raw.action) return null
     if (!raw.action) return null
 
-    // pull_request_review deliveries carry no `issue` envelope. Only newly
-    // submitted reviews matter; edits and dismissals carry no new request.
-    if (raw.review && raw.pull_request) {
-      if (raw.action !== "submitted") return null
-      return toReviewEvent(raw.review, raw.pull_request, raw.repository)
-    }
+    // pull_request_review deliveries carry no `issue` envelope.
+    if (isReviewDelivery(raw)) return toReviewEvent(raw)
 
     const apiIssue = raw.issue
     // Not an issues event (e.g. pull_request, push) -> ignore.
@@ -289,15 +258,6 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-const MAINTAINER_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"])
-
-const REVIEW_VERDICTS = new Set<string>(["approved", "changes_requested", "commented"])
-
-function commentAuthorTrust(comment: GithubCommentPayload): CommentAuthorTrust {
-  if (comment.user?.type === "Bot" || comment.performed_via_github_app != null) return "bot"
-  return MAINTAINER_ASSOCIATIONS.has(comment.author_association ?? "") ? "maintainer" : "external"
-}
-
 function toCommentEvent(issueId: string, comment: GithubCommentPayload): ParsedWebhookEvent | null {
   if (typeof comment.id !== "number") return null
   const rawBody = comment.body ?? ""
@@ -314,49 +274,6 @@ function toCommentEvent(issueId: string, comment: GithubCommentPayload): ParsedW
   }
 }
 
-/**
- * Map a submitted review to the issue its pull request delivers. Agent
- * Valley names branches `<prefix>/<owner>/<repo>#<issue>`
- * (`workspace/worktree-lifecycle.ts::deriveBranchName`), so any other
- * branch, a fork's branch or a closed pull request is not follow-up work.
- */
-function toReviewEvent(
-  review: GithubReviewPayload,
-  pr: GithubPullRequestPayload,
-  repository: GithubRepositoryPayload | undefined,
-): ParsedWebhookEvent | null {
-  if (typeof review.id !== "number" || typeof pr.number !== "number" || pr.state !== "open") return null
-  const repoName = repository?.full_name
-  if (!repoName || pr.head?.repo?.full_name?.toLowerCase() !== repoName.toLowerCase()) return null
-  const issueId = issueIdFromBranch(pr.head?.ref ?? "", repoName)
-  const verdict = (review.state ?? "").toLowerCase()
-  if (!issueId || !REVIEW_VERDICTS.has(verdict)) return null
-  const rawBody = review.body ?? ""
-  const login = review.user?.login
-  return {
-    kind: "pull_request.reviewed",
-    issueId,
-    pullNumber: pr.number,
-    reviewId: String(review.id),
-    reviewer: login ?? "unknown",
-    reviewerKeys: login ? [login] : [],
-    reviewerTrust: commentAuthorTrust(review),
-    verdict: verdict as PullRequestReviewVerdict,
-    fromAgentValley: isAgentValleyCommentBody(rawBody),
-    body: sanitizeAtBoundary(rawBody),
-    url: review.html_url ?? pr.html_url ?? "",
-  }
-}
-
-function issueIdFromBranch(branch: string, repoName: string): string | null {
-  const marker = `/${repoName.toLowerCase()}#`
-  const at = branch.toLowerCase().indexOf(marker)
-  // Exactly one prefix segment before the repository name.
-  if (at <= 0 || branch.slice(0, at).includes("/")) return null
-  const issueNumber = branch.slice(at + marker.length)
-  return /^[1-9]\d*$/.test(issueNumber) ? issueNumber : null
-}
-
 function statusFromLabels(
   labels: string[],
   ghState: "open" | "closed",
@@ -369,27 +286,4 @@ function statusFromLabels(
   if (labels.includes(stateLabels.todo)) return { id: stateLabels.todo, name: "Todo", type: "unstarted" }
   const fallbackId = ghState === "closed" ? "github:closed:untagged" : "github:open:untagged"
   return { id: fallbackId, name: ghState === "closed" ? "Closed" : "Open", type: ghState }
-}
-
-const MAX_BOUNDARY_BODY_LENGTH = 64_000
-const PROMPT_BOUNDARY_MARKERS = [
-  /<\s*\|\s*im_start\s*\|\s*>/gi,
-  /<\s*\|\s*im_end\s*\|\s*>/gi,
-  /<\s*\|\s*system\s*\|\s*>/gi,
-]
-
-/**
- * Boundary-level sanitizer: strip control characters that could break
- * downstream JSON parsing / logs, chop absurdly long bodies, and remove
- * prompt-boundary markers. Deeper injection handling is left to
- * `config/workflow-loader.ts::sanitizeIssueBody` at render time.
- */
-function sanitizeAtBoundary(text: string): string {
-  if (!text) return ""
-  // Keep \n (\x0A), \r (\x0D), \t (\x09); strip other C0 + DEL.
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
-  let out = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-  if (out.length > MAX_BOUNDARY_BODY_LENGTH) out = out.slice(0, MAX_BOUNDARY_BODY_LENGTH)
-  for (const pattern of PROMPT_BOUNDARY_MARKERS) out = out.replace(pattern, "")
-  return out
 }

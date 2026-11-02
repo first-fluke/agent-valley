@@ -33,13 +33,7 @@ function harness(options: {
   const config = makeConfig(
     options.withRelayConfig === false
       ? {}
-      : {
-          commentRelay: {
-            enabled: options.enabled ?? true,
-            ignoreAuthors: options.ignoreAuthors ?? [],
-            pullRequestReviews: false,
-          },
-        },
+      : { commentRelay: { enabled: options.enabled ?? true, ignoreAuthors: options.ignoreAuthors ?? [] } },
   )
   const core = {
     config,

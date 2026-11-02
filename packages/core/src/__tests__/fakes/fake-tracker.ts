@@ -48,6 +48,12 @@ export class FakeIssueTracker implements IssueTracker {
     return [...this.issues.values()].filter((i) => wanted.has(i.status.id))
   }
 
+  async findIssueByIdentifier(identifier: string): Promise<Issue | null> {
+    this.calls.push({ method: "findIssueByIdentifier", args: [identifier] })
+    this.maybeThrow("findIssueByIdentifier")
+    return [...this.issues.values()].find((i) => i.identifier === identifier) ?? null
+  }
+
   async fetchIssueLabels(issueId: string): Promise<string[]> {
     this.calls.push({ method: "fetchIssueLabels", args: [issueId] })
     this.maybeThrow("fetchIssueLabels")

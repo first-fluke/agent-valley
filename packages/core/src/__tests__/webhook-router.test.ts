@@ -282,33 +282,61 @@ describe("WebhookRouter — issue comments", () => {
 })
 
 describe("WebhookRouter — pull request reviews", () => {
-  test("reopens a delivered issue with the review queued as retry context", async () => {
-    const harness = buildRouter({ commentRelay: { enabled: true, ignoreAuthors: [], pullRequestReviews: true } })
+  const reviewEvent: ParsedWebhookEvent = {
+    kind: "pull_request.reviewed",
+    repository: "first-fluke/agent-valley",
+    pullNumber: 7,
+    headBranch: "feature/PROJ-42",
+    issueIdentifier: "PROJ-42",
+    reviewId: "7001",
+    reviewer: "maintainer",
+    reviewerKeys: ["maintainer"],
+    reviewerTrust: "maintainer",
+    verdict: "changes_requested",
+    fromAgentValley: false,
+    body: "Rename the flag.",
+    url: "https://github.com/first-fluke/agent-valley/pull/7#pullrequestreview-7001",
+  }
+
+  function buildReviewRouter() {
+    const harness = buildRouter({ pullRequestReviews: { enabled: true, webhookSecret: "whsec", ignoreAuthors: [] } })
     harness.tracker.seedIssue(
-      makeIssue({ id: "42", status: { id: "state-done", name: "Done", type: "completed" }, labels: ["state-done"] }),
+      makeIssue({
+        id: "uuid-42",
+        identifier: "PROJ-42",
+        status: { id: "state-done", name: "Done", type: "completed" },
+      }),
     )
-    harness.webhook.nextEvent = {
-      kind: "pull_request.reviewed",
-      issueId: "42",
-      pullNumber: 7,
-      reviewId: "7001",
-      reviewer: "maintainer",
-      reviewerKeys: ["maintainer"],
-      reviewerTrust: "maintainer",
-      verdict: "changes_requested",
-      fromAgentValley: false,
-      body: "Rename the flag.",
-      url: "https://github.com/first-fluke/agent-valley/pull/7#pullrequestreview-7001",
-    }
+    return harness
+  }
+
+  test("reopens the delivered tracker issue with the review queued as retry context", async () => {
+    const harness = buildReviewRouter()
+    harness.webhook.nextEvent = reviewEvent
 
     const response = await harness.router.handleWebhook("{}", "ok")
 
     expect(response.status).toBe(200)
-    expect(harness.tracker.calls).toContainEqual({ method: "updateIssueState", args: ["42", "state-ip"] })
+    expect(harness.tracker.calls).toContainEqual({ method: "findIssueByIdentifier", args: ["PROJ-42"] })
+    expect(harness.tracker.calls).toContainEqual({ method: "updateIssueState", args: ["uuid-42", "state-ip"] })
     expect(harness.core.retryQueue.entries).toEqual([
-      expect.objectContaining({ issueId: "42", lastError: expect.stringContaining("Rename the flag.") }),
+      expect.objectContaining({ issueId: "uuid-42", lastError: expect.stringContaining("Rename the flag.") }),
     ])
     // The queued retry owns the dispatch; nothing starts before its delay.
     expect(harness.lifecycle.inProgressCalls).toHaveLength(0)
+  })
+
+  test("verifies and parses a code host delivery with the receiver it came through", async () => {
+    const harness = buildReviewRouter()
+    const codeHostWebhook = new FakeWebhookReceiver<ParsedWebhookEvent>()
+    codeHostWebhook.nextEvent = reviewEvent
+    harness.webhook.nextEvent = null
+
+    const response = await harness.router.handleWebhook("{}", "ok", "delivery-1", codeHostWebhook)
+
+    expect(response.status).toBe(200)
+    expect(harness.webhook.verifyCalls).toHaveLength(0)
+    expect(codeHostWebhook.deliveryIdCalls).toEqual(["delivery-1"])
+    expect(harness.tracker.calls).toContainEqual({ method: "updateIssueState", args: ["uuid-42", "state-ip"] })
   })
 })

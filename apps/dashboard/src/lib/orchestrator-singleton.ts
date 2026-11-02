@@ -11,6 +11,16 @@ import type { InterventionBus } from "@agent-valley/core/orchestrator/interventi
 export interface OrchestratorInstance {
   getStatus: () => Record<string, unknown>
   handleWebhook: (payload: string, signature: string, deliveryId?: string) => Promise<{ status: number; body: string }>
+  /**
+   * GitHub deliveries for `/api/webhook/github`: the tracker handler with
+   * the GitHub tracker, otherwise the code host handler (pull request
+   * reviews for Linear issues). Falls back to `handleWebhook` when absent.
+   */
+  handleGithubWebhook?: (
+    payload: string,
+    signature: string,
+    deliveryId?: string,
+  ) => Promise<{ status: number; body: string }>
   stop: () => Promise<void>
   on: (event: string, handler: (...args: unknown[]) => void) => void
   off: (event: string, handler: (...args: unknown[]) => void) => void

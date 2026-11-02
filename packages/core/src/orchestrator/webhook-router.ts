@@ -14,6 +14,8 @@
  */
 
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
+import type { CodeHost } from "../domain/ports/code-host"
+import type { WebhookReceiver } from "../domain/ports/tracker"
 import { logger } from "../observability/logger"
 import { relayIssueComment } from "./comment-relay"
 import type { IssueLifecycle } from "./issue-lifecycle"
@@ -26,16 +28,32 @@ export interface WebhookResponse {
 }
 
 export class WebhookRouter {
+  private codeHost: CodeHost | null = null
+
   constructor(
     private readonly core: OrchestratorCore,
     private readonly lifecycle: IssueLifecycle,
   ) {}
 
-  async handleWebhook(payload: string, signature: string, deliveryId?: string): Promise<WebhookResponse> {
+  /** Code host used to read pull request review details; reviews still route without one. */
+  attachCodeHost(codeHost: CodeHost): void {
+    this.codeHost = codeHost
+  }
+
+  /**
+   * `receiver` defaults to the tracker's. A code host that is not the
+   * tracker (GitHub pull requests for Linear issues) passes its own.
+   */
+  async handleWebhook(
+    payload: string,
+    signature: string,
+    deliveryId?: string,
+    receiver: WebhookReceiver<ParsedWebhookEvent> = this.core.webhook,
+  ): Promise<WebhookResponse> {
     const { core } = this
 
     // Verify signature
-    const valid = await core.webhook.verifySignature(payload, signature)
+    const valid = await receiver.verifySignature(payload, signature)
     if (!valid) {
       logger.warn("orchestrator", "Webhook signature invalid")
       return { status: 403, body: '{"error":"Invalid signature"}' }
@@ -44,7 +62,7 @@ export class WebhookRouter {
     // Parse event into the domain union. `deliveryId` (e.g. GitHub's
     // X-GitHub-Delivery header) is threaded through so receivers that
     // support it dedup on the stable delivery id instead of a body hash.
-    const event = core.webhook.parseEvent(payload, deliveryId) as ParsedWebhookEvent | null
+    const event = receiver.parseEvent(payload, deliveryId)
     if (!event) {
       return { status: 200, body: '{"ok":true,"skipped":"not an issue event"}' }
     }
@@ -108,7 +126,8 @@ export class WebhookRouter {
 
         if (event.to === "todo") {
           // Instant acknowledgment for webhook-triggered-only (not startup/retry).
-          const queued = core.retryQueue.entries.some((entry) => entry.issueId === event.issueId)
+          const { issueId } = event
+          const queued = core.retryQueue.entries.some((entry) => entry.issueId === issueId)
           if (!queued && !core.processingIssues.has(event.issueId) && !core.state.activeWorkspaces.has(event.issueId)) {
             core.tracker
               .addIssueComment(event.issueId, `Symphony: Received — starting agent for ${event.issue.identifier}`)
@@ -156,7 +175,7 @@ export class WebhookRouter {
 
       case "pull_request.reviewed": {
         // Review of an Agent Valley pull request; policy lives in review-follow-up.
-        await followUpPullRequestReview(core, event)
+        await followUpPullRequestReview(core, event, this.codeHost)
         return
       }
 

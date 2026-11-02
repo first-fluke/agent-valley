@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 interface MockOrchestrator {
   handleWebhook: ReturnType<typeof vi.fn>
+  handleGithubWebhook?: ReturnType<typeof vi.fn>
 }
 
 let mockOrchestrator: MockOrchestrator | null = null
@@ -80,6 +81,21 @@ describe("POST /api/webhook/github", () => {
     expect(JSON.parse(payload as string)).toEqual({ action: "opened", issue: { number: 42 } })
     expect(signature).toBe("sha256=deadbeef")
     expect(deliveryId).toBe("delivery-xyz")
+  })
+
+  test("prefers the GitHub handler, which serves pull request reviews for a Linear tracker", async () => {
+    const handleGithubWebhook = vi.fn(async () => ({ status: 200, body: '{"ok":true}' }))
+    if (mockOrchestrator) mockOrchestrator.handleGithubWebhook = handleGithubWebhook
+
+    await githubWebhookPOST(
+      githubRequest(
+        { action: "submitted", review: { id: 1 }, pull_request: { number: 7 } },
+        { "x-hub-signature-256": "sha256=abc", "x-github-delivery": "delivery-review" },
+      ),
+    )
+
+    expect(handleGithubWebhook).toHaveBeenCalledWith(expect.any(String), "sha256=abc", "delivery-review")
+    expect(mockOrchestrator?.handleWebhook).not.toHaveBeenCalled()
   })
 
   test("returns 503 without calling handleWebhook when orchestrator is not initialized", async () => {

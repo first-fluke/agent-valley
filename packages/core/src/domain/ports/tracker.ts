@@ -20,14 +20,6 @@ import type { Issue } from "../models"
  */
 export type IssueStateType = "todo" | "in_progress" | "done" | "cancelled"
 
-/** Inline comment attached to a pull request review. */
-export interface PullRequestReviewComment {
-  path: string
-  /** Line in the reviewed file version; null when the tracker no longer maps it. */
-  line: number | null
-  body: string
-}
-
 /**
  * IssueTracker — read and mutate issues on an external tracker.
  *
@@ -39,6 +31,13 @@ export interface PullRequestReviewComment {
 export interface IssueTracker {
   /** Refresh a webhook's partial issue with authoritative routing and dependency metadata. */
   fetchIssue?(issueId: string): Promise<Issue | null>
+
+  /**
+   * Find an issue by its human identifier (`ACR-42`, `owner/repo#42`), e.g.
+   * one read from an Agent Valley branch name. Null when the identifier
+   * does not belong to this tracker or the issue does not exist.
+   */
+  findIssueByIdentifier?(identifier: string): Promise<Issue | null>
 
   /** Return all issues currently in any of the given workflow state IDs. */
   fetchIssuesByState(stateIds: string[]): Promise<Issue[]>
@@ -54,9 +53,6 @@ export interface IssueTracker {
 
   /** Attach a label by name, creating it on-demand if the tracker supports it. */
   addIssueLabel(issueId: string, labelName: string): Promise<void>
-
-  /** Inline comments of one pull request review. Only trackers that host pull requests implement it. */
-  fetchPullRequestReviewComments?(pullNumber: number, reviewId: string): Promise<PullRequestReviewComment[]>
 }
 
 /**

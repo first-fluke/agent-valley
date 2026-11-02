@@ -15,7 +15,7 @@
 import type { Issue } from "../../domain/models"
 import { parseScoreFromLabels } from "../../domain/models"
 import { AGENT_VALLEY_COMMENT_MARKER } from "../../domain/parsed-webhook-event"
-import type { IssueTracker, PullRequestReviewComment } from "../../domain/ports/tracker"
+import type { IssueTracker } from "../../domain/ports/tracker"
 
 const GITHUB_API_URL = "https://api.github.com"
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -61,13 +61,6 @@ interface GithubIssueApi {
   pull_request?: unknown
   labels: Array<{ name: string } | string>
   assignees?: Array<{ login: string }>
-}
-
-interface GithubReviewCommentApi {
-  path?: string
-  line?: number | null
-  original_line?: number | null
-  body?: string | null
 }
 
 /**
@@ -337,15 +330,20 @@ export class GithubTrackerAdapter implements IssueTracker {
     await this.request("POST", this.repoUrl(`/issues/${number}/labels`), { labels: [labelName] })
   }
 
-  async fetchPullRequestReviewComments(pullNumber: number, reviewId: string): Promise<PullRequestReviewComment[]> {
-    // One page covers any review a person writes; GitHub caps per_page at 100.
-    const path = `/pulls/${pullNumber}/reviews/${encodeURIComponent(reviewId)}/comments?per_page=100`
-    const { data } = await this.request<GithubReviewCommentApi[]>("GET", this.repoUrl(path))
-    return (data ?? []).map((comment) => ({
-      path: comment.path ?? "",
-      line: comment.line ?? comment.original_line ?? null,
-      body: comment.body ?? "",
-    }))
+  async findIssueByIdentifier(identifier: string): Promise<Issue | null> {
+    // Identifiers are `owner/repo#number`; issues of other repositories are not ours.
+    const match = /^([^/\s]+)\/([^/\s#]+)#([1-9]\d*)$/.exec(identifier)
+    const [, owner, repo, number] = match ?? []
+    if (owner?.toLowerCase() !== this.owner.toLowerCase() || repo?.toLowerCase() !== this.repo.toLowerCase()) {
+      return null
+    }
+    try {
+      const { data } = await this.request<GithubIssueApi>("GET", this.repoUrl(`/issues/${number}`))
+      return data.pull_request ? null : this.apiIssueToDomain(data)
+    } catch (err) {
+      if ((err as { code?: string }).code === "github.not_found") return null
+      throw err
+    }
   }
 
   // ── Mappers ─────────────────────────────────────────────────────────

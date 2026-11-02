@@ -103,9 +103,13 @@ export type ParsedWebhookEvent =
     }
   | {
       kind: "pull_request.reviewed"
-      /** Issue whose Agent Valley branch the open pull request delivers. */
-      issueId: string
+      /** Repository hosting the pull request, `owner/name`; may differ from the tracker. */
+      repository: string
       pullNumber: number
+      /** Head branch of the open pull request. */
+      headBranch: string
+      /** Identifier read from an Agent Valley branch `<prefix>/<identifier>` (ACR-42, owner/repo#42). */
+      issueIdentifier: string
       reviewId: string
       reviewer: string
       /** Identifiers `ignore_authors` may name (GitHub login). */

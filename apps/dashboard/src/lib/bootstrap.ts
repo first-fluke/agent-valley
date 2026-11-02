@@ -12,10 +12,12 @@ import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
 import type { LedgerBridge } from "@agent-valley/core/relay/ledger-bridge"
 import { wireLedgerRelay } from "@agent-valley/core/relay/ledger-wiring"
 import { GithubTrackerAdapter } from "@agent-valley/core/tracker/adapters/github-adapter"
+import { GithubReviewWebhookReceiver } from "@agent-valley/core/tracker/adapters/github-review-webhook-receiver"
 import { GithubWebhookReceiver } from "@agent-valley/core/tracker/adapters/github-webhook-receiver"
 import { LinearTrackerAdapter } from "@agent-valley/core/tracker/adapters/linear-adapter"
 import { LinearWebhookReceiver } from "@agent-valley/core/tracker/adapters/linear-webhook-receiver"
 import { FileSystemWorkspaceGateway } from "@agent-valley/core/workspace/adapters/fs-workspace-gateway"
+import { GhCliCodeHost } from "@agent-valley/core/workspace/adapters/gh-code-host"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { toOrchestratorConfig } from "@/lib/env"
 import { setMetricsEndpoint } from "@/lib/metrics-singleton"
@@ -92,6 +94,18 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
   if (budget.ready) await budget.ready
 
   const orchestrator = new Orchestrator(config, tracker, webhook, workspace, undefined, observability, budget)
+  const githubTracker = config.trackerKind === "github" && Boolean(config.github)
+  // Pull requests live on GitHub whichever service tracks the issues. The
+  // GitHub tracker's receiver already parses reviews; other trackers get a
+  // review-only receiver on /api/webhook/github.
+  if (config.pullRequestReviews?.enabled) {
+    orchestrator.attachCodeHost({
+      client: new GhCliCodeHost(),
+      webhook: githubTracker
+        ? undefined
+        : new GithubReviewWebhookReceiver({ secret: config.pullRequestReviews.webhookSecret }),
+    })
+  }
 
   // Team ledger relay — opt-in via av.yaml team: (relay_url + id)
   // and a valid user team token saved by `av login`. Clean no-op
@@ -136,6 +150,7 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
   return {
     getStatus: handlers.getStatus,
     handleWebhook: handlers.onWebhook,
+    handleGithubWebhook: githubTracker ? handlers.onWebhook : handlers.onCodeHostWebhook,
     stop,
     on: (event, handler) => orchestrator.on(event, handler),
     off: (event, handler) => orchestrator.off(event, handler),

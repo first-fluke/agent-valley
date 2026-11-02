@@ -186,13 +186,16 @@ linear:
 #   comment_relay:
 #     enabled: false
 #     ignore_authors: []
-#     pull_request_reviews: false
 
 workspace:
   root: /absolute/path/to/target-repo
 
 delivery:
   mode: merge # merge (자동 병합+푸시) 또는 pr (draft PR 생성)
+  # pull_request_reviews:
+  #   enabled: false
+  #   webhook_secret: whsec_xxx # Linear 트래커 전용. GitHub 트래커는 github.webhook_secret 사용
+  #   ignore_authors: []
 
 prompt: |
   You are working on {{issue.identifier}}: {{issue.title}}.
@@ -385,7 +388,9 @@ Linear 외에 GitHub Issues로도 오케스트레이터를 구동할 수 있습�
 
 사용 중인 트래커 설정(`github:` 또는 `linear:`)에 `comment_relay.enabled: true` 를 넣으면, Actor가 실행 중인 이슈에 새로 달린 코멘트가 그 Actor에게 추가 지시로 전달됩니다. GitHub은 저장소 소유자·멤버·협업자의 코멘트를 전달하며 webhook이 **Issue comments** 이벤트를 받아야 합니다. Linear는 워크스페이스 사용자(멤버와 게스트)의 코멘트를 전달하며 **Comment** 이벤트가 필요합니다. Codex는 실행 중인 세션에서 받고, Claude처럼 상태를 유지하지 않는 Actor는 코멘트를 붙여 시도를 다시 시작합니다. Agent Valley 자신의 코멘트(숨은 표식이나 `Symphony:` 머리말), 봇과 연동 앱, 외부 기여자, `ignore_authors`, 수정·삭제된 코멘트, PR 코멘트는 전달하지 않습니다. `ignore_authors` 에는 GitHub 로그인이나 Linear 이메일·사용자 ID·이름을 넣을 수 있으며, Actor가 사람의 토큰으로 코멘트를 남긴다면 그 계정을 넣으세요.
 
-GitHub 트래커에서 `pull_request_reviews: true` 도 켜면, Agent Valley 브랜치(`<prefix>/<owner>/<repo>#<issue>`)의 열린 PR에 제출된 리뷰가 후속 작업이 됩니다. PR 전달 모드에서 리뷰 피드백에 대응할 수 있습니다. webhook이 **Pull request reviews** 이벤트도 받아야 합니다. 작성자 규칙은 코멘트 전달과 같고, 승인(approve)은 건너뛰며, 리뷰 본문과 인라인 코멘트가 지시로 전달됩니다. Actor가 실행 중이면 코멘트처럼 바로 전달됩니다. 이미 전달된(Done) 이슈는 In Progress로 다시 열고, 기존 worktree에서 리뷰를 재시도 맥락으로 붙여 다시 실행한 뒤 같은 PR에 push합니다. 포크 브랜치, 닫힌 PR, 다른 브랜치의 리뷰는 무시합니다. Linear 트래커에는 GitHub webhook 수신기가 없어 GitHub 리뷰에 대응하지 않습니다.
+### PR 리뷰 대응
+
+PR 전달 모드는 이슈를 어느 서비스에서 관리하든 리뷰 피드백에 대응할 수 있습니다. `delivery.pull_request_reviews.enabled: true` 로 켜면, Agent Valley 브랜치의 열린 PR에 제출된 리뷰가 브랜치 이름에 담긴 이슈의 후속 작업이 됩니다(`feature/ACR-42` → Linear `ACR-42`, `feature/my-org/my-repo#42` → GitHub 이슈 #42). 이슈와 코드는 서로 다른 곳에 있어도 됩니다. Linear 이슈를 GitHub PR로 전달하거나, 한 저장소의 GitHub 이슈를 다른 저장소로 전달하는 경우입니다. 코드 저장소마다 GitHub webhook이 `/api/webhook/github` 로 **Pull request reviews** 이벤트를 보내도록 설정하세요. GitHub 트래커의 저장소가 아니라면 이 이벤트만 보냅니다. GitHub 트래커는 이 엔드포인트를 `github.webhook_secret` 으로 검증하므로 모든 webhook에 같은 secret을 씁니다. Linear 트래커라면 `delivery.pull_request_reviews.webhook_secret` 에 그 webhook의 secret을 넣습니다. 저장소 소유자·멤버·협업자의 리뷰만 대상이며, 승인(approve), 봇, `ignore_authors`(GitHub 로그인), 포크 브랜치, 닫힌 PR은 건너뜁니다. 리뷰 본문과 인라인 코멘트가 지시로 전달되며, 인라인 코멘트는 PR 전달에 이미 쓰는 인증된 `gh` CLI로 읽습니다. Actor가 실행 중이면 코멘트처럼 바로 전달됩니다. 이미 전달된(Done) 이슈는 In Progress로 되돌리고, 재시도 지연이 지난 뒤 기존 worktree에서 리뷰를 재시도 맥락으로 붙여 다시 실행한 다음 같은 PR에 push합니다.
 
 ### 관측성 (v0.2+)
 

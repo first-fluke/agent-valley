@@ -17,6 +17,7 @@
 
 import type { Config } from "../config/yaml-loader"
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
+import type { CodeHost } from "../domain/ports/code-host"
 import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
 import type { ObservabilityHooks } from "../observability/hooks"
@@ -30,10 +31,17 @@ import { IssueLifecycle } from "./issue-lifecycle"
 import { OrchestratorCore } from "./orchestrator-core"
 import { WebhookRouter } from "./webhook-router"
 
+type WebhookHandler = (
+  payload: string,
+  signature: string,
+  deliveryId?: string,
+) => Promise<{ status: number; body: string }>
+
 export class Orchestrator extends OrchestratorEventEmitter {
   private readonly core: OrchestratorCore
   private readonly lifecycle: IssueLifecycle
   private readonly router: WebhookRouter
+  private codeHostWebhook: WebhookReceiver<ParsedWebhookEvent> | null = null
   /** Live intervention mediator (C). Exposed for the HTTP surface. */
   public readonly intervention: InterventionBus
 
@@ -110,15 +118,32 @@ export class Orchestrator extends OrchestratorEventEmitter {
   }
 
   /**
+   * Attach the code host behind pull request review follow-up. `webhook`
+   * receives its deliveries when it is not the tracker (Linear issues,
+   * GitHub pull requests); the GitHub tracker's receiver already parses
+   * reviews, so it omits `webhook`.
+   */
+  attachCodeHost(codeHost: { client: CodeHost; webhook?: WebhookReceiver<ParsedWebhookEvent> }): void {
+    this.codeHostWebhook = codeHost.webhook ?? null
+    this.router.attachCodeHost(codeHost.client)
+  }
+
+  /**
    * Returns handler callbacks for the Presentation layer to wire into the HTTP server.
    * This keeps the Application layer free of Presentation imports.
    */
   getHandlers(): {
-    onWebhook: (payload: string, signature: string, deliveryId?: string) => Promise<{ status: number; body: string }>
+    onWebhook: WebhookHandler
+    /** Deliveries from a code host that is not the tracker; 404 until one is attached. */
+    onCodeHostWebhook: WebhookHandler
     getStatus: () => Record<string, unknown>
   } {
     return {
       onWebhook: (payload, signature, deliveryId) => this.router.handleWebhook(payload, signature, deliveryId),
+      onCodeHostWebhook: async (payload, signature, deliveryId) => {
+        if (!this.codeHostWebhook) return { status: 404, body: '{"error":"Code host webhook is not configured"}' }
+        return this.router.handleWebhook(payload, signature, deliveryId, this.codeHostWebhook)
+      },
       getStatus: () => this.core.getStatus(),
     }
   }
