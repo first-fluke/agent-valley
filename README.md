@@ -194,6 +194,9 @@ linear:
 #     in_progress: valley:wip
 #     done: valley:done
 #     cancelled: valley:cancelled
+#   comment_relay:
+#     enabled: false
+#     ignore_authors: []
 
 workspace:
   root: /absolute/path/to/target-repo
@@ -390,6 +393,8 @@ PixiJS-rendered office scene showing real-time actor status:
 ### GitHub Issues Support (v0.2+)
 
 Alongside Linear, GitHub Issues can drive the orchestrator. Set `tracker.kind: github` in `av.yaml` and configure the GitHub section — the domain `IssueTracker` / `WebhookReceiver` ports swap transparently. Both trackers reuse the same orchestration, retry, and delivery pipeline.
+
+With `github.comment_relay.enabled: true` and the webhook subscribed to **Issue comments**, a new comment from a repository owner, member or collaborator on an issue whose actor is running reaches that actor as an added instruction. Codex receives it in the running session; stateless actors such as Claude restart the attempt with the comment. Agent Valley's own comments, bot accounts, outside contributors, `ignore_authors`, edited comments and pull request comments are not relayed. Add the account behind `GITHUB_TOKEN` to `ignore_authors` when actors comment with it.
 
 ### Observability (v0.2+)
 

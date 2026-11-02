@@ -89,6 +89,14 @@ export const projectConfigSchema = z
             cancelled: z.string().min(1).optional(),
           })
           .optional(),
+        /** Relay maintainer comments on a running issue into its actor. Off by default. */
+        comment_relay: z
+          .object({
+            enabled: z.boolean().optional(),
+            /** Logins whose comments are never relayed (e.g. the token's own account). */
+            ignore_authors: z.array(z.string().min(1)).optional(),
+          })
+          .optional(),
       })
       .optional(),
     workspace: z
@@ -152,6 +160,13 @@ const githubConfigSchema = z.object({
     done: z.string().min(1, "github.labels.done is not set.\n  Fix: Add it to av.yaml"),
     cancelled: z.string().min(1, "github.labels.cancelled is not set.\n  Fix: Add it to av.yaml"),
   }),
+  /** Absent means comment relay is off. */
+  commentRelay: z
+    .object({
+      enabled: z.boolean(),
+      ignoreAuthors: z.array(z.string()),
+    })
+    .optional(),
 })
 
 export type GithubTrackerConfig = z.infer<typeof githubConfigSchema>
@@ -362,6 +377,10 @@ function mergeConfigs(
       repo: project.github.repo ?? "",
       webhookSecret: project.github.webhook_secret ?? "",
       labels,
+      commentRelay: {
+        enabled: project.github.comment_relay?.enabled ?? false,
+        ignoreAuthors: project.github.comment_relay?.ignore_authors ?? [],
+      },
     }
     // GitHub state identifiers are label names. The orchestrator passes
     // workflowStates.* straight to IssueTracker.updateIssueState, so mirror

@@ -1,7 +1,7 @@
 /**
  * GithubWebhookReceiver — Infrastructure adapter implementing the domain
  * `WebhookReceiver<ParsedWebhookEvent>` port against GitHub's `issues`
- * webhook contract.
+ * and `issue_comment` webhook contracts.
  *
  * Signing: HMAC-SHA256 with header `X-Hub-Signature-256: sha256=<hex>`.
  * Event mapping: see § 5.2 of docs/plans/v0-2-bigbang-design.md.
@@ -15,7 +15,11 @@
 
 import type { Issue } from "../../domain/models"
 import { parseScoreFromLabels } from "../../domain/models"
-import type { ParsedWebhookEvent } from "../../domain/parsed-webhook-event"
+import {
+  AGENT_VALLEY_COMMENT_MARKER,
+  type CommentAuthorTrust,
+  type ParsedWebhookEvent,
+} from "../../domain/parsed-webhook-event"
 import type { IssueStateType, WebhookReceiver } from "../../domain/ports/tracker"
 import { logger } from "../../observability/logger"
 import { hashPayloadSha256Hex, WebhookDedupCache } from "../dedup-cache"
@@ -43,12 +47,23 @@ interface GithubIssuePayload {
   state?: "open" | "closed"
   labels?: Array<{ name: string } | string>
   repository_url?: string
+  /** Present when the "issue" is a pull request. */
+  pull_request?: unknown
+}
+
+interface GithubCommentPayload {
+  id?: number
+  body?: string | null
+  user?: { login?: string; type?: string }
+  author_association?: string
+  performed_via_github_app?: unknown
 }
 
 interface GithubWebhookPayload {
   action?: string
   issue?: GithubIssuePayload
   label?: { name: string }
+  comment?: GithubCommentPayload
   repository?: { owner?: { login?: string }; name?: string; full_name?: string }
   changes?: Record<string, unknown>
   zen?: string
@@ -129,6 +144,14 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
 
     const issueId = String(apiIssue.number)
     const action = raw.action
+
+    // issue_comment deliveries share the `issue` envelope, so they must be
+    // recognized before the issue actions below. Pull request conversation
+    // comments are not routed yet; edits and deletions are ignored.
+    if (raw.comment) {
+      if (action !== "created" || apiIssue.pull_request) return null
+      return toCommentEvent(issueId, raw.comment)
+    }
 
     if (action === "deleted") {
       return { kind: "issue.deleted", issueId }
@@ -237,6 +260,27 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
+
+const MAINTAINER_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"])
+
+function commentAuthorTrust(comment: GithubCommentPayload): CommentAuthorTrust {
+  if (comment.user?.type === "Bot" || comment.performed_via_github_app != null) return "bot"
+  return MAINTAINER_ASSOCIATIONS.has(comment.author_association ?? "") ? "maintainer" : "external"
+}
+
+function toCommentEvent(issueId: string, comment: GithubCommentPayload): ParsedWebhookEvent | null {
+  if (typeof comment.id !== "number") return null
+  const rawBody = comment.body ?? ""
+  return {
+    kind: "issue.commented",
+    issueId,
+    commentId: String(comment.id),
+    author: comment.user?.login ?? "unknown",
+    authorTrust: commentAuthorTrust(comment),
+    fromAgentValley: rawBody.includes(AGENT_VALLEY_COMMENT_MARKER),
+    body: sanitizeAtBoundary(rawBody),
+  }
+}
 
 function statusFromLabels(
   labels: string[],

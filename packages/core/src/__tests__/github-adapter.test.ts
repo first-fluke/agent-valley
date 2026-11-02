@@ -353,7 +353,7 @@ describe("GithubTrackerAdapter — updateIssueState", () => {
 // ── addIssueComment / addIssueLabel ──────────────────────────────────
 
 describe("GithubTrackerAdapter — comments and labels", () => {
-  test("addIssueComment posts body JSON", async () => {
+  test("addIssueComment posts body JSON with the Agent Valley marker", async () => {
     const { fetch, requests } = makeFetch([(_r) => ({ status: 201, body: { id: 1 } })])
     const adapter = makeAdapter({ fetch })
 
@@ -362,7 +362,7 @@ describe("GithubTrackerAdapter — comments and labels", () => {
     expect(requests).toHaveLength(1)
     expect(requests[0]?.method).toBe("POST")
     expect(requests[0]?.url).toMatch(/\/issues\/42\/comments$/)
-    expect(requests[0]?.body).toEqual({ body: "hello world" })
+    expect(requests[0]?.body).toEqual({ body: "hello world\n\n<!-- agent-valley -->" })
   })
 
   test("addIssueComment surfaces 429 as retryable rate-limit error", async () => {

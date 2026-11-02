@@ -181,6 +181,9 @@ linear:
 #     in_progress: valley:wip
 #     done: valley:done
 #     cancelled: valley:cancelled
+#   comment_relay:
+#     enabled: false
+#     ignore_authors: []
 
 workspace:
   root: /absolute/path/to/target-repo
@@ -374,6 +377,8 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 ### GitHub Issues 지원 (v0.2+)
 
 Linear 외에 GitHub Issues로도 오케스트레이터를 구동할 수 있습니다. `av.yaml` 의 `tracker.kind: github` 로 설정하고 `github:` 섹션만 채우면, 도메인 `IssueTracker` / `WebhookReceiver` 포트가 투명하게 교체됩니다. 두 트래커는 동일한 오케스트레이션·재시도·딜리버리 파이프라인을 공유합니다.
+
+`github.comment_relay.enabled: true` 로 설정하고 webhook이 **Issue comments** 이벤트도 받도록 하면, Actor가 실행 중인 이슈에 저장소 소유자·멤버·협업자가 새로 단 코멘트가 그 Actor에게 추가 지시로 전달됩니다. Codex는 실행 중인 세션에서 받고, Claude처럼 상태를 유지하지 않는 Actor는 코멘트를 붙여 시도를 다시 시작합니다. Agent Valley 자신의 코멘트, 봇 계정, 외부 기여자, `ignore_authors`, 수정된 코멘트, PR 코멘트는 전달하지 않습니다. Actor가 `GITHUB_TOKEN` 계정으로 코멘트를 남긴다면 그 계정을 `ignore_authors`에 넣으세요.
 
 ### 관측성 (v0.2+)
 

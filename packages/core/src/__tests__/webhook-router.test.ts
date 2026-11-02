@@ -257,3 +257,25 @@ describe("WebhookRouter — issue events dispatch", () => {
     expect(harness.core.state.lastEventAt).not.toBeNull()
   })
 })
+
+describe("WebhookRouter — issue comments", () => {
+  test("hands comments to the comment relay without touching the issue lifecycle", async () => {
+    const harness = buildRouter()
+    harness.webhook.nextEvent = {
+      kind: "issue.commented",
+      issueId: "issue-a",
+      commentId: "c-1",
+      author: "maintainer",
+      authorTrust: "maintainer",
+      fromAgentValley: false,
+      body: "Also cover the empty state.",
+    }
+
+    const response = await harness.router.handleWebhook("{}", "ok")
+
+    expect(response.status).toBe(200)
+    expect(harness.lifecycle.todoCalls).toHaveLength(0)
+    expect(harness.lifecycle.inProgressCalls).toHaveLength(0)
+    expect(harness.lifecycle.leftCalls).toHaveLength(0)
+  })
+})

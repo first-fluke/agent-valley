@@ -14,6 +14,7 @@
 
 import type { Issue } from "../../domain/models"
 import { parseScoreFromLabels } from "../../domain/models"
+import { AGENT_VALLEY_COMMENT_MARKER } from "../../domain/parsed-webhook-event"
 import type { IssueTracker } from "../../domain/ports/tracker"
 
 const GITHUB_API_URL = "https://api.github.com"
@@ -316,7 +317,11 @@ export class GithubTrackerAdapter implements IssueTracker {
 
   async addIssueComment(issueId: string, body: string): Promise<void> {
     const number = parseIssueNumber(issueId)
-    await this.request("POST", this.repoUrl(`/issues/${number}/comments`), { body })
+    // The hidden marker lets the comment webhook skip Agent Valley's own
+    // messages instead of relaying them back into the running actor.
+    await this.request("POST", this.repoUrl(`/issues/${number}/comments`), {
+      body: `${body}\n\n${AGENT_VALLEY_COMMENT_MARKER}`,
+    })
   }
 
   async addIssueLabel(issueId: string, labelName: string): Promise<void> {

@@ -15,6 +15,7 @@
 
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import { logger } from "../observability/logger"
+import { relayIssueComment } from "./comment-relay"
 import type { IssueLifecycle } from "./issue-lifecycle"
 import type { OrchestratorCore } from "./orchestrator-core"
 
@@ -142,6 +143,12 @@ export class WebhookRouter {
           issueId: event.issueId,
           changedFields: event.changedFields.join(",") || "<none>",
         })
+        return
+      }
+
+      case "issue.commented": {
+        // Follow-up input for running work; policy lives in comment-relay.
+        await relayIssueComment(core, event)
         return
       }
 

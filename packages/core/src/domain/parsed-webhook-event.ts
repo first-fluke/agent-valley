@@ -24,6 +24,19 @@ export type ParsedWebhookEventKind =
   | "issue.deleted"
   | "issue.labeled"
   | "issue.relation_changed"
+  | "issue.commented"
+
+/**
+ * Hidden marker appended to every tracker comment Agent Valley posts, so
+ * comment webhooks can tell its own messages from people's.
+ */
+export const AGENT_VALLEY_COMMENT_MARKER = "<!-- agent-valley -->"
+
+/**
+ * Tracker-reported standing of a comment author. `maintainer` covers
+ * repository owners, organization members and collaborators.
+ */
+export type CommentAuthorTrust = "maintainer" | "external" | "bot"
 
 export type ParsedWebhookEvent =
   | {
@@ -58,4 +71,16 @@ export type ParsedWebhookEvent =
       relatedIssueId: string
       /** true = relation added, false = relation removed. */
       added: boolean
+    }
+  | {
+      kind: "issue.commented"
+      issueId: string
+      commentId: string
+      /** Author handle as reported by the tracker. */
+      author: string
+      authorTrust: CommentAuthorTrust
+      /** True when the body carries `AGENT_VALLEY_COMMENT_MARKER`. */
+      fromAgentValley: boolean
+      /** Boundary-sanitized comment text; still untrusted input. */
+      body: string
     }
