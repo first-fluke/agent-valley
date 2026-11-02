@@ -6,6 +6,18 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.6.0](https://github.com/first-fluke/agent-valley/compare/v4.5.0...v4.6.0) (2026-11-02)
+
+
+### Features
+
+* **tracker:** follow up on pull request reviews of delivered work ([39a7209](https://github.com/first-fluke/agent-valley/commit/39a7209af0f21682170bf44e07c5cbf06050cb23))
+
+
+### Bug Fixes
+
+* **prompt:** keep retry context when the template omits it ([609084d](https://github.com/first-fluke/agent-valley/commit/609084d13669a289d0ee9d7d91931b6105c61588))
+
 ## [4.5.0](https://github.com/first-fluke/agent-valley/compare/v4.4.0...v4.5.0) (2026-11-02)
 
 
