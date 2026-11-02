@@ -4,7 +4,8 @@ const nextConfig: NextConfig = {
   output: "standalone",
   reactCompiler: true,
   transpilePackages: ["@agent-valley/core"],
-  serverExternalPackages: ["zod"],
+  // libsql loads a native binding for the local state database.
+  serverExternalPackages: ["zod", "@libsql/client"],
 }
 
 export default nextConfig

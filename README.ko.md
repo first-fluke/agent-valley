@@ -432,6 +432,10 @@ OpenTelemetry OTLP HTTP 트레이스와 Prometheus 메트릭이 내장돼 있으
 
 부팅 시 Orchestrator가 설정된 트래커에서 모든 Todo + In Progress 이슈를 가져와 DAG 캐시를 재조정합니다. 기존 진행 중인 이슈는 자동으로 재개됩니다.
 
+### 상태 저장
+
+재시작 후에도 기억해야 하는 상태는 workspace root의 SQLite 파일 하나, `.agent-valley/state.db` 에 모두 들어갑니다. 실행 중인 시도, 재시도 큐, 완료 대기, DAG 캐시, 예산 사용량, webhook 전달 키입니다. 저장소마다 트랜잭션으로 쓰기 때문에 중간에 죽어도 반쪽짜리 기록이 남지 않고, 재시작 뒤에 트래커가 같은 이벤트를 다시 보내도 걸러 냅니다. 업그레이드 후 첫 부팅에서 이전의 `run-state.json`, `dag-cache.json`, `budget-usage.json` 을 가져온 뒤 `*.migrated` 로 이름을 바꿉니다.
+
 ---
 
 ## 개발

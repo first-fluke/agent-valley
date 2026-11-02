@@ -448,6 +448,10 @@ Failed actor runs are retried with exponential backoff (`60s × 2^(attempt-1)`, 
 
 On boot, the orchestrator fetches all Todo + In Progress issues from the configured tracker and reconciles the DAG cache. Existing in-progress issues resume automatically.
 
+### Durable State
+
+Everything the orchestrator must remember across a restart lives in one SQLite file, `.agent-valley/state.db` inside the workspace root: active attempts, the retry queue, pending finalizations, the DAG cache, budget usage and webhook delivery keys. Each store writes in a transaction, so a crash never leaves a half-written record, and a tracker redelivery after a restart is still rejected. The first boot after upgrading imports the earlier `run-state.json`, `dag-cache.json` and `budget-usage.json` snapshots and renames them `*.migrated`.
+
 ---
 
 ## Development

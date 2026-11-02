@@ -3,18 +3,17 @@ import type { Issue, OrchestratorRuntimeState, RetryCategory, Workspace } from "
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
 import type { IssueTracker, WebhookReceiver } from "../domain/ports/tracker"
 import type { WorkspaceGateway } from "../domain/ports/workspace"
-import type { ObservabilityHooks } from "../observability/hooks"
-import { createNoopObservabilityHooks } from "../observability/hooks"
+import { createNoopObservabilityHooks, type ObservabilityHooks } from "../observability/hooks"
 import { logger } from "../observability/logger"
 import { SpawnAgentRunnerAdapter } from "../sessions/adapters/spawn-agent-runner"
 import type { AgentRunnerService } from "./agent-runner"
-import type { BudgetService } from "./budget-service"
-import { createNoopBudgetService } from "./budget-service"
+import { type BudgetService, createNoopBudgetService } from "./budget-service"
 import type { CompletionDeps } from "./completion-deps"
 import { DagScheduler } from "./dag-scheduler"
 import { buildOrchestratorStatus, sortByIssueNumber } from "./helpers"
 import type { InterventionBus } from "./intervention-bus"
 import { PendingFinalizationManager } from "./pending-finalization"
+import type { DagCachePort } from "./persistence/dag-cache-store"
 import { decideRecovery } from "./persistence/recovery"
 import {
   applyRecoveryDecision,
@@ -22,8 +21,7 @@ import {
   cleanupAttemptState,
   reconcileRecoveredAttempts,
 } from "./persistence/recovery-apply"
-import type { PersistedAttempt, RunStatePort } from "./persistence/run-state-store"
-import { RunStatePersistence } from "./persistence/run-state-store"
+import { type PersistedAttempt, RunStatePersistence, type RunStatePort } from "./persistence/run-state-store"
 import type { RetryContext } from "./retry-queue"
 import { CAPACITY_WAIT_REASON, RetryQueue } from "./retry-queue"
 import { fillVacantSlots } from "./slot-filler"
@@ -50,7 +48,9 @@ export interface OrchestratorCoreDeps {
   emit: CoreEventEmit
   observability?: ObservabilityHooks
   budget?: BudgetService
+  /** Durable stores; JSON files under `.agent-valley/` when the host injects none. */
   runStatePersistence?: RunStatePort
+  dagCache?: DagCachePort
 }
 
 export class OrchestratorCore {
@@ -104,7 +104,7 @@ export class OrchestratorCore {
     this.agentRunnerPort = deps.agentRunner ?? new SpawnAgentRunnerAdapter()
     this.agentRunner = this.agentRunnerPort.service
     this.retryQueue = new RetryQueue(this.config.agentMaxRetries, this.config.agentRetryDelay)
-    this.dagScheduler = new DagScheduler(`${this.config.workspaceRoot}/.agent-valley/dag-cache.json`)
+    this.dagScheduler = new DagScheduler(deps.dagCache ?? `${this.config.workspaceRoot}/.agent-valley/dag-cache.json`)
     this.runStatePersistence =
       deps.runStatePersistence ?? new RunStatePersistence(`${this.config.workspaceRoot}/.agent-valley/run-state.json`)
     this.observability = deps.observability ?? createNoopObservabilityHooks()

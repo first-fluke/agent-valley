@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { getOrchestrator } from "@/lib/orchestrator-singleton"
 
 const runtime = vi.hoisted(() => ({
+  // The state database needs a writable workspace root.
+  workspaceRoot: `${process.env.TMPDIR ?? "/tmp"}/av-bootstrap-test-${process.pid}-${Date.now()}`,
   calls: [] as string[],
   failStartup: false,
   disposeRelay: vi.fn(async () => {}),
@@ -17,7 +19,7 @@ vi.mock("@/lib/env", () => ({
     linearTeamUuid: "test-team",
     linearWebhookSecret: "test-secret",
     workflowStates: { todo: "todo", inProgress: "working", done: "done", cancelled: "cancelled" },
-    workspaceRoot: "/unused-test-workspace",
+    workspaceRoot: runtime.workspaceRoot,
     logLevel: "error",
     logFormat: "json",
     observability: { prometheus: { enabled: false, path: "/api/metrics" }, otel: { enabled: false } },

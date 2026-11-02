@@ -1,11 +1,9 @@
 /**
  * DagScheduler — Application-layer component for dependency graph management.
- * Manages DAG state, persists to JSON cache, and provides query methods.
- * Delegates pure DAG logic to domain/dag.ts.
+ * Manages DAG state, persists it through a DagCachePort, and provides query
+ * methods. Delegates pure DAG logic to domain/dag.ts.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { dirname } from "node:path"
 import {
   allChildrenDone as dagAllChildrenDone,
   getReadyIssues as dagGetReadyIssues,
@@ -15,6 +13,7 @@ import {
 } from "../domain/dag"
 import type { DagCache, DagNode, DagNodeStatus, Issue } from "../domain/models"
 import { logger } from "../observability/logger"
+import { type DagCachePort, JsonDagCacheStore } from "./persistence/dag-cache-store"
 
 export class DagScheduler {
   private cache: DagCache = { version: 1, updatedAt: "", nodes: {} }
@@ -27,7 +26,12 @@ export class DagScheduler {
    */
   private onCycleDetected: (() => void) | null = null
 
-  constructor(private cachePath: string) {}
+  private readonly store: DagCachePort
+
+  /** A path keeps the JSON file store; hosts pass the SQLite store. */
+  constructor(store: string | DagCachePort) {
+    this.store = typeof store === "string" ? new JsonDagCacheStore(store) : store
+  }
 
   /** Register a one-line observability callback. Calling again replaces it. */
   setCycleObserver(fn: () => void): void {
@@ -251,21 +255,20 @@ export class DagScheduler {
   // ── Persistence ───────────────────────────────────────────────────
 
   async loadCache(): Promise<void> {
-    try {
-      const raw = await readFile(this.cachePath, "utf-8")
-      this.cache = JSON.parse(raw) as DagCache
+    const loaded = await this.store.load().catch(() => null)
+    if (loaded?.nodes) {
+      this.cache = loaded
       logger.info("dag-scheduler", `Loaded DAG cache with ${Object.keys(this.cache.nodes).length} nodes`)
-    } catch {
-      // File doesn't exist or is corrupt — start fresh
+    } else {
+      // Nothing saved yet or unreadable — start fresh
       this.cache = { version: 1, updatedAt: "", nodes: {} }
     }
   }
 
   async saveCache(): Promise<void> {
     try {
-      await mkdir(dirname(this.cachePath), { recursive: true })
       this.cache.updatedAt = new Date().toISOString()
-      await writeFile(this.cachePath, JSON.stringify(this.cache, null, 2), "utf-8")
+      await this.store.save(this.cache)
     } catch (err) {
       logger.error("dag-scheduler", "Failed to save DAG cache", { error: String(err) })
     }

@@ -29,7 +29,18 @@ import type { InterventionBus } from "./intervention-bus"
 import { InterventionBus as InterventionBusImpl } from "./intervention-bus"
 import { IssueLifecycle } from "./issue-lifecycle"
 import { OrchestratorCore } from "./orchestrator-core"
+import type { DagCachePort } from "./persistence/dag-cache-store"
+import type { RunStatePort } from "./persistence/run-state-store"
 import { WebhookRouter } from "./webhook-router"
+
+/**
+ * Durable stores the host injects (`state/open-state-stores.ts`). Without
+ * them the core falls back to JSON files under `.agent-valley/`.
+ */
+export interface OrchestratorPersistence {
+  runState?: RunStatePort
+  dagCache?: DagCachePort
+}
 
 type WebhookHandler = (
   payload: string,
@@ -54,6 +65,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
     observability?: ObservabilityHooks,
     budget?: BudgetService,
     intervention?: InterventionBus,
+    persistence?: OrchestratorPersistence,
   ) {
     super()
 
@@ -73,6 +85,8 @@ export class Orchestrator extends OrchestratorEventEmitter {
       emit: (event, payload) => this.emitEvent(event, payload),
       observability,
       budget,
+      runStatePersistence: persistence?.runState,
+      dagCache: persistence?.dagCache,
     })
 
     // Construct the intervention bus if one was not injected. It shares

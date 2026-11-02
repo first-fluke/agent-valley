@@ -3,12 +3,11 @@
  * replayed webhook deliveries (a captured-and-resent valid-signature body,
  * or an at-least-once redelivery from the tracker platform).
  *
- * Limitation: this cache is process-local and in-memory by design. It does
- * NOT survive process restarts and is NOT shared across horizontally
- * scaled instances — a replay sent to a different process/instance within
- * the TTL window would not be caught. A durable (Redis / DB-backed) store
- * is a separate workstream; this cache closes the single-process replay
- * window, which is the immediate verified gap.
+ * The cache answers synchronously from memory. With a `DedupKeyStore`
+ * (`state/sqlite-dedup-store.ts`) keys are also written through, and
+ * `hydrate()` reloads the live ones at boot, so a replay after a restart
+ * is still rejected. It is still not shared across horizontally scaled
+ * instances.
  */
 
 import { createHash } from "node:crypto"
@@ -22,9 +21,17 @@ export const DEFAULT_DEDUP_TTL_MS = 10 * 60 * 1000 // 10 minutes
 /** Default freshness window for timestamp-based replay protection (Linear). */
 export const WEBHOOK_REPLAY_FRESHNESS_WINDOW_MS = 60_000 // 60 seconds
 
+/** Durable backing for the cache; writes are fire-and-forget. */
+export interface DedupKeyStore {
+  loadLive(now: number): Promise<Array<{ key: string; expiresAt: number }>>
+  record(key: string, expiresAt: number): void
+  purgeExpired(now: number): void
+}
+
 export interface WebhookDedupCacheOptions {
   maxSize?: number
   ttlMs?: number
+  store?: DedupKeyStore
 }
 
 /**
@@ -46,11 +53,25 @@ export function hashPayloadSha256Hex(payload: string): string {
 export class WebhookDedupCache {
   private readonly maxSize: number
   private readonly ttlMs: number
+  private readonly store: DedupKeyStore | null
   private readonly seen = new Map<string, number>() // key -> expiresAt (ms epoch)
 
   constructor(options: WebhookDedupCacheOptions = {}) {
     this.maxSize = options.maxSize ?? DEFAULT_DEDUP_CACHE_MAX_SIZE
     this.ttlMs = options.ttlMs ?? DEFAULT_DEDUP_TTL_MS
+    this.store = options.store ?? null
+  }
+
+  /** Reload the keys still alive in the store. Call once before the first webhook. */
+  async hydrate(now: number = Date.now()): Promise<void> {
+    if (!this.store) return
+    this.store.purgeExpired(now)
+    // The store returns keys ordered by expiry, which keeps `seen` in
+    // insertion order of expiry as `evictExpired` expects.
+    for (const { key, expiresAt } of await this.store.loadLive(now)) {
+      if (this.seen.size >= this.maxSize) break
+      this.seen.set(key, expiresAt)
+    }
   }
 
   /**
@@ -74,6 +95,7 @@ export class WebhookDedupCache {
     }
 
     this.seen.set(key, now + this.ttlMs)
+    this.store?.record(key, now + this.ttlMs)
     return true
   }
 
@@ -82,10 +104,14 @@ export class WebhookDedupCache {
   }
 
   private evictExpired(now: number): void {
+    let evicted = false
     for (const [key, expiresAt] of this.seen) {
-      if (expiresAt <= now) this.seen.delete(key)
-      else break // Map iterates insertion order; expiresAt is monotonic with insertion.
+      if (expiresAt <= now) {
+        this.seen.delete(key)
+        evicted = true
+      } else break // Map iterates insertion order; expiresAt is monotonic with insertion.
     }
+    if (evicted) this.store?.purgeExpired(now)
   }
 }
 

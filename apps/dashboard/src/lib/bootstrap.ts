@@ -11,6 +11,7 @@ import { createInMemoryBudgetService, createNoopBudgetService } from "@agent-val
 import { Orchestrator } from "@agent-valley/core/orchestrator/orchestrator"
 import type { LedgerBridge } from "@agent-valley/core/relay/ledger-bridge"
 import { wireLedgerRelay } from "@agent-valley/core/relay/ledger-wiring"
+import { openStateStores } from "@agent-valley/core/state/open-state-stores"
 import { GithubTrackerAdapter } from "@agent-valley/core/tracker/adapters/github-adapter"
 import { GithubReviewWebhookReceiver } from "@agent-valley/core/tracker/adapters/github-review-webhook-receiver"
 import { GithubWebhookReceiver } from "@agent-valley/core/tracker/adapters/github-webhook-receiver"
@@ -36,6 +37,10 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
   const config = toOrchestratorConfig(projectRoot)
   configureLogger(config.logLevel, config.logFormat)
 
+  // Every durable record lives in `.agent-valley/state.db`; earlier JSON
+  // snapshots are imported on first boot.
+  const stateStores = await openStateStores(`${config.workspaceRoot}/.agent-valley`)
+
   const tracker =
     config.trackerKind === "github" && config.github
       ? new GithubTrackerAdapter({
@@ -54,10 +59,12 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
       ? new GithubWebhookReceiver({
           secret: config.github.webhookSecret,
           labels: config.github.labels,
+          dedupCache: stateStores.dedupCache,
         })
       : new LinearWebhookReceiver({
           secret: config.linearWebhookSecret,
           workflowStates: config.workflowStates,
+          dedupCache: stateStores.dedupCache,
         })
   const workspace = new FileSystemWorkspaceGateway(new WorkspaceManager(config.workspaceRoot))
 
@@ -79,21 +86,29 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
 
   // Budget service — configured via av.yaml budget: section. When the
   // section is absent the no-op service is used so spawn is never gated.
-  // Design § 4.5 / § 6.4 (E16–E19). Counters are persisted to
-  // `.agent-valley/budget-usage.json` (same convention as DagScheduler /
-  // RunStatePersistence) so a process restart cannot silently reset
-  // today's daily USD/token cap — `ready` is awaited below before the
-  // orchestrator can accept its first issue.
+  // Design § 4.5 / § 6.4 (E16–E19). Counters live in the state database
+  // so a process restart cannot silently reset today's daily USD/token
+  // cap — `ready` is awaited below before the orchestrator can accept its
+  // first issue.
   const budget = config.budget
-    ? createInMemoryBudgetService({
-        caps: config.budget,
-        observability,
-        persistPath: `${config.workspaceRoot}/.agent-valley/budget-usage.json`,
-      })
+    ? createInMemoryBudgetService({ caps: config.budget, observability, persistence: stateStores.budgetUsage })
     : createNoopBudgetService()
   if (budget.ready) await budget.ready
 
-  const orchestrator = new Orchestrator(config, tracker, webhook, workspace, undefined, observability, budget)
+  const orchestrator = new Orchestrator(
+    config,
+    tracker,
+    webhook,
+    workspace,
+    undefined,
+    observability,
+    budget,
+    undefined,
+    {
+      runState: stateStores.runState,
+      dagCache: stateStores.dagCache,
+    },
+  )
   const githubTracker = config.trackerKind === "github" && Boolean(config.github)
   // Pull requests live on GitHub whichever service tracks the issues. The
   // GitHub tracker's receiver already parses reviews; other trackers get a
@@ -103,7 +118,10 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
       client: new GhCliCodeHost(),
       webhook: githubTracker
         ? undefined
-        : new GithubReviewWebhookReceiver({ secret: config.pullRequestReviews.webhookSecret }),
+        : new GithubReviewWebhookReceiver({
+            secret: config.pullRequestReviews.webhookSecret,
+            dedupCache: stateStores.dedupCache,
+          }),
     })
   }
 
@@ -124,7 +142,11 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
       try {
         if (ledgerBridge) await ledgerBridge.dispose()
       } finally {
-        await otel.shutdown()
+        try {
+          await otel.shutdown()
+        } finally {
+          await stateStores.close()
+        }
       }
     }
   }
