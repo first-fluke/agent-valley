@@ -224,7 +224,7 @@ export function renderPrompt(
   const sanitizedTitle = wrapUntrustedContent(sanitizeIssueBody(issue.title))
   const sanitizedRetryReason = wrapUntrustedContent(sanitizeIssueBody(retryReason))
 
-  const rendered = template
+  let rendered = template
     .replace(/\{\{issue\.identifier\}\}/g, issue.identifier.slice(0, 50))
     .replace(/\{\{issue\.title\}\}/g, sanitizedTitle)
     .replace(/\{\{issue\.description\}\}/g, sanitizedDescription)
@@ -232,6 +232,13 @@ export function renderPrompt(
     .replace(/\{\{attempt\.id\}\}/g, attempt.id)
     .replace(/\{\{retry_count\}\}/g, String(retryCount))
     .replace(/\{\{retry_reason\}\}/g, sanitizedRetryReason)
+
+  // Retries carry actionable context (operator or reviewer instructions,
+  // conflict repair steps). Templates without {{retry_reason}}, including
+  // the `av setup` default, would otherwise drop it silently.
+  if (retryReason.trim() && !template.includes("{{retry_reason}}")) {
+    rendered += `\n\n## Retry context\n${sanitizedRetryReason}`
+  }
 
   // No trigger table (target repo doesn't ship oma, or it failed to parse)
   // → render exactly as before this feature existed. Boundary validation

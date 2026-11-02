@@ -108,6 +108,22 @@ describe("renderPrompt", () => {
     expect(result).not.toContain("${process.env.SECRET}")
   })
 
+  test("retry reason is appended when the template has no {{retry_reason}}", () => {
+    const tmpl = "Work on {{issue.identifier}}"
+    const result = renderPrompt(tmpl, makeIssue(), "/tmp/ws", makeAttempt(), 0, "Address review: rename the flag")
+
+    expect(result).toContain("## Retry context")
+    expect(result).toContain("Address review: rename the flag")
+    expect(result).toContain(UNTRUSTED_BLOCK_OPEN)
+  })
+
+  test("retry reason is rendered once when the template places it", () => {
+    const result = renderPrompt(template, makeIssue(), "/tmp/ws", makeAttempt(), 1, "Fix the failing test")
+
+    expect(result).not.toContain("## Retry context")
+    expect(result.split("Fix the failing test")).toHaveLength(2)
+  })
+
   test("unknown variables remain unchanged", () => {
     const tmpl = "Hello {{unknown_var}} world"
     const issue = makeIssue()
