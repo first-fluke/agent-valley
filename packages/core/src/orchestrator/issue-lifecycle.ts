@@ -28,6 +28,10 @@ export class IssueLifecycle {
 
   async handleIssueTodo(issue: Issue, retryContext?: RetryContext): Promise<void> {
     const { core } = this
+    // A queued retry owns the next dispatch and carries its context (e.g. a
+    // pull request review that reopened the issue). The slot filler removes
+    // capacity-only entries before it calls in here.
+    if (!retryContext && core.retryQueue.entries.some((entry) => entry.issueId === issue.id)) return
     core.dagScheduler.addNode(issue)
     core.dagScheduler.updateNodeStatus(issue.id, "waiting")
 

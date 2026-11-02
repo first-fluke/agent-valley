@@ -18,6 +18,7 @@ import { logger } from "../observability/logger"
 import { relayIssueComment } from "./comment-relay"
 import type { IssueLifecycle } from "./issue-lifecycle"
 import type { OrchestratorCore } from "./orchestrator-core"
+import { followUpPullRequestReview } from "./review-follow-up"
 
 export interface WebhookResponse {
   status: number
@@ -107,7 +108,8 @@ export class WebhookRouter {
 
         if (event.to === "todo") {
           // Instant acknowledgment for webhook-triggered-only (not startup/retry).
-          if (!core.processingIssues.has(event.issueId) && !core.state.activeWorkspaces.has(event.issueId)) {
+          const queued = core.retryQueue.entries.some((entry) => entry.issueId === event.issueId)
+          if (!queued && !core.processingIssues.has(event.issueId) && !core.state.activeWorkspaces.has(event.issueId)) {
             core.tracker
               .addIssueComment(event.issueId, `Symphony: Received — starting agent for ${event.issue.identifier}`)
               .catch((err) => {
@@ -149,6 +151,12 @@ export class WebhookRouter {
       case "issue.commented": {
         // Follow-up input for running work; policy lives in comment-relay.
         await relayIssueComment(core, event)
+        return
+      }
+
+      case "pull_request.reviewed": {
+        // Review of an Agent Valley pull request; policy lives in review-follow-up.
+        await followUpPullRequestReview(core, event)
         return
       }
 

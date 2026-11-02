@@ -1,7 +1,7 @@
 /**
  * GithubWebhookReceiver — Infrastructure adapter implementing the domain
- * `WebhookReceiver<ParsedWebhookEvent>` port against GitHub's `issues`
- * and `issue_comment` webhook contracts.
+ * `WebhookReceiver<ParsedWebhookEvent>` port against GitHub's `issues`,
+ * `issue_comment` and `pull_request_review` webhook contracts.
  *
  * Signing: HMAC-SHA256 with header `X-Hub-Signature-256: sha256=<hex>`.
  * Event mapping: see § 5.2 of docs/plans/v0-2-bigbang-design.md.
@@ -19,6 +19,7 @@ import {
   type CommentAuthorTrust,
   isAgentValleyCommentBody,
   type ParsedWebhookEvent,
+  type PullRequestReviewVerdict,
 } from "../../domain/parsed-webhook-event"
 import type { IssueStateType, WebhookReceiver } from "../../domain/ports/tracker"
 import { logger } from "../../observability/logger"
@@ -59,12 +60,32 @@ interface GithubCommentPayload {
   performed_via_github_app?: unknown
 }
 
+interface GithubReviewPayload extends GithubCommentPayload {
+  state?: string
+  html_url?: string
+}
+
+interface GithubPullRequestPayload {
+  number?: number
+  state?: "open" | "closed"
+  html_url?: string
+  head?: { ref?: string; repo?: { full_name?: string } | null }
+}
+
+interface GithubRepositoryPayload {
+  owner?: { login?: string }
+  name?: string
+  full_name?: string
+}
+
 interface GithubWebhookPayload {
   action?: string
   issue?: GithubIssuePayload
   label?: { name: string }
   comment?: GithubCommentPayload
-  repository?: { owner?: { login?: string }; name?: string; full_name?: string }
+  review?: GithubReviewPayload
+  pull_request?: GithubPullRequestPayload
+  repository?: GithubRepositoryPayload
   changes?: Record<string, unknown>
   zen?: string
 }
@@ -137,6 +158,13 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
     // ping / non-issue / missing action -> ignore.
     if (raw.zen && !raw.action) return null
     if (!raw.action) return null
+
+    // pull_request_review deliveries carry no `issue` envelope. Only newly
+    // submitted reviews matter; edits and dismissals carry no new request.
+    if (raw.review && raw.pull_request) {
+      if (raw.action !== "submitted") return null
+      return toReviewEvent(raw.review, raw.pull_request, raw.repository)
+    }
 
     const apiIssue = raw.issue
     // Not an issues event (e.g. pull_request, push) -> ignore.
@@ -263,6 +291,8 @@ export class GithubWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
 
 const MAINTAINER_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"])
 
+const REVIEW_VERDICTS = new Set<string>(["approved", "changes_requested", "commented"])
+
 function commentAuthorTrust(comment: GithubCommentPayload): CommentAuthorTrust {
   if (comment.user?.type === "Bot" || comment.performed_via_github_app != null) return "bot"
   return MAINTAINER_ASSOCIATIONS.has(comment.author_association ?? "") ? "maintainer" : "external"
@@ -282,6 +312,49 @@ function toCommentEvent(issueId: string, comment: GithubCommentPayload): ParsedW
     fromAgentValley: isAgentValleyCommentBody(rawBody),
     body: sanitizeAtBoundary(rawBody),
   }
+}
+
+/**
+ * Map a submitted review to the issue its pull request delivers. Agent
+ * Valley names branches `<prefix>/<owner>/<repo>#<issue>`
+ * (`workspace/worktree-lifecycle.ts::deriveBranchName`), so any other
+ * branch, a fork's branch or a closed pull request is not follow-up work.
+ */
+function toReviewEvent(
+  review: GithubReviewPayload,
+  pr: GithubPullRequestPayload,
+  repository: GithubRepositoryPayload | undefined,
+): ParsedWebhookEvent | null {
+  if (typeof review.id !== "number" || typeof pr.number !== "number" || pr.state !== "open") return null
+  const repoName = repository?.full_name
+  if (!repoName || pr.head?.repo?.full_name?.toLowerCase() !== repoName.toLowerCase()) return null
+  const issueId = issueIdFromBranch(pr.head?.ref ?? "", repoName)
+  const verdict = (review.state ?? "").toLowerCase()
+  if (!issueId || !REVIEW_VERDICTS.has(verdict)) return null
+  const rawBody = review.body ?? ""
+  const login = review.user?.login
+  return {
+    kind: "pull_request.reviewed",
+    issueId,
+    pullNumber: pr.number,
+    reviewId: String(review.id),
+    reviewer: login ?? "unknown",
+    reviewerKeys: login ? [login] : [],
+    reviewerTrust: commentAuthorTrust(review),
+    verdict: verdict as PullRequestReviewVerdict,
+    fromAgentValley: isAgentValleyCommentBody(rawBody),
+    body: sanitizeAtBoundary(rawBody),
+    url: review.html_url ?? pr.html_url ?? "",
+  }
+}
+
+function issueIdFromBranch(branch: string, repoName: string): string | null {
+  const marker = `/${repoName.toLowerCase()}#`
+  const at = branch.toLowerCase().indexOf(marker)
+  // Exactly one prefix segment before the repository name.
+  if (at <= 0 || branch.slice(0, at).includes("/")) return null
+  const issueNumber = branch.slice(at + marker.length)
+  return /^[1-9]\d*$/.test(issueNumber) ? issueNumber : null
 }
 
 function statusFromLabels(

@@ -20,6 +20,14 @@ import type { Issue } from "../models"
  */
 export type IssueStateType = "todo" | "in_progress" | "done" | "cancelled"
 
+/** Inline comment attached to a pull request review. */
+export interface PullRequestReviewComment {
+  path: string
+  /** Line in the reviewed file version; null when the tracker no longer maps it. */
+  line: number | null
+  body: string
+}
+
 /**
  * IssueTracker — read and mutate issues on an external tracker.
  *
@@ -46,6 +54,9 @@ export interface IssueTracker {
 
   /** Attach a label by name, creating it on-demand if the tracker supports it. */
   addIssueLabel(issueId: string, labelName: string): Promise<void>
+
+  /** Inline comments of one pull request review. Only trackers that host pull requests implement it. */
+  fetchPullRequestReviewComments?(pullNumber: number, reviewId: string): Promise<PullRequestReviewComment[]>
 }
 
 /**

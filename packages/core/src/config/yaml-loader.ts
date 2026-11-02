@@ -11,6 +11,12 @@ import {
 } from "./actor-schema"
 import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
 import { chiefConfigSchema, mergeChiefConfig } from "./chief-schema"
+import {
+  buildCommentRelayConfig,
+  commentRelayMergedSchema,
+  commentRelayProjectSchema,
+  githubCommentRelayProjectSchema,
+} from "./comment-relay-schema"
 import { detectHardware } from "./hardware"
 import { resolveMaxParallel } from "./merge-helpers"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
@@ -51,12 +57,6 @@ export const globalConfigSchema = z
 export type GlobalConfig = z.infer<typeof globalConfigSchema>
 
 /** Schema for <project>/av.yaml */
-const commentRelayProjectSchema = z.object({
-  enabled: z.boolean().optional(),
-  /** Authors whose comments are never relayed: GitHub logins; Linear emails, user ids or names. */
-  ignore_authors: z.array(z.string().min(1)).optional(),
-})
-
 export const projectConfigSchema = z
   .object({
     tracker: z
@@ -97,8 +97,8 @@ export const projectConfigSchema = z
             cancelled: z.string().min(1).optional(),
           })
           .optional(),
-        /** Relay maintainer comments on a running issue into its actor. Off by default. */
-        comment_relay: commentRelayProjectSchema.optional(),
+        /** Relay maintainer comments and, optionally, pull request reviews into the actor. Off by default. */
+        comment_relay: githubCommentRelayProjectSchema.optional(),
       })
       .optional(),
     workspace: z
@@ -181,12 +181,7 @@ const mergedConfigSchema = z
     }),
     github: githubConfigSchema.optional(),
     /** Comment relay for the active tracker; absent means off. */
-    commentRelay: z
-      .object({
-        enabled: z.boolean(),
-        ignoreAuthors: z.array(z.string()),
-      })
-      .optional(),
+    commentRelay: commentRelayMergedSchema,
     workspaceRoot: z
       .string()
       .min(1, "workspace.root is not set.\n  Fix: Add workspace.root to av.yaml")
@@ -400,7 +395,7 @@ function mergeConfigs(
       cancelled: project?.linear?.workflow_states?.cancelled ?? "",
     },
     github: githubMerged,
-    commentRelay: resolveCommentRelay(
+    commentRelay: buildCommentRelayConfig(
       trackerKind === "github" ? project?.github?.comment_relay : project?.linear?.comment_relay,
     ),
     workspaceRoot: project?.workspace?.root ?? "",
@@ -483,11 +478,4 @@ export function loadConfig(projectRoot?: string, globalConfigPath?: string): Con
     console.error(`${(error as Error).message}\n\nSymphony cannot start until all config errors are resolved.`)
     process.exit(1)
   }
-}
-
-function resolveCommentRelay(relay: z.infer<typeof commentRelayProjectSchema> | undefined): {
-  enabled: boolean
-  ignoreAuthors: string[]
-} {
-  return { enabled: relay?.enabled ?? false, ignoreAuthors: relay?.ignore_authors ?? [] }
 }

@@ -199,6 +199,7 @@ linear:
 #   comment_relay:
 #     enabled: false
 #     ignore_authors: []
+#     pull_request_reviews: false
 
 workspace:
   root: /absolute/path/to/target-repo
@@ -399,6 +400,8 @@ Alongside Linear, GitHub Issues can drive the orchestrator. Set `tracker.kind: g
 ### Comment relay
 
 With `comment_relay.enabled: true` under the active tracker (`github:` or `linear:`), a new comment on an issue whose actor is running reaches that actor as an added instruction. GitHub relays repository owners, members and collaborators and needs the webhook subscribed to **Issue comments**; Linear relays workspace users (members and guests) and needs **Comment** events. Codex receives the comment in the running session; stateless actors such as Claude restart the attempt with it. Agent Valley's own comments (its hidden marker or the `Symphony:` prefix), bots and integrations, outside contributors, `ignore_authors`, edited or deleted comments and pull request comments are not relayed. `ignore_authors` accepts GitHub logins and Linear emails, user ids or names; add the account actors comment with when it is a person's token.
+
+With `pull_request_reviews: true` as well (GitHub tracker only), a submitted review of an open pull request on an Agent Valley branch (`<prefix>/<owner>/<repo>#<issue>`) becomes follow-up work, so PR delivery mode can answer review feedback. The webhook must also send **Pull request reviews**. The same author rules apply, approvals are skipped, and the review summary and its inline comments become the instruction. A running actor receives it like a relayed comment. A delivered issue (Done) is reopened to In Progress and retried with the review as context in the existing worktree; delivery then pushes to the same pull request. Reviews of fork branches, closed pull requests and other branches are ignored. A Linear tracker cannot follow up on GitHub reviews because it has no GitHub webhook receiver.
 
 ### Observability (v0.2+)
 

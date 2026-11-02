@@ -15,7 +15,7 @@
 import type { Issue } from "../../domain/models"
 import { parseScoreFromLabels } from "../../domain/models"
 import { AGENT_VALLEY_COMMENT_MARKER } from "../../domain/parsed-webhook-event"
-import type { IssueTracker } from "../../domain/ports/tracker"
+import type { IssueTracker, PullRequestReviewComment } from "../../domain/ports/tracker"
 
 const GITHUB_API_URL = "https://api.github.com"
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -61,6 +61,13 @@ interface GithubIssueApi {
   pull_request?: unknown
   labels: Array<{ name: string } | string>
   assignees?: Array<{ login: string }>
+}
+
+interface GithubReviewCommentApi {
+  path?: string
+  line?: number | null
+  original_line?: number | null
+  body?: string | null
 }
 
 /**
@@ -328,6 +335,17 @@ export class GithubTrackerAdapter implements IssueTracker {
     const number = parseIssueNumber(issueId)
     // GitHub's POST /issues/{n}/labels is additive and idempotent on duplicates.
     await this.request("POST", this.repoUrl(`/issues/${number}/labels`), { labels: [labelName] })
+  }
+
+  async fetchPullRequestReviewComments(pullNumber: number, reviewId: string): Promise<PullRequestReviewComment[]> {
+    // One page covers any review a person writes; GitHub caps per_page at 100.
+    const path = `/pulls/${pullNumber}/reviews/${encodeURIComponent(reviewId)}/comments?per_page=100`
+    const { data } = await this.request<GithubReviewCommentApi[]>("GET", this.repoUrl(path))
+    return (data ?? []).map((comment) => ({
+      path: comment.path ?? "",
+      line: comment.line ?? comment.original_line ?? null,
+      body: comment.body ?? "",
+    }))
   }
 
   // ── Mappers ─────────────────────────────────────────────────────────

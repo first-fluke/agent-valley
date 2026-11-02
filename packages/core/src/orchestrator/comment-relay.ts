@@ -42,9 +42,7 @@ export async function relayIssueComment(
   if (!policy?.enabled) return skip(event, "disabled")
   if (event.fromAgentValley) return skip(event, "own_comment")
   if (event.authorTrust !== "maintainer") return skip(event, "untrusted_author")
-  // Logins and emails are case-insensitive.
-  const ignored = new Set(policy.ignoreAuthors.map((key) => key.toLowerCase()))
-  if (event.authorKeys.some((key) => ignored.has(key.toLowerCase()))) return skip(event, "ignored_author")
+  if (isIgnoredAuthor(policy.ignoreAuthors, event.authorKeys)) return skip(event, "ignored_author")
   if (!event.body.trim()) return skip(event, "empty")
 
   const attemptId = core.getAttempt(event.issueId)
@@ -72,6 +70,12 @@ export async function relayIssueComment(
     attemptId,
   })
   return { relayed: true, attemptId }
+}
+
+/** True when any of the author's keys is listed. Logins and emails are case-insensitive. */
+export function isIgnoredAuthor(ignoreAuthors: string[], authorKeys: string[]): boolean {
+  const ignored = new Set(ignoreAuthors.map((key) => key.toLowerCase()))
+  return authorKeys.some((key) => ignored.has(key.toLowerCase()))
 }
 
 function skip(event: IssueCommentEvent, reason: CommentRelaySkipReason): CommentRelayOutcome {

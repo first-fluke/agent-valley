@@ -25,6 +25,7 @@ export type ParsedWebhookEventKind =
   | "issue.labeled"
   | "issue.relation_changed"
   | "issue.commented"
+  | "pull_request.reviewed"
 
 /**
  * Hidden marker appended to every GitHub comment Agent Valley posts, so
@@ -48,6 +49,9 @@ export function isAgentValleyCommentBody(body: string): boolean {
  * repository owners, organization members and collaborators.
  */
 export type CommentAuthorTrust = "maintainer" | "external" | "bot"
+
+/** Outcome a reviewer chose when submitting a pull request review. */
+export type PullRequestReviewVerdict = "approved" | "changes_requested" | "commented"
 
 export type ParsedWebhookEvent =
   | {
@@ -96,4 +100,21 @@ export type ParsedWebhookEvent =
       fromAgentValley: boolean
       /** Boundary-sanitized comment text; still untrusted input. */
       body: string
+    }
+  | {
+      kind: "pull_request.reviewed"
+      /** Issue whose Agent Valley branch the open pull request delivers. */
+      issueId: string
+      pullNumber: number
+      reviewId: string
+      reviewer: string
+      /** Identifiers `ignore_authors` may name (GitHub login). */
+      reviewerKeys: string[]
+      reviewerTrust: CommentAuthorTrust
+      verdict: PullRequestReviewVerdict
+      /** True when `isAgentValleyCommentBody` matches the raw review body. */
+      fromAgentValley: boolean
+      /** Boundary-sanitized review summary; may be empty when the review only has inline comments. */
+      body: string
+      url: string
     }

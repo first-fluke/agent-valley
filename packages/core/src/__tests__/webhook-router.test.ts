@@ -48,11 +48,11 @@ class SpyLifecycle {
   }
 }
 
-function buildRouter() {
+function buildRouter(configOverrides: Parameters<typeof makeConfig>[0] = {}) {
   const tracker = new FakeIssueTracker()
   const webhook = new FakeWebhookReceiver<ParsedWebhookEvent>()
   const workspace = new FakeWorkspaceGateway()
-  const config = makeConfig()
+  const config = makeConfig(configOverrides)
   const events: Array<{ event: string; payload: Record<string, unknown> }> = []
 
   const core = new OrchestratorCore({
@@ -278,5 +278,37 @@ describe("WebhookRouter — issue comments", () => {
     expect(harness.lifecycle.todoCalls).toHaveLength(0)
     expect(harness.lifecycle.inProgressCalls).toHaveLength(0)
     expect(harness.lifecycle.leftCalls).toHaveLength(0)
+  })
+})
+
+describe("WebhookRouter — pull request reviews", () => {
+  test("reopens a delivered issue with the review queued as retry context", async () => {
+    const harness = buildRouter({ commentRelay: { enabled: true, ignoreAuthors: [], pullRequestReviews: true } })
+    harness.tracker.seedIssue(
+      makeIssue({ id: "42", status: { id: "state-done", name: "Done", type: "completed" }, labels: ["state-done"] }),
+    )
+    harness.webhook.nextEvent = {
+      kind: "pull_request.reviewed",
+      issueId: "42",
+      pullNumber: 7,
+      reviewId: "7001",
+      reviewer: "maintainer",
+      reviewerKeys: ["maintainer"],
+      reviewerTrust: "maintainer",
+      verdict: "changes_requested",
+      fromAgentValley: false,
+      body: "Rename the flag.",
+      url: "https://github.com/first-fluke/agent-valley/pull/7#pullrequestreview-7001",
+    }
+
+    const response = await harness.router.handleWebhook("{}", "ok")
+
+    expect(response.status).toBe(200)
+    expect(harness.tracker.calls).toContainEqual({ method: "updateIssueState", args: ["42", "state-ip"] })
+    expect(harness.core.retryQueue.entries).toEqual([
+      expect.objectContaining({ issueId: "42", lastError: expect.stringContaining("Rename the flag.") }),
+    ])
+    // The queued retry owns the dispatch; nothing starts before its delay.
+    expect(harness.lifecycle.inProgressCalls).toHaveLength(0)
   })
 })

@@ -117,6 +117,18 @@ describe("IssueLifecycle.handleIssueTodo", () => {
     expect(comment).toBeDefined()
   })
 
+  test("leaves an issue with a queued retry to that retry's dispatch", async () => {
+    const h = buildLifecycle()
+    const issue = makeIssue({ id: "reopened", identifier: "PROJ-25" })
+    h.core.enqueueRetry(issue.id, 0, "Pull request review from @maintainer: rename the flag")
+
+    await h.lifecycle.handleIssueTodo(issue)
+
+    expect(h.tracker.calls.some((c) => c.method === "updateIssueState")).toBe(false)
+    expect(FakeAgentSession.instances).toHaveLength(0)
+    expect(h.core.retryQueue.entries[0]?.lastError).toContain("rename the flag")
+  })
+
   test("queues a retry and does not create a workspace when updateIssueState throws", async () => {
     const h = buildLifecycle()
     const issue = makeIssue({ id: "t-fail", identifier: "PROJ-30" })

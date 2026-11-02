@@ -41,6 +41,7 @@ linear:
 #   comment_relay:                  # Relay maintainer comments on a running issue into its actor (off by default)
 #     enabled: false                # Subscribe the webhook to "Issue comments" too; stateless actors restart with the comment
 #     ignore_authors: []            # Logins never relayed, e.g. the account behind GITHUB_TOKEN
+#     pull_request_reviews: false   # Reviews of Agent Valley PRs become follow-up work; subscribe to "Pull request reviews"
 
 # ── Workspace ─────────────────────────────────────────────────────────
 workspace:

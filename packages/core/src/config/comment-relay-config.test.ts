@@ -29,13 +29,18 @@ const GITHUB = {
 
 describe("comment relay configuration", () => {
   it("is off when the active tracker does not configure it", () => {
-    expect(resolve({ linear: LINEAR }).commentRelay).toEqual({ enabled: false, ignoreAuthors: [] })
+    expect(resolve({ linear: LINEAR }).commentRelay).toEqual({
+      enabled: false,
+      ignoreAuthors: [],
+      pullRequestReviews: false,
+    })
   })
 
   it("reads linear.comment_relay for the Linear tracker", () => {
     expect(resolve({ linear: { ...LINEAR, comment_relay: RELAY } }).commentRelay).toEqual({
       enabled: true,
       ignoreAuthors: ["release-bot"],
+      pullRequestReviews: false,
     })
   })
 
@@ -45,6 +50,17 @@ describe("comment relay configuration", () => {
       linear: { ...LINEAR, comment_relay: { enabled: false } },
       github: { ...GITHUB, comment_relay: RELAY },
     })
-    expect(config.commentRelay).toEqual({ enabled: true, ignoreAuthors: ["release-bot"] })
+    expect(config.commentRelay).toEqual({ enabled: true, ignoreAuthors: ["release-bot"], pullRequestReviews: false })
+  })
+
+  it("reads github.comment_relay.pull_request_reviews and never enables it for Linear", () => {
+    const github = resolve({
+      tracker: { kind: "github" },
+      github: { ...GITHUB, comment_relay: { ...RELAY, pull_request_reviews: true } },
+    })
+    expect(github.commentRelay?.pullRequestReviews).toBe(true)
+
+    const linear = resolve({ linear: { ...LINEAR, comment_relay: { ...RELAY, pull_request_reviews: true } } })
+    expect(linear.commentRelay?.pullRequestReviews).toBe(false)
   })
 })
