@@ -266,6 +266,7 @@ describe("WebhookRouter — issue comments", () => {
       issueId: "issue-a",
       commentId: "c-1",
       author: "maintainer",
+      authorKeys: ["maintainer"],
       authorTrust: "maintainer",
       fromAgentValley: false,
       body: "Also cover the empty state.",

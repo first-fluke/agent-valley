@@ -14,6 +14,7 @@ function comment(overrides: Partial<IssueCommentEvent> = {}): IssueCommentEvent 
     issueId: "42",
     commentId: "9001",
     author: "maintainer",
+    authorKeys: ["maintainer"],
     authorTrust: "maintainer",
     fromAgentValley: false,
     body: "Please also handle the empty state.",
@@ -29,18 +30,11 @@ function harness(options: {
   withRelayConfig?: boolean
 }) {
   const send = vi.fn(async () => options.result ?? ({ ok: true } as InterventionResult))
-  const config = makeConfig({
-    github: {
-      token: "ghp_test",
-      owner: "first-fluke",
-      repo: "agent-valley",
-      webhookSecret: "whsec_test",
-      labels: { todo: "todo", inProgress: "wip", done: "done", cancelled: "cancelled" },
-      ...(options.withRelayConfig === false
-        ? {}
-        : { commentRelay: { enabled: options.enabled ?? true, ignoreAuthors: options.ignoreAuthors ?? [] } }),
-    },
-  })
+  const config = makeConfig(
+    options.withRelayConfig === false
+      ? {}
+      : { commentRelay: { enabled: options.enabled ?? true, ignoreAuthors: options.ignoreAuthors ?? [] } },
+  )
   const core = {
     config,
     getAttempt: (issueId: string) => (issueId === "42" ? options.attemptId : undefined),
@@ -90,12 +84,14 @@ describe("relayIssueComment", () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  test("drops configured authors case-insensitively", async () => {
-    const { core, send } = harness({ attemptId: "att-1", ignoreAuthors: ["Release-Bot"] })
-    expect(await relayIssueComment(core, comment({ author: "release-bot" }))).toEqual({
-      relayed: false,
-      reason: "ignored_author",
-    })
+  test("drops configured authors by any of their keys, case-insensitively", async () => {
+    const { core, send } = harness({ attemptId: "att-1", ignoreAuthors: ["Release-Bot", "ops@example.com"] })
+    for (const authorKeys of [["release-bot"], ["Ops@Example.com", "user-1", "Ops"]]) {
+      expect(await relayIssueComment(core, comment({ author: "someone", authorKeys }))).toEqual({
+        relayed: false,
+        reason: "ignored_author",
+      })
+    }
     expect(send).not.toHaveBeenCalled()
   })
 

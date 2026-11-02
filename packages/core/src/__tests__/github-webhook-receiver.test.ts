@@ -290,6 +290,7 @@ describe("GithubWebhookReceiver — issue_comment", () => {
       issueId: "42",
       commentId: "9001",
       author: "maintainer",
+      authorKeys: ["maintainer"],
       authorTrust: "maintainer",
       fromAgentValley: false,
       body: "Please also handle the empty state.",
@@ -309,11 +310,11 @@ describe("GithubWebhookReceiver — issue_comment", () => {
     expect(app).toMatchObject({ kind: "issue.commented", authorTrust: "bot" })
   })
 
-  test("flags comments that carry the Agent Valley marker", () => {
-    const ev = makeReceiver().parseEvent(
-      JSON.stringify(commentPayload({ body: "Symphony: Received\n\n<!-- agent-valley -->" })),
-    )
-    expect(ev).toMatchObject({ kind: "issue.commented", fromAgentValley: true })
+  test("flags comments that carry the Agent Valley marker or prefix", () => {
+    for (const body of ["Done here.\n\n<!-- agent-valley -->", "Symphony: Work completed"]) {
+      const ev = makeReceiver().parseEvent(JSON.stringify(commentPayload({ body })))
+      expect(ev).toMatchObject({ kind: "issue.commented", fromAgentValley: true })
+    }
   })
 
   test("ignores edited and deleted comments", () => {

@@ -27,10 +27,21 @@ export type ParsedWebhookEventKind =
   | "issue.commented"
 
 /**
- * Hidden marker appended to every tracker comment Agent Valley posts, so
+ * Hidden marker appended to every GitHub comment Agent Valley posts, so
  * comment webhooks can tell its own messages from people's.
  */
 export const AGENT_VALLEY_COMMENT_MARKER = "<!-- agent-valley -->"
+
+/** Prefix of every comment Agent Valley posts on any tracker. */
+export const AGENT_VALLEY_COMMENT_PREFIX = "Symphony:"
+
+/**
+ * True for a comment body Agent Valley wrote. Trackers that rebuild
+ * Markdown (Linear) may drop the hidden marker, so the prefix also counts.
+ */
+export function isAgentValleyCommentBody(body: string): boolean {
+  return body.includes(AGENT_VALLEY_COMMENT_MARKER) || body.trimStart().startsWith(AGENT_VALLEY_COMMENT_PREFIX)
+}
 
 /**
  * Tracker-reported standing of a comment author. `maintainer` covers
@@ -76,10 +87,12 @@ export type ParsedWebhookEvent =
       kind: "issue.commented"
       issueId: string
       commentId: string
-      /** Author handle as reported by the tracker. */
+      /** Author display handle as reported by the tracker. */
       author: string
+      /** Identifiers `ignore_authors` may name: GitHub login; Linear email, user id and name. */
+      authorKeys: string[]
       authorTrust: CommentAuthorTrust
-      /** True when the body carries `AGENT_VALLEY_COMMENT_MARKER`. */
+      /** True when `isAgentValleyCommentBody` matches the raw body. */
       fromAgentValley: boolean
       /** Boundary-sanitized comment text; still untrusted input. */
       body: string

@@ -90,7 +90,7 @@ describe("parseWebhookEvent", () => {
   })
 
   test("non-Issue type returns null", () => {
-    const event = parseWebhookEvent(makePayload({ type: "Comment" }))
+    const event = parseWebhookEvent(makePayload({ type: "Project" }))
     expect(event).toBeNull()
   })
 

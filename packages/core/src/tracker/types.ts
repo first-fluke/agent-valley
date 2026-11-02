@@ -35,7 +35,20 @@ export interface LinearRelationWebhookEvent {
   webhookTimestamp?: number
 }
 
-export type LinearParsedWebhookEvent = LinearIssueWebhookEvent | LinearRelationWebhookEvent
+export interface LinearCommentWebhookEvent {
+  kind: "comment"
+  action: "create"
+  commentId: string
+  issueId: string
+  body: string
+  userId: string | null
+  /** Webhook `actor`: a User, OAuth client or Integration; null once deleted. */
+  actor: { id: string | null; type: string | null; name: string | null; email: string | null } | null
+  /** See `LinearIssueWebhookEvent.webhookTimestamp`. */
+  webhookTimestamp?: number
+}
+
+export type LinearParsedWebhookEvent = LinearIssueWebhookEvent | LinearRelationWebhookEvent | LinearCommentWebhookEvent
 
 /**
  * @deprecated Kept for `tracker/webhook-handler.ts` and existing unit tests

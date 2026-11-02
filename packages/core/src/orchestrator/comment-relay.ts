@@ -3,7 +3,8 @@
  * working on its issue, and forwards it through the InterventionBus as an
  * `append_prompt`.
  *
- * Only maintainers' comments on an issue with a running attempt are relayed.
+ * Only maintainers' comments on an issue with a running attempt are relayed
+ * (GitHub owners, members and collaborators; Linear workspace users).
  * Agent Valley's own comments, bots, configured authors and external authors
  * are dropped: comment text is untrusted input (docs/harness/SAFETY.md §3),
  * and relaying our own messages would feed the actor back into itself.
@@ -37,13 +38,13 @@ export async function relayIssueComment(
   core: CommentRelayCore,
   event: IssueCommentEvent,
 ): Promise<CommentRelayOutcome> {
-  const policy = core.config.github?.commentRelay
+  const policy = core.config.commentRelay
   if (!policy?.enabled) return skip(event, "disabled")
   if (event.fromAgentValley) return skip(event, "own_comment")
   if (event.authorTrust !== "maintainer") return skip(event, "untrusted_author")
-  // GitHub logins are case-insensitive.
-  const author = event.author.toLowerCase()
-  if (policy.ignoreAuthors.some((login) => login.toLowerCase() === author)) return skip(event, "ignored_author")
+  // Logins and emails are case-insensitive.
+  const ignored = new Set(policy.ignoreAuthors.map((key) => key.toLowerCase()))
+  if (event.authorKeys.some((key) => ignored.has(key.toLowerCase()))) return skip(event, "ignored_author")
   if (!event.body.trim()) return skip(event, "empty")
 
   const attemptId = core.getAttempt(event.issueId)

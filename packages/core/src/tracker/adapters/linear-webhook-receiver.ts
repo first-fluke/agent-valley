@@ -11,11 +11,11 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 4.2 / § 5.5 (PR4).
  */
 
-import type { ParsedWebhookEvent } from "../../domain/parsed-webhook-event"
+import { isAgentValleyCommentBody, type ParsedWebhookEvent } from "../../domain/parsed-webhook-event"
 import type { IssueStateType, WebhookReceiver } from "../../domain/ports/tracker"
 import { logger } from "../../observability/logger"
 import { checkWebhookFreshnessAndDedup, WebhookDedupCache } from "../dedup-cache"
-import type { LinearParsedWebhookEvent } from "../types"
+import type { LinearCommentWebhookEvent, LinearParsedWebhookEvent } from "../types"
 import { parseWebhookEvent, verifyWebhookSignature } from "../webhook-handler"
 
 /**
@@ -96,6 +96,8 @@ export class LinearWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
   }
 
   private toDomainEvent(event: LinearParsedWebhookEvent): ParsedWebhookEvent | null {
+    if (event.kind === "comment") return toCommentEvent(event)
+
     // Relation events map onto the domain relation_changed kind.
     if (event.kind === "relation") {
       const relation = normalizeRelation(event.relationType)
@@ -155,6 +157,28 @@ export class LinearWebhookReceiver implements WebhookReceiver<ParsedWebhookEvent
     if (stateId === ws.done) return "done"
     if (stateId === ws.cancelled) return "cancelled"
     return null
+  }
+}
+
+/**
+ * Linear comments come from workspace users (members and guests), OAuth
+ * clients or integrations; only users count as maintainers. Agent Valley
+ * posts with the API key's user, so its own comments are recognized by body.
+ */
+function toCommentEvent(event: LinearCommentWebhookEvent): ParsedWebhookEvent {
+  const actor = event.actor
+  const authorKeys = [actor?.email, actor?.id ?? event.userId, actor?.name].filter(
+    (key): key is string => typeof key === "string" && key.length > 0,
+  )
+  return {
+    kind: "issue.commented",
+    issueId: event.issueId,
+    commentId: event.commentId,
+    author: actor?.name ?? actor?.email ?? event.userId ?? "unknown",
+    authorKeys,
+    authorTrust: actor?.type === "user" ? "maintainer" : "bot",
+    fromAgentValley: isAgentValleyCommentBody(event.body),
+    body: event.body,
   }
 }
 

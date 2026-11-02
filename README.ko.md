@@ -169,7 +169,9 @@ linear:
     in_progress: state-uuid
     done: state-uuid
     cancelled: state-uuid
-
+  # comment_relay:
+  #   enabled: false
+  #   ignore_authors: []
 # GitHub 트래커 (v0.2+) — tracker.kind = github 일 때 사용합니다.
 # github:
 #   token_env: GITHUB_TOKEN
@@ -378,7 +380,9 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 
 Linear 외에 GitHub Issues로도 오케스트레이터를 구동할 수 있습니다. `av.yaml` 의 `tracker.kind: github` 로 설정하고 `github:` 섹션만 채우면, 도메인 `IssueTracker` / `WebhookReceiver` 포트가 투명하게 교체됩니다. 두 트래커는 동일한 오케스트레이션·재시도·딜리버리 파이프라인을 공유합니다.
 
-`github.comment_relay.enabled: true` 로 설정하고 webhook이 **Issue comments** 이벤트도 받도록 하면, Actor가 실행 중인 이슈에 저장소 소유자·멤버·협업자가 새로 단 코멘트가 그 Actor에게 추가 지시로 전달됩니다. Codex는 실행 중인 세션에서 받고, Claude처럼 상태를 유지하지 않는 Actor는 코멘트를 붙여 시도를 다시 시작합니다. Agent Valley 자신의 코멘트, 봇 계정, 외부 기여자, `ignore_authors`, 수정된 코멘트, PR 코멘트는 전달하지 않습니다. Actor가 `GITHUB_TOKEN` 계정으로 코멘트를 남긴다면 그 계정을 `ignore_authors`에 넣으세요.
+### 코멘트 전달
+
+사용 중인 트래커 설정(`github:` 또는 `linear:`)에 `comment_relay.enabled: true` 를 넣으면, Actor가 실행 중인 이슈에 새로 달린 코멘트가 그 Actor에게 추가 지시로 전달됩니다. GitHub은 저장소 소유자·멤버·협업자의 코멘트를 전달하며 webhook이 **Issue comments** 이벤트를 받아야 합니다. Linear는 워크스페이스 사용자(멤버와 게스트)의 코멘트를 전달하며 **Comment** 이벤트가 필요합니다. Codex는 실행 중인 세션에서 받고, Claude처럼 상태를 유지하지 않는 Actor는 코멘트를 붙여 시도를 다시 시작합니다. Agent Valley 자신의 코멘트(숨은 표식이나 `Symphony:` 머리말), 봇과 연동 앱, 외부 기여자, `ignore_authors`, 수정·삭제된 코멘트, PR 코멘트는 전달하지 않습니다. `ignore_authors` 에는 GitHub 로그인이나 Linear 이메일·사용자 ID·이름을 넣을 수 있으며, Actor가 사람의 토큰으로 코멘트를 남긴다면 그 계정을 넣으세요.
 
 ### 관측성 (v0.2+)
 

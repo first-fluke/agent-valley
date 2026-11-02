@@ -51,6 +51,12 @@ export const globalConfigSchema = z
 export type GlobalConfig = z.infer<typeof globalConfigSchema>
 
 /** Schema for <project>/av.yaml */
+const commentRelayProjectSchema = z.object({
+  enabled: z.boolean().optional(),
+  /** Authors whose comments are never relayed: GitHub logins; Linear emails, user ids or names. */
+  ignore_authors: z.array(z.string().min(1)).optional(),
+})
+
 export const projectConfigSchema = z
   .object({
     tracker: z
@@ -72,6 +78,8 @@ export const projectConfigSchema = z
             cancelled: z.string().min(1).optional(),
           })
           .optional(),
+        /** Relay workspace users' comments on a running issue into its actor. Off by default. */
+        comment_relay: commentRelayProjectSchema.optional(),
       })
       .optional(),
     github: z
@@ -90,13 +98,7 @@ export const projectConfigSchema = z
           })
           .optional(),
         /** Relay maintainer comments on a running issue into its actor. Off by default. */
-        comment_relay: z
-          .object({
-            enabled: z.boolean().optional(),
-            /** Logins whose comments are never relayed (e.g. the token's own account). */
-            ignore_authors: z.array(z.string().min(1)).optional(),
-          })
-          .optional(),
+        comment_relay: commentRelayProjectSchema.optional(),
       })
       .optional(),
     workspace: z
@@ -160,13 +162,6 @@ const githubConfigSchema = z.object({
     done: z.string().min(1, "github.labels.done is not set.\n  Fix: Add it to av.yaml"),
     cancelled: z.string().min(1, "github.labels.cancelled is not set.\n  Fix: Add it to av.yaml"),
   }),
-  /** Absent means comment relay is off. */
-  commentRelay: z
-    .object({
-      enabled: z.boolean(),
-      ignoreAuthors: z.array(z.string()),
-    })
-    .optional(),
 })
 
 export type GithubTrackerConfig = z.infer<typeof githubConfigSchema>
@@ -185,6 +180,13 @@ const mergedConfigSchema = z
       cancelled: z.string(),
     }),
     github: githubConfigSchema.optional(),
+    /** Comment relay for the active tracker; absent means off. */
+    commentRelay: z
+      .object({
+        enabled: z.boolean(),
+        ignoreAuthors: z.array(z.string()),
+      })
+      .optional(),
     workspaceRoot: z
       .string()
       .min(1, "workspace.root is not set.\n  Fix: Add workspace.root to av.yaml")
@@ -377,10 +379,6 @@ function mergeConfigs(
       repo: project.github.repo ?? "",
       webhookSecret: project.github.webhook_secret ?? "",
       labels,
-      commentRelay: {
-        enabled: project.github.comment_relay?.enabled ?? false,
-        ignoreAuthors: project.github.comment_relay?.ignore_authors ?? [],
-      },
     }
     // GitHub state identifiers are label names. The orchestrator passes
     // workflowStates.* straight to IssueTracker.updateIssueState, so mirror
@@ -402,6 +400,9 @@ function mergeConfigs(
       cancelled: project?.linear?.workflow_states?.cancelled ?? "",
     },
     github: githubMerged,
+    commentRelay: resolveCommentRelay(
+      trackerKind === "github" ? project?.github?.comment_relay : project?.linear?.comment_relay,
+    ),
     workspaceRoot: project?.workspace?.root ?? "",
     agentType: projectActor?.type ?? globalActor?.type ?? defaults.agentType,
     agentTimeout: projectActor?.timeout ?? globalActor?.timeout ?? defaults.agentTimeout,
@@ -482,4 +483,11 @@ export function loadConfig(projectRoot?: string, globalConfigPath?: string): Con
     console.error(`${(error as Error).message}\n\nSymphony cannot start until all config errors are resolved.`)
     process.exit(1)
   }
+}
+
+function resolveCommentRelay(relay: z.infer<typeof commentRelayProjectSchema> | undefined): {
+  enabled: boolean
+  ignoreAuthors: string[]
+} {
+  return { enabled: relay?.enabled ?? false, ignoreAuthors: relay?.ignore_authors ?? [] }
 }

@@ -21,6 +21,9 @@ linear:
     # in_progress: state-uuid       # "In Progress" workflow state ID
     # done: state-uuid              # "Done" workflow state ID
     # cancelled: state-uuid         # "Cancelled" workflow state ID
+  # comment_relay:                # Relay workspace users' comments on a running issue into its actor (off by default)
+  #   enabled: false              # The webhook must include Comment events
+  #   ignore_authors: []          # Emails, user ids or names never relayed
 # ── GitHub Issues Tracker (v0.2+, optional) ───────────────────────────
 # Used when tracker.kind = github. Labels are used instead of workflow
 # states — see packages/core/src/tracker/adapters/github-adapter.ts for

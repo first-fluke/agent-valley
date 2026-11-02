@@ -7,7 +7,7 @@ import type { Issue } from "../domain/models"
 import { parseScoreFromLabels } from "../domain/models"
 import { logger } from "../observability/logger"
 import { verifyHmacSha256Hex } from "./hmac-verify"
-import type { ParsedWebhookEvent, RelationWebhookEvent, WebhookEvent } from "./types"
+import type { LinearCommentWebhookEvent, ParsedWebhookEvent, RelationWebhookEvent, WebhookEvent } from "./types"
 
 /**
  * Verify HMAC-SHA256 webhook signature (constant-time; see hmac-verify.ts).
@@ -74,12 +74,61 @@ const relationPayloadSchema = z.object({
   webhookTimestamp: z.number().optional(),
 })
 
+const commentPayloadSchema = z.object({
+  action: z.string(),
+  type: z.literal("Comment"),
+  actor: z
+    .object({
+      id: z.string().nullish(),
+      type: z.string().nullish(),
+      name: z.string().nullish(),
+      email: z.string().nullish(),
+    })
+    .nullish(),
+  data: z.object({
+    id: z.string(),
+    body: z.string().nullish(),
+    issueId: z.string().nullish(),
+    userId: z.string().nullish(),
+  }),
+  webhookTimestamp: z.number().optional(),
+})
+
+/**
+ * Parse a Linear Comment webhook. Only new comments on issues are events;
+ * edits, removals and comments on other entities (project updates, ...)
+ * return null.
+ */
+function parseCommentWebhook(raw: unknown): LinearCommentWebhookEvent | null {
+  const result = commentPayloadSchema.safeParse(raw)
+  if (!result.success) {
+    logger.warn("tracker-client", "Comment webhook validation failed", { error: result.error.message })
+    return null
+  }
+  const { action, actor, data, webhookTimestamp } = result.data
+  if (action !== "create" || !data.issueId) return null
+  return {
+    kind: "comment",
+    action: "create",
+    commentId: data.id,
+    issueId: data.issueId,
+    body: data.body ?? "",
+    userId: data.userId ?? null,
+    actor: actor
+      ? { id: actor.id ?? null, type: actor.type ?? null, name: actor.name ?? null, email: actor.email ?? null }
+      : null,
+    webhookTimestamp,
+  }
+}
+
 /**
  * Parse Linear webhook payload into a WebhookEvent or RelationWebhookEvent.
  */
 export function parseWebhookEvent(payload: string): ParsedWebhookEvent | null {
   try {
     const raw = JSON.parse(payload)
+
+    if (raw?.type === "Comment") return parseCommentWebhook(raw)
 
     // Try IssueRelation first (more specific type check)
     if (raw?.type === "IssueRelation") {

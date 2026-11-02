@@ -182,7 +182,9 @@ linear:
     in_progress: state-uuid
     done: state-uuid
     cancelled: state-uuid
-
+  # comment_relay:
+  #   enabled: false
+  #   ignore_authors: []
 # GitHub tracker (v0.2+) — used when tracker.kind = github.
 # github:
 #   token_env: GITHUB_TOKEN
@@ -394,7 +396,9 @@ PixiJS-rendered office scene showing real-time actor status:
 
 Alongside Linear, GitHub Issues can drive the orchestrator. Set `tracker.kind: github` in `av.yaml` and configure the GitHub section — the domain `IssueTracker` / `WebhookReceiver` ports swap transparently. Both trackers reuse the same orchestration, retry, and delivery pipeline.
 
-With `github.comment_relay.enabled: true` and the webhook subscribed to **Issue comments**, a new comment from a repository owner, member or collaborator on an issue whose actor is running reaches that actor as an added instruction. Codex receives it in the running session; stateless actors such as Claude restart the attempt with the comment. Agent Valley's own comments, bot accounts, outside contributors, `ignore_authors`, edited comments and pull request comments are not relayed. Add the account behind `GITHUB_TOKEN` to `ignore_authors` when actors comment with it.
+### Comment relay
+
+With `comment_relay.enabled: true` under the active tracker (`github:` or `linear:`), a new comment on an issue whose actor is running reaches that actor as an added instruction. GitHub relays repository owners, members and collaborators and needs the webhook subscribed to **Issue comments**; Linear relays workspace users (members and guests) and needs **Comment** events. Codex receives the comment in the running session; stateless actors such as Claude restart the attempt with it. Agent Valley's own comments (its hidden marker or the `Symphony:` prefix), bots and integrations, outside contributors, `ignore_authors`, edited or deleted comments and pull request comments are not relayed. `ignore_authors` accepts GitHub logins and Linear emails, user ids or names; add the account actors comment with when it is a person's token.
 
 ### Observability (v0.2+)
 

@@ -16,8 +16,8 @@
 import type { Issue } from "../../domain/models"
 import { parseScoreFromLabels } from "../../domain/models"
 import {
-  AGENT_VALLEY_COMMENT_MARKER,
   type CommentAuthorTrust,
+  isAgentValleyCommentBody,
   type ParsedWebhookEvent,
 } from "../../domain/parsed-webhook-event"
 import type { IssueStateType, WebhookReceiver } from "../../domain/ports/tracker"
@@ -271,13 +271,15 @@ function commentAuthorTrust(comment: GithubCommentPayload): CommentAuthorTrust {
 function toCommentEvent(issueId: string, comment: GithubCommentPayload): ParsedWebhookEvent | null {
   if (typeof comment.id !== "number") return null
   const rawBody = comment.body ?? ""
+  const login = comment.user?.login
   return {
     kind: "issue.commented",
     issueId,
     commentId: String(comment.id),
-    author: comment.user?.login ?? "unknown",
+    author: login ?? "unknown",
+    authorKeys: login ? [login] : [],
     authorTrust: commentAuthorTrust(comment),
-    fromAgentValley: rawBody.includes(AGENT_VALLEY_COMMENT_MARKER),
+    fromAgentValley: isAgentValleyCommentBody(rawBody),
     body: sanitizeAtBoundary(rawBody),
   }
 }
