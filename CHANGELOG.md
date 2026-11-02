@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.4.0](https://github.com/first-fluke/agent-valley/compare/v4.3.0...v4.4.0) (2026-11-02)
+
+
+### Features
+
+* **tracker:** relay maintainer issue comments to running actors ([4eeef49](https://github.com/first-fluke/agent-valley/commit/4eeef49c288ae61656bb7dd427742edcc40dc4ba))
+
 ## [4.3.0](https://github.com/first-fluke/agent-valley/compare/v4.2.1...v4.3.0) (2026-10-30)
 
 
