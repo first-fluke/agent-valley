@@ -58,6 +58,21 @@ describe("pull request review follow-up configuration", () => {
     expect(config.pullRequestReviews?.webhookSecret).toBe("whsec_github")
   })
 
+  it("still honors the 4.6.0 switch github.comment_relay.pull_request_reviews for the GitHub tracker", () => {
+    const github = resolve({
+      tracker: { kind: "github" },
+      github: { ...GITHUB, comment_relay: { enabled: true, pull_request_reviews: true } },
+    })
+    expect(github.pullRequestReviews).toEqual({ enabled: true, webhookSecret: "whsec_github", ignoreAuthors: [] })
+
+    const explicit = resolve({
+      tracker: { kind: "github" },
+      github: { ...GITHUB, comment_relay: { pull_request_reviews: true } },
+      delivery: { pull_request_reviews: { enabled: false } },
+    })
+    expect(explicit.pullRequestReviews?.enabled).toBe(false)
+  })
+
   it("refuses to enable follow-up without a webhook secret", () => {
     expect(() => resolve({ linear: LINEAR, delivery: { pull_request_reviews: { enabled: true } } })).toThrow(
       /delivery\.pull_request_reviews\.webhook_secret/,

@@ -15,6 +15,15 @@ export const commentRelayProjectSchema = z.object({
   ignore_authors: z.array(z.string().min(1)).optional(),
 })
 
+/**
+ * GitHub block. `pull_request_reviews` shipped in 4.6.0 and moved to
+ * `delivery.pull_request_reviews` right after; it still enables follow-up
+ * for the GitHub tracker so an upgrade does not switch it off.
+ */
+export const githubCommentRelayProjectSchema = commentRelayProjectSchema.extend({
+  pull_request_reviews: z.boolean().optional(),
+})
+
 export const commentRelayMergedSchema = z
   .object({
     enabled: z.boolean(),

@@ -11,7 +11,12 @@ import {
 } from "./actor-schema"
 import { budgetMergedSchema, budgetProjectSchema, buildBudgetConfig } from "./budget-schema"
 import { chiefConfigSchema, mergeChiefConfig } from "./chief-schema"
-import { buildCommentRelayConfig, commentRelayMergedSchema, commentRelayProjectSchema } from "./comment-relay-schema"
+import {
+  buildCommentRelayConfig,
+  commentRelayMergedSchema,
+  commentRelayProjectSchema,
+  githubCommentRelayProjectSchema,
+} from "./comment-relay-schema"
 import { detectHardware } from "./hardware"
 import { resolveMaxParallel } from "./merge-helpers"
 import { buildObservabilityConfig, observabilityMergedSchema, observabilityProjectSchema } from "./observability-schema"
@@ -98,7 +103,7 @@ export const projectConfigSchema = z
           })
           .optional(),
         /** Relay maintainer comments on a running issue into its actor. Off by default. */
-        comment_relay: commentRelayProjectSchema.optional(),
+        comment_relay: githubCommentRelayProjectSchema.optional(),
       })
       .optional(),
     workspace: z
@@ -415,6 +420,7 @@ function mergeConfigs(
       project?.delivery?.pull_request_reviews,
       trackerKind,
       project?.github?.webhook_secret,
+      project?.github?.comment_relay?.pull_request_reviews,
     ),
     promptTemplate: project?.prompt ?? "",
     routingRules: (project?.routing?.rules ?? []).map((r) => ({

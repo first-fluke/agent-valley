@@ -37,9 +37,11 @@ export function buildPullRequestReviewsConfig(
   reviews: z.infer<typeof pullRequestReviewsProjectSchema> | undefined,
   trackerKind: "linear" | "github",
   githubWebhookSecret: string | undefined,
+  /** 4.6.0 location of the switch, `github.comment_relay.pull_request_reviews`. */
+  legacyGithubEnabled?: boolean,
 ): NonNullable<z.infer<typeof pullRequestReviewsMergedSchema>> {
   return {
-    enabled: reviews?.enabled ?? false,
+    enabled: reviews?.enabled ?? (trackerKind === "github" ? legacyGithubEnabled : undefined) ?? false,
     // The GitHub tracker's receiver verifies reviews on its own endpoint.
     webhookSecret: (trackerKind === "github" ? githubWebhookSecret : reviews?.webhook_secret) ?? "",
     ignoreAuthors: reviews?.ignore_authors ?? [],
