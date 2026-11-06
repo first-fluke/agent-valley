@@ -14,6 +14,8 @@
  *   - Outbound network restricted to HTTP/HTTPS ports, plus local DNS
  *     resolution and local unix-domain sockets (ssh-agent and similar —
  *     these never leave the host).
+ *   - Named Unix-domain listeners limited to the workspace and OS tmp
+ *     directory; TCP listeners and other local socket paths stay denied.
  *
  * Credential denylist (closes a HIGH-severity secret-exfiltration gap —
  * see docs/harness/SAFETY.md § 2 residual gaps and the sandbox result
@@ -100,6 +102,7 @@ export function buildDarwinSandboxCommand(
 }
 
 function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
+  const workspacePaths = pathAliases(req.workspacePath)
   const tmpPaths = pathAliases(tmpdir())
   const git = linkedWorktreeGitPaths(req.workspacePath)
   const agentPaths = agentHomeAccess(req.agentType, home, req.env)
@@ -113,7 +116,7 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   // checks against. Keep unresolved paths when they do not exist yet.
 
   const writablePaths = [
-    req.workspacePath,
+    ...workspacePaths,
     ...tmpPaths,
     ...agentPaths.active,
     `${home}/.cache`,
@@ -126,6 +129,15 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   // sandboxed process. The active CLI receives only its known paths.
 
   const writeRules = writablePaths.map((p) => `(allow file-write* (subpath ${seatbeltString(p)}))`).join("\n")
+  // Nest the path filter inside local unix-socket: sibling filters are ORed
+  // by Seatbelt and would allow Unix listeners outside these directories.
+  const unixListenerRules = [...new Set([...workspacePaths, ...tmpPaths])]
+    .flatMap((path) =>
+      ["network-bind", "network-inbound"].map(
+        (operation) => `(allow ${operation} (local unix-socket (subpath ${seatbeltString(path)})))`,
+      ),
+    )
+    .join("\n")
   const gitWriteRules = git
     ? [git.gitDir, git.objectsDir]
         .map((p) => `(allow file-write* (subpath ${seatbeltString(p)}))`)
@@ -209,6 +221,9 @@ ${denyWriteRules}
 ; why per-domain scoping is not possible via sandbox-exec on this OS).
 (deny network-outbound)
 (allow network-outbound (remote unix-socket))
+; Local named Unix servers are needed by workspace IPC tests and resident tools.
+; This does not permit TCP listeners or Unix binds in caches/vendor homes.
+${unixListenerRules}
 (allow mach-lookup (global-name "com.apple.mDNSResponder"))
 (allow network-outbound (remote udp "*:53"))
 (allow network-outbound (remote tcp "*:443"))

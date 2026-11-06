@@ -84,6 +84,13 @@ spawn through an OS-level sandbox so containment comes from the kernel:
   current platform, the spawn is refused with an actionable error
   instead of falling back to unsandboxed execution.
 
+On macOS, named Unix-domain listeners are allowed within the task workspace
+and OS temporary directory, including their canonical path aliases. This
+supports local IPC and resident-process tests. Other Unix bind paths and TCP
+listeners remain denied, including Unix bind paths in otherwise writable
+agent homes and caches. Existing outbound Unix connections and credential
+read/write exclusions are unchanged.
+
 | Env var                              | Effect                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `SYMPHONY_ALLOW_UNSANDBOXED=1`       | Opt-in escape hatch: run without an OS sandbox when one isn't available on the host. NOT the default. Every unsandboxed spawn logs a loud WARN naming exactly what's missing and what it grants (full host filesystem + network access to a prompt-injected issue body). Set in the orchestrator process environment, not in `av.yaml`.          |

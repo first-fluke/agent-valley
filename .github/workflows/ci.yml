@@ -1,6 +1,6 @@
 # CI Workflow — Agent Valley (Bun + TypeScript monorepo)
 #
-# Jobs: validate → lint → typecheck → test (parallel after validate)
+# Platform sandbox checks run on macOS alongside the Linux validation jobs.
 
 name: CI
 
@@ -25,6 +25,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  darwin-sandbox:
+    name: macOS sandbox
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: Verify native sandbox availability
+        run: test "$(uname -s)" = Darwin && test -x /usr/bin/sandbox-exec
+      - name: Exercise native sandbox boundaries
+        run: >-
+          bun run test
+          packages/core/src/sessions/sandbox-darwin-unix.test.ts
+          packages/core/src/sessions/sandbox-darwin-paths.test.ts
+          packages/core/src/sessions/sandbox-darwin-signals.test.ts
+          packages/core/src/sessions/sandbox-codex-preferences.test.ts
+
   validate:
     name: Harness validate
     runs-on: ubuntu-latest
