@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { planPrePush } from "./pre-push.mjs"
@@ -31,6 +31,7 @@ async function installCheckers() {
     const tool = basename(process.argv[1]);
     appendFileSync(process.env.CHECK_CALLS, JSON.stringify({
       tool, args: process.argv.slice(2), changedOnly: process.env.AV_CHANGED_PRE_PUSH,
+      engine: process.versions.bun ? "bun" : "node",
       git: Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith("GIT_"))),
       fixtureRoot: process.env.GIT_FIXTURE ? execFileSync("git", ["rev-parse", "--show-toplevel"], {cwd: process.env.GIT_FIXTURE, encoding: "utf8"}).trim() : undefined,
     }) + "\\n");
@@ -39,8 +40,14 @@ async function installCheckers() {
   await Promise.all(["vitest", "tsc"].map((tool) => writeFile(join(directory, tool), checker)))
 }
 
-function push(files: string[], env: NodeJS.ProcessEnv = {}, explicit = true, input = "") {
-  return spawnSync(process.execPath, [script, ...(explicit ? ["--files"] : []), ...files], {
+function push(
+  files: string[],
+  env: Partial<NodeJS.ProcessEnv> = {},
+  explicit = true,
+  input = "",
+  runtime = process.execPath,
+) {
+  return spawnSync(runtime, [script, ...(explicit ? ["--files"] : []), ...files], {
     cwd: root,
     env: { ...process.env, CHECK_CALLS: calls, ...env },
     encoding: "utf8",
@@ -50,7 +57,7 @@ function push(files: string[], env: NodeJS.ProcessEnv = {}, explicit = true, inp
 }
 
 async function recorded(): Promise<
-  Array<{ tool: string; args: string[]; git: Record<string, string>; fixtureRoot?: string }>
+  Array<{ tool: string; engine: string; args: string[]; git: Record<string, string>; fixtureRoot?: string }>
 > {
   return (await readFile(calls, "utf8").catch(() => ""))
     .trim()
@@ -130,6 +137,29 @@ describe("changed-input pre-push checks", () => {
     expect((await recorded()).map((command) => command.tool)).toEqual(["vitest"])
   })
 
+  it("uses Node checkers when HK starts the hook with the installed Bun runtime", async () => {
+    await installCheckers()
+    const bun = execFileSync("bun", ["-e", "process.stdout.write(process.execPath)"], {
+      cwd: resolve(dirname(script), ".."),
+      encoding: "utf8",
+    }).trim()
+    const result = push(
+      ["apps/cli/src/index.ts"],
+      {
+        PATH: [dirname(process.execPath), process.env.PATH ?? ""].join(delimiter),
+      },
+      true,
+      "",
+      bun,
+    )
+    expect(result.status, result.stderr).toBe(0)
+    const commands = await recorded()
+    expect(commands.map(({ tool, engine }) => [tool, engine])).toEqual([
+      ["vitest", "node"],
+      ["tsc", "node"],
+    ])
+  })
+
   it("preserves exact spaces, globs, Unicode, newlines and option-like filenames without shell expansion", async () => {
     await installCheckers()
     const files = [
@@ -185,7 +215,7 @@ describe("changed-input pre-push checks", () => {
     const untracked = "apps/cli/src/space [*]\n한글.ts"
     await writeFile(join(root, untracked), "export const untracked = true\n")
     const input = `refs/heads/docs ${docs} refs/heads/docs ${base}\nrefs/heads/main ${head} refs/heads/main ${docs}\n`
-    const result = push(["README.md"], {}, true, input)
+    const result = push(["README.md", "apps/dashboard/src/unrelated-hk-fallback.ts"], {}, true, input)
     expect(result.status, result.stderr).toBe(0)
     const commands = await recorded()
     expect(new Set(commands[0]?.args.slice(5))).toEqual(

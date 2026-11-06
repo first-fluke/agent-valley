@@ -129,7 +129,9 @@ export function pushChangedFiles(repository, input, env = process.env) {
 /** Run only locally installed checkers; this hook never fetches packages or expands shell globs. */
 export function runPrePush(files, repository = process.cwd(), env = process.env, hookStdin = "") {
   const root = resolve(repository)
-  const plan = planPrePush([...files, ...(hookStdin.trim() ? pushChangedFiles(root, hookStdin, env) : [])], root)
+  // HK can fall back to the entire tree when a remote-tracking ref is missing.
+  const changed = hookStdin.trim() ? pushChangedFiles(root, hookStdin, env) : files
+  const plan = planPrePush(changed, root)
   if (!plan.length) {
     console.log("pre-push: no changed code inputs; tests and type checks skipped.")
     return 0
@@ -148,18 +150,20 @@ export function runPrePush(files, repository = process.cwd(), env = process.env,
     binaries.set(tool, path)
   }
   const clean = { ...childEnvironment(root, env), AV_CHANGED_PRE_PUSH: "1" }
+  // Hooks run under Bun; Vitest and tsc keep their usual Node runtime semantics.
+  const runtime = process.versions.bun ? "node" : process.execPath
   for (const step of plan) {
     console.log(
       `pre-push: ${step.tool === "vitest" ? "tests related to changed inputs" : `typecheck ${step.args.at(-1)}`}`,
     )
-    const result = spawnSync(process.execPath, [binaries.get(step.tool), ...step.args], {
+    const result = spawnSync(runtime, [binaries.get(step.tool), ...step.args], {
       cwd: root,
       env: clean,
       stdio: "inherit",
     })
     if (result.error)
       throw new Error(
-        `Could not run local ${step.tool}: ${result.error.message}. Restore the local runtime and retry the push.`,
+        `Could not run local ${step.tool} with Node: ${result.error.message}. Restore the project's pinned Node runtime with mise and retry the push.`,
       )
     if (result.status !== 0) {
       if (result.signal)
