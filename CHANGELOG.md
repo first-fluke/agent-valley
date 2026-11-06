@@ -6,6 +6,15 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.7](https://github.com/first-fluke/agent-valley/compare/v4.8.6...v4.8.7) (2026-11-06)
+
+
+### Bug Fixes
+
+* **dev:** preserve exact push scope and native node checks ([591a4a5](https://github.com/first-fluke/agent-valley/commit/591a4a5ea603ac2f17b0c17b037139a9157dc5bd))
+* **dev:** replace husky with scoped hk hooks ([62de647](https://github.com/first-fluke/agent-valley/commit/62de6476239860b360df1e8ba80b9b172ffdb4ff))
+* **setup:** retain caller identity and handle unsupported auth probes ([f148bd6](https://github.com/first-fluke/agent-valley/commit/f148bd6154d0e26b82737c9a348639b96ad96de3))
+
 ## [4.8.6](https://github.com/first-fluke/agent-valley/compare/v4.8.5...v4.8.6) (2026-11-06)
 
 
