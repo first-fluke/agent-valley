@@ -39,6 +39,7 @@ function operation(id = "continuous-order"): ContinuousOperation {
 }
 function runners() {
   const mission = missionFixture()
+  if (mission.supervision) mission.supervision.operatorGoal = mission.goal
   mission.repositoryRoot = repository
   const current = operation()
   return {
@@ -133,6 +134,149 @@ describe("one public order command", () => {
     expect(dependencies.current.settings).toEqual({ workspace: repository, actor: "codex", model: "chosen-model" })
     expect(dependencies.supervised).not.toHaveBeenCalled()
   })
+
+  it("rejoins the owning order after an implicitly resumed child completes", async () => {
+    const dependencies = runners()
+    const parent = dependencies.current
+    parent.currentMissionId = dependencies.mission.id
+    parent.pauseKind = "blocked"
+    parent.decision = {
+      action: "execute",
+      goal: dependencies.mission.goal,
+      reason: "Saved goal",
+      evidence: ["Observed source"],
+    }
+    await operationStore(root).save(parent)
+    await new MissionStore(join(root, ".agent-valley", "missions")).save(dependencies.mission)
+
+    const result = await dispatchOrder(
+      undefined,
+      { resume: dependencies.mission.id, retry: true, timeout: "1800" },
+      root,
+      dependencies,
+    )
+
+    expect(dependencies.supervised).toHaveBeenCalledOnce()
+    expect(dependencies.continuous).toHaveBeenCalledWith(undefined, { resume: parent.id }, root)
+    expect(result).toBe(parent)
+  })
+
+  it.each(["interrupted", undefined] as const)(
+    "retains an operator-controlled parent pause %s after child completion",
+    async (pauseKind) => {
+      const dependencies = runners()
+      dependencies.current.currentMissionId = dependencies.mission.id
+      dependencies.current.pauseKind = pauseKind
+      dependencies.current.decision = {
+        action: "execute",
+        goal: dependencies.mission.goal,
+        reason: "Saved goal",
+        evidence: ["Observed source"],
+      }
+      await operationStore(root).save(dependencies.current)
+      await new MissionStore(join(root, ".agent-valley", "missions")).save(dependencies.mission)
+
+      await dispatchOrder(undefined, { resume: dependencies.mission.id }, root, dependencies)
+
+      expect(dependencies.continuous).not.toHaveBeenCalled()
+    },
+  )
+
+  it("honors --once when resuming an operation child", async () => {
+    const dependencies = runners()
+    dependencies.current.currentMissionId = dependencies.mission.id
+    dependencies.current.pauseKind = "blocked"
+    dependencies.current.decision = {
+      action: "execute",
+      goal: dependencies.mission.goal,
+      reason: "Saved goal",
+      evidence: ["Observed source"],
+    }
+    await operationStore(root).save(dependencies.current)
+    await new MissionStore(join(root, ".agent-valley", "missions")).save(dependencies.mission)
+
+    await dispatchOrder(undefined, { resume: dependencies.mission.id, once: true }, root, dependencies)
+
+    expect(dependencies.supervised).toHaveBeenCalledOnce()
+    expect(dependencies.continuous).not.toHaveBeenCalled()
+  })
+
+  it("leaves acceptance to an already running parent coordinator", async () => {
+    const dependencies = runners()
+    dependencies.current.currentMissionId = dependencies.mission.id
+    dependencies.current.pauseKind = "blocked"
+    dependencies.current.decision = {
+      action: "execute",
+      goal: dependencies.mission.goal,
+      reason: "Saved goal",
+      evidence: ["Observed source"],
+    }
+    await operationStore(root).save(dependencies.current)
+    await new MissionStore(join(root, ".agent-valley", "missions")).save(dependencies.mission)
+    const unlock = await operationStore(root).lock(dependencies.current.id)
+    try {
+      await dispatchOrder(undefined, { resume: dependencies.mission.id }, root, dependencies)
+      expect(dependencies.continuous).not.toHaveBeenCalled()
+      expect(dependencies.supervised).toHaveBeenCalledOnce()
+    } finally {
+      await unlock()
+    }
+  })
+
+  it("does not continue a parent for an unverified child or hide its continuation failure", async () => {
+    const dependencies = runners()
+    dependencies.current.currentMissionId = dependencies.mission.id
+    dependencies.current.pauseKind = "blocked"
+    dependencies.current.decision = {
+      action: "execute",
+      goal: dependencies.mission.goal,
+      reason: "Saved goal",
+      evidence: ["Observed source"],
+    }
+    await operationStore(root).save(dependencies.current)
+    dependencies.mission.verification = undefined
+    await new MissionStore(join(root, ".agent-valley", "missions")).save(dependencies.mission)
+    await dispatchOrder(undefined, { resume: dependencies.mission.id }, root, dependencies)
+    expect(dependencies.continuous).not.toHaveBeenCalled()
+    dependencies.mission.verification = missionFixture().verification
+    dependencies.continuous.mockRejectedValueOnce(new Error("parent storage unavailable"))
+    await expect(dispatchOrder(undefined, { resume: dependencies.mission.id }, root, dependencies)).rejects.toThrow(
+      "parent storage unavailable",
+    )
+  })
+
+  it.each([false, true])(
+    "handles only a confirmed parent lock race, not storage failures (contention=%s)",
+    async (contention) => {
+      const dependencies = runners()
+      dependencies.current.currentMissionId = dependencies.mission.id
+      dependencies.current.pauseKind = "blocked"
+      dependencies.current.decision = {
+        action: "execute",
+        goal: dependencies.mission.goal,
+        reason: "Saved goal",
+        evidence: ["Observed source"],
+      }
+      await operationStore(root).save(dependencies.current)
+      await new MissionStore(join(root, ".agent-valley", "missions")).save(dependencies.mission)
+      let unlock: (() => Promise<void>) | undefined
+      dependencies.continuous.mockImplementationOnce(async () => {
+        unlock = await operationStore(root).lock(dependencies.current.id)
+        throw new Error(
+          contention
+            ? `Mission ${dependencies.current.id} is already running (PID ${process.pid}).`
+            : "parent storage unavailable",
+        )
+      })
+      try {
+        const result = dispatchOrder(undefined, { resume: dependencies.mission.id }, root, dependencies)
+        if (contention) await expect(result).resolves.toBe(dependencies.mission)
+        else await expect(result).rejects.toThrow("parent storage unavailable")
+      } finally {
+        await unlock?.()
+      }
+    },
+  )
 
   it("fails closed on missing, ambiguous or corrupted resume records before launching an Actor", async () => {
     const dependencies = runners()

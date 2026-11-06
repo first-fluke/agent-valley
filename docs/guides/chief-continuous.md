@@ -60,10 +60,13 @@ av order --resume OPERATION_ID --cycles 5
 
 Recoverable child or decision failures continue through bounded recovery using the original checkpoint, charter, selected Chief and spent budgets. A Chief-selected wait retains the same child and automatically resumes at its saved `nextRunAt`; completed external actions remain preserved. A stopped or unresolved child is never replaced with a new mission to evade its evidence or limits.
 
-`av order --resume ID` detects whether the saved record is an operation or a single mission. Existing mission IDs keep their saved execution mode. `--once --resume ID` explicitly selects a mission. After a user stop or an externally repaired prerequisite, the following advanced manual controls can resume the original child and operation:
+A confirmed native Actor timeout receives bounded delayed retries with the saved timeout and remaining execution budget. It does not spend a malformed-JSON correction attempt. A resumed operation joins a child that another live coordinator already owns, then reads its latest checkpoint and accepts verified completion once. Joining does not start a second Actor or spend another recovery attempt; cancelling the joining parent does not cancel the other coordinator's child.
+
+`av order --resume ID` detects whether the saved record is an operation or a single mission. When an implicitly selected child finishes with verified evidence, the command reconnects its original blocked order and continues acceptance automatically. A live parent already handling acceptance is preserved. Explicitly interrupted or legacy paused orders remain operator-controlled. `--once --resume CHILD_ID` runs only the child without reconnecting its order. After a user stop or an externally repaired prerequisite, the following advanced manual controls can resume the original child and operation:
 
 ```bash
 av order --resume CHILD_ID --retry
+# Or observe/reconnect the existing child through its parent directly:
 av order --resume OPERATION_ID
 ```
 

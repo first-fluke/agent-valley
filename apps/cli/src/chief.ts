@@ -33,6 +33,7 @@ import { saveAndDeliverMissionReport } from "./chief-delivery"
 import { createMissionMetricPorts } from "./chief-metrics"
 import { registerMissionCommands } from "./chief-missions"
 import { orderExitCode, printOrderOutcome } from "./chief-outcome"
+import { resumeParentForChild } from "./chief-parent-resume"
 import { applyResumeOptions, validateResumeOptions } from "./chief-resume"
 import { superviseOrder } from "./chief-supervisor"
 import { prepareChiefToolConfig } from "./chief-tool-config"
@@ -380,9 +381,14 @@ export async function dispatchOrder(
         "--cycles and --interval apply to continuing orders. Omit them when using --once or resuming a single mission.",
       )
     const { once: _once, cycles: _cycles, interval: _interval, ...missionOptions } = normalized
-    return missionOptions.worker || missionOptions.supervise === false
+    const result = await (missionOptions.worker || missionOptions.supervise === false
       ? (dependencies.single ?? runOrder)(goal, missionOptions, root)
-      : (dependencies.supervised ?? superviseOrder)(goal, missionOptions, root)
+      : (dependencies.supervised ?? superviseOrder)(goal, missionOptions, root))
+    return options.resume && !options.once && !missionOptions.worker && missionOptions.supervise !== false
+      ? resumeParentForChild(root, result, (id) =>
+          (dependencies.continuous ?? runOperation)(undefined, { resume: id }, root),
+        )
+      : result
   }
   if (normalized.supervise === false)
     throw new Error("Continuing orders require supervision. Add --once to run one goal with --no-supervise.")

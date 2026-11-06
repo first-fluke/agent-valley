@@ -351,11 +351,21 @@ export async function runOperation(
         dependencies.decide ??
         ((current, decisionId) => decideContinuousGoal(current, decisionId, root, { signal: controller.signal })),
       findMission: async (missionId) => {
-        const saved = await missions.load(missionId).catch((error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return undefined
-          throw error
-        })
-        return saved ? reobserveLocalExecutions(saved, missions) : undefined
+        for (;;) {
+          controller.signal.throwIfAborted()
+          while (await missions.isLocked(missionId)) {
+            controller.signal.throwIfAborted()
+            await (dependencies.delay ?? abortableDelay)(5_000, controller.signal)
+          }
+          controller.signal.throwIfAborted()
+          const saved = await missions.load(missionId).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return undefined
+            throw error
+          })
+          if (!saved) return undefined
+          const observed = await reobserveLocalExecutions(saved, missions)
+          if (!(await missions.isLocked(missionId))) return observed
+        }
       },
       runMission:
         dependencies.runMission ??

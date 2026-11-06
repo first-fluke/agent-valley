@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
+import { MAX_CARGO_VERIFICATION_INPUTS } from "./cargo-verification"
 import {
   executeVerificationCommand,
   MAX_VERIFICATION_OUTPUT_BYTES,
@@ -39,7 +40,7 @@ const checkEvidenceSchema = z.strictObject({
   sha256: digest.optional(),
   outputSha256: digest.optional(),
   exitCode: z.number().int().nullable().optional(),
-  inputs: z.array(inputSchema).max(30).optional(),
+  inputs: z.array(inputSchema).max(MAX_CARGO_VERIFICATION_INPUTS).optional(),
 })
 
 export const goalVerificationResultSchema = z.strictObject({

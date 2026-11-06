@@ -30,6 +30,11 @@ export class MissionPause extends Error {
   }
 }
 
+/** Exact deadline message emitted only after the native runner confirms termination. */
+export function isNativeAgentTimeout(reason: string): boolean {
+  return /^Agent timed out after \d+(?:\.\d+)?s$/i.test(reason)
+}
+
 export function classifyFailure(reason: string): FailureKind {
   if (
     /unauthori[sz]ed|authentication|login required|log in|expired token|invalid.*(?:token|api.key)|\b401\b|\b403\b/i.test(
@@ -39,6 +44,7 @@ export function classifyFailure(reason: string): FailureKind {
     return "authentication"
   if (/rate.?limit|too many requests|\b429\b/i.test(reason)) return "rate-limit"
   if (
+    isNativeAgentTimeout(reason) ||
     /\b50[0234]\b|econnreset|econnrefused|etimedout|fetch failed|temporarily unavailable|overloaded|network error/i.test(
       reason,
     )

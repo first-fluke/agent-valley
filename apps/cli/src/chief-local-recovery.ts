@@ -1,6 +1,15 @@
 import type { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 
+export function isMissionLockContention(error: unknown, id: string): boolean {
+  return (
+    error instanceof Error &&
+    !(error as NodeJS.ErrnoException).code &&
+    (error.message.startsWith(`Mission ${id} is already running (PID `) ||
+      error.message.startsWith(`Could not acquire Mission ${id}. Another process acquired it;`))
+  )
+}
+
 /** Re-observe AV-owned processes; this never resolves a destination-side effect. */
 export async function reobserveLocalExecutions(mission: Mission, store: MissionStore): Promise<Mission> {
   const eligible = (current: Mission) =>
@@ -10,7 +19,14 @@ export async function reobserveLocalExecutions(mission: Mission, store: MissionS
       (run) => run.executionState === "unknown" && run.executionRecovery === "local-process",
     )
   if (!eligible(mission)) return mission
-  const unlock = await store.lock(mission.id)
+  if (await store.isLocked(mission.id)) return store.load(mission.id)
+  let unlock: () => Promise<void>
+  try {
+    unlock = await store.lock(mission.id)
+  } catch (error) {
+    if (isMissionLockContention(error, mission.id) && (await store.isLocked(mission.id))) return store.load(mission.id)
+    throw error
+  }
   try {
     const current = await store.load(mission.id)
     if (!eligible(current)) return current

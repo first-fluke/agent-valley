@@ -27,6 +27,7 @@ const testPath = (name: string, nodeOnly = false): boolean =>
   (nodeOnly ? /(?:\.test|\.spec)\.(?:js|mjs|cjs)$/ : /(?:\.test|\.spec)\.(?:[cm]?[jt]sx?)$/).test(name)
 
 export function verificationCommandTestPaths(program: string, args: string[]): string[] {
+  if (program === "cargo") return ["Cargo.toml"]
   if (program === "bun" && args[0] === "test") return args.slice(1)
   if (program === "node" && args[0] === "--test") return args.slice(1)
   if (program === "node" && args[0] === "node_modules/vitest/vitest.mjs" && args[1] === "run") return args.slice(2)
@@ -36,6 +37,12 @@ export function verificationCommandTestPaths(program: string, args: string[]): s
 /** Package scripts, shells, interpreter eval flags and implicit discovery are excluded. */
 export function safeVerificationCommand(program: string, args: string[]): boolean {
   if (args.some((arg) => /[\0\r\n]/.test(arg))) return false
+  if (program === "cargo")
+    return [
+      ["fmt", "--all", "--", "--check"],
+      ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+      ["test", "--workspace"],
+    ].some((allowed) => args.length === allowed.length && args.every((arg, index) => arg === allowed[index]))
   const tests = verificationCommandTestPaths(program, args)
   if (tests.length) return tests.every((name) => testPath(name, program === "node" && args[0] === "--test"))
   if (program !== "git") return false
@@ -77,14 +84,14 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
   z
     .strictObject({
       kind: z.literal("command"),
-      program: z.enum(["git", "node", "bun"]),
+      program: z.enum(["git", "node", "bun", "cargo"]),
       args: z.array(z.string().min(1).max(1_024)).min(1).max(30),
       timeoutMs: z.number().int().min(100).max(300_000).default(120_000),
       stdoutIncludes: z.array(text).min(1).max(10).optional(),
     })
     .refine((check) => safeVerificationCommand(check.program, check.args), {
       message:
-        "Use explicit test files with node --test, bun test, installed Vitest run, or a read-only Git check. Shells, scripts, builds, installs and publishing are forbidden.",
+        "Use explicit node/bun/Vitest tests, read-only Git, or exactly cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- -D warnings, cargo test --workspace. Other Cargo commands or flags, shells, scripts, installs and publishing are forbidden.",
     }),
 ])
 

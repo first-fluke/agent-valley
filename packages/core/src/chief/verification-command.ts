@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import { realpath } from "node:fs/promises"
 import { join, relative, sep } from "node:path"
+import { cargoVerificationInputs } from "./cargo-verification"
 import { safeVerificationCommand, verificationCommandTestPaths } from "./verification-contract"
 import { readVerificationFile } from "./verification-files"
 
@@ -57,6 +58,7 @@ export async function verificationCommandInputs(
 ): Promise<{ path: string; sha256: string }[]> {
   if (!safeVerificationCommand(program, args))
     throw new Error("Verification command is outside the allowed argv contract.")
+  if (program === "cargo") return cargoVerificationInputs(root, budget)
   const names = verificationCommandTestPaths(program, args)
   if (program === "node" && args[0] === "node_modules/vitest/vitest.mjs") {
     // Package managers may link this installed dependency within node_modules.
@@ -96,6 +98,7 @@ export const executeVerificationCommand: VerificationCommandExecutor = (program,
     ])
       delete env[key]
     Object.assign(env, { GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1", GIT_LITERAL_PATHSPECS: "1" })
+    if (program === "cargo") Object.assign(env, { CARGO_NET_OFFLINE: "true", CARGO_TERM_COLOR: "never" })
     const argv =
       program === "git"
         ? ["-c", "core.fsmonitor=false", "-c", "diff.external=", "-c", "core.pager=cat", "--no-pager", ...args]

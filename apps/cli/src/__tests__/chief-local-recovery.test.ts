@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto"
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { executionPolicySchema } from "@agent-valley/core/chief/execution"
 import { mission as missionFixture } from "@agent-valley/core/chief/reports.fixture"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { reobserveLocalExecutions } from "../chief-local-recovery"
 import { superviseOrder } from "../chief-supervisor"
 
 vi.mock("@agent-valley/core/config/yaml-loader", () => ({
@@ -69,6 +70,55 @@ async function marker(missionId: string, pid = 654321) {
 }
 
 describe("automatic local execution re-observation", () => {
+  it("reads a live owner's latest checkpoint without reconciling its unknown execution", async () => {
+    const mission = checkpoint()
+    await store.save(mission)
+    const path = join(root, ".agent-valley", "missions", `${mission.id}.json`)
+    const original = await readFile(path, "utf8")
+    const unlock = await store.lock(mission.id)
+    const recover = vi.spyOn(store, "recoverProcesses")
+    try {
+      expect(await reobserveLocalExecutions(mission, store)).toEqual(await store.load(mission.id))
+      expect(recover).not.toHaveBeenCalled()
+      expect(await readFile(path, "utf8")).toBe(original)
+    } finally {
+      await unlock()
+    }
+  })
+
+  it("joins a confirmed ownership race by reloading without changing the competing checkpoint", async () => {
+    const mission = checkpoint()
+    await store.save(mission)
+    const acquire = store.lock.bind(store)
+    let release: (() => Promise<void>) | undefined
+    vi.spyOn(store, "lock").mockImplementationOnce(async (id) => {
+      release = await acquire(id)
+      const latest = await store.load(id)
+      latest.status = "planning"
+      await store.save(latest)
+      throw new Error(`Mission ${id} is already running (PID ${process.pid}). Stop that run before resuming.`)
+    })
+    const recover = vi.spyOn(store, "recoverProcesses")
+    try {
+      const observed = await reobserveLocalExecutions(mission, store)
+      expect(observed.status).toBe("planning")
+      expect(observed.execution).toEqual(mission.execution)
+      expect(recover).not.toHaveBeenCalled()
+      expect((await store.load(mission.id)).operations?.runs[0]?.executionState).toBe("unknown")
+    } finally {
+      await release?.()
+    }
+  })
+
+  it("propagates storage permission errors rather than treating them as a live owner", async () => {
+    const mission = checkpoint()
+    await store.save(mission)
+    const error = Object.assign(new Error("Cannot write mission storage"), { code: "EACCES" })
+    vi.spyOn(store, "lock").mockRejectedValueOnce(error)
+
+    await expect(reobserveLocalExecutions(mission, store)).rejects.toBe(error)
+  })
+
   it("uses stopped-process proof before resuming the same Chief recovery without resetting spend", async () => {
     const mission = checkpoint()
     await store.save(mission)
