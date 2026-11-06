@@ -1,5 +1,5 @@
 import { continuousBaselineSchema, type Operation } from "./continuous-contract"
-import type { ContinuousOperationPorts } from "./continuous-operation"
+import type { ContinuousOperationPorts } from "./continuous-operation-ports"
 import { type SourceIntegrationSummary, sourceIntegrationSummarySchema } from "./source-integration-contract"
 import type { Mission } from "./types"
 
