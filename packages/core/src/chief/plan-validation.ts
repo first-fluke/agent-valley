@@ -2,8 +2,11 @@ import { detectCycles } from "../domain/dag"
 import type { DagNode } from "../domain/models"
 import type { ChiefPlan, Persona } from "./types"
 
+export const MAX_JSON_RESPONSE_LENGTH = 128_000
+
 export function parseJson(source: string, stage: string): unknown {
-  if (source.length > 128_000) throw new Error(`${stage} response exceeds 128 KB. Return only the requested JSON.`)
+  if (source.length > MAX_JSON_RESPONSE_LENGTH)
+    throw new Error(`${stage} response exceeds 128 KB. Return only the requested JSON.`)
   const content = source.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, "$1")
   try {
     return JSON.parse(content)

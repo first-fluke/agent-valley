@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { coordinate } from "./coordinator"
+import { MAX_JSON_RESPONSE_LENGTH } from "./plan-validation"
 import { planPrompt } from "./prompts"
 import { parsePlanningResponse, validateMission } from "./schemas"
 import type { ChiefPlan, ChiefPorts, ChiefTask, Mission, Persona } from "./types"
@@ -312,12 +313,27 @@ describe("automatic Actor planning", () => {
     expect(() => parsePlanningResponse(JSON.stringify(response), mission)).toThrow()
   })
 
-  it("rejects oversized automatic plans before transport truncation can lose the roster", () => {
+  it("accepts automatic plans above the former eight-thousand-character limit", () => {
     const { mission } = fixture()
     const response = planning()
     const task = response.tasks[0] as ChiefTask
     task.instructions = "x".repeat(8_000)
-    expect(() => parsePlanningResponse(JSON.stringify(response), mission)).toThrow(/exceeds 8,000 characters/)
+    expect(parsePlanningResponse(JSON.stringify(response), mission).plan.tasks).toEqual(response.tasks)
+    expect(planPrompt(mission)).toContain(`${MAX_JSON_RESPONSE_LENGTH} characters`)
+    task.acceptance = []
+    expect(() => parsePlanningResponse(JSON.stringify(response), mission)).toThrow(/acceptance/)
+  })
+
+  it.each([true, false])("bounds automatic=%s and legacy plans at the shared JSON limit", (automatic) => {
+    const { mission } = fixture()
+    if (!automatic) delete mission.availableAgents
+    const response = planning(automatic ? "api-engineer" : "reviewer")
+    const task = response.tasks[0] as ChiefTask
+    task.instructions = "x".repeat(32_000)
+    task.acceptance = Array.from({ length: 4 }, () => "e".repeat(32_000))
+    const source = JSON.stringify(automatic ? response : { tasks: response.tasks })
+    expect(source.length).toBeGreaterThan(MAX_JSON_RESPONSE_LENGTH)
+    expect(() => parsePlanningResponse(source, mission)).toThrow("exceeds 128 KB")
   })
 
   it("validates available CLI capabilities and saved automatic rosters", () => {

@@ -2,6 +2,7 @@ import { actorData, actorPlanData, actorTaskData, canonicalTaskResponseKeys } fr
 import { unavailableDirectorAdvice } from "./advisory-evidence"
 import { requiresOmaActor } from "./oma-actor"
 import { operationsEvidence } from "./operations-report"
+import { MAX_JSON_RESPONSE_LENGTH } from "./plan-validation"
 import { reviewResponseFormat } from "./review-response"
 import { finalCriteria } from "./schemas"
 import { taskDecompositionGuidance } from "./task-decomposition-guidance"
@@ -81,7 +82,7 @@ export function planPrompt(mission: Mission): string {
     taskDecompositionGuidance(mission, "plan"),
     "Use recorded organization evidence and explicitly approved standards when relevant; historical outcomes are not approval of current files. Routing quality/cost evidence is measured only where reported, not a claim of universal model superiority. Explicit metric targets require actual recorded measurements and are additional completion gates; advisory ROI text is not measurement.",
     "Use 1-12 tasks with unique ids, concrete instructions, nonempty acceptance criteria, and acyclic dependencies.",
-    "Keep the complete JSON response under 8,000 characters; use concise tasks so it fits the Actor transport.",
+    `Keep the complete JSON response within ${MAX_JSON_RESPONSE_LENGTH} characters; use concise Actors and tasks.`,
     "Every Actor must produce or update a material file deliverable, including research reports. Plan intermediate checks.",
     ...(requiresOmaActor(mission)
       ? [
@@ -120,8 +121,8 @@ export function planPrompt(mission: Mission): string {
       ? [
           `The operator's Chief Director CLI is fixed: ${JSON.stringify({ id: mission.chiefId, actorType: chief?.agentType })}. Do not replace it with another vendor. Omit model from every response Actor; the scheduler retains the selected Chief Director model and Actors use their CLI defaults.`,
           mission.availableSkills?.length
-            ? "Select relevant skills only from the verified installed catalog. Assign tasks to generated Actor ids. Return actors, tasks and the requested goalBrief together in one JSON object within the 8,000-character limit."
-            : "Set skills: [] on each Actor because no installed skill capabilities were supplied; describe expertise in role. Assign tasks to generated Actor ids. Return actors, tasks and any requested goalBrief together in one JSON object within the 8,000-character limit.",
+            ? `Select relevant skills only from the verified installed catalog. Assign tasks to generated Actor ids. Return actors, tasks and the requested goalBrief together in one JSON object within the ${MAX_JSON_RESPONSE_LENGTH}-character limit.`
+            : `Set skills: [] on each Actor because no installed skill capabilities were supplied; describe expertise in role. Assign tasks to generated Actor ids. Return actors, tasks and any requested goalBrief together in one JSON object within the ${MAX_JSON_RESPONSE_LENGTH}-character limit.`,
           'Return ONLY JSON: {"actors":[{"id":"...","name":"...","role":"...","actorType":"...","skills":[]}],"tasks":[{"id":"task-1","title":"...","actorId":"...","instructions":"...","acceptance":["..."],"dependencies":[]}]}',
         ]
       : [

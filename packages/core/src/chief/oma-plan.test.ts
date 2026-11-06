@@ -25,6 +25,23 @@ describe("required OMA task assignments", () => {
     expect(parsePlanningResponse(source, mission).plan).toEqual(plan)
   })
 
+  it("accepts a supervised OMA plan and goalBrief above eight thousand characters", () => {
+    const { mission } = fixture()
+    mission.oma = true
+    const worker = mission.personas.find((entry) => entry.id === "worker")
+    if (!worker) throw new Error("Expected fixture worker")
+    worker.skills = ["oma-backend"]
+    const expanded = structuredClone(plan)
+    const task = expanded.tasks[0]
+    if (!task) throw new Error("Expected fixture task")
+    task.instructions = "x".repeat(8_000)
+    const source = JSON.stringify({ ...expanded, goalBrief: brief })
+    expect(source.length).toBeGreaterThan(8_000)
+    const parsed = parsePlanningResponse(source, mission)
+    expect(parsed.plan).toEqual(expanded)
+    expect(parsed.goalBrief).toEqual(brief)
+  })
+
   it("requires skilled work even without receipt mode when the installed catalog is present", () => {
     const { mission } = fixture()
     mission.oma = false

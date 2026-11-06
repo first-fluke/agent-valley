@@ -193,10 +193,6 @@ export function parsePlanningResponse(
     validateOmaAssignments(plan, mission.personas, mission)
     return { personas: mission.personas, plan }
   }
-  if (source.length > 8_000)
-    throw new Error(
-      "Planning response exceeds 8,000 characters. Return a concise roster and plan within the transport limit.",
-    )
   const roster = mission.availableAgents
     ? z
         .array(actorSchema)
