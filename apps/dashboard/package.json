@@ -10,18 +10,18 @@
   },
   "dependencies": {
     "@agent-valley/core": "workspace:*",
-    "@tailwindcss/postcss": "^4.3.3",
-    "ahooks": "^3.10.0",
-    "next": "^16.3.8",
+    "@tailwindcss/postcss": "^4.3.4",
+    "ahooks": "^3.11.0",
+    "next": "^16.4.5",
     "pixi.js": "^8.22.0",
-    "postcss": "^8.5.28",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "tailwindcss": "^4.3.3",
-    "zod": "^4.6.5"
+    "postcss": "^8.5.32",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.4",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "babel-plugin-react-compiler": "^1.0.0",
