@@ -6,6 +6,14 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.5](https://github.com/first-fluke/agent-valley/compare/v4.8.4...v4.8.5) (2026-11-06)
+
+
+### Bug Fixes
+
+* **chief:** preserve spent retry budgets on resume ([2663c1e](https://github.com/first-fluke/agent-valley/commit/2663c1e3a36b430b774edaa9e088e3eee673d4f9))
+* **sandbox:** allow scoped Unix listeners on macOS ([ea749bb](https://github.com/first-fluke/agent-valley/commit/ea749bbf9147deaf9f466b216ee337fd9967da64))
+
 ## [4.8.4](https://github.com/first-fluke/agent-valley/compare/v4.8.3...v4.8.4) (2026-11-06)
 
 
