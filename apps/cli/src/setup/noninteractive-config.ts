@@ -7,6 +7,7 @@ import {
   type ProjectConfig,
   projectConfigSchema,
 } from "@agent-valley/core/config/yaml-loader"
+import { prepareRuntimeGitignore, type RuntimeIgnoreChange } from "@agent-valley/core/workspace/runtime-ignore"
 import { parse, stringify } from "yaml"
 import type { z } from "zod"
 import { type IntegrationFile, integrationFile } from "../client-integrations-files"
@@ -183,5 +184,18 @@ export async function prepareNoninteractiveConfig(options: SetupOptions, deps: N
   project.file.after = stringify(savedProject, { lineWidth: 0 })
   global.file.after = stringify(savedGlobal, { lineWidth: 0 })
   project.file.writeMode = global.file.writeMode = 0o600
+  await prepareRuntimeIgnoreFiles(projectRoot, workspace)
   return { projectRoot, workspace, projectPath, globalPath, chief, files: [project.file, global.file] }
+}
+
+export async function prepareRuntimeIgnoreFiles(
+  projectRoot: string,
+  workspace: string,
+): Promise<RuntimeIgnoreChange[]> {
+  const ignores = new Map<string, RuntimeIgnoreChange>()
+  for (const root of [projectRoot, workspace]) {
+    const change = await prepareRuntimeGitignore(root)
+    if (change) ignores.set(change.path, change)
+  }
+  return [...ignores.values()]
 }

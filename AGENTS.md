@@ -111,6 +111,8 @@ live in `packages/core/src/domain/ports/`.
 
 **Rust verification:** Generated native Cargo checks use the fixed argv contract in `packages/core/src/chief/verification-contract.ts` and bounded workspace input evidence in `packages/core/src/chief/cargo-verification.ts`. Keep native timeout retries separate from malformed-response correction attempts.
 
+**Runtime data:** Reuse `packages/core/src/workspace/runtime-ignore.ts` before writing project `.agent-valley/` state. Preserve existing ignore rules and tracked files; see [environment setup](docs/guides/environment-setup.md).
+
 **Error message principle:** Include fix instructions, not just warnings. An agent must be able to self-correct from the error message alone.
 
 **Coverage threshold (v0.2+):** `lines >= 80%`, `branches >= 70%`, `functions >= 80%`, `statements >= 80%`. Enforced by `validate.sh` Check 5/5 via `bun run test:coverage` (vitest v8 provider). Thresholds live in `vitest.config.ts:coverage.thresholds`. Local opt-out for fast iteration: `SKIP_COVERAGE=1`; CI must not skip.

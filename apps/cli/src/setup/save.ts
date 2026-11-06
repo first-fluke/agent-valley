@@ -20,6 +20,7 @@ import {
   resolveGlobalConfigDir,
   resolveGlobalConfigPath,
 } from "@agent-valley/core/config/yaml-loader"
+import { ensureRuntimeGitignore } from "@agent-valley/core/workspace/runtime-ignore"
 import * as p from "@clack/prompts"
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 import { changedProjectChief } from "./chief-write"
@@ -49,6 +50,7 @@ export async function saveConfig(
     const workspaceError = await validateOrderWorkspace(ctx.workspaceRoot)
     if (workspaceError) throw new Error(workspaceError)
   }
+  for (const root of new Set([process.cwd(), ctx.workspaceRoot])) await ensureRuntimeGitignore(root)
   // ── Global config ──────────────────────────────────────────────────
   const globalDir = resolveGlobalConfigDir()
   if (!existsSync(globalDir)) {

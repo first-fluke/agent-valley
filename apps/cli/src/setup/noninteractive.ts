@@ -1,6 +1,10 @@
 import { join, parse as parsePath, resolve } from "node:path"
 import { AGENT_LOGIN_HINT } from "../doctor-checks"
-import { prepareNoninteractiveConfig, validateNoninteractiveOptions } from "./noninteractive-config"
+import {
+  prepareNoninteractiveConfig,
+  prepareRuntimeIgnoreFiles,
+  validateNoninteractiveOptions,
+} from "./noninteractive-config"
 import { noninteractiveSetupDefaults } from "./noninteractive-runtime"
 import type { NoninteractiveSetupDependencies, NoninteractiveSetupResult, SetupOptions } from "./noninteractive-types"
 
@@ -86,7 +90,12 @@ export async function setupNoninteractive(
     // OMA may add unrelated client settings. Recompute their snapshots before the single atomic save.
     result.integrations.status = "failed"
     const integrations = await deps.prepareIntegrations(config.workspace, config.projectRoot)
-    const changed = await deps.applyFiles(parsePath(config.projectRoot).root, [...config.files, ...integrations.files])
+    const ignores = await prepareRuntimeIgnoreFiles(config.projectRoot, config.workspace)
+    const changed = await deps.applyFiles(parsePath(config.projectRoot).root, [
+      ...config.files,
+      ...ignores,
+      ...integrations.files,
+    ])
     result.config.saved = true
     const clientPaths = new Set(integrations.files.map((file) => file.path))
     result.integrations = {

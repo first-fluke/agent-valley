@@ -8,74 +8,15 @@
  * Design: docs/plans/v0-2-bigbang-design.md § 5.4
  */
 
-import { spawn } from "node:child_process"
 import { lstatSync, realpathSync } from "node:fs"
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
+import { type CommandResult, runCommand } from "./command"
+import { ensureRuntimeGitignore } from "./runtime-ignore"
 
-export interface CommandResult {
-  exitCode: number
-  stdout: string
-  stderr: string
-}
-
-export interface RunCommandOptions {
-  cwd?: string
-  ignoreStdio?: boolean
-  env?: Record<string, string | undefined>
-}
-
-/**
- * Git config overrides applied to every Git invocation made by the
- * orchestrator. Agent workspaces are writable by the agent, so `.git` (and
- * repo-local config) must be treated as untrusted: a planted hook, signing
- * program, or fsmonitor command would otherwise execute on the host outside
- * the sandbox during auto-commit/rebase.
- */
-export const GIT_SAFETY_ARGS = Object.freeze([
-  "-c",
-  "core.hooksPath=/dev/null",
-  "-c",
-  "commit.gpgsign=false",
-  "-c",
-  "core.fsmonitor=false",
-])
-
-/** Run a command and return its exit code, stdout, and stderr. */
-export function runCommand(cmd: string, args: string[], options: RunCommandOptions = {}): Promise<CommandResult> {
-  const argv = cmd === "git" ? [...GIT_SAFETY_ARGS, ...args] : args
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, argv, {
-      cwd: options.cwd ?? process.cwd(),
-      stdio: options.ignoreStdio ? "ignore" : ["ignore", "pipe", "pipe"],
-      env: options.env ? { ...process.env, ...options.env } : undefined,
-    })
-
-    let stdout = ""
-    let stderr = ""
-    if (!options.ignoreStdio) {
-      if (proc.stdout) {
-        proc.stdout.on("data", (chunk: Buffer) => {
-          stdout += chunk.toString()
-        })
-      }
-      if (proc.stderr) {
-        proc.stderr.on("data", (chunk: Buffer) => {
-          stderr += chunk.toString()
-        })
-      }
-    }
-
-    proc.once("error", (error) => {
-      resolve({ exitCode: -1, stdout, stderr: `${stderr}${error.message}` })
-    })
-    proc.once("close", (code) => {
-      resolve({ exitCode: code ?? -1, stdout, stderr })
-    })
-  })
-}
+export { type CommandResult, GIT_SAFETY_ARGS, type RunCommandOptions, runCommand } from "./command"
 
 /** Map conventional commit prefixes to git branch prefixes. */
 const BRANCH_PREFIX_MAP: Record<string, string> = {
@@ -156,20 +97,9 @@ async function localBranchExists(root: string, branch: string): Promise<boolean>
 }
 
 async function bootstrapMetadata(workspacePath: string, issue: Issue, branch: string): Promise<void> {
+  await ensureRuntimeGitignore(workspacePath)
   // Create metadata directory after worktree.
   await mkdir(`${workspacePath}/.agent-valley/attempts`, { recursive: true })
-
-  // Ensure .agent-valley is gitignored to prevent auto-commit conflicts across branches.
-  const gitignorePath = `${workspacePath}/.gitignore`
-  try {
-    const existing = await readFile(gitignorePath, "utf-8").catch(() => "")
-    if (!existing.includes(".agent-valley")) {
-      const entry = existing.endsWith("\n") || existing === "" ? ".agent-valley/\n" : "\n.agent-valley/\n"
-      await writeFile(gitignorePath, existing + entry)
-    }
-  } catch {
-    await writeFile(gitignorePath, ".agent-valley/\n")
-  }
 
   // Store issue metadata for workspace lookup.
   await writeFile(

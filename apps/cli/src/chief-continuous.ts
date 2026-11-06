@@ -16,6 +16,7 @@ import { serviceShutdownPause } from "@agent-valley/core/chief/service-shutdown"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { writeTextAtomic } from "@agent-valley/core/util/atomic-json"
+import { ensureRuntimeGitignore } from "@agent-valley/core/workspace/runtime-ignore"
 import { type Command, Option } from "commander"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { decideContinuousGoal } from "./chief-continuous-decision"
@@ -247,6 +248,7 @@ export async function runOperation(
 ): Promise<ContinuousOperation> {
   assertNotManagedRun()
   root = await realpath(root)
+  await ensureRuntimeGitignore(root)
   const id = options.resume ?? options.operationId ?? randomUUID()
   const storage = operationStore(root)
   const unlock = await storage.lock(id)
@@ -330,6 +332,7 @@ export async function runOperation(
         throw new Error(`Operation ${id} already exists. Use --resume ${id}.`)
       operation = await newOperation(charter, options, root, id)
     }
+    await ensureRuntimeGitignore(operation.repositoryRoot)
     await storage.save(operation)
     await saveOperationReport(root, operation)
     console.log(`Operation ${id}\nCharter: ${operation.charter}\nResume: av order --resume ${id}`)

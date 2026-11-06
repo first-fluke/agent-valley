@@ -16,6 +16,7 @@ import {
 import { discoverMissionSkills, prepareMissionSkills } from "@agent-valley/core/chief/skills"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
+import { ensureRuntimeGitignore } from "@agent-valley/core/workspace/runtime-ignore"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { type Command, Option } from "commander"
 import { discoverReadyAgents, resetHandoffForRetry } from "./chief-agent-discovery"
@@ -77,6 +78,7 @@ export async function runOrder(
     )
   )
     throw new Error("Use --resume <id> for retry, external-effect resolution or cost reconciliation.")
+  await ensureRuntimeGitignore(root)
   const store = new MissionStore(join(root, ".agent-valley/missions"))
   const id = options.resume ?? options.missionId ?? randomUUID()
   const unlock = await store.lock(id)
@@ -114,6 +116,7 @@ export async function runOrder(
     if (options.resume) {
       validateResumeOptions(goal, options)
       mission = await store.load(id)
+      await ensureRuntimeGitignore(mission.repositoryRoot ?? root)
       applyResumeOptions(mission, goal, options)
       resetHandoffForRetry(mission, options.retry)
       await store.save(mission)
@@ -129,6 +132,7 @@ export async function runOrder(
           "Order goal exceeds 32 KB. Put supporting details in repository files and reference them in a shorter goal.",
         )
       const config = await resolveOrderConfig(root, options)
+      await ensureRuntimeGitignore(config.workspace)
       const codeDelivery = await prepareCodeDelivery(config.workspace, {
         ...options,
         deliveryPaths: deliveryPaths(options.deliveryPaths),

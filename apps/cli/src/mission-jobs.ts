@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { isProcessAlive, processIdentity } from "@agent-valley/core/chief/process-identity"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { writeJsonAtomic } from "@agent-valley/core/util/atomic-json"
+import { ensureRuntimeGitignore } from "@agent-valley/core/workspace/runtime-ignore"
 import { z } from "zod"
 
 const jobSchema = z.object({
@@ -63,6 +64,7 @@ export class MissionJobs {
   }
 
   async locked<T>(operation: () => Promise<T>): Promise<T> {
+    await ensureRuntimeGitignore(this.root)
     await ensureAvDirectory(this.root, ["control", this.directoryName])
     const release = await new MissionStore(this.directory).lock("submission")
     try {

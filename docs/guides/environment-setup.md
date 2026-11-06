@@ -143,6 +143,8 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 
 Running the installer inside its own checkout leaves existing files intact. Repeated installs deduplicate the Symphony section and ignore entries.
 
+Setup and runtime startup ensure `.agent-valley/` is excluded in the project's `.gitignore` before creating local state, including projects nested inside a Git repository. This also applies to MCP/API queues, A2A jobs and generated workspaces. Existing rules, comments and newline style are preserved. Repeated starts do not add duplicate rules, and non-Git directories are left unchanged. Already tracked files remain tracked; adding an ignore rule does not remove them from Git history or the index.
+
 Existing OMA configuration and vendor instruction trees are preserved as a whole; `av setup` updates OMA through its supported installer. Other harness copies fill missing files after checking all planned copies for content, type, and symlink conflicts. A conflicting file stops installation before those copies; retain it and resolve the named conflict before retrying.
 
 ## Dashboard and webhook access

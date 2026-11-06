@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { writeJsonAtomic } from "../util/atomic-json"
 import { lockRecord } from "../util/record-lock"
+import { ensureRuntimeGitignore } from "../workspace/runtime-ignore"
 import { type A2aJob, a2aJobSchema } from "./a2a-job"
 
 /** Durable AV execution state; a repository lock prevents competing local artifact writers. */
@@ -24,16 +25,18 @@ export class A2aJobStore {
   }
 
   async lock(): Promise<() => Promise<void>> {
+    await ensureRuntimeGitignore(this.root)
     await this.prepare()
     return lockRecord(join(this.directory, "repository.lock"), "A2A repository execution")
   }
 
   save(job: A2aJob): Promise<void> {
     const write = this.writes.then(async () => {
-      await this.prepare()
       const value = a2aJobSchema.parse(job)
       if (value.root !== this.root)
         throw new Error("A2A record belongs to another repository. Restore its original root.")
+      await ensureRuntimeGitignore(this.root)
+      await this.prepare()
       await writeJsonAtomic(this.path(value.id), value)
     })
     this.writes = write.catch(() => {})

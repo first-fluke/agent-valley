@@ -19,6 +19,7 @@ import { LinearTrackerAdapter } from "@agent-valley/core/tracker/adapters/linear
 import { LinearWebhookReceiver } from "@agent-valley/core/tracker/adapters/linear-webhook-receiver"
 import { FileSystemWorkspaceGateway } from "@agent-valley/core/workspace/adapters/fs-workspace-gateway"
 import { GhCliCodeHost } from "@agent-valley/core/workspace/adapters/gh-code-host"
+import { ensureRuntimeGitignore } from "@agent-valley/core/workspace/runtime-ignore"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { toOrchestratorConfig } from "@/lib/env"
 import { setMetricsEndpoint } from "@/lib/metrics-singleton"
@@ -35,6 +36,7 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
   process.chdir(projectRoot)
 
   const config = toOrchestratorConfig(projectRoot)
+  for (const root of new Set([projectRoot, config.workspaceRoot])) await ensureRuntimeGitignore(root)
   configureLogger(config.logLevel, config.logFormat)
 
   // Every durable record lives in `.agent-valley/state.db`; earlier JSON
