@@ -216,6 +216,15 @@ export async function runContinuousOperation(
     }
   }
   if (operation.phase === "completed") return operation
+  const observingResumedChild =
+    ["paused", "running", "accepting"].includes(operation.phase) &&
+    operation.recovery?.target === "child" &&
+    operation.recovery.checkpointId === operation.currentMissionId &&
+    operation.recovery.disposition === "protected" &&
+    operation.recovery.reason === "The operation was cancelled; automatic recovery is stopped."
+  if (observingResumedChild && operation.recovery)
+    operation.recovery.reason =
+      "Operation resumed; observing the original child checkpoint before deciding recovery. Its saved protections and spent limits remain in force."
   if (operation.phase === "paused") {
     operation.phase =
       operation.resumePhase ?? (operation.currentMissionId ? "running" : operation.nextRunAt ? "waiting" : "deciding")
@@ -223,7 +232,7 @@ export async function runContinuousOperation(
     operation.pauseKind = undefined
     operation.error = undefined
     await save()
-  }
+  } else if (observingResumedChild) await save()
   try {
     while (true) {
       if (ports.signal?.aborted)
@@ -277,6 +286,18 @@ export async function runContinuousOperation(
             return pause(`Completed child ${id} is missing. Restore its saved mission record before continuing.`)
           mission = await ports.runMission(operation, id, decision.goal, operation.baseline.path)
         } else if (mission.status !== "completed" && mission.status !== "paused" && mission.status !== "failed") {
+          const recovery = operation.recovery
+          if (
+            recovery?.target === "child" &&
+            recovery.checkpointId === id &&
+            recovery.disposition === "protected" &&
+            !mission.tasks.some((task) => task.effectState === "running") &&
+            automaticMissionRecovery(mission, Date.parse(now())).retry
+          ) {
+            recovery.disposition = "retrying"
+            recovery.reason = `The original child resumed ${mission.status}; joining its saved coordinator without spending another recovery attempt.`
+            await save()
+          }
           mission = await ports.runMission(operation, id, decision.goal, operation.baseline.path)
         }
         assertIdentity(mission)

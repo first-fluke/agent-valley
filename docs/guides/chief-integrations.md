@@ -8,6 +8,8 @@
 
 Automatic teams with multiple authenticated CLIs can route work between native defaults. A configured pool can also select models. Chief Director models and explicit model pins in supplied Actor rosters are preserved. After enough observations, routing selects a qualifying route with the lowest observed cost per accepted deliverable, including failed attempts. Before then it uses configured prices or candidate order. Failed or rejected routes can escalate within the existing task/recovery limits. AV does not download or guess model prices.
 
+A work run whose local termination and saved operator-stop history prove an interruption does not count as a route failure or success-rate sample. Its calls, elapsed time, token usage and cost remain recorded. Actual failures, review rejections and uncertain executions retain their existing treatment. Explicitly resuming a stopped order preserves its original goal, workspace and spent limits.
+
 ```yaml
 chief:
   review_vendor: prefer # prefer | require | off

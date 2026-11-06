@@ -80,6 +80,14 @@ export const operatingRunSchema = z.strictObject({
   executionState: z.enum(["running", "settled", "unknown"]).optional(),
   /** Absent on legacy records, whose executions were always local processes. */
   executionRecovery: z.enum(["local-process", "reconcile"]).optional(),
+  /** Framework-attested cancellation; usage remains spent and the native outcome stays failed. */
+  routingExclusion: z
+    .strictObject({
+      reason: z.literal("coordinator-cancelled"),
+      dispatchAt: z.iso.datetime(),
+      pauseAt: z.iso.datetime(),
+    })
+    .optional(),
   routingReason: text.optional(),
   evidence: text.optional(),
   fingerprint: text.optional(),

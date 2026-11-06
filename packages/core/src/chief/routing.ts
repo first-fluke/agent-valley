@@ -1,3 +1,4 @@
+import { cancelledWorkRunProofs } from "./cancelled-work-run"
 import type { RouteEvidence, RoutingCandidate } from "./operations"
 import type { Mission, Persona } from "./types"
 
@@ -6,6 +7,7 @@ export const routeKey = (entry: { actorType: string; model?: string }) => `${ent
 /** Include unsuccessful attempts in successful-deliverable cost; unknown costs stay unknown. */
 export function routeEvidence(mission: Mission): RouteEvidence[] {
   const evidence = new Map<string, RouteEvidence>()
+  const cancelled = cancelledWorkRunProofs(mission)
   for (const item of mission.operations?.routingEvidence ?? []) evidence.set(routeKey(item), { ...item })
   for (const run of mission.operations?.runs ?? []) {
     if (run.stage !== "work" || run.outcome === "pending") continue
@@ -18,7 +20,7 @@ export function routeEvidence(mission: Mission): RouteEvidence[] {
       totalCostUsd: 0,
       successfulDeliverableCostUsd: null,
     }
-    item.samples += 1
+    if (!cancelled.has(run.runId)) item.samples += 1
     if (run.outcome === "passed") item.successes += 1
     item.totalCostUsd = item.totalCostUsd === null || run.costUsd === null ? null : item.totalCostUsd + run.costUsd
     item.successfulDeliverableCostUsd =
@@ -119,7 +121,10 @@ export function selectWorkActor(
   const measured = qualified.at(0)
   const initial = measured?.candidate ?? [...eligible].sort((a, b) => price(a) - price(b)).at(0)
   if (!initial) throw new Error("Restore a ready work routing candidate before continuing this mission.")
-  const taskRuns = (mission.operations?.runs ?? []).filter((run) => run.stage === "work" && run.taskId === taskId)
+  const cancelled = cancelledWorkRunProofs(mission)
+  const taskRuns = (mission.operations?.runs ?? []).filter(
+    (run) => run.stage === "work" && run.taskId === taskId && !cancelled.has(run.runId),
+  )
   const failed = new Set<string>()
   for (let i = taskRuns.length - 1; i >= 0; i--) {
     const run = taskRuns[i]

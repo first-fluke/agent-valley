@@ -4,6 +4,7 @@ import { lstat, open, realpath } from "node:fs/promises"
 import { relative, resolve, sep } from "node:path"
 import { z } from "zod"
 import { runCommand } from "../workspace/worktree-lifecycle"
+import { archivedWorkCancellation, cancelledWorkRunProofs } from "./cancelled-work-run"
 import { fingerprintWorkspace } from "./fingerprint"
 import type { operatingRunSchema, RouteEvidence } from "./operations"
 import { appendOrganizationRecord, organizationRecordKey, readOrganizationRecords } from "./organization-store"
@@ -150,6 +151,7 @@ export async function recordMissionOrganizationOutcome(
     mission.verification?.ok,
     mission.finalReview?.criteria,
   ])
+  const cancellations = cancelledWorkRunProofs(mission)
   return recordOrganizationOutcome(sourceRepo, {
     missionId: mission.id,
     missionVersion,
@@ -160,7 +162,10 @@ export async function recordMissionOrganizationOutcome(
     summary: (mission.report?.summary ?? mission.error ?? `Mission ${mission.status}`).slice(0, 2_000),
     evidence: await deliveredArtifacts(mission.workspace.path),
     observations: [],
-    runs: mission.operations?.runs ?? [],
+    runs: (mission.operations?.runs ?? []).map((run) => {
+      const routingExclusion = cancellations.get(run.runId)
+      return routingExclusion ? { ...run, routingExclusion } : run
+    }),
     verification: mission.verification
       ? {
           ok: mission.verification.ok,
@@ -196,7 +201,7 @@ export async function getOrganizationRouteEvidence(sourceRepo: string): Promise<
       totalCostUsd: 0,
       successfulDeliverableCostUsd: null,
     }
-    group.samples++
+    if (!archivedWorkCancellation(run)) group.samples++
     if (run.outcome === "passed") group.successes++
     group.totalCostUsd = group.totalCostUsd === null || run.costUsd === null ? null : group.totalCostUsd + run.costUsd
     group.successfulDeliverableCostUsd =
