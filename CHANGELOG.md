@@ -6,6 +6,25 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.7.0](https://github.com/first-fluke/agent-valley/compare/v4.6.0...v4.7.0) (2026-11-06)
+
+
+### Features
+
+* **chief:** hand off exhausted agents to authenticated providers ([8c0cfa8](https://github.com/first-fluke/agent-valley/commit/8c0cfa89c566290eeaed2e850bb08e1baf6dc227))
+* **delivery:** follow up on GitHub reviews for any issue tracker ([83c5af6](https://github.com/first-fluke/agent-valley/commit/83c5af68751e2c6b612f1174617738dc4548ae90))
+* **state:** keep orchestrator state in one SQLite database ([76b5313](https://github.com/first-fluke/agent-valley/commit/76b5313a5f83c9507d2f339d85535eed4fc606af))
+
+
+### Bug Fixes
+
+* **chief:** recover planning timeouts and reconnect child orders ([da7d7b0](https://github.com/first-fluke/agent-valley/commit/da7d7b0a3482fab98bc9b4d10dfed4a271ea619d))
+* **chief:** recover unavailable models without replaying work ([002e93f](https://github.com/first-fluke/agent-valley/commit/002e93fb8d43a0f43d70fed423428859f2f32e4e))
+* **config:** keep honoring github.comment_relay.pull_request_reviews ([dcc5a80](https://github.com/first-fluke/agent-valley/commit/dcc5a809cf3a8967cc91efb20bfce88806b3b709))
+* **executions:** validate A2A storage before ignore updates ([7eb1d89](https://github.com/first-fluke/agent-valley/commit/7eb1d89e851e0cf347a0b1f45fbb9f3c07bc703d))
+* **grok:** preserve final JSON decisions across native runs ([922aae5](https://github.com/first-fluke/agent-valley/commit/922aae54dea5a6fcd215a3f9c85b7bdf1142afa3))
+* **setup:** ignore runtime state before project startup ([a81d892](https://github.com/first-fluke/agent-valley/commit/a81d892d418dd14a7d0d986bc2321802ce65e237))
+
 ## [4.6.0](https://github.com/first-fluke/agent-valley/compare/v4.5.0...v4.6.0) (2026-11-02)
 
 
