@@ -15,6 +15,7 @@ import type {
   DiscoveryDeps,
 } from "./discovery-types"
 import { AGENT_BINARY, AGENT_INSTALL_HINT, AGENT_LOGIN_HINT, AGENT_TYPES, type AgentType } from "./doctor-checks"
+import { dshAuth, zcodeAuth } from "./native-provider-discovery"
 import { qwenAuth } from "./qwen-discovery"
 
 export type { AgentAvailability, AgentReadiness, AuthProbeOptions, AuthProbeResult, DiscoveryDeps }
@@ -219,6 +220,8 @@ function kimiAuth(deps: DiscoveryDeps): AuthEvidence {
 
 function localAuth(agent: AgentType, deps: DiscoveryDeps): AuthEvidence | null {
   if (agent === "qwen") return qwenAuth(deps, (path) => readState(path, deps))
+  if (agent === "dsh") return dshAuth(deps, (path, parse) => readState(path, deps, parse))
+  if (agent === "zcode") return zcodeAuth(deps, (path) => readState(path, deps))
   if (agent === "kimi") return kimiAuth(deps)
   if (agent === "antigravity") {
     // https://www.antigravity.google/docs/cli/install/: bare API keys are ignored without this provider.
@@ -353,7 +356,7 @@ export async function supportsNativeLoginCommand(
   path: string,
   overrides: Partial<DiscoveryDeps> = {},
 ): Promise<boolean> {
-  if (!["claude", "codex", "cursor", "grok", "opencode"].includes(agent)) return false
+  if (!["claude", "codex", "cursor", "grok", "opencode", "zcode"].includes(agent)) return false
   const deps: DiscoveryDeps = { ...defaultDeps(), ...overrides }
   deps.env = buildAgentEnv(agent, {}, deps.env)
   try {
@@ -394,7 +397,11 @@ export async function discoverAgents(overrides: Partial<DiscoveryDeps> = {}): Pr
       }
       try {
         const credential =
-          agentType === "kimi" || agentType === "antigravity" || agentType === "qwen"
+          agentType === "kimi" ||
+          agentType === "antigravity" ||
+          agentType === "qwen" ||
+          agentType === "dsh" ||
+          agentType === "zcode"
             ? undefined
             : getAgentAuthEnvKeys(agentType).find((key) => nonempty(deps.env[key]))
         if (credential) {

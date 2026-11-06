@@ -22,7 +22,7 @@ function problem(detail: string, readiness: Evidence["readiness"] = "unknown"): 
   }
 }
 
-/** Native provider/model selection is required; old cached Qwen OAuth tokens are insufficient.
+/** Inspect selected native OAuth or API-provider credentials without a model or refresh request.
  * https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/
  * Only inspect bounded user settings; workspace overrides and .env files require manual selection.
  */
@@ -34,8 +34,17 @@ export function qwenAuth(deps: DiscoveryDeps, read: (path: string) => unknown): 
   const allowed = new Set(getAgentAuthEnvKeys("qwen"))
   const env = (key: string): unknown => deps.env[key] ?? localEnv[key]
   const selected = record(record(settings.security).auth).selectedType
-  if (selected === "qwen-oauth")
-    return problem("Cached Qwen OAuth is no longer a supported provider", "unauthenticated")
+  if (selected === "qwen-oauth") {
+    const credentials = record(read(join(home, "oauth_creds.json")))
+    if (![credentials.access_token, credentials.refresh_token, credentials.token_type].every(text))
+      return problem("Qwen OAuth credentials are incomplete; sign in to your Qwen subscription", "unauthenticated")
+    if (typeof credentials.expiry_date !== "number" || !Number.isFinite(credentials.expiry_date))
+      return problem("Qwen OAuth credentials have no valid expiry", "unauthenticated")
+    if (credentials.expiry_date <= deps.now() + 30_000)
+      return problem("Qwen OAuth credentials need a native refresh; launch qwen to refresh the subscription login")
+    // The native OAuth route supplies its own default model when model.name is absent.
+    return { readiness: "ready", reason: "Qwen selected OAuth credentials are complete and unexpired" }
+  }
   const protocol = selected ?? Object.entries(PROTOCOLS).find(([, value]) => text(env(value.key)))?.[0]
   if (typeof protocol !== "string" || !Object.hasOwn(PROTOCOLS, protocol)) {
     return problem("Qwen provider authentication could not be confirmed")

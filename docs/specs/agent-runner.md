@@ -52,6 +52,9 @@ pre-disable unsupported intervention controls:
 ```
 claude       → ["append_prompt", "abort"]               (stateless; pause/resume absent)
 codex        → ["pause", "resume", "append_prompt", "abort"]
+qwen         → ["abort"]
+dsh          → ["abort"]
+zcode        → ["abort"]
 antigravity  → ["append_prompt", "abort"] conservatively (stateless)
 cursor       → ["append_prompt", "abort"] conservatively (stateless)
 grok         → ["append_prompt", "abort"] conservatively (stateless)
@@ -161,6 +164,9 @@ The Agent Runner does not communicate with agents directly. It uses the `AgentSe
 Orchestrator → AgentRunner → AgentSession interface
                                 ├── CodexSession  → codex app-server (JSON-RPC over stdio)
                                 ├── ClaudeSession → claude (NDJSON stream-json)
+                                ├── QwenSession   → qwen (native stream-json)
+                                ├── DshSession    → dsh --profile headless --json
+                                ├── ZcodeSession  → zcode (native headless JSON)
                                 ├── AgySession    → agy (Antigravity, one-shot print mode)
                                 ├── CursorSession → cursor-agent (streaming NDJSON)
                                 ├── GrokSession   → grok (Grok Build, streaming NDJSON)
@@ -170,17 +176,29 @@ Orchestrator → AgentRunner → AgentSession interface
 
 ### Supported Agents
 
-Select via `AGENT_TYPE` environment variable (or `agent.type` in `WORKFLOW.md`).
+Select `actor.type` in project `av.yaml` or global
+`~/.config/agent-valley/settings.yaml`. The project value takes precedence.
+Local orders accept `--actor`; use `av setup` to save a selection.
 
-| `AGENT_TYPE`  | Session           | Native Protocol                                                                  | Model Override                                                  |
-| ------------- | ----------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `codex`       | `CodexSession`    | JSON-RPC 2.0 over stdio (`codex app-server`)                                     | `CODEX_MODEL`                                                   |
-| `claude`      | `ClaudeSession`   | NDJSON streaming (`claude --print --input-format=stream-json`)                   | `CLAUDE_MODEL`                                                  |
-| `antigravity` | `AgySession`      | One-shot print mode, plain text stdout (`agy -p --dangerously-skip-permissions`) | via `config.model` (no `AGENT_MODEL` env override)              |
-| `cursor`      | `CursorSession`   | Streaming NDJSON (`cursor-agent -p --output-format stream-json`)                 | via `config.model` (no `AGENT_MODEL` env override)              |
-| `grok`        | `GrokSession`     | Streaming NDJSON (`grok --single --output-format streaming-json`)                | not supported — Grok Build has no per-invocation `--model` flag |
-| `kimi`        | `KimiSession`     | Streaming NDJSON (`kimi -p --output-format stream-json`)                         | via `config.model` (no `AGENT_MODEL` env override)              |
-| `opencode`    | `OpencodeSession` | Streaming NDJSON, multi-provider (75+ backends)                                  | via `config.model` (no `AGENT_MODEL` env override)              |
+| `actor.type`  | Session           | Native protocol                                                            | Per-session model selection                                  |
+| ------------- | ----------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `claude`      | `ClaudeSession`   | `claude --print --output-format stream-json`; plain stdin                  | `--model` from `AgentConfig.model`                           |
+| `codex`       | `CodexSession`    | `codex app-server`; JSON-RPC over stdio                                    | Native model field                                           |
+| `qwen`        | `QwenSession`     | `qwen --output-format stream-json --yolo`; plain stdin                     | `--model` from `AgentConfig.model`                           |
+| `dsh`         | `DshSession`      | `dsh --profile headless --json`; plain stdin                               | Native headless profile route; no per-invocation model flag  |
+| `zcode`       | `ZcodeSession`    | `zcode --prompt <task> --mode yolo --output-format stream-json --no-color` | Native `defaultModelSelection`; no per-invocation model flag |
+| `antigravity` | `AgySession`      | `agy` one-shot print mode                                                  | Native CLI model option                                      |
+| `cursor`      | `CursorSession`   | `cursor-agent -p --output-format stream-json`                              | `AgentConfig.model`                                          |
+| `grok`        | `GrokSession`     | `grok --single --output-format streaming-json`                             | No per-invocation model flag                                 |
+| `kimi`        | `KimiSession`     | `kimi -p --output-format stream-json`                                      | `AgentConfig.model`                                          |
+| `opencode`    | `OpencodeSession` | `opencode` streaming NDJSON                                                | `AgentConfig.model`                                          |
+
+Qwen, DSH, and ZCode normalize their own native event envelopes. They do not
+claim completion from exit zero alone. Each run must have the provider's
+successful terminal event and a successful process exit. Their local adapter
+capability is `abort`; it does not advertise pause, resume, or live prompt
+appends. See [Actor sessions](../guides/actor-sessions.md) for the full invocation,
+credential/profile rules, usage accounting, and external validation limits.
 
 ### SessionFactory
 
@@ -261,6 +279,9 @@ Agent processes receive a **minimal allowlisted environment**, not the full host
 Safe system vars: PATH, HOME, SHELL, LANG, TERM, TMPDIR, GIT_AUTHOR_*
 Agent-specific:   codex → OPENAI_API_KEY, CODEX_HOME
                   claude → ANTHROPIC_API_KEY
+                  qwen → native provider API keys/endpoints/model variables, QWEN_HOME
+                  dsh → DEEPSEEK_API_KEY, DSH_HOME
+                  zcode → native ZCode credentials/profile variables (see Actor sessions guide)
                   antigravity (and its "agy" CLI key) → GOOGLE_API_KEY, GEMINI_API_KEY
                   cursor → CURSOR_API_KEY
                   grok → XAI_API_KEY, GROK_API_KEY
@@ -381,7 +402,7 @@ attempt.filesChanged = result.filesChanged
 | 17.6  | Retry queue          | Failure + nextRetryAt reached | Re-executed                    | attemptCount incremented              |
 | 17.7  | Max retries exceeded | maxAttempts=3, 3 failures     | Halted                         | Workspace.status == "failed"          |
 | 17.8  | Restart recovery     | Orchestrator restart          | Startup sync                   | Existing workspace reused             |
-| 17.9  | WORKFLOW.md change   | File change detected          | Rolling restart                | Current sessions complete first       |
+| 17.9  | av.yaml change       | File change detected          | Rolling restart                | Current sessions complete first       |
 | 17.10 | Prompt injection     | Malicious issue body          | Sanitized                      | Sanitize before session.execute()     |
 | 17.11 | Graceful shutdown    | SIGTERM                       | Complete current sessions      | No in-progress attempt lost           |
 | 17.12 | Env isolation        | Agent process env             | Minimal allowlist              | No host secrets leaked                |
@@ -390,12 +411,12 @@ attempt.filesChanged = result.filesChanged
 
 ## Adding a New Agent
 
-1. Implement the `AgentSession` interface in `src/sessions/your-session.ts`
-2. Register in `src/sessions/session-factory.ts`:
+1. Implement the `AgentSession` interface in a new session file under `packages/core/src/sessions/`.
+2. Register in `packages/core/src/sessions/session-factory.ts`:
 
    ```typescript
    registerSession("your-agent", () => new YourSession())
    ```
-3. Add agent-specific env keys to `AGENT_ENV_KEYS` in `base-session.ts`
-4. Set `AGENT_TYPE=your-agent` in `.env`
-5. No Orchestrator code changes required
+3. For a built-in Actor, add its canonical ID and metadata to the domain Actor list and `packages/core/src/agent-registry.ts`, then wire CLI discovery, installation/authentication guidance, and sandbox profile paths.
+4. For a built-in Actor, set its supported `actor.type` in `av.yaml` or user `settings.yaml`. Embedded/custom callers can use `createSession("your-agent")` after registration; YAML accepts the canonical Actor IDs.
+5. Add deterministic native-protocol and CLI/configuration tests. No Orchestrator-specific provider branch is required.

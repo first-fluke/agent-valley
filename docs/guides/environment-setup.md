@@ -52,6 +52,12 @@ Run `av setup` again to change the local order configuration, or `av setup --edi
 
 Setup saves project configuration in its invocation directory. To keep configuration and mission history in directory A while Actors work in repository B, invoke setup from A with `--workspace /absolute/repository-B`. Integrations are installed in B and launch `av mcp --workspace A`. When client tools are available, read `av_missions` and check both `project=A` and `workspace=B`. Preserve this binding when rerunning setup; see [agent client project binding](./agent-clients.md).
 
+## Prepare Qwen, DeepSeek Harness, or ZCode
+
+The `qwen`, `dsh`, and `zcode` Actor sessions use the corresponding native CLI. Their binaries, credentials, and selected profiles must be available to the AV process. Qwen supports native OAuth or configured API-key routes. DSH headless uses API-key routes and does not use a saved GUI sign-in by default. ZCode requires manual installation of its official Agent CLI and native authentication.
+
+See [Actor sessions](./actor-sessions.md) for exact invocations, profile variables, installation/authentication links, model behavior, and protocol verification. `av doctor` reports detected local evidence; a saved credential or an installed binary alone does not prove a model request succeeds.
+
 ## Set up tracker automation
 
 Use the source checkout for the dashboard and tracker runtime:
@@ -70,7 +76,7 @@ Run these commands from the Agent Valley checkout. The CLI needs the dashboard s
 
 Use `bun av dev` for foreground logs and configuration watching, or `bun av up --dev` for a background process without a production build. Plain `bun av up` attempts a production dashboard build before starting.
 
-Supported actor values are `claude`, `codex`, `qwen`, `antigravity`, `cursor`, `grok`, `kimi`, and `opencode`. Antigravity uses the `agy` executable. The wizard guides preparation of the selected CLI.
+Supported actor values are `claude`, `codex`, `qwen`, `dsh`, `zcode`, `antigravity`, `cursor`, `grok`, `kimi`, and `opencode`. Antigravity uses the `agy` executable. The wizard guides preparation of the selected CLI.
 
 Tracker mode selects Linear or GitHub, the actor, workspace, tunnel, and completion checks, and offers the same OMA preparation. It writes project configuration to `av.yaml` and user defaults/credentials to `~/.config/agent-valley/settings.yaml`. Project values override global values; existing unrelated global settings are preserved. The example YAML is a reference, not a ready-to-run configuration. OMA preparation can be deferred.
 

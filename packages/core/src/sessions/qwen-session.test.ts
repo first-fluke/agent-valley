@@ -20,7 +20,7 @@ let events: AgentEvent[]
 function fakeProcess(
   frames: unknown[],
   exitCode = 0,
-  options: { keepAlive?: boolean; stderr?: boolean; prefix?: string } = {},
+  options: { keepAlive?: boolean; gracefulCancel?: boolean; stderr?: boolean; prefix?: string } = {},
 ) {
   const payload = frames.map((frame) => JSON.stringify(frame)).join("\n")
   const script = `
@@ -29,6 +29,7 @@ function fakeProcess(
       process.stdout.write(${JSON.stringify(options.prefix ?? "")});
       process.stdout.write(${JSON.stringify(payload)});
       ${options.stderr ? 'process.stderr.write("x".repeat(1048576));' : ""}
+      ${options.gracefulCancel ? 'process.on("SIGTERM", () => process.exit(0));' : ""}
       ${options.keepAlive ? "setInterval(() => {}, 1000);" : `process.exitCode = ${exitCode};`}
     });
   `
@@ -278,5 +279,17 @@ describe("Qwen Code native single-shot session", () => {
     expect(session.isAlive()).toBe(false)
     await session.execute("test")
     expect(events.find((event) => event.type === "error")?.error.message).toContain("before start")
+  })
+
+  it("does not accept a buffered success when cancellation exits gracefully with zero", async () => {
+    fakeProcess([{ type: "system" }, SUCCESS], 0, { keepAlive: true, gracefulCancel: true })
+    await session.start({ type: "qwen", workspacePath: workspace, timeout: 10 })
+    const ready = new Promise<void>((resolve) => session.on("heartbeat", () => resolve()))
+    const execution = session.execute("test")
+    await ready
+    await session.cancel()
+    await execution
+    expect(events.some((event) => event.type === "complete")).toBe(false)
+    expect(events.find((event) => event.type === "error")?.error.message).toContain("cancelled")
   })
 })

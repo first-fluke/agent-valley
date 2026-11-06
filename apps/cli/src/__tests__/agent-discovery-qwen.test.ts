@@ -4,15 +4,23 @@ import { type DiscoveryDeps, discoverAgents } from "../agent-discovery"
 import { AGENT_BINARY, AGENT_INSTALL_HINT, AGENT_LOGIN_HINT, AGENT_TYPES } from "../doctor-checks"
 
 const SECRET = "qwen-test-secret-never-print"
-async function check(settings: unknown = null, env: NodeJS.ProcessEnv = {}, path = "/home/test/.qwen/settings.json") {
+const NOW = 1_000_000
+async function check(
+  settings: unknown = null,
+  env: NodeJS.ProcessEnv = {},
+  path = "/home/test/.qwen/settings.json",
+  extraFiles: Record<string, unknown> = {},
+) {
+  const files = { ...extraFiles, ...(settings === null ? {} : { [path]: settings }) }
   const probe = vi.fn()
   const deps: Partial<DiscoveryDeps> = {
     home: "/home/test",
     env,
+    now: () => NOW,
     resolveBinary: (name) => (name === "qwen" ? "/bin/qwen" : null),
     isExecutableFile: () => true,
-    fileInfo: (file) => (file === path && settings !== null ? { isFile: true, size: 100 } : null),
-    readFile: () => (typeof settings === "string" ? settings : JSON.stringify(settings)),
+    fileInfo: (file) => (Object.hasOwn(files, file) ? { isFile: true, size: 100 } : null),
+    readFile: (file) => (typeof files[file] === "string" ? files[file] : JSON.stringify(files[file])),
     probe,
   }
   const all = await discoverAgents(deps)
@@ -59,6 +67,11 @@ describe("Qwen Code readiness", () => {
   })
   it("accepts configured provider-specific credentials and locally saved native fallback env", async () => {
     expect((await check(profile("openai", "DASHSCOPE_API_KEY"), { DASHSCOPE_API_KEY: SECRET })).readiness).toBe("ready")
+    expect((await check(profile("openai", "QWENCLOUD_API_KEY"), { QWENCLOUD_API_KEY: SECRET })).readiness).toBe("ready")
+    expect(
+      (await check(profile("openai", "QWENCLOUD_TOKEN_PLAN_API_KEY"), { QWENCLOUD_TOKEN_PLAN_API_KEY: SECRET }))
+        .readiness,
+    ).toBe("ready")
     expect((await check({ ...profile(), env: { OPENAI_API_KEY: SECRET } })).readiness).toBe("ready")
     expect(
       (await check({ ...profile("openai", "PRIVATE_PROVIDER_KEY"), env: { PRIVATE_PROVIDER_KEY: SECRET } })).readiness,
@@ -77,7 +90,7 @@ describe("Qwen Code readiness", () => {
     expect((await check(null, { DASHSCOPE_API_KEY: SECRET, OPENAI_MODEL: "test-model" })).readiness).toBe("unknown")
     expect((await check(profile(), { OPENAI_API_KEY: " " })).readiness).toBe("unauthenticated")
   })
-  it("rejects discontinued OAuth and mismatched or missing native provider models", async () => {
+  it("requires complete selected OAuth credentials and matching API-provider models", async () => {
     expect(
       (await check({ ...profile(), security: { auth: { selectedType: "qwen-oauth" } } }, { OPENAI_API_KEY: SECRET }))
         .readiness,
@@ -88,6 +101,40 @@ describe("Qwen Code readiness", () => {
     expect(
       (await check({ security: { auth: { selectedType: "unsupported" } } }, { OPENAI_API_KEY: SECRET })).readiness,
     ).toBe("unknown")
+  })
+  it("recognizes selected Qwen subscription OAuth with native model defaults", async () => {
+    const settings = { security: { auth: { selectedType: "qwen-oauth" } } }
+    const credentials = { access_token: SECRET, refresh_token: SECRET, token_type: "Bearer", expiry_date: NOW + 60_000 }
+    expect((await check(settings, {}, undefined, { "/home/test/.qwen/oauth_creds.json": credentials })).readiness).toBe(
+      "ready",
+    )
+    expect(
+      (
+        await check(settings, { QWEN_HOME: "/custom/qwen" }, "/custom/qwen/settings.json", {
+          "/custom/qwen/oauth_creds.json": credentials,
+        })
+      ).readiness,
+    ).toBe("ready")
+  })
+  it("keeps expired or refresh-due Qwen OAuth unverified without running a refresh request", async () => {
+    const settings = { security: { auth: { selectedType: "qwen-oauth" } } }
+    for (const expiry_date of [NOW - 1, NOW + 30_000]) {
+      const credentials = { access_token: SECRET, refresh_token: SECRET, token_type: "Bearer", expiry_date }
+      const result = await check(settings, {}, undefined, { "/home/test/.qwen/oauth_creds.json": credentials })
+      expect(result.readiness).toBe("unknown")
+      expect(result.reason).toContain("refresh")
+    }
+  })
+  it("rejects malformed OAuth credential fields without leaking saved tokens", async () => {
+    const settings = { security: { auth: { selectedType: "qwen-oauth" } } }
+    for (const credentials of [
+      { access_token: SECRET, expiry_date: NOW + 60_000 },
+      { access_token: SECRET, refresh_token: SECRET, token_type: "Bearer", expiry_date: "future" },
+    ]) {
+      expect(
+        (await check(settings, {}, undefined, { "/home/test/.qwen/oauth_creds.json": credentials })).readiness,
+      ).toBe("unauthenticated")
+    }
   })
   it("respects absolute and tilde QWEN_HOME without repurposing HOME", async () => {
     expect(
@@ -119,6 +166,8 @@ describe("Qwen Code readiness", () => {
       ANTHROPIC_API_KEY: SECRET,
       GEMINI_API_KEY: SECRET,
       DASHSCOPE_API_KEY: SECRET,
+      QWENCLOUD_API_KEY: SECRET,
+      QWENCLOUD_TOKEN_PLAN_API_KEY: SECRET,
       PRIVATE_PROVIDER_KEY: SECRET,
     }
     const forwarded = buildAgentEnv("qwen", { AGENT_VALLEY_MANAGED_RUN: "1" }, source)

@@ -55,7 +55,7 @@ Config {
     retentionDays : number   // Days to retain completed/failed workspaces (WORKFLOW.md: cleanup_after_days, default: 7)
   }
   agent: {
-    type        : string   // Agent type — selects AgentSession impl ($AGENT_TYPE: "claude" | "gemini" | "codex")
+    type        : string   // Agent type — selects AgentSession via actor.type in av.yaml/settings.yaml; see Actor sessions guide
     timeout     : number   // Seconds. Force-kill if exceeded
     retryPolicy : {
       maxAttempts : number   // Max retry count (default: 3)
@@ -128,18 +128,22 @@ Symphony cannot start until all config errors are resolved.
 
 See `.env.example`. Key items:
 
-| Env Var                             | Required | Default  | Description                         |
-| ----------------------------------- | -------- | -------- | ----------------------------------- |
-| `LINEAR_API_KEY`                    | Y        | —        | Linear Personal API key             |
-| `LINEAR_TEAM_ID`                    | Y        | —        | Linear team identifier (e.g. `ACR`) |
-| `LINEAR_TEAM_UUID`                  | Y        | —        | Linear team UUID                    |
-| `LINEAR_WEBHOOK_SECRET`             | Y        | —        | Linear webhook signing secret       |
-| `LINEAR_WORKFLOW_STATE_TODO`        | Y        | —        | "Todo" state UUID                   |
-| `LINEAR_WORKFLOW_STATE_IN_PROGRESS` | Y        | —        | "In Progress" state UUID            |
-| `LINEAR_WORKFLOW_STATE_DONE`        | Y        | —        | "Done" state UUID                   |
-| `LINEAR_WORKFLOW_STATE_CANCELLED`   | Y        | —        | "Cancelled" state UUID              |
-| `WORKSPACE_ROOT`                    | Y        | —        | Workspace root absolute path        |
-| `AGENT_TYPE`                        | Y        | `claude` | Agent to use: claude, gemini, codex |
-| `LOG_LEVEL`                         | N        | `info`   | Log level (debug/info/warn/error)   |
-| `LOG_FORMAT`                        | N        | `text`   | Log format (text/json)              |
-| `OTEL_ENDPOINT`                     | N        | —        | OpenTelemetry collector endpoint    |
+| Env Var                             | Required | Default | Description                         |
+| ----------------------------------- | -------- | ------- | ----------------------------------- |
+| `LINEAR_API_KEY`                    | Y        | —       | Linear Personal API key             |
+| `LINEAR_TEAM_ID`                    | Y        | —       | Linear team identifier (e.g. `ACR`) |
+| `LINEAR_TEAM_UUID`                  | Y        | —       | Linear team UUID                    |
+| `LINEAR_WEBHOOK_SECRET`             | Y        | —       | Linear webhook signing secret       |
+| `LINEAR_WORKFLOW_STATE_TODO`        | Y        | —       | "Todo" state UUID                   |
+| `LINEAR_WORKFLOW_STATE_IN_PROGRESS` | Y        | —       | "In Progress" state UUID            |
+| `LINEAR_WORKFLOW_STATE_DONE`        | Y        | —       | "Done" state UUID                   |
+| `LINEAR_WORKFLOW_STATE_CANCELLED`   | Y        | —       | "Cancelled" state UUID              |
+| `WORKSPACE_ROOT`                    | Y        | —       | Workspace root absolute path        |
+| `LOG_LEVEL`                         | N        | `info`  | Log level (debug/info/warn/error)   |
+| `LOG_FORMAT`                        | N        | `text`  | Log format (text/json)              |
+| `OTEL_ENDPOINT`                     | N        | —       | OpenTelemetry collector endpoint    |
+
+Actor selection uses `actor.type` in `av.yaml` or user `settings.yaml`: `claude`,
+`codex`, `qwen`, `dsh`, `zcode`, `antigravity`, `cursor`, `grok`, `kimi`, or
+`opencode`. See [Actor sessions](../guides/actor-sessions.md) for native
+installation, credentials and model behavior.

@@ -100,6 +100,9 @@ export const AGENT_BINARY = Object.fromEntries(AGENT_IDS.map((id) => [id, agentB
 
 export const AGENT_INSTALL_HINT: Record<AgentType, string> = {
   qwen: "Install: npm install -g @qwen-code/qwen-code (see https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/)",
+  dsh: "Install: npm install -g @deepseek-ai/dsh (see https://github.com/deepseek-ai/deepseek-harness)",
+  zcode:
+    "Install: the official ZCode Agent CLI and put zcode on PATH; see https://github.com/zai-org/ZCode/blob/main/apps/zcode-cli/docs/usage/01-quickstart.md",
   claude: "Install: npm install -g @anthropic-ai/claude-code (see https://claude.com/product/claude-code)",
   codex: "Install: npm install -g @openai/codex (see https://github.com/openai/codex)",
   antigravity: "Install: see Antigravity docs for the `agy` CLI (https://antigravity.google)",
@@ -110,7 +113,10 @@ export const AGENT_INSTALL_HINT: Record<AgentType, string> = {
 }
 
 export const AGENT_LOGIN_HINT: Record<AgentType, string> = {
-  qwen: "Run qwen, then /auth to configure an API provider and /exit to return.",
+  qwen: "Run qwen, then /auth to sign in with Qwen OAuth or configure an API provider, and /exit to return.",
+  dsh: "Export DEEPSEEK_API_KEY or set it in $DSH_HOME/.env (default ~/.dsh/.env). The default headless profile does not use Web UI credentials.",
+  zcode:
+    "Run zcode login, or configure a provider and default model in ~/.zcode/v2/provider_config.json; ZCODE_DATA_BASE_DIR changes its parent directory.",
   claude: "Run `claude` and complete the browser login prompt.",
   codex: "Run `codex login`.",
   antigravity: "Run `agy` and complete its first-launch browser sign-in, then exit.",
@@ -131,7 +137,17 @@ function probeAgentAuth(agent: AgentType, deps: DoctorDeps): { status: CheckStat
 
   switch (agent) {
     case "qwen":
-      return { status: "unknown", message: "Qwen needs a selected API provider/model; configure qwen /auth" }
+      return {
+        status: "unknown",
+        message: "Qwen requires selected OAuth or API-provider credentials; configure qwen /auth",
+      }
+    case "dsh":
+      return {
+        status: "unknown",
+        message: "DeepSeek Harness headless credentials require an environment/API-key check",
+      }
+    case "zcode":
+      return { status: "unknown", message: "ZCode requires a selected provider/model or native account credentials" }
     case "claude": {
       const p = join(home, ".claude")
       return exists(p) ? { status: "pass", message: `${p} present` } : { status: "fail", message: `${p} not found` }
@@ -186,7 +202,8 @@ export function checkAgentAuthenticated(agent: AgentType, deps: DoctorDeps): Che
   const { status, message } = probeAgentAuth(agent, deps)
   const base = { id: `agent.${agent}.auth`, name: `Agent CLI authenticated (${agent})`, critical: false }
   if (status === "unknown") {
-    if (agent === "qwen") return { ...base, status, message, fix: AGENT_LOGIN_HINT[agent] }
+    if (agent === "qwen" || agent === "dsh" || agent === "zcode")
+      return { ...base, status, message, fix: AGENT_LOGIN_HINT[agent] }
     return { ...base, status, message: `unknown — run a test issue to confirm (${message})` }
   }
   if (status === "pass") return { ...base, status, message }

@@ -18,7 +18,7 @@ Linear Issue (Todo)
 
 트래커 모드는 상태 전환(Todo → In Progress → Done/Cancelled)을 관리하고 검증된 변경을 전달합니다. Chief Director 명령은 목표에 대한 계획, 작업별 검토, 검증 결과를 로컬에 저장합니다.
 
-**TypeScript + Bun**으로 구축되었습니다. AgentSession 인터페이스로 **Claude Code, Codex, Qwen Code, Antigravity, Cursor, Grok, Kimi, OpenCode**를 지원합니다.
+**TypeScript + Bun**으로 구축되었습니다. AgentSession 인터페이스로 **Claude Code, Codex, Qwen Code, DeepSeek Harness (DSH), ZCode, Antigravity, Cursor, Grok, Kimi, OpenCode**를 지원합니다.
 
 사용자별 운용 과정, 수정 사항, 검증 범위와 남은 제약은 [운용 점검 보고서](./docs/reports/operability-audit-2026-10-03.md)에 있습니다.
 
@@ -129,7 +129,7 @@ linear:
   api_key: lin_api_xxx
 
 actor:
-  type: claude # 기본 Actor: claude / codex / antigravity / cursor / grok / kimi / opencode
+  type: claude # 기본 Actor: claude / codex / qwen / dsh / zcode / antigravity / cursor / grok / kimi / opencode
   timeout: 3600
   max_retries: 3
   max_parallel: 3 # 동시 실행 가능한 Actor 수 (기본값: 하드웨어 감지 기반 권장치)
@@ -335,15 +335,20 @@ v0.2부터 Application 레이어는 네 개의 도메인 포트를 통해 외부
 
 ### Actor Session 플러그인
 
-| Actor       | 설정 값       | 실행 파일      |
-| ----------- | ------------- | -------------- |
-| Claude Code | `claude`      | `claude`       |
-| Codex       | `codex`       | `codex`        |
-| Antigravity | `antigravity` | `agy`          |
-| Cursor      | `cursor`      | `cursor-agent` |
-| Grok        | `grok`        | `grok`         |
-| Kimi        | `kimi`        | `kimi`         |
-| OpenCode    | `opencode`    | `opencode`     |
+| Actor            | 설정 값       | 실행 파일      |
+| ---------------- | ------------- | -------------- |
+| Claude Code      | `claude`      | `claude`       |
+| Codex            | `codex`       | `codex`        |
+| Qwen Code        | `qwen`        | `qwen`         |
+| DeepSeek Harness | `dsh`         | `dsh`          |
+| ZCode            | `zcode`       | `zcode`        |
+| Antigravity      | `antigravity` | `agy`          |
+| Cursor           | `cursor`      | `cursor-agent` |
+| Grok             | `grok`        | `grok`         |
+| Kimi             | `kimi`        | `kimi`         |
+| OpenCode         | `opencode`    | `opencode`     |
+
+Qwen·DSH·ZCode는 네이티브 단발 실행과 `abort`를 지원합니다. 설치·인증·모델 선택·검증 범위는 [Actor 세션 안내](./docs/guides/actor-sessions.md)를 확인하세요.
 
 `registerSession()`을 통해 확장 가능 — `AgentSession` 인터페이스를 구현하여 커스텀 Actor를 추가하세요.
 

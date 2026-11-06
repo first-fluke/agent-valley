@@ -37,7 +37,7 @@ beforeEach(() => {
     .find(existsSync)
   if (!git) throw new Error("Fixture requires Git.")
   symlinkSync(realpathSync(git), join(root, "bin", "git"))
-  for (const native of ["claude", "codex", "qwen", "agy", "cursor", "grok", "kimi", "opencode"])
+  for (const native of ["claude", "codex", "qwen", "dsh", "zcode", "agy", "cursor", "grok", "kimi", "opencode"])
     writeFileSync(join(root, "bin", native), "#!/bin/sh\nexit 91\n", { mode: 0o755 })
   env = {
     PATH: [join(root, "bin"), "/usr/bin", "/bin"].join(delimiter),

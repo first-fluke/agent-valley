@@ -1,7 +1,7 @@
 /**
  * SessionFactory — Registry-based factory for creating AgentSession instances.
  *
- * Built-in sessions: codex, claude, qwen, antigravity, cursor, grok, kimi, opencode.
+ * Built-in sessions are keyed by the canonical agent identifiers.
  * Community/custom sessions can be registered at runtime.
  */
 
@@ -57,6 +57,8 @@ export class SessionRegistry {
     const { CodexSession } = await import("./codex-session")
     const { ClaudeSession } = await import("./claude-session")
     const { QwenSession } = await import("./qwen-session")
+    const { DshSession } = await import("./dsh-session")
+    const { ZcodeSession } = await import("./zcode-session")
     const { AgySession } = await import("./agy-session")
     const { CursorSession } = await import("./cursor-session")
     const { GrokSession } = await import("./grok-session")
@@ -67,6 +69,8 @@ export class SessionRegistry {
       codex: () => new CodexSession(),
       claude: () => new ClaudeSession(),
       qwen: () => new QwenSession(),
+      dsh: () => new DshSession(),
+      zcode: () => new ZcodeSession(),
       antigravity: () => new AgySession(),
       cursor: () => new CursorSession(),
       grok: () => new GrokSession(),

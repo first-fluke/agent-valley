@@ -77,6 +77,12 @@ describe("checkAgentInstalled", () => {
 // ── checkAgentAuthenticated ──────────────────────────────────────────────────
 
 describe("checkAgentAuthenticated", () => {
+  it.each(["dsh", "zcode"] as const)("keeps %s auth unknown when only its profile directory exists", (agent) => {
+    const result = checkAgentAuthenticated(agent, makeDeps({ existsSync: () => true }))
+    expect(result.status).toBe("unknown")
+    expect(result.fix).toBeTruthy()
+    expect(result.critical).toBe(false)
+  })
   it("does not mark Qwen authenticated merely because a cache/profile directory exists", () => {
     const deps = makeDeps({ existsSync: () => true })
     expect(checkAgentAuthenticated("qwen", deps).status).toBe("unknown")

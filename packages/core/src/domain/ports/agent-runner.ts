@@ -1,7 +1,7 @@
 /**
  * AgentRunnerPort — Domain-layer interface for spawning and controlling
  * running agent sessions. Infrastructure adapters implement this against
- * the concrete `AgentSession` plugin system (Claude, Codex, Gemini).
+ * the concrete native CLI `AgentSession` plugins.
  *
  * Design: docs/plans/v0-2-bigbang-design.md § 4.4 (PR4).
  *

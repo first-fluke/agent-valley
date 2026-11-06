@@ -18,7 +18,7 @@ Linear Issue (Todo)
 
 Tracker mode manages lifecycle transitions (Todo → In Progress → Done/Cancelled) and delivers verified changes. Chief Director orders keep a local plan, task reviews, and verification results for a goal.
 
-Built with **TypeScript + Bun**. Supports **Claude Code, Codex, Qwen Code, Antigravity, Cursor, Grok, Kimi, and OpenCode** through the AgentSession interface.
+Built with **TypeScript + Bun**. Supports **Claude Code, Codex, Qwen Code, DeepSeek Harness (DSH), ZCode, Antigravity, Cursor, Grok, Kimi, and OpenCode** through the AgentSession interface.
 
 See the [operability audit](./docs/reports/operability-audit-2026-10-03.md) for tested user journeys, fixes, and remaining limits.
 
@@ -142,7 +142,7 @@ linear:
   api_key: lin_api_xxx
 
 actor:
-  type: claude # Default actor: claude / codex / antigravity / cursor / grok / kimi / opencode
+  type: claude # Default actor: claude / codex / qwen / dsh / zcode / antigravity / cursor / grok / kimi / opencode
   timeout: 3600
   max_retries: 3
   max_parallel: 3 # Max concurrent actor runs (default: hardware-detected recommendation)
@@ -288,7 +288,7 @@ agent-valley/
 │           ├── config/         YAML config loader (settings.yaml + av.yaml)
 │           ├── domain/         Pure types: Issue, Workspace, RunAttempt, DAG
 │           ├── orchestrator/   State machine, actor runner, retry queue, DAG scheduler
-│           ├── sessions/       Actor plugins: Claude, Codex, Antigravity
+│           ├── sessions/       Ten built-in Actor session adapters
 │           ├── tracker/        Linear GraphQL client + webhook HMAC verification
 │           ├── workspace/      Git worktree lifecycle + merge/PR
 │           └── observability/  Structured JSON/text logger
@@ -350,16 +350,20 @@ domain ports so adapters can be swapped without touching the orchestrator:
 
 ### Actor Session Plugins
 
-| Actor       | Config value  | Executable     |
-| ----------- | ------------- | -------------- |
-| Claude Code | `claude`      | `claude`       |
-| Codex       | `codex`       | `codex`        |
-| Qwen Code   | `qwen`        | `qwen`         |
-| Antigravity | `antigravity` | `agy`          |
-| Cursor      | `cursor`      | `cursor-agent` |
-| Grok        | `grok`        | `grok`         |
-| Kimi        | `kimi`        | `kimi`         |
-| OpenCode    | `opencode`    | `opencode`     |
+| Actor            | Config value  | Executable     |
+| ---------------- | ------------- | -------------- |
+| Claude Code      | `claude`      | `claude`       |
+| Codex            | `codex`       | `codex`        |
+| Qwen Code        | `qwen`        | `qwen`         |
+| DeepSeek Harness | `dsh`         | `dsh`          |
+| ZCode            | `zcode`       | `zcode`        |
+| Antigravity      | `antigravity` | `agy`          |
+| Cursor           | `cursor`      | `cursor-agent` |
+| Grok             | `grok`        | `grok`         |
+| Kimi             | `kimi`        | `kimi`         |
+| OpenCode         | `opencode`    | `opencode`     |
+
+Qwen, DSH, and ZCode use native one-shot protocols with `abort` support. See [Actor sessions](./docs/guides/actor-sessions.md) for installation, authentication, model selection, and verification limits.
 
 Extensible via `registerSession()` — implement the `AgentSession` interface to add custom actors.
 

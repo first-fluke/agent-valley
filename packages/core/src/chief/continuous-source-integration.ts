@@ -140,7 +140,7 @@ function productPath(path: string): boolean {
       .split("/")
       .some(
         (part) =>
-          /^\.(?:claude|codex|cursor|qwen|grok|kimi|gemini|opencode|antigravity|mcp)(?:\.|$)/i.test(part) ||
+          /^\.(?:claude|codex|cursor|qwen|dsh|zcode|grok|kimi|gemini|opencode|antigravity|mcp)(?:\.|$)/i.test(part) ||
           /^(?:opencode\.jsonc?|mcp\.json|\.cursorrules|\.cursorignore|\.npmrc|\.pypirc|\.netrc|\.git-credentials)$/i.test(
             part,
           ) ||

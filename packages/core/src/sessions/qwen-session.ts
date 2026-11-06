@@ -51,6 +51,7 @@ export class QwenSession extends ClaudeSession {
   private actualModel: string | undefined
   private usageModels = new Set<string>()
   private resultEvent: Record<string, unknown> | undefined
+  private cancelled = false
 
   protected override buildArgs(): string[] {
     const args = ["--output-format", "stream-json", "--yolo"]
@@ -65,6 +66,17 @@ export class QwenSession extends ClaudeSession {
     this.actualModel = undefined
     this.usageModels.clear()
     this.resultEvent = undefined
+    this.cancelled = false
+  }
+
+  override async cancel(): Promise<void> {
+    this.cancelled = true
+    await super.cancel()
+  }
+
+  override async kill(): Promise<void> {
+    this.cancelled = true
+    await super.kill()
   }
 
   override isAlive(): boolean {
@@ -111,6 +123,18 @@ export class QwenSession extends ClaudeSession {
 
   protected override finalizeNativeExit(code: number | null): void {
     if (this.terminalEventReceived) return
+    if (this.cancelled) {
+      this.emit({
+        type: "error",
+        error: {
+          code: "CRASH",
+          message: "Qwen Code execution was cancelled. Start a new run to continue.",
+          recoverable: false,
+          tokenUsage: this.resultEvent ? this.extractTokenUsage(this.resultEvent) : undefined,
+        },
+      })
+      return
+    }
     if (
       this.resultEvent &&
       (this.resultEvent.is_error === true || String(this.resultEvent.subtype).startsWith("error"))

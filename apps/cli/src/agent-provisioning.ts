@@ -12,6 +12,7 @@ interface AgentProvisioningPlan {
   documentation: string
   npmPackage?: string
   installerUrl?: string
+  manualInstallInstructions?: string
   loginArgs: readonly string[]
   loginInstructions: string
 }
@@ -24,7 +25,24 @@ export const AGENT_PROVISIONING: Readonly<Record<AgentType, AgentProvisioningPla
     npmPackage: "@qwen-code/qwen-code",
     loginArgs: [],
     loginInstructions:
-      "In Qwen Code, enter /auth and configure a current API provider. Then /exit to return. Cached Qwen OAuth alone is not a supported readiness signal.",
+      "In Qwen Code, enter /auth and sign in with your Qwen subscription or configure an API provider. Then /exit to return.",
+  },
+  dsh: {
+    label: "DeepSeek Harness",
+    documentation: "https://github.com/deepseek-ai/deepseek-harness",
+    npmPackage: "@deepseek-ai/dsh",
+    loginArgs: [],
+    loginInstructions:
+      "Configure DEEPSEEK_API_KEY in the launch environment or $DSH_HOME/.env (default ~/.dsh/.env), then choose Recheck. The default headless profile ignores saved Web UI credentials.",
+  },
+  zcode: {
+    label: "ZCode Agent CLI",
+    documentation: "https://github.com/zai-org/ZCode/blob/main/apps/zcode-cli/docs/usage/01-quickstart.md",
+    manualInstallInstructions:
+      "Install the official ZCode Agent CLI bundle or SEA binary and put zcode on PATH, then choose Recheck. The desktop distribution launcher is a separate entry point.",
+    loginArgs: ["login"],
+    loginInstructions:
+      "Complete zcode login in your browser, or configure your API provider and default model in ~/.zcode/v2/provider_config.json, then choose Recheck.",
   },
   claude: {
     label: "Claude Code",
@@ -249,6 +267,8 @@ export async function installChiefAgent(
   const deps = { ...defaults(), ...overrides }
   const plan = AGENT_PROVISIONING[agent]
   try {
+    if (plan.manualInstallInstructions)
+      return { success: false, message: `${plan.manualInstallInstructions} ${plan.documentation}` }
     if (plan.npmPackage) {
       const npm = deps.resolveBinary("npm")
       if (!npm) return { success: false, message: `Install Node.js 26 with npm, then retry. ${plan.documentation}` }
@@ -300,6 +320,7 @@ export async function loginChiefAgent(
   const deps = { ...defaults(), ...overrides }
   const plan = AGENT_PROVISIONING[agent]
   try {
+    if (agent === "dsh") return { success: false, message: plan.loginInstructions }
     const state = await inspectChiefAgent(agent, deps)
     if (!state.binaryPath || state.readiness === "unavailable") {
       return { success: false, message: `Install ${plan.label} first, then retry login. ${plan.documentation}` }

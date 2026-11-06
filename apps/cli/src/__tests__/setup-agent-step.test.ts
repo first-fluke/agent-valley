@@ -34,21 +34,21 @@ beforeEach(() => {
 })
 
 describe("Chief Director setup step", () => {
-  it("offers Qwen as a Chief Director with a native model pin", async () => {
-    vi.mocked(p.select).mockResolvedValueOnce("qwen")
-    vi.mocked(p.text).mockResolvedValueOnce("qwen-test-model")
+  it.each(["qwen", "dsh", "zcode"] as const)("offers %s as a Chief Director with a native model pin", async (agent) => {
+    vi.mocked(p.select).mockResolvedValueOnce(agent)
+    vi.mocked(p.text).mockResolvedValueOnce("native-test-model")
     vi.mocked(inspectChiefAgent).mockResolvedValueOnce({
-      agentType: "qwen",
+      agentType: agent,
       readiness: "ready",
       reason: "Fixture provider",
     })
     const ctx: SetupContext = {}
     await stepAgentType(ctx, 1, 1)
     expect(p.select).toHaveBeenCalledWith(
-      expect.objectContaining({ options: expect.arrayContaining([expect.objectContaining({ value: "qwen" })]) }),
+      expect.objectContaining({ options: expect.arrayContaining([expect.objectContaining({ value: agent })]) }),
     )
-    expect(ctx).toMatchObject({ agentType: "qwen", agentModel: "qwen-test-model" })
-    expect(inspectChiefAgent).toHaveBeenCalledWith("qwen")
+    expect(ctx).toMatchObject({ agentType: agent, agentModel: "native-test-model" })
+    expect(inspectChiefAgent).toHaveBeenCalledWith(agent)
   })
   it("asks only for Chief Director vendor/model when the selected CLI is already ready", async () => {
     const ctx: SetupContext = { agentType: "codex", agentModel: "test-chief-model" }

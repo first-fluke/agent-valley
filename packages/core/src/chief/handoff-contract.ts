@@ -1,13 +1,15 @@
 import { z } from "zod"
+import { actorTypeSchema } from "../config/actor-schema"
+import { AGENT_IDS } from "../domain/agent"
 
 export const handoffRouteSchema = z.strictObject({
-  agentType: z.enum(["claude", "codex", "qwen", "antigravity", "cursor", "grok", "kimi", "opencode"]),
+  agentType: actorTypeSchema,
   model: z.string().min(1).max(2_000).optional(),
 })
 
 export const handoffStateSchema = z.strictObject({
-  exhaustedAgents: z.array(handoffRouteSchema.shape.agentType).max(8),
-  unavailableAgents: z.array(handoffRouteSchema.shape.agentType).max(8).optional(),
+  exhaustedAgents: z.array(handoffRouteSchema.shape.agentType).max(AGENT_IDS.length),
+  unavailableAgents: z.array(handoffRouteSchema.shape.agentType).max(AGENT_IDS.length).optional(),
   unavailableModels: z.record(z.string().min(1).max(64), z.array(z.string().min(1).max(2_000)).max(128)).optional(),
   freeModels: z.record(z.string().min(1).max(64), z.array(z.string().min(1).max(2_000)).max(128)).optional(),
   freeRoutes: z.record(z.string().min(1).max(64), z.string().min(1).max(2_000)).optional(),

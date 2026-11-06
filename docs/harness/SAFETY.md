@@ -71,7 +71,8 @@ Agent -> Agent Runner (adapter) -> Codex server
 
 ### OS-Level Sandbox for Spawned Agents (v0.2+)
 
-Every agent CLI (claude/codex/gemini) runs non-interactive with its own
+Every supported agent CLI (claude, codex, qwen, dsh, zcode, antigravity, cursor,
+grok, kimi, opencode) runs non-interactive with its own
 permission-bypass flag (`--dangerously-skip-permissions`, `approvalPolicy:
 "never"`, `--yolo`) — there is no TTY to answer prompts. That flag alone
 would give a prompt-injected issue body full shell/filesystem/network
@@ -110,8 +111,8 @@ read/write exclusions are unchanged.
 2. **Most credential files are readable inside the sandbox — a curated
    denylist is excluded.** Both platforms grant broad filesystem READ
    (macOS: most of the host; Linux: a read-only view of `$HOME`) so
-   language toolchains keep working. `packages/core/src/sessions/
-   sandbox-darwin.ts` and `sandbox-linux.ts` now carve out an explicit
+   language toolchains keep working. `packages/core/src/sessions/sandbox-darwin.ts`
+   and `sandbox-linux.ts` now carve out an explicit
    denylist from that broad read (macOS: `(deny file-read* ...)` rules
    placed after the broad allow, exploiting Seatbelt's last-match-wins
    evaluation; Linux: `--tmpfs`/`--ro-bind /dev/null` masks layered over

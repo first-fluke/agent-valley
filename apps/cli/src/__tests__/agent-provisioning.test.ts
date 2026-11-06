@@ -41,6 +41,7 @@ describe("Chief Director provisioning", () => {
     ["claude", "@anthropic-ai/claude-code"],
     ["codex", "@openai/codex"],
     ["qwen", "@qwen-code/qwen-code"],
+    ["dsh", "@deepseek-ai/dsh"],
     ["grok", "@xai-official/grok"],
     ["kimi", "@moonshot-ai/kimi-code"],
     ["opencode", "opencode-ai"],
@@ -53,6 +54,15 @@ describe("Chief Director provisioning", () => {
       env: injected.env,
       timeoutMs: 300_000,
     })
+  })
+
+  it("provides official Agent CLI installation instructions for ZCode without guessing a package", async () => {
+    const injected = deps("zcode")
+    const result = await installChiefAgent("zcode", injected)
+    expect(result.success).toBe(false)
+    expect(result.message).toContain("official ZCode Agent CLI")
+    expect(result.message).toContain("zai-org/ZCode")
+    expect(injected.runCommand).not.toHaveBeenCalled()
   })
 
   it.each(["cursor", "antigravity"] as const)(
@@ -118,6 +128,7 @@ describe("Chief Director provisioning", () => {
     ["opencode", ["auth", "login"]],
     ["kimi", []],
     ["qwen", []],
+    ["zcode", ["login"]],
     ["antigravity", []],
   ] as const)(
     "uses only documented native %s login arguments with inherited-session environment",
@@ -147,13 +158,21 @@ describe("Chief Director provisioning", () => {
     expect(legacy.runCommand).not.toHaveBeenCalled()
   })
 
+  it("guides headless DSH credentials without launching a web server or inventing login commands", async () => {
+    const injected = deps("dsh")
+    const result = await loginChiefAgent("dsh", injected)
+    expect(result.success).toBe(false)
+    expect(result.message).toContain("DEEPSEEK_API_KEY")
+    expect(injected.runCommand).not.toHaveBeenCalled()
+  })
+
   it("reports a missing discovery result as unknown", async () => {
     expect((await inspectChiefAgent("claude", deps("claude", { discover: async () => [] }))).readiness).toBe("unknown")
   })
 })
 
 describe("login command verification", () => {
-  it.each(["claude", "codex", "cursor", "grok", "opencode"] as const)(
+  it.each(["claude", "codex", "cursor", "grok", "opencode", "zcode"] as const)(
     "verifies advertised %s login without running it",
     async (agent) => {
       const probe = vi.fn(async (_path: string, args: readonly string[]) => ({

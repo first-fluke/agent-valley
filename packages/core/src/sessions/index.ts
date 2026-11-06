@@ -13,11 +13,11 @@ export { buildAgentEnv } from "./base-session"
 export { ClaudeSession } from "./claude-session"
 export { CodexSession } from "./codex-session"
 export { CursorSession } from "./cursor-session"
+export { DshSession } from "./dsh-session"
 export { GrokSession } from "./grok-session"
 export { KimiSession } from "./kimi-session"
 export { OpencodeSession } from "./opencode-session"
 export { QwenSession } from "./qwen-session"
-
 export {
   createSession,
   defaultRegistry,
@@ -26,3 +26,4 @@ export {
   registerSession,
   SessionRegistry,
 } from "./session-factory"
+export { ZcodeSession } from "./zcode-session"

@@ -5,7 +5,18 @@
  * binaries, environment forwarding, telemetry mapping, and the config enum all
  * derive from `AGENT_IDS` so adding a vendor cannot silently skip a table.
  */
-export const AGENT_IDS = ["claude", "codex", "qwen", "antigravity", "cursor", "grok", "kimi", "opencode"] as const
+export const AGENT_IDS = [
+  "claude",
+  "codex",
+  "qwen",
+  "dsh",
+  "zcode",
+  "antigravity",
+  "cursor",
+  "grok",
+  "kimi",
+  "opencode",
+] as const
 
 export type AgentType = (typeof AGENT_IDS)[number]
 

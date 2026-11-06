@@ -1,5 +1,6 @@
 import { realpathSync, statSync } from "node:fs"
-import { isAbsolute, relative, resolve, sep } from "node:path"
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
+import { nativeProfilePath } from "./native-profile"
 import { qwenProfilePath } from "./qwen-profile"
 
 /** Home directories that may contain credentials for supported agent CLIs. */
@@ -7,6 +8,8 @@ const AGENT_HOME_PATHS: Record<string, string[]> = {
   claude: [".claude"],
   codex: [".codex"],
   qwen: [".qwen"],
+  dsh: [".dsh"],
+  zcode: [".zcode"],
   cursor: [".cursor"],
   grok: [".grok"],
   kimi: [".kimi-code"],
@@ -21,11 +24,18 @@ export function agentHomeAccess(
   home: string,
   env: Readonly<Record<string, string | undefined>> = {},
 ): { active: string[]; inactive: string[] } {
-  const profile = agentType === "qwen" ? qwenProfilePath(home, env) : null
+  const profile =
+    agentType === "qwen"
+      ? qwenProfilePath(home, env)
+      : agentType === "dsh"
+        ? nativeProfilePath(home, env, "DSH_HOME", ".dsh")
+        : agentType === "zcode"
+          ? nativeProfilePath(home, env, "ZCODE_DATA_BASE_DIR", ".zcode", ".zcode")
+          : null
   const active =
     agentType === "codex"
       ? [codexProfilePath(home, env)]
-      : agentType === "qwen"
+      : agentType === "qwen" || agentType === "dsh" || agentType === "zcode"
         ? profile
           ? [profile]
           : []
@@ -35,6 +45,14 @@ export function agentHomeAccess(
       .flat()
       .map((path) => `${home}/${path}`),
   )
+  // ZCode redirects provider/task data but keeps CLI resources under the original HOME.
+  if (agentType === "zcode" && profile && !active.includes(`${home}/.zcode`)) active.push(`${home}/.zcode`)
+  const providerConfig = env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE
+  if (agentType === "zcode" && providerConfig && isAbsolute(providerConfig)) {
+    // Native reads may normalize/migrate configuration using a sibling lock and atomic rename.
+    const directory = nativeProfilePath(home, { providerConfig: dirname(providerConfig) }, "providerConfig", ".zcode")
+    if (directory && !active.includes(directory)) active.push(directory)
+  }
   return {
     active,
     inactive: [...all].filter((path) => !active.includes(path)),

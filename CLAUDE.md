@@ -13,7 +13,7 @@ When working on this project, use these specialized sub-agents:
 
 ## What This Project Is
 
-Symphony Dev Template — an agent orchestration platform that receives Linear webhook events and dispatches work to AI agents (Claude Code, Codex, Antigravity, Cursor, Grok, Kimi, opencode) in isolated git worktrees. Implemented in **TypeScript + Bun**.
+Symphony Dev Template — an agent orchestration platform that receives Linear webhook events and dispatches work to AI agents (Claude Code, Codex, Qwen Code, DSH, ZCode, Antigravity, Cursor, Grok, Kimi, OpenCode) in isolated git worktrees. Implemented in **TypeScript + Bun**.
 
 ## Commands
 
@@ -53,7 +53,7 @@ Domain         packages/core/src/domain/         Pure types: Issue, Workspace, R
      ↓
 Infrastructure packages/core/src/tracker/        Linear GraphQL client + webhook HMAC + state mutations + comments
                packages/core/src/workspace/      Git worktree lifecycle
-               packages/core/src/sessions/       AgentSession implementations (Claude, Codex, Antigravity, Cursor, Grok, Kimi, opencode)
+               packages/core/src/sessions/       AgentSession implementations (ten built-in Actors; see plugin list below)
                packages/core/src/config/         Zod-based YAML config validation (settings.yaml + av.yaml)
                packages/core/src/observability/  Structured JSON/text logger
                packages/core/src/relay/          Supabase ledger bridge (team dashboard event sourcing)
@@ -69,13 +69,16 @@ Infrastructure packages/core/src/tracker/        Linear GraphQL client + webhook
 
 - `ClaudeSession` — spawns a new process per `execute()` (stateless)
 - `CodexSession` — persistent JSON-RPC connection via stdio
+- `QwenSession` — Qwen Code stdin prompt + native stream-json, one-shot per execution
+- `DshSession` — DeepSeek Harness headless stdin + native JSON events, one-shot per execution
+- `ZcodeSession` — ZCode headless native JSON events, one-shot per execution
 - `AgySession` — Antigravity's `agy` CLI, one-shot spawn-per-`execute()` (stateless)
 - `CursorSession` — `cursor-agent` CLI, streaming NDJSON, one-shot spawn-per-`execute()` (stateless)
 - `GrokSession` — Grok Build's `grok` CLI, streaming NDJSON, one-shot spawn-per-`execute()` (stateless)
 - `KimiSession` — Kimi Code's `kimi` CLI, streaming NDJSON, one-shot spawn-per-`execute()` (stateless)
 - `OpencodeSession` — opencode's `opencode` CLI, multi-provider (75+ backends), one-shot spawn-per-`execute()` (stateless)
 
-`SessionFactory` uses a registry pattern for runtime lookup by agent type string.
+`SessionFactory` uses a registry pattern for runtime lookup by agent type string. Qwen, DSH, and ZCode expose `abort` only; completion requires their native terminal envelope and a successful process exit. See [Actor sessions](docs/guides/actor-sessions.md).
 
 ## Config
 

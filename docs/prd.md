@@ -95,7 +95,7 @@
 | 웹훅 수신              | Linear HMAC-SHA256 서명 검증 후 오케스트레이터 디스패치                                                                    | `apps/dashboard/src/app/api/webhook/route.ts`, `packages/core/src/tracker/webhook-handler.ts`            |
 | 오케스트레이션         | 상태 머신, 재시도 큐(60s × 2^n, 최대 3회), DAG 스케줄러, 동시성 제한                                                       | `packages/core/src/orchestrator/*`                                                                       |
 | 워크스페이스           | 이슈별 git worktree 생성/정리, 자동 머지 또는 드래프트 PR                                                                  | `packages/core/src/workspace/workspace-manager.ts`                                                       |
-| 에이전트 세션          | Claude(NDJSON) / Codex(JSON-RPC stdio) / Gemini(ACP + CLI 폴백) 플러그인                                                   | `packages/core/src/sessions/*`                                                                           |
+| 에이전트 세션          | Claude / Codex / Qwen / DSH / ZCode / Antigravity / Cursor / Grok / Kimi / OpenCode 플러그인                               | `packages/core/src/sessions/*`                                                                           |
 | 대시보드               | Next.js 16 + PixiJS 오피스 씬, 시스템 메트릭, SSE 실시간 업데이트, 팀 HUD                                                  | `apps/dashboard/src/app`, `features/office`, `features/team`                                             |
 | 스코어링               | ISO/IEC 14143 기능점수 분석 → easy/medium/hard 모델 라우팅                                                                 | `packages/core/src/orchestrator/scoring-service.ts`                                                      |
 | 팀 대시보드            | AV 사용자 토큰으로 gateway 인증, Turso ledger 저장·조회·리플레이, Drizzle 스키마·마이그레이션 관리                         | `packages/core/src/relay/*`, `apps/dashboard/src/app/api/team/*`                                         |
@@ -145,7 +145,7 @@ Domain         packages/core/src/domain/        Issue / Workspace / RunAttempt /
        ↓
 Infrastructure packages/core/src/tracker/       Linear GraphQL + webhook HMAC
                packages/core/src/workspace/     git worktree 라이프사이클
-               packages/core/src/sessions/      Claude / Codex / Gemini AgentSession
+               packages/core/src/sessions/      10개 내장 Actor의 AgentSession (FR-5.2 참조)
                packages/core/src/config/        Zod YAML loader
                packages/core/src/observability/ logger
                packages/core/src/relay/         AV gateway client / Turso ledger store
@@ -205,7 +205,7 @@ Linear webhook POST
 ### FR-5. 에이전트 세션 플러그인
 
 - FR-5.1 `AgentSession` 인터페이스(`start / execute / cancel / kill / isAlive / on / off / dispose`) 를 구현하는 모든 모듈은 `SessionFactory.registerSession` 으로 등록 가능하다.
-- FR-5.2 내장 구현: Claude(stateless, per-execute spawn), Codex(persistent JSON-RPC), Gemini(ACP persistent + one-shot fallback).
+- FR-5.2 내장 구현: Claude, Codex, Qwen, DSH, ZCode, Antigravity, Cursor, Grok, Kimi, OpenCode. 네이티브 프로토콜·설치·인증·모델 선택은 [Actor 세션 안내](./guides/actor-sessions.md)를 따른다.
 - FR-5.3 `actor.type` 은 라우팅 우선순위로 결정된다: `model:*` 레이블 → `score:N` → `config.agentType`(기본값).
 - FR-5.4 타임아웃(기본 3600s) 초과 시 SIGTERM → 5s 후 SIGKILL.
 
@@ -322,7 +322,7 @@ PR 단위 기준:
 
 - **Symphony:** 7-컴포넌트로 구성된 에이전트 오케스트레이션 레퍼런스 아키텍처.
 - **Worktree:** 이슈별로 격리된 git working tree. `WORKSPACE_ROOT/{issue-key}` 경로.
-- **AgentSession:** 에이전트 프로세스 생명주기를 추상화한 인터페이스. Claude/Codex/Gemini 각자 구현.
+- **AgentSession:** 에이전트 프로세스 생명주기를 추상화한 인터페이스. Claude/Codex/Qwen/DSH/ZCode/Antigravity/Cursor/Grok/Kimi/OpenCode 구현.
 - **DAG 스케줄러:** `blocked_by` 관계를 그래프로 해석해 실행 가능한 이슈만 디스패치.
 - **Ledger:** AV gateway를 통해 접근하는 팀 이벤트 저장소(Turso). 스키마·마이그레이션은 Drizzle로 관리한다.
 - **MAX_PARALLEL:** 동시에 실행 가능한 에이전트 최대 수. 기본값 하드웨어 기반 자동 산출.

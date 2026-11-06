@@ -12,6 +12,8 @@ export async function stepAgentType(ctx: SetupContext, step: number, total: numb
       { value: "claude", label: "Claude", hint: "Anthropic Claude Code" },
       { value: "codex", label: "Codex", hint: "OpenAI Codex" },
       { value: "qwen", label: "Qwen", hint: "Qwen Code" },
+      { value: "dsh", label: "DeepSeek Harness", hint: "DeepSeek dsh" },
+      { value: "zcode", label: "ZCode", hint: "Z.ai Agent CLI" },
       { value: "antigravity", label: "Antigravity", hint: "Google Antigravity (agy)" },
       { value: "cursor", label: "Cursor", hint: "Cursor Agent" },
       { value: "grok", label: "Grok", hint: "xAI Grok Build" },

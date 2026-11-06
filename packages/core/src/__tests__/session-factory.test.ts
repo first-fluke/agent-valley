@@ -2,11 +2,14 @@
  * SessionFactory tests — registry, creation, error messages.
  */
 import { beforeEach, describe, expect, test } from "vitest"
+import { AGENT_IDS } from "../domain/agent.ts"
 import type { AgentSession } from "../sessions/agent-session.ts"
+import { DshSession } from "../sessions/dsh-session.ts"
 import { KimiSession } from "../sessions/kimi-session.ts"
 import { OpencodeSession } from "../sessions/opencode-session.ts"
 import { QwenSession } from "../sessions/qwen-session.ts"
 import { SessionRegistry } from "../sessions/session-factory.ts"
+import { ZcodeSession } from "../sessions/zcode-session.ts"
 
 /** Minimal mock session for testing the registry. */
 function mockSession(): AgentSession {
@@ -74,9 +77,10 @@ describe("SessionRegistry", () => {
     expect(callCount).toBe(2)
   })
 
-  test("registerBuiltins registers all eight supported vendors", async () => {
+  test("registerBuiltins registers every canonical vendor", async () => {
     await registry.registerBuiltins()
     const types = registry.list()
+    expect(types).toEqual([...AGENT_IDS])
     expect(types).toContain("claude")
     expect(types).toContain("codex")
     expect(types).toContain("qwen")
@@ -101,6 +105,14 @@ describe("SessionRegistry", () => {
   test('"qwen" resolves to a QwenSession instance', async () => {
     await registry.registerBuiltins()
     expect(registry.create("qwen")).toBeInstanceOf(QwenSession)
+  })
+
+  test.each([
+    ["dsh", DshSession],
+    ["zcode", ZcodeSession],
+  ] as const)("%s resolves to its native session", async (type, Session) => {
+    await registry.registerBuiltins()
+    expect(registry.create(type)).toBeInstanceOf(Session)
   })
 
   test('"opencode" resolves to an OpencodeSession instance', async () => {

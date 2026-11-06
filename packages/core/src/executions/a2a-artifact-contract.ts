@@ -11,6 +11,8 @@ const protectedDirectories = new Set([
   ".claude",
   ".cursor",
   ".qwen",
+  ".dsh",
+  ".zcode",
   ".kiro",
   ".ssh",
   ".aws",

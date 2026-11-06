@@ -47,8 +47,10 @@ workspace:
   # root: /absolute/path/to/target-repo # Existing Git repository; worktrees are created inside it
 # ── Actor ─────────────────────────────────────────────────────────────
 # actor:
-#   type: claude                    # claude | codex | antigravity | cursor | grok | kimi | opencode
+#   type: claude                    # claude | codex | qwen | dsh | zcode | antigravity | cursor | grok | kimi | opencode
 #   model: your-model               # Optional Chief Director model for av order; actors use CLI defaults
+#                                    # DSH/ZCode use native model selection; omit actor.model for dsh/zcode.
+#                                    # See docs/guides/actor-sessions.md for provider setup.
 #   max_parallel: 3                 # Max concurrent actor runs. Default: hardware-detected
 #                                    # recommendation. An explicit value above the recommendation
 #                                    # is honored (never silently clamped) but logged as a WARN.
