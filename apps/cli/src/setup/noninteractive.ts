@@ -1,11 +1,12 @@
 import { join, parse as parsePath, resolve } from "node:path"
 import { AGENT_LOGIN_HINT } from "../doctor-checks"
+import { hasUnsupportedAuthProbe } from "./actor-readiness"
 import {
   prepareNoninteractiveConfig,
   prepareRuntimeIgnoreFiles,
   validateNoninteractiveOptions,
 } from "./noninteractive-config"
-import { noninteractiveSetupDefaults } from "./noninteractive-runtime"
+import { noninteractiveSetupDefaults, SetupIdentityRequiredError } from "./noninteractive-runtime"
 import type { NoninteractiveSetupDependencies, NoninteractiveSetupResult, SetupOptions } from "./noninteractive-types"
 
 export type { NoninteractiveSetupDependencies, NoninteractiveSetupResult, SetupOptions } from "./noninteractive-types"
@@ -70,8 +71,11 @@ export async function setupNoninteractive(
       else result.nextActions.push(installation.message)
     }
     result.chief.readiness = availability.readiness
+    result.chief.authStatusProbe = availability.authStatusProbe
     result.chief.message = availability.reason
-    if (availability.readiness !== "ready") result.nextActions.push(AGENT_LOGIN_HINT[selected])
+    const unsupportedAuthProbe = hasUnsupportedAuthProbe(availability)
+    if (unsupportedAuthProbe) result.chief.message += " Chief authentication remains unverified."
+    else if (availability.readiness !== "ready") result.nextActions.push(AGENT_LOGIN_HINT[selected])
 
     if (options.oma === "skip") {
       result.oma = {
@@ -108,7 +112,7 @@ export async function setupNoninteractive(
       result.nextActions.push(rerunCommand(result, options))
       return result
     }
-    if (availability.readiness !== "ready") {
+    if (availability.readiness !== "ready" && !unsupportedAuthProbe) {
       result.status = "action_required"
       result.exitCode = 2
       result.nextActions.push(rerunCommand(result, options))
@@ -122,6 +126,10 @@ export async function setupNoninteractive(
     )
     return result
   } catch (error) {
+    if (error instanceof SetupIdentityRequiredError) {
+      result.status = "action_required"
+      result.exitCode = 2
+    }
     result.error =
       error instanceof Error
         ? error.message
@@ -140,7 +148,7 @@ export function printNoninteractiveSetupResult(result: NoninteractiveSetupResult
     ? `${result.chief.actorType} / ${result.chief.model ?? "native default"}`
     : "not selected"
   console.log(
-    `AV setup: ${result.status}\nWorkspace: ${result.workspace ?? "not selected"}\nProject config: ${result.config.project}\nGlobal config: ${result.config.global}\nChief Director: ${chief} (${result.chief.readiness})\nOMA: ${result.oma.status}\nClient integrations: ${result.integrations.status}`,
+    `AV setup: ${result.status}\nWorkspace: ${result.workspace ?? "not selected"}\nProject config: ${result.config.project}\nGlobal config: ${result.config.global}\nChief Director: ${chief} (${result.chief.readiness}; source: ${result.chief.actorSource ?? "unknown"})\nChief readiness: ${result.chief.message}\nOMA: ${result.oma.status}\nClient integrations: ${result.integrations.status}`,
   )
   for (const action of result.nextActions) console.log(`Next: ${action}`)
   if (result.error && !result.nextActions.includes(result.error)) console.log(`Error: ${result.error}`)

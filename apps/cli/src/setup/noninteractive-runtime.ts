@@ -30,6 +30,8 @@ export function noninteractiveSetupDefaults(): NoninteractiveSetupDependencies {
   }
 }
 
+export class SetupIdentityRequiredError extends Error {}
+
 export function currentRuntimeIdentity(
   env: Record<string, string | undefined>,
 ): { actorType: AgentType; source: string } | undefined {
@@ -40,7 +42,7 @@ export function currentRuntimeIdentity(
   const claude = ["CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION"].find((key) => env[key] === "1")
   if (claude) identities.push({ actorType: "claude", source: claude })
   if (identities.length > 1)
-    throw new Error(
+    throw new SetupIdentityRequiredError(
       "Current runtime identity is ambiguous. Rerun av setup --yes --actor <current-vendor> --model <current-model-or-empty>; do not use OMA defaults to identify the caller.",
     )
   return identities[0]

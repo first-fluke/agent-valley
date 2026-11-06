@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts"
 import { AGENT_PROVISIONING, inspectChiefAgent, installChiefAgent, loginChiefAgent } from "../agent-provisioning"
+import { hasUnsupportedAuthProbe } from "./actor-readiness"
 import { type AgentType, CANCEL, type SetupContext, type StepResult } from "./types"
 import { stepLabel } from "./ui"
 
@@ -43,6 +44,12 @@ export async function stepAgentType(ctx: SetupContext, step: number, total: numb
       p.log.success(`${plan.label} Chief Director is ready. Available worker CLIs are selected automatically.`)
       return
     }
+    if (hasUnsupportedAuthProbe(state)) {
+      p.log.warn(
+        `${plan.label} is installed. Authentication remains unverified because its status probe is unsupported.`,
+      )
+      return
+    }
     p.note(state.reason, `${plan.label} setup`)
     const action = await p.select({
       message:
@@ -81,7 +88,7 @@ export async function stepAgentType(ctx: SetupContext, step: number, total: numb
         continue
       }
       const afterInstall = await inspectChiefAgent(selected)
-      if (afterInstall.readiness === "ready") continue
+      if (afterInstall.readiness === "ready" || hasUnsupportedAuthProbe(afterInstall)) continue
       if (afterInstall.readiness === "unavailable") {
         p.log.warn("The CLI is still unavailable. Check your PATH, open a new terminal if needed, and choose Recheck.")
         continue

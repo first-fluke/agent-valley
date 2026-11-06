@@ -36,6 +36,7 @@ import { fastTrackSetup } from "./fast-track"
 import { stepGithubLabels, stepGithubRepo, stepGithubToken, stepGithubWebhookSecret } from "./github-step"
 import { GLOBAL_CONFIG_REPAIR_WARNING, readSetupGlobalConfig } from "./global-settings"
 import { stepApiKey, stepTeam, stepWebhook, stepWorkflowStates } from "./linear-step"
+import { currentRuntimeIdentity } from "./noninteractive-runtime"
 import { stepOma } from "./oma-step"
 import { stepParallel } from "./parallel-step"
 import { renderPreview } from "./preview"
@@ -163,8 +164,10 @@ export async function setup(options: { mode?: "order" | "tracker" } = {}): Promi
     mode === "order" ? { trackerKind: "none", maxParallel: 1, tunnel: { provider: "none" } } : {}
   const existing = globalSettings.config
   if (existing.linear?.api_key) ctx.linear = { apiKey: existing.linear.api_key }
-  ctx.agentType = existing.agent?.type
-  ctx.agentModel = existing.agent?.model
+  if (hasProject) {
+    ctx.agentType = existing.agent?.type
+    ctx.agentModel = existing.agent?.model
+  }
   ctx.chief = existing.chief
   let replaceInvalidProject = false
   if (hasProject) {
@@ -174,11 +177,22 @@ export async function setup(options: { mode?: "order" | "tracker" } = {}): Promi
       ctx.verifyCommand = existing?.verify?.command
       ctx.task = existing?.task
       ctx.chief = mergeChiefConfig(ctx.chief, existing?.chief)
+      if (existing?.agent?.type) {
+        if (ctx.agentType !== existing.agent.type) delete ctx.agentModel
+        ctx.agentType = existing.agent.type
+        ctx.agentModel = existing.agent.model ?? ctx.agentModel
+      }
     } catch (error) {
       if (error instanceof TeamConfigMigrationError) throw error
       replaceInvalidProject = true
       p.log.warn("Existing av.yaml cannot be read. Re-enter the workspace and verification settings to replace it.")
     }
+  }
+
+  const runtime = currentRuntimeIdentity(process.env)
+  if (runtime) {
+    ctx.agentType = runtime.actorType
+    delete ctx.agentModel
   }
 
   await runStepLoop(ctx)

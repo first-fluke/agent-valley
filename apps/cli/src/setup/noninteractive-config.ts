@@ -13,7 +13,7 @@ import type { z } from "zod"
 import { type IntegrationFile, integrationFile } from "../client-integrations-files"
 import { AGENT_TYPES } from "../doctor-checks"
 import { canonicalConfig } from "./config-write"
-import { currentRuntimeIdentity } from "./noninteractive-runtime"
+import { currentRuntimeIdentity, SetupIdentityRequiredError } from "./noninteractive-runtime"
 import type { NoninteractiveSetupDependencies, NoninteractiveSetupResult, SetupOptions } from "./noninteractive-types"
 import type { AgentType } from "./types"
 import { validateOrderWorkspace } from "./workspace-step"
@@ -85,19 +85,21 @@ function selectChief(
   deps: NoninteractiveSetupDependencies,
   project: Record<string, unknown>,
   global: Record<string, unknown>,
+  existingProject: boolean,
 ): ChiefSelection {
   const runtime = options.actor === undefined ? currentRuntimeIdentity(deps.env) : undefined
   const projectActor = actor(project)
   const globalActor = actor(global)
-  const selected = options.actor ?? runtime?.actorType ?? projectActor.type ?? globalActor.type
+  const savedType = projectActor.type ?? (existingProject ? globalActor.type : undefined)
+  const selected = options.actor ?? runtime?.actorType ?? savedType
   if (!selected)
-    throw new Error(
-      `actor.type is missing in ${join(deps.projectRoot, "av.yaml")} and ${deps.globalConfigPath}, and the current agent runtime is unknown. Rerun av setup --yes --actor <current-vendor> --model <current-model-or-empty>.`,
+    throw new SetupIdentityRequiredError(
+      `actor.type is not selected for ${join(deps.projectRoot, "av.yaml")}, and the current agent runtime is unknown. Defaults in ${deps.globalConfigPath} do not identify a new project's initiating agent. Rerun av setup --yes --actor <current-vendor> --model <current-model-or-empty>.`,
     )
   const actorType = selected as AgentType
   const actorSource =
     options.actor !== undefined ? "explicit" : runtime ? "runtime" : projectActor.type ? "project" : "global"
-  const previousType = projectActor.type ?? globalActor.type
+  const previousType = savedType
   let model: string | null = null
   let modelSource: ChiefSelection["modelSource"] = "native-default"
   if (options.model !== undefined) {
@@ -141,7 +143,13 @@ export async function prepareNoninteractiveConfig(options: SetupOptions, deps: N
   const projectPath = join(projectRoot, "av.yaml")
   const project = await configFile(projectPath, projectConfigSchema)
   const global = await configFile(globalPath, globalConfigSchema)
-  const chief = selectChief(options, { ...deps, projectRoot, globalConfigPath: globalPath }, project.raw, global.raw)
+  const chief = selectChief(
+    options,
+    { ...deps, projectRoot, globalConfigPath: globalPath },
+    project.raw,
+    global.raw,
+    project.file.before !== null,
+  )
   for (const [raw, path] of [
     [project.raw, projectPath],
     [global.raw, globalPath],

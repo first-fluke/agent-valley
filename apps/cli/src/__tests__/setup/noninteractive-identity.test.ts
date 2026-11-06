@@ -103,6 +103,7 @@ describe("initiating agent Chief Director selection", () => {
   })
 
   it("honors explicit empty model clearing and otherwise preserves same-vendor saved pins", async () => {
+    fixture.write(fixture.projectPath, `workspace:\n  root: ${fixture.workspace}\n`)
     fixture.write(fixture.globalConfigPath, "actor:\n  type: codex\n  model: saved-model\n")
     const preserved = await setupNoninteractive({ yes: true, actor: "codex", oma: "skip" }, fixture.deps)
     expect(preserved.chief).toMatchObject({ model: "saved-model", modelSource: "global" })
@@ -112,9 +113,10 @@ describe("initiating agent Chief Director selection", () => {
     expect(fixture.json(fixture.globalConfigPath).actor.model).toBeUndefined()
   })
 
-  it("uses valid legacy saved global defaults when runtime identity is not established", async () => {
+  it("preserves a legacy project's global Chief when runtime identity is not established", async () => {
     fixture.deps.env.OMA_DEFAULT_CLI = "claude"
     fixture.deps.env.CODEX_HOME = "/not-runtime-evidence"
+    fixture.write(fixture.projectPath, `workspace:\n  root: ${fixture.workspace}\n`)
     fixture.write(fixture.globalConfigPath, "agent:\n  type: cursor\n  model: saved-cursor\n")
     const result = await setupNoninteractive({ yes: true, oma: "skip" }, fixture.deps)
     expect(result.chief).toMatchObject({
@@ -125,6 +127,36 @@ describe("initiating agent Chief Director selection", () => {
       runtimeIdentity: null,
     })
     expect(fixture.json(fixture.globalConfigPath).agent).toBeUndefined()
+  })
+
+  it("does not copy an unrelated global Chief into a new project without initiating identity", async () => {
+    const original = "actor:\n  type: grok\n  model: unrelated-global-model\n"
+    fixture.write(fixture.globalConfigPath, original)
+    const result = await setupNoninteractive({ yes: true, oma: "skip" }, fixture.deps)
+    expect(result).toMatchObject({ status: "action_required", exitCode: 2, config: { saved: false } })
+    expect(result.error).toContain("--actor <current-vendor>")
+    expect(fixture.deps.inspectActor).not.toHaveBeenCalled()
+    expect(fixture.deps.applyFiles).not.toHaveBeenCalled()
+    expect(existsSync(fixture.projectPath)).toBe(false)
+    expect(readFileSync(fixture.globalConfigPath, "utf8")).toBe(original)
+  })
+
+  it("starts a new explicitly selected Chief at its native default instead of an old global pin", async () => {
+    fixture.write(fixture.globalConfigPath, "actor:\n  type: codex\n  model: obsolete-global-pin\n")
+    const result = await setupNoninteractive({ yes: true, actor: "codex", oma: "skip" }, fixture.deps)
+    expect(result.chief).toMatchObject({ actorType: "codex", model: null, modelSource: "native-default" })
+    expect(fixture.json(fixture.projectPath).actor).toEqual({ type: "codex" })
+  })
+
+  it("keeps the existing project's Chief ahead of unrelated global defaults", async () => {
+    fixture.write(
+      fixture.projectPath,
+      `workspace:\n  root: ${fixture.workspace}\nactor:\n  type: grok\n  model: project-grok\n`,
+    )
+    fixture.write(fixture.globalConfigPath, "actor:\n  type: codex\n  model: unrelated-global-model\n")
+    const result = await setupNoninteractive({ yes: true, oma: "skip" }, fixture.deps)
+    expect(result.chief).toMatchObject({ actorType: "grok", actorSource: "project", model: "project-grok" })
+    expect(fixture.deps.inspectActor).toHaveBeenCalledWith("grok")
   })
 
   it("rejects a stale custom provider command on vendor change without clobbering it", async () => {

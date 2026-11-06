@@ -84,6 +84,8 @@ function writeDefaults(): void {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  for (const key of ["CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION"])
+    vi.stubEnv(key, undefined)
   originalCwd = process.cwd()
   originalXdg = process.env.XDG_CONFIG_HOME
   root = mkdtempSync(join(tmpdir(), "av-order-setup-"))
@@ -108,6 +110,7 @@ afterEach(() => {
   if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME
   else process.env.XDG_CONFIG_HOME = originalXdg
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -210,8 +213,9 @@ describe("standalone order setup", () => {
     expect(p.confirm).toHaveBeenCalledWith({ message: "Save this configuration?" })
   })
 
-  it("offers the saved chief vendor and model again and preserves unrelated global settings", async () => {
+  it("offers an existing project's saved chief and preserves unrelated global settings", async () => {
     writeDefaults()
+    writeFileSync("av.yaml", `workspace:\n  root: ${repo}\n`)
     vi.mocked(stepAgentType).mockImplementation(async (context) => {
       expect(context.agentType).toBe("codex")
       expect(context.agentModel).toBe("saved-chief-model")
@@ -221,6 +225,43 @@ describe("standalone order setup", () => {
     const defaults = parse(readFileSync(settingsPath, "utf-8"))
     expect(defaults.actor.model).toBe("saved-chief-model")
     expect(defaults.server.port).toBe(9900)
+  })
+
+  it("seeds the initiating runtime instead of an unrelated saved Chief and clears its stale model", async () => {
+    writeDefaults()
+    writeFileSync(settingsPath, "actor:\n  type: grok\n  model: stale-global-model\nserver:\n  port: 9900\n")
+    vi.stubEnv("CODEX_THREAD_ID", "initiating-session")
+    vi.mocked(stepAgentType).mockImplementation(async (context) => {
+      expect(context.agentType).toBe("codex")
+      expect(context.agentModel).toBeUndefined()
+      return undefined
+    })
+    await setup()
+    expect(parse(readFileSync(settingsPath, "utf8")).actor).toEqual({ type: "codex", max_parallel: 1 })
+  })
+
+  it("does not preselect an unrelated global Chief for a new project without runtime identity", async () => {
+    writeDefaults()
+    vi.mocked(stepAgentType).mockImplementation(async (context) => {
+      expect(context.agentType).toBeUndefined()
+      expect(context.agentModel).toBeUndefined()
+      context.agentType = "codex"
+      return undefined
+    })
+    await setup()
+    expect(parse(readFileSync(settingsPath, "utf8")).actor.model).toBeUndefined()
+  })
+
+  it("keeps a project's saved Chief ahead of another global Chief without runtime identity", async () => {
+    writeDefaults()
+    writeFileSync("av.yaml", `workspace:\n  root: ${repo}\nactor:\n  type: grok\n  model: project-model\n`)
+    vi.mocked(stepAgentType).mockImplementation(async (context) => {
+      expect(context.agentType).toBe("grok")
+      expect(context.agentModel).toBe("project-model")
+      return undefined
+    })
+    await setup()
+    expect(parse(readFileSync(settingsPath, "utf8")).actor).toMatchObject({ type: "grok", model: "project-model" })
   })
 
   it("clears a stale model when the user chooses a different chief with its native default", async () => {

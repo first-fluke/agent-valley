@@ -36,6 +36,7 @@ export interface NoninteractiveSetupResult {
       | "native-default"
     runtimeIdentity: string | null
     readiness: AgentReadiness | "not_checked"
+    authStatusProbe?: AgentAvailability["authStatusProbe"]
     message: string
   }
   oma: { status: "prepared" | "skipped" | "failed" | "not_started"; message: string }

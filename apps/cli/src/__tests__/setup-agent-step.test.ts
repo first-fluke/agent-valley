@@ -65,6 +65,35 @@ describe("Chief Director setup step", () => {
     expect(loginChiefAgent).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])(
+    "finishes unsupported status checks without asking for login after install=%s",
+    async (install) => {
+      vi.mocked(p.select).mockResolvedValueOnce("grok").mockResolvedValueOnce("setup")
+      const unsupported = {
+        agentType: "grok" as const,
+        binaryPath: "/fixture/grok",
+        readiness: "unknown" as const,
+        authStatusProbe: "unsupported" as const,
+        reason: "No supported read-only authentication status probe.",
+      }
+      vi.mocked(inspectChiefAgent).mockResolvedValue(unsupported)
+      if (install)
+        vi.mocked(inspectChiefAgent).mockResolvedValueOnce({
+          agentType: "grok",
+          readiness: "unavailable",
+          reason: "Install Grok",
+        })
+      const ctx: SetupContext = {}
+      expect(await stepAgentType(ctx, 1, 1)).toBeUndefined()
+      expect(ctx.agentType).toBe("grok")
+      expect(p.select).toHaveBeenCalledTimes(install ? 2 : 1)
+      expect(installChiefAgent).toHaveBeenCalledTimes(install ? 1 : 0)
+      expect(loginChiefAgent).not.toHaveBeenCalled()
+      expect(p.log.success).not.toHaveBeenCalled()
+      expect(p.log.warn).toHaveBeenCalledWith(expect.stringContaining("Authentication remains unverified"))
+    },
+  )
+
   it("trims explicit model IDs and clears old model selection on blank", async () => {
     const ctx: SetupContext = { agentType: "codex", agentModel: "previous" }
     vi.mocked(p.text).mockResolvedValueOnce("  selected/model  ").mockResolvedValueOnce("  ")

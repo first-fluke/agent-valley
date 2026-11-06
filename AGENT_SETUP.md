@@ -40,6 +40,8 @@ Pass the exact active model only when trusted session metadata or the effective 
 
 If the runtime identity cannot be established or has no supported adapter, report `action_required` with that specific limit. Do not guess a vendor or ask the user to choose one merely because the exact model is unknown.
 
+For a new project, saved global defaults alone do not identify the initiating agent. Pass the initiating vendor explicitly; setup can otherwise use trusted runtime identity. Existing project selections, including older projects whose Chief is stored in global settings, remain available when no initiating override or runtime identity is supplied.
+
 ## Install on the target machine
 
 Resolve the user-selected repository to an absolute path. It must be a Git repository with at least one commit. Check this prerequisite without changing Git history. Preserve existing repository files and user configuration. Check only the needed paths and readiness results; do not print credentials or dump the environment.
@@ -93,7 +95,7 @@ cd "$AV_SETUP_WORKSPACE"
 
 Always pass this explicit workspace for the user-selected target. Otherwise setup may retain an existing `workspace.root` that points to a different repository.
 
-`--yes` performs local order setup without prompts. It saves `av.yaml` in the invocation directory and Chief Director defaults in `~/.config/agent-valley/settings.yaml`, prepares OMA in the working repository, and installs the project AV skill and MCP entries for Codex, Claude Code, Cursor, Qwen Code, and Antigravity. It uses the existing provider acquisition and readiness adapters. It does not run a paid model probe, start a mission, or complete browser/device login unattended.
+`--yes` performs local order setup without prompts. It saves `av.yaml` in the invocation directory and Chief Director defaults in `~/.config/agent-valley/settings.yaml`, prepares OMA in the working repository, and installs the project AV skill and MCP entries for Codex, Claude Code, Cursor, Qwen Code, and Antigravity. It uses the existing provider acquisition and readiness adapters. It does not run a paid model probe, start a mission, or complete browser/device login unattended. When an installed CLI has no supported read-only authentication status probe, local setup can complete with Chief readiness `unknown`; this does not confirm login. Confirmed missing authentication and failed supported checks still require action.
 
 OMA preparation is the default. Use `--oma skip` only if the user asks to defer OMA, and report the deferral. An OMA failure must be reported; do not silently turn it into a skip. Preserve existing OMA configuration and use the supported installer/update path instead of editing managed definitions directly.
 
@@ -120,7 +122,7 @@ Read setup's JSON and exit status. Its report includes project/config paths, Chi
 | `action_required` | `2`  | Preserve saved configuration, report the exact next action, and stop unattended retries. Rerun the same setup command after the action is complete. |
 | `failed`          | `1`  | Report the actual error and affected path. Fix an authorized, understood cause or report the remaining blocker.                                     |
 
-An installed executable does not prove authentication. Unknown authentication or model readiness must remain visible in the report. Browser/device sign-in is a concrete user action; do not bypass it or choose another vendor to avoid it.
+An installed executable does not prove authentication. Unknown authentication or model readiness must remain visible in the report. An unsupported authentication status probe alone does not block local setup or require repeated login attempts. Follow `action_required` for confirmed missing authentication or a supported check that could not complete. Browser/device sign-in is a concrete user action; do not bypass it or choose another vendor to avoid it.
 
 Inspect the integration result's client files and confirm the MCP server points to the configuration directory above. Restart or reload the selected agent client and let the user complete its normal workspace/MCP trust step when required. Desktop clients may need the AV launcher directory on their PATH.
 
@@ -128,7 +130,7 @@ If the current client already exposes the AV tools, use the read-only `av_missio
 
 ## Recover while preserving files
 
-- For login or unknown readiness, follow the reported vendor action and rerun the same setup command after login. Do not loop unattended.
+- For `action_required` readiness, follow the reported vendor action and rerun the same setup command after resolving it. If setup completed with an unsupported authentication status probe, report authentication as unverified without an unattended retry loop.
 - For an OMA preparation error, retain its diagnostic and fix the stated dependency, permission, or installer failure before retrying. Defer only at the user's request.
 - For an AV skill/MCP name collision or locally edited owned file, preserve the original. Reconcile the reported file only when its ownership and intended binding are established. Keep unrelated entries and user changes; report `action_required` if resolving the collision needs a user decision. Do not delete files or force a managed update.
 - For a missing or malformed configuration key, use the error's key path and named file. Repair only the requested setting and keep unrelated configuration.

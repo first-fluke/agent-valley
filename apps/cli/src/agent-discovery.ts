@@ -22,7 +22,7 @@ export type { AgentAvailability, AgentReadiness, AuthProbeOptions, AuthProbeResu
 const PROBE_TIMEOUT_MS = 5_000
 const MAX_OUTPUT_BYTES = 16_384
 const MAX_AUTH_FILE_BYTES = 1_048_576
-type AuthEvidence = Pick<AgentAvailability, "readiness" | "reason">
+type AuthEvidence = Pick<AgentAvailability, "readiness" | "reason" | "authStatusProbe">
 type JsonRecord = Record<string, unknown>
 
 function record(value: unknown): JsonRecord {
@@ -306,7 +306,11 @@ async function boundedProbe(path: string, args: readonly string[], deps: Discove
 
 async function nativeAuth(agent: AgentType, path: string, deps: DiscoveryDeps): Promise<AuthEvidence> {
   if (agent !== "claude" && agent !== "codex" && agent !== "cursor") {
-    return unknown(agent, "This CLI has no supported read-only authentication status probe")
+    return {
+      readiness: "unknown",
+      reason: "This CLI has no supported read-only authentication status probe. Authentication remains unverified.",
+      authStatusProbe: "unsupported",
+    }
   }
   // Check installed subcommands first: older CLIs can interpret unknown commands as prompts.
   const command = agent === "claude" ? "auth" : agent === "codex" ? "login" : "status"

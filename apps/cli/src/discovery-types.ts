@@ -7,6 +7,7 @@ export interface AgentAvailability {
   agentType: AgentType
   binaryPath?: string
   readiness: AgentReadiness
+  authStatusProbe?: "unsupported"
   reason: string
 }
 
