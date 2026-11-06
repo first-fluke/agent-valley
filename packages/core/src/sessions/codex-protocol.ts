@@ -13,7 +13,27 @@ export interface JsonRpcResponse {
   method?: string
   params?: Record<string, unknown>
   result?: unknown
-  error?: { code: number; message: string }
+  error?: { code: number; message: string; data?: unknown }
+}
+
+/** Retain provider codes when the human-readable message omits the exhaustion reason. */
+export function extractCodexErrorMessage(value: unknown, fallback: string): string {
+  if (typeof value === "string") return value.slice(0, 10_240)
+  if (!value || typeof value !== "object") return fallback
+  const error = value as Record<string, unknown>
+  const data = error.data && typeof error.data === "object" ? (error.data as Record<string, unknown>) : undefined
+  const details = [error.codexErrorInfo, error.code, error.type, data?.codexErrorInfo, data?.code, data?.type].filter(
+    (part): part is string => typeof part === "string",
+  )
+  const message = typeof error.message === "string" ? error.message : fallback
+  return [...new Set([...details, message])].join(": ").slice(0, 10_240)
+}
+
+export function codexExitError(proc: ChildProcess, exitCode: number | null, exhaustion?: string): Error {
+  return new Error(
+    exhaustion ??
+      `Codex app-server exited (${proc.signalCode ?? exitCode ?? "unknown"}). Run av doctor and check Codex authentication.`,
+  )
 }
 
 export function closeInputAndJoin(proc: ChildProcess): Promise<void> {

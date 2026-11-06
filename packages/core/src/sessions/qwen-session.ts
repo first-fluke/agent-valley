@@ -1,4 +1,5 @@
 import { ClaudeSession } from "./claude-session"
+import { exhaustionMessage, nativeErrorMessage } from "./native-failure"
 
 /** Qwen Code's documented Claude-compatible JSONL envelopes, with Qwen usage/error semantics.
  * https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/
@@ -47,15 +48,7 @@ export class QwenSession extends ClaudeSession {
       // A native subagent result must never finish the enclosing Chief/Actor run.
       if (!main) return
       if (value.is_error === true || String(value.subtype).startsWith("error")) {
-        this.emit({
-          type: "error",
-          error: {
-            code: "CRASH",
-            message: "Qwen Code reported a failed run. Check qwen /auth, model access and limits, then retry av order.",
-            recoverable: false,
-            tokenUsage: this.extractTokenUsage(value),
-          },
-        })
+        this.resultEvent = value
         return
       }
       if (value.is_error !== false || value.subtype !== "success" || typeof value.result !== "string") {
@@ -75,13 +68,30 @@ export class QwenSession extends ClaudeSession {
 
   protected override finalizeNativeExit(code: number | null): void {
     if (this.terminalEventReceived) return
+    if (
+      this.resultEvent &&
+      (this.resultEvent.is_error === true || String(this.resultEvent.subtype).startsWith("error"))
+    ) {
+      this.emit({
+        type: "error",
+        error: {
+          code: "CRASH",
+          message:
+            exhaustionMessage(nativeErrorMessage([this.resultEvent, this.nativeError], "")) ??
+            "Qwen Code reported a failed run. Check qwen /auth, model access and limits, then retry av order.",
+          recoverable: false,
+          tokenUsage: this.extractTokenUsage(this.resultEvent),
+        },
+      })
+      return
+    }
     if (code === 0 && this.resultEvent) super.handleEvent(this.resultEvent)
     else if (this.resultEvent)
       this.emit({
         type: "error",
         error: {
           code: "CRASH",
-          message: "Qwen Code failed after its result. Run av doctor and retry.",
+          message: this.nativeError ?? "Qwen Code failed after its result. Run av doctor and retry.",
           recoverable: false,
           tokenUsage: this.extractTokenUsage(this.resultEvent),
         },

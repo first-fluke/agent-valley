@@ -55,6 +55,7 @@
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
+import { captureExhaustion, nativeErrorMessage } from "./native-failure"
 
 export const CURSOR_COMMAND = "cursor-agent"
 
@@ -142,6 +143,7 @@ export class CursorSession extends BaseSession {
   private async readStream(): Promise<void> {
     const proc = this.process
     if (!proc?.stdout) return
+    const stderrExhaustion = captureExhaustion(proc.stderr)
     const flush = readJsonLines(proc.stdout, (event) => this.handleEvent(event))
     const { exitCode: code } = await waitForStreamCompletion(proc)
     flush()
@@ -149,9 +151,10 @@ export class CursorSession extends BaseSession {
     const exitCode = code ?? -1
     this.emitError(
       exitCode === -1 ? "TIMEOUT" : "CRASH",
-      exitCode === 0
-        ? "cursor-agent exited without a result event. Check CLI authentication and update Cursor, then retry."
-        : `cursor-agent exited with code ${exitCode}. Run av doctor and check Cursor authentication.`,
+      stderrExhaustion() ??
+        (exitCode === 0
+          ? "cursor-agent exited without a result event. Check CLI authentication and update Cursor, then retry."
+          : `cursor-agent exited with code ${exitCode}. Run av doctor and check Cursor authentication.`),
       exitCode !== 1,
     )
   }
@@ -196,6 +199,14 @@ export class CursorSession extends BaseSession {
         this.handleResultEvent(e)
         break
       }
+
+      case "error":
+        this.emitError(
+          "CRASH",
+          nativeErrorMessage(e, "cursor-agent reported an error. Check its provider access and retry."),
+          true,
+        )
+        break
 
       case "thinking":
       case "user":
@@ -272,7 +283,7 @@ export class CursorSession extends BaseSession {
     const isError = e.is_error === true || e.isError === true
 
     if (isError) {
-      this.emitError("CRASH", result || "cursor-agent reported an error result", true)
+      this.emitError("CRASH", nativeErrorMessage(e, "cursor-agent reported an error result"), true)
       return
     }
 

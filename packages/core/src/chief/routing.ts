@@ -34,6 +34,26 @@ function price(candidate: RoutingCandidate): number {
     : Number.POSITIVE_INFINITY
 }
 
+function readyWorkCandidates(mission: Mission): RoutingCandidate[] {
+  const ready = mission.operatingPolicy?.readyActors ?? mission.availableAgents ?? []
+  const exhausted = mission.handoff?.exhaustedAgents ?? []
+  const candidates = (mission.operatingPolicy?.routing?.candidates ?? []).filter(
+    (candidate) => ready.includes(candidate.actorType) && !exhausted.some((vendor) => vendor === candidate.actorType),
+  )
+  if (candidates.length || !exhausted.length) return candidates
+  // An authenticated exhaustion fallback also remains available to subsequent tasks.
+  return [
+    ...new Map(
+      Object.values(mission.handoff?.routes ?? {})
+        .filter((route) => !exhausted.includes(route.agentType))
+        .map((route) => {
+          const candidate = { actorType: route.agentType, ...(route.model ? { model: route.model } : {}) }
+          return [routeKey(candidate), candidate] as const
+        }),
+    ).values(),
+  ]
+}
+
 export function workActorCandidates(
   mission: Mission,
   actor: Persona,
@@ -42,8 +62,7 @@ export function workActorCandidates(
   const routing = mission.operatingPolicy?.routing
   if (!routing || actor.id === mission.chiefId || (!mission.availableAgents && (actor.model || preserveExplicit)))
     return [{ actorType: actor.agentType, model: actor.model }]
-  const ready = mission.operatingPolicy?.readyActors ?? mission.availableAgents ?? []
-  return routing.candidates.filter((candidate) => ready.includes(candidate.actorType))
+  return readyWorkCandidates(mission)
 }
 
 export function selectWorkActor(
@@ -60,8 +79,7 @@ export function selectWorkActor(
       )
     return { actor, reason: "Preserved the configured Actor and explicit model." }
   }
-  const ready = mission.operatingPolicy?.readyActors ?? mission.availableAgents ?? []
-  const candidates = routing.candidates.filter((candidate) => ready.includes(candidate.actorType))
+  const candidates = readyWorkCandidates(mission)
   if (!candidates.length)
     throw new Error(
       "No configured work routing candidate is ready. Install/login a candidate CLI or update chief.routing.candidates in av.yaml.",

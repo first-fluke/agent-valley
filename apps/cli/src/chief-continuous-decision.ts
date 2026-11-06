@@ -13,6 +13,7 @@ import { interruptionPause, isServiceShutdown, recordServiceShutdown } from "@ag
 import { discoverMissionSkills, prepareMissionSkills } from "@agent-valley/core/chief/skills"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { ChiefPorts, Mission } from "@agent-valley/core/chief/types"
+import { discoverReadyAgents } from "./chief-agent-discovery"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { consultContinuousDirectors, continuousDirectorAdvice } from "./chief-continuous-council"
 import { assertContinuousDecisionRecovery, runContinuousDecision } from "./chief-continuous-recovery"
@@ -69,10 +70,10 @@ export async function decideContinuousGoal(
   if (!operation.baseline) throw new Error("An accepted operation baseline is required before selecting a goal.")
   const store = new MissionStore(join(root, ".agent-valley", "operation-decisions", operation.id))
   const unlock = await store.lock(decisionId)
-  const runtime = (dependencies.runtime ?? ((storage, signal) => new ChiefRuntime(storage, signal)))(
-    store,
-    dependencies.signal,
-  )
+  const runtime = (
+    dependencies.runtime ??
+    ((storage, signal) => new ChiefRuntime(storage, signal, undefined, undefined, undefined, discoverReadyAgents))
+  )(store, dependencies.signal)
   let mission: Mission | undefined
   try {
     mission = await store.load(decisionId).catch((error: NodeJS.ErrnoException) => {

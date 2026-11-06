@@ -18,6 +18,7 @@ import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { type Command, Option } from "commander"
+import { discoverReadyAgents, resetHandoffForRetry } from "./chief-agent-discovery"
 import { deliverMissionCode, prepareCodeDelivery } from "./chief-code-delivery"
 import { deliveryPaths, type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { createMissionContainerPorts } from "./chief-containers"
@@ -87,8 +88,13 @@ export async function runOrder(
       ),
     )
   const terminate = () => (options.service ? abortController.abort(serviceShutdownPause()) : interrupt())
-  const runtime = new ChiefRuntime(store, abortController.signal, (stage, persona) =>
-    console.log(`[${stage}] ${persona.name} (${persona.agentType})`),
+  const runtime = new ChiefRuntime(
+    store,
+    abortController.signal,
+    (stage, persona) => console.log(`[${stage}] ${persona.name} (${persona.agentType})`),
+    undefined,
+    undefined,
+    discoverReadyAgents,
   )
   process.once("SIGINT", interrupt)
   process.once("SIGTERM", terminate)
@@ -108,6 +114,7 @@ export async function runOrder(
       validateResumeOptions(goal, options)
       mission = await store.load(id)
       applyResumeOptions(mission, goal, options)
+      resetHandoffForRetry(mission, options.retry)
       await store.save(mission)
       await store.recoverProcesses(id, mission)
       if (mission.status === "paused") return mission

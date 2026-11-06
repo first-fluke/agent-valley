@@ -1,5 +1,7 @@
+import { classifyAgentExhaustion } from "../domain/agent-exhaustion"
 import { createMissionCheckpoint } from "./coordinator-checkpoint"
 import { assertNoUncertainExecution, classifyFailure, MissionPause, reserveExecutionRun } from "./execution"
+import { handoffActor, handoffPrompt, prepareHandoff, recordHandoffReview } from "./handoff"
 import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
 
 export class ReadOnlyViolation extends Error {}
@@ -12,12 +14,12 @@ export function createMissionRun(
   checkAbort: () => void,
   persist = createMissionCheckpoint(mission, ports, assertContract).persist,
 ) {
-  return async (
+  const runOnce = async (
     actor: Persona,
     prompt: string,
     stage: ChiefStage,
     taskId?: string,
-    context?: { workspace?: Mission["workspace"]; signal?: AbortSignal },
+    context?: { workspace?: Mission["workspace"]; signal?: AbortSignal; handoff?: string },
   ): Promise<string> => {
     assertNoUncertainExecution(mission)
     checkAbort()
@@ -31,6 +33,7 @@ export function createMissionRun(
     if (effect?.effectState === "completed")
       throw new Error(`External effect ${taskId} already completed; review its evidence without repeating the Actor.`)
     const omaActor = stage === "work" ? await ports.prepareWork?.(actor, mission, context) : undefined
+    if (context?.handoff) recordHandoffReview(mission, actor, stage, taskId)
     checkAbort()
     assertContract()
     reserveExecutionRun(mission)
@@ -82,6 +85,7 @@ export function createMissionRun(
         )
       checkAbort()
       if (error instanceof MissionPause) throw error
+      if (classifyAgentExhaustion(error instanceof Error ? error.message : String(error))) throw error
       if (actor.id === mission.chiefId && stage !== "work" && stage !== "report") {
         const kind = classifyFailure(error instanceof Error ? error.message : String(error))
         if (kind === "provider" || kind === "rate-limit") throw error
@@ -108,5 +112,49 @@ export function createMissionRun(
       )
     checkAbort()
     return output
+  }
+
+  return async (
+    actor: Persona,
+    prompt: string,
+    stage: ChiefStage,
+    taskId?: string,
+    context?: { workspace?: Mission["workspace"]; signal?: AbortSignal },
+  ): Promise<string> => {
+    let selected = handoffActor(mission, actor)
+    let reason = selected === actor ? undefined : "Continue the saved authenticated handoff route."
+    let currentPrompt = reason ? handoffPrompt(mission, prompt, stage, taskId) : prompt
+    const redirect = async (error: unknown): Promise<boolean> => {
+      checkAbort()
+      let next: Awaited<ReturnType<typeof prepareHandoff>>
+      try {
+        next = await prepareHandoff(mission, ports, selected, stage, taskId, error)
+      } catch (failure) {
+        // Exhausted providers and spent continuation allowances survive a stopped supervisor.
+        await persist("Handoff checkpoint could not be saved. Restore writable mission storage before resuming.")
+        throw failure
+      }
+      if (!next) return false
+      selected = next.actor
+      reason = next.reason
+      currentPrompt = handoffPrompt(mission, prompt, stage, taskId)
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "handoff",
+        message: reason,
+        ...(taskId ? { taskId } : {}),
+      })
+      await persist("Handoff checkpoint could not be saved. Restore writable mission storage before resuming.")
+      return true
+    }
+    for (;;) {
+      if (mission.handoff?.exhaustedAgents.some((vendor) => vendor === selected.agentType))
+        await redirect(new Error("usage_limit_reached"))
+      try {
+        return await runOnce(selected, currentPrompt, stage, taskId, reason ? { ...context, handoff: reason } : context)
+      } catch (error) {
+        if (error instanceof ReadOnlyViolation || !(await redirect(error))) throw error
+      }
+    }
   }
 }

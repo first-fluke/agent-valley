@@ -18,6 +18,7 @@ import type {
   Review,
   Verification,
 } from "./contracts"
+import type { HandoffState } from "./handoff-contract"
 import type { MetricSourcePolicy } from "./metric-source-policy"
 import type { PreparedOmaActor } from "./oma-actor"
 import type { ChiefOperatingPolicy, ChiefOperations } from "./operations"
@@ -80,6 +81,7 @@ export interface Mission {
   goalVerification?: GoalVerificationResult
   executionPolicy?: ExecutionPolicy
   execution?: ExecutionState
+  handoff?: HandoffState
   metricSourcePolicy?: MetricSourcePolicy
   observationStartedAt?: string
   metricBaselineIds?: Record<string, string>
@@ -89,6 +91,8 @@ export interface Mission {
 }
 
 export interface ChiefPorts {
+  /** Probe supported local CLI installation and authentication; never starts a model run. */
+  discoverReadyAgents?(): Promise<string[]>
   /** Validate and bind required OMA inputs before reserving a run or dispatching an external effect. */
   prepareWork?(
     persona: Persona,
@@ -100,7 +104,13 @@ export interface ChiefPorts {
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal; omaActor?: PreparedOmaActor },
+    context?: {
+      taskId?: string
+      workspace?: Workspace
+      signal?: AbortSignal
+      omaActor?: PreparedOmaActor
+      handoff?: string
+    },
   ): Promise<string>
   verify(mission: Mission): Promise<{ ok: boolean; output?: string }>
   save(mission: Mission): Promise<void>

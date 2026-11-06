@@ -90,6 +90,7 @@ export class ChiefRuntime {
     private readonly onStage: (stage: string, persona: Persona) => void = () => {},
     private readonly skillMatrixDeps?: SkillMatrixDeps,
     runner?: AgentRunnerPort,
+    private readonly discoverReadyAgents?: () => Promise<string[]>,
   ) {
     this.localExecution = runner === undefined
     this.runner = runner ?? createLocalMissionRunner(store)
@@ -98,6 +99,7 @@ export class ChiefRuntime {
   ports(): ChiefPorts {
     return {
       signal: this.signal,
+      ...(this.discoverReadyAgents ? { discoverReadyAgents: this.discoverReadyAgents } : {}),
       prepareWork: (persona, mission, context) => this.prepareWork(persona, mission, context),
       save: (mission) => this.store.save(mission),
       fingerprint: async (mission) => {
@@ -191,7 +193,13 @@ export class ChiefRuntime {
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal; omaActor?: PreparedOmaActor },
+    context?: {
+      taskId?: string
+      workspace?: Workspace
+      signal?: AbortSignal
+      omaActor?: PreparedOmaActor
+      handoff?: string
+    },
   ): Promise<string> {
     return withMissionDeadline(mission, context?.signal ?? this.signal, (signal) =>
       this.executeAgent(persona, prompt, mission, stage, { ...context, signal }),
@@ -203,7 +211,13 @@ export class ChiefRuntime {
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: { taskId?: string; workspace?: Workspace; signal?: AbortSignal; omaActor?: PreparedOmaActor },
+    context?: {
+      taskId?: string
+      workspace?: Workspace
+      signal?: AbortSignal
+      omaActor?: PreparedOmaActor
+      handoff?: string
+    },
   ): Promise<string> {
     const signal = context?.signal ?? this.signal
     const workspace = context?.workspace ?? mission.workspace
@@ -235,7 +249,9 @@ export class ChiefRuntime {
             compatibilityPolicy,
             workspace.path,
             persona.skills,
-            workActorCandidates(mission, persona, compatibilityPolicy.mode === "require"),
+            context?.handoff
+              ? [{ actorType: persona.agentType, model: persona.model }]
+              : workActorCandidates(mission, persona, compatibilityPolicy.mode === "require"),
             this.skillMatrixDeps,
             signal,
           )
@@ -251,7 +267,11 @@ export class ChiefRuntime {
         message: `${compatibilityPolicy.mode}: ${compatibility.routes.map((entry) => `${entry.actorType}/${entry.model ?? "native default"} ${entry.status}: ${entry.reason}`).join("; ")} Scope: ${compatibility.scope}.`,
         ...(context?.taskId ? { taskId: context.taskId } : {}),
       })
-    const route = stage === "work" ? selectWorkActor(mission, persona, context?.taskId, compatibleRoutes) : undefined
+    const route = context?.handoff
+      ? { actor: persona, reason: context.handoff }
+      : stage === "work"
+        ? selectWorkActor(mission, persona, context?.taskId, compatibleRoutes)
+        : undefined
     persona = route?.actor ?? persona
     if (compatibility && compatibilityPolicy) {
       if (compatibilityPolicy.mode === "require")

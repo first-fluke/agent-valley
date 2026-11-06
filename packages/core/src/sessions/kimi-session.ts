@@ -67,6 +67,7 @@
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
+import { captureExhaustion, exhaustionMessage, nativeErrorMessage } from "./native-failure"
 
 export const KIMI_COMMAND = "kimi"
 
@@ -130,6 +131,7 @@ export class KimiSession extends BaseSession {
   private async readStream(): Promise<void> {
     const proc = this.process
     if (!proc?.stdout) return
+    const stderrExhaustion = captureExhaustion(proc.stderr)
     const flush = readJsonLines(
       proc.stdout,
       (event) => this.handleEvent(event),
@@ -151,9 +153,11 @@ export class KimiSession extends BaseSession {
     }
     this.emitError(
       exitCode === -1 ? "TIMEOUT" : "CRASH",
-      exitCode === 0
-        ? "kimi exited without a result event. Check CLI authentication and update Kimi, then retry."
-        : `kimi exited with code ${exitCode}. Run av doctor and check Kimi authentication.`,
+      stderrExhaustion() ??
+        exhaustionMessage(this.rawTail) ??
+        (exitCode === 0
+          ? "kimi exited without a result event. Check CLI authentication and update Kimi, then retry."
+          : `kimi exited with code ${exitCode}. Run av doctor and check Kimi authentication.`),
       exitCode !== 1,
     )
   }
@@ -184,6 +188,14 @@ export class KimiSession extends BaseSession {
 
       case "result":
         this.handleResultEvent(e)
+        break
+
+      case "error":
+        this.emitError(
+          "CRASH",
+          nativeErrorMessage(e, "kimi reported an error. Check its provider access and retry."),
+          true,
+        )
         break
 
       case "system":
@@ -257,7 +269,7 @@ export class KimiSession extends BaseSession {
     const isError = e.is_error === true || e.isError === true
 
     if (isError) {
-      this.emitError("CRASH", result || "kimi reported an error result", true)
+      this.emitError("CRASH", nativeErrorMessage(e, "kimi reported an error result"), true)
       return
     }
 

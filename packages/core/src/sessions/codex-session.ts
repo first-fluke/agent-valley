@@ -7,8 +7,16 @@
 
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
-import { closeInputAndJoin, extractTokenUsage, type JsonRpcRequest, type JsonRpcResponse } from "./codex-protocol"
+import {
+  closeInputAndJoin,
+  codexExitError,
+  extractCodexErrorMessage,
+  extractTokenUsage,
+  type JsonRpcRequest,
+  type JsonRpcResponse,
+} from "./codex-protocol"
 import { readJsonLines } from "./json-lines"
+import { captureExhaustion } from "./native-failure"
 
 export class CodexSession extends BaseSession {
   private rpcId = 0
@@ -322,18 +330,16 @@ export class CodexSession extends BaseSession {
     })
   }
 
-  private readStream(): void {
-    const proc = this.process
+  private readStream(proc = this.process): void {
     if (!proc?.stdout) return
+    const stderrExhaustion = captureExhaustion(proc.stderr)
     const flush = readJsonLines(proc.stdout, (message) => {
       if (typeof message === "object" && message !== null) this.handleMessage(message as JsonRpcResponse)
     })
     proc.once("error", (error) => this.rejectPending(error))
     void waitForStreamCompletion(proc).then(({ exitCode }) => {
       flush()
-      const error = new Error(
-        `Codex app-server exited (${proc.signalCode ?? exitCode ?? "unknown"}). Run av doctor and check Codex authentication.`,
-      )
+      const error = codexExitError(proc, exitCode, stderrExhaustion())
       this.rejectPending(error)
       if (!this.disposing && !this.terminalEventReceived) this.emitError("CRASH", error.message, true)
     })
@@ -357,7 +363,7 @@ export class CodexSession extends BaseSession {
       this.pendingResolvers.delete(msg.id)
       clearTimeout(resolver.timer)
       if (msg.error) {
-        resolver.reject(new Error(msg.error.message))
+        resolver.reject(new Error(extractCodexErrorMessage(msg.error, msg.error.message)))
       } else {
         resolver.resolve(msg.result)
       }
@@ -457,8 +463,10 @@ export class CodexSession extends BaseSession {
         if (turn?.status !== "completed") {
           this.emitError(
             "CRASH",
-            turn?.error?.message ??
+            extractCodexErrorMessage(
+              turn?.error,
               `Codex turn ${turn?.status ?? "has no completion status"}. Check the agent output and retry.`,
+            ),
             true,
           )
           break
@@ -480,8 +488,7 @@ export class CodexSession extends BaseSession {
           this.emit({ type: "heartbeat", timestamp: new Date().toISOString() })
           break
         }
-        const error = msg.params?.error as { message?: string } | undefined
-        const errMsg = error?.message ?? (msg.params?.message as string | undefined) ?? "Unknown codex error"
+        const errMsg = extractCodexErrorMessage(msg.params?.error ?? msg.params, "Unknown codex error")
         this.emitError("UNKNOWN", errMsg, true)
         break
       }

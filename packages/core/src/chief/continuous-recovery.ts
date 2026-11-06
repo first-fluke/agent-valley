@@ -88,6 +88,11 @@ export function automaticMissionRecovery(
     return stop(state?.pauseReason ?? "The immutable mission contract or checkpoint has an integrity failure.")
   if (String(state?.failureKind) === "chief-unavailable")
     return stop(state?.pauseReason ?? "The selected Chief is unavailable; its identity and checkpoint were retained.")
+  if (state?.failureKind === "handoff-unavailable")
+    return stop(
+      state.pauseReason ??
+        "No eligible exhaustion handoff remains. Restore provider availability and explicitly retry the saved order.",
+    )
   const lastDecision = mission.supervision?.decisions.at(-1)
   // Only this saved Chief decision authorizes another read-only observation of an unknown effect.
   const unknownChiefWait = scheduledChiefWait(mission) && !!mission.supervision?.pendingRecovery

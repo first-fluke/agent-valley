@@ -12,11 +12,13 @@
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
+import { captureExhaustion } from "./native-failure"
 
 export class ClaudeSession extends BaseSession {
   protected filesChanged: string[] = []
   protected readonly vendor: string = "claude"
   private started = false
+  protected nativeError: string | undefined
 
   async start(config: AgentConfig): Promise<void> {
     this.config = config
@@ -58,6 +60,7 @@ export class ClaudeSession extends BaseSession {
     }
 
     this.filesChanged = []
+    this.nativeError = undefined
     this.resetNativeState()
     this.startedAt = Date.now()
 
@@ -89,9 +92,11 @@ export class ClaudeSession extends BaseSession {
   private async readStream(): Promise<void> {
     const proc = this.process
     if (!proc?.stdout) return
+    const stderrExhaustion = captureExhaustion(proc.stderr)
     const flush = readJsonLines(proc.stdout, (event) => this.handleEvent(event))
     const { exitCode: code } = await waitForStreamCompletion(proc)
     flush()
+    this.nativeError ??= stderrExhaustion()
     this.finalizeNativeExit(code)
   }
 
@@ -100,9 +105,10 @@ export class ClaudeSession extends BaseSession {
     const exitCode = code ?? -1
     this.emitError(
       exitCode === -1 ? "TIMEOUT" : "CRASH",
-      exitCode === 0
-        ? `${this.vendor} exited without a result event. Check CLI authentication and update the CLI, then retry.`
-        : `${this.vendor} exited with code ${exitCode}. Run av doctor and check CLI authentication.`,
+      this.nativeError ??
+        (exitCode === 0
+          ? `${this.vendor} exited without a result event. Check CLI authentication and update the CLI, then retry.`
+          : `${this.vendor} exited with code ${exitCode}. Run av doctor and check CLI authentication.`),
       exitCode !== 1,
     )
   }
@@ -115,6 +121,15 @@ export class ClaudeSession extends BaseSession {
       case "assistant": {
         const msg = e.message as Record<string, unknown> | undefined
         const content = msg?.content as Array<Record<string, unknown>> | undefined
+        if (typeof e.error === "string") {
+          const text = Array.isArray(content)
+            ? content
+                .filter((block) => block.type === "text" && typeof block.text === "string")
+                .map((block) => block.text)
+                .join("\n")
+            : ""
+          this.nativeError = [e.error, text].filter(Boolean).join(": ").slice(0, 10_240)
+        }
         if (Array.isArray(content)) {
           for (const block of content) {
             if (block.type === "text" && typeof block.text === "string") {
@@ -150,12 +165,19 @@ export class ClaudeSession extends BaseSession {
       }
 
       case "result": {
-        const result = (e.result as string | undefined) ?? ""
+        const result = typeof e.result === "string" ? e.result : ""
         const durationMs = (e.duration_ms as number | undefined) ?? this.elapsedMs()
         const isError = e.is_error === true
 
         if (isError) {
-          this.emitError("CRASH", result, true)
+          const errors = Array.isArray(e.errors) ? e.errors.filter((error) => typeof error === "string") : []
+          const message = [...new Set([result, ...errors, this.nativeError].filter(Boolean))].join("\n")
+          this.emitError(
+            "CRASH",
+            message.slice(0, 10_240) ||
+              String(e.subtype ?? "Claude execution failed. Check the agent output and retry."),
+            true,
+          )
         } else {
           this.emit({
             type: "complete",

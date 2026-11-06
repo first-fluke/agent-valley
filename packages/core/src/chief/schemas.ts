@@ -31,6 +31,7 @@ import { refineMissionContainerState } from "./container-observation-state"
 import { CDO_ROLE } from "./design-lead"
 import { executionPolicySchema, executionStateSchema } from "./execution"
 import { validateFinalReview } from "./goal-evidence"
+import { handoffStateSchema } from "./handoff-contract"
 import { CMO_ROLE } from "./marketing-lead"
 import { metricSourcePolicySchema } from "./metric-source-policy"
 import { assignFixedActorSkills, requiresOmaActor } from "./oma-actor"
@@ -150,6 +151,7 @@ export const missionSchema = z
     goalVerification: goalVerificationResultSchema.optional(),
     executionPolicy: executionPolicySchema.optional(),
     execution: executionStateSchema.optional(),
+    handoff: handoffStateSchema.optional(),
     metricSourcePolicy: metricSourcePolicySchema.optional(),
     observationStartedAt: z.iso.datetime().optional(),
     metricBaselineIds: z.record(z.string().min(1).max(120), z.string().min(1).max(120)).optional(),

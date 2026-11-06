@@ -107,6 +107,8 @@ live in `packages/core/src/domain/ports/`.
 2. **Validate at the boundary** — External inputs (issue body, API responses, env vars) are validated only at system entry points. Trusted internally.
 3. **Team standard tools** — Enforce stack-specific linters. Agents use the same tools. (See `docs/architecture/enforcement/`)
 
+**Native agent recovery:** Reuse `packages/core/src/domain/agent-exhaustion.ts` for usage/context exhaustion classification and `packages/core/src/sessions/native-failure.ts` for bounded native error capture. Mission handoffs retain checkpoints and spent budgets; see [Chief Director orders](docs/guides/chief-missions.md).
+
 **Error message principle:** Include fix instructions, not just warnings. An agent must be able to self-correct from the error message alone.
 
 **Coverage threshold (v0.2+):** `lines >= 80%`, `branches >= 70%`, `functions >= 80%`, `statements >= 80%`. Enforced by `validate.sh` Check 5/5 via `bun run test:coverage` (vitest v8 provider). Thresholds live in `vitest.config.ts:coverage.thresholds`. Local opt-out for fast iteration: `SKIP_COVERAGE=1`; CI must not skip.

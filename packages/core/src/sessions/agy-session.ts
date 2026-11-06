@@ -20,6 +20,7 @@
 
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
+import { captureExhaustion, exhaustionMessage } from "./native-failure"
 
 // ── CLI surface (verified against `agy --help` v1.1.3) ─────────────────────
 
@@ -203,6 +204,7 @@ export class AgySession extends BaseSession {
     }
 
     const decoder = new TextDecoder()
+    const stderrExhaustion = captureExhaustion(proc.stderr)
     let buffer = ""
 
     proc.stdout.on("data", (chunk: Buffer) => {
@@ -233,7 +235,11 @@ export class AgySession extends BaseSession {
       const result = this.buildRunResult(this.tailBuffer, this.filesChanged)
       this.emit({ type: "complete", result })
     } else {
-      this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `agy exited with code ${exitCode}`, true)
+      this.emitError(
+        exitCode === -1 ? "TIMEOUT" : "CRASH",
+        stderrExhaustion() ?? exhaustionMessage(this.tailBuffer) ?? `agy exited with code ${exitCode}`,
+        true,
+      )
     }
   }
 

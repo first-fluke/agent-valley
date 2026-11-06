@@ -38,14 +38,18 @@ describe("automatic Chief recovery eligibility", () => {
     expect(mission).toEqual(before)
   })
 
-  it.each(["budget", "interrupted", "unknown-effect", "chief-unavailable", "integrity"] as const)(
-    "protects %s without automatic replay",
-    (kind) => {
-      const mission = checkpoint()
-      mission.execution.failureKind = kind
-      expect(automaticMissionRecovery(mission, now).retry).toBe(false)
-    },
-  )
+  it.each([
+    "budget",
+    "interrupted",
+    "unknown-effect",
+    "chief-unavailable",
+    "handoff-unavailable",
+    "integrity",
+  ] as const)("protects %s without automatic replay", (kind) => {
+    const mission = checkpoint()
+    mission.execution.failureKind = kind
+    expect(automaticMissionRecovery(mission, now).retry).toBe(false)
+  })
 
   it("protects unknown native usage, exhausted calls, duration, rounds and disabled recovery", () => {
     const mission = checkpoint()

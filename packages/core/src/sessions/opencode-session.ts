@@ -108,6 +108,7 @@
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
+import { captureExhaustion, exhaustionMessage, nativeErrorMessage } from "./native-failure"
 
 export const OPENCODE_COMMAND = "opencode"
 
@@ -212,6 +213,7 @@ export class OpencodeSession extends BaseSession {
   private async readStream(): Promise<void> {
     const proc = this.process
     if (!proc?.stdout) return
+    const stderrExhaustion = captureExhaustion(proc.stderr)
     const flush = readJsonLines(
       proc.stdout,
       (event) => this.handleEvent(event),
@@ -234,7 +236,11 @@ export class OpencodeSession extends BaseSession {
         )
         return
       }
-      this.emitError(exitCode === -1 ? "TIMEOUT" : "CRASH", `opencode exited with code ${exitCode}`, exitCode !== 1)
+      this.emitError(
+        exitCode === -1 ? "TIMEOUT" : "CRASH",
+        stderrExhaustion() ?? exhaustionMessage(this.rawTail) ?? `opencode exited with code ${exitCode}`,
+        exitCode !== 1,
+      )
       return
     }
     this.emit({
@@ -273,11 +279,9 @@ export class OpencodeSession extends BaseSession {
     const e = event as Record<string, unknown>
     const type = typeof e.type === "string" ? e.type : undefined
     if (type === "error" || e.is_error === true || e.isError === true) {
-      const error = e.error as { message?: string; data?: { message?: string } } | string | undefined
-      const detail = typeof error === "string" ? error : (error?.message ?? error?.data?.message)
       this.emitError(
         "CRASH",
-        detail ?? String(e.result ?? "OpenCode reported an error. Check the provider credentials and retry."),
+        nativeErrorMessage(e, "OpenCode reported an error. Check the provider credentials and retry."),
         true,
       )
       return

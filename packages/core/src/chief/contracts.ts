@@ -165,6 +165,7 @@ export const executionStateSchema = z.strictObject({
       "service-shutdown",
       "chief-wait",
       "chief-unavailable",
+      "handoff-unavailable",
       "integrity",
     ])
     .optional(),
