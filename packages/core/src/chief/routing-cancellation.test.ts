@@ -70,7 +70,7 @@ describe("routing after a proven native operator cancellation", () => {
       const { mission, run, worker } = routingCancellationFixture()
       run.evidence = evidence
       expect(routeEvidence(mission).find((route) => route.actorType === "opencode")?.samples).toBe(3)
-      expect(() => selectWorkActor(mission, worker, "onboarding")).toThrow("minimum success rate")
+      expect(selectWorkActor(mission, worker, "onboarding").actor.agentType).toBe("qwen")
     },
   )
 
@@ -128,7 +128,13 @@ describe("routing after a proven native operator cancellation", () => {
       })
 
     expect(routeEvidence(mission).find((route) => route.actorType === "opencode")?.samples).toBeGreaterThanOrEqual(3)
-    expect(() => selectWorkActor(mission, worker, "onboarding")).toThrow("minimum success rate")
+    if (
+      ["unknown", "running", "no-finish", "external-effect", "overlapping-unknown", "invalid-run-date"].includes(
+        condition,
+      )
+    )
+      expect(() => selectWorkActor(mission, worker, "onboarding")).toThrow("minimum success rate")
+    else expect(selectWorkActor(mission, worker, "onboarding").actor.agentType).toBe("qwen")
   })
 
   it("retains an earlier actual failed route for this task after a later cancelled retry", () => {

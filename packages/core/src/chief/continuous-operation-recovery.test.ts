@@ -157,37 +157,42 @@ describe("explicitly resumed child recovery reporting", () => {
     },
   )
 
-  it.each(["paused", "running", "accepting"] as const)(
-    "updates stale cancellation wording before observing an owned child from %s without lifting protection",
-    async (phase) => {
-      const { record, ports, child, saved } = resumedChild()
-      record.phase = phase
-      if (phase !== "paused") {
-        record.resumePhase = undefined
-        record.pauseKind = undefined
-      }
-      let release!: (value: typeof child) => void
-      ports.findMission = vi.fn(
-        () =>
-          new Promise<typeof child>((resolve) => {
-            release = resolve
-          }),
-      )
-      ports.runMission = vi.fn(async () => {
-        child.status = "completed"
-        return child
-      })
-      const running = runContinuousOperation(record, ports)
-      await vi.waitFor(() => expect(ports.findMission).toHaveBeenCalledOnce())
+  it.each(
+    (["paused", "running", "accepting"] as const).flatMap((phase) =>
+      [
+        "The operation was cancelled; automatic recovery is stopped.",
+        "The Chief stopped recovery: No eligible routing candidate",
+      ].map((reason) => ({ phase, reason })),
+    ),
+  )("refreshes $phase recovery reporting before observing the child: $reason", async ({ phase, reason }) => {
+    const { record, ports, child, saved } = resumedChild()
+    record.phase = phase
+    if (record.recovery) record.recovery.reason = reason
+    if (phase !== "paused") {
+      record.resumePhase = undefined
+      record.pauseKind = undefined
+    }
+    let release!: (value: typeof child) => void
+    ports.findMission = vi.fn(
+      () =>
+        new Promise<typeof child>((resolve) => {
+          release = resolve
+        }),
+    )
+    ports.runMission = vi.fn(async () => {
+      child.status = "completed"
+      return child
+    })
+    const running = runContinuousOperation(record, ports)
+    await vi.waitFor(() => expect(ports.findMission).toHaveBeenCalledOnce())
 
-      expect(saved.at(-1)?.recovery).toMatchObject({ attempts: 3, failedAttempts: 3, disposition: "protected" })
-      expect(saved.at(-1)?.phase).toBe(phase === "paused" ? "running" : phase)
-      expect(saved.at(-1)?.recovery?.reason).toContain("observing the original child checkpoint")
-      expect(ports.runMission).not.toHaveBeenCalled()
-      release(child)
-      await running
-    },
-  )
+    expect(saved.at(-1)?.recovery).toMatchObject({ attempts: 3, failedAttempts: 3, disposition: "protected" })
+    expect(saved.at(-1)?.phase).toBe(phase === "paused" ? "running" : phase)
+    expect(saved.at(-1)?.recovery?.reason).toContain("observing the original child checkpoint")
+    expect(ports.runMission).not.toHaveBeenCalled()
+    release(child)
+    await running
+  })
 
   it.each(["paused", "failed"] as const)(
     "keeps a still-interrupted %s child protected instead of forcing a retry",

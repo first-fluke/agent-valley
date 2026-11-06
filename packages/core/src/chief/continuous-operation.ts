@@ -220,11 +220,10 @@ export async function runContinuousOperation(
     ["paused", "running", "accepting"].includes(operation.phase) &&
     operation.recovery?.target === "child" &&
     operation.recovery.checkpointId === operation.currentMissionId &&
-    operation.recovery.disposition === "protected" &&
-    operation.recovery.reason === "The operation was cancelled; automatic recovery is stopped."
+    operation.recovery.disposition === "protected"
   if (observingResumedChild && operation.recovery)
     operation.recovery.reason =
-      "Operation resumed; observing the original child checkpoint before deciding recovery. Its saved protections and spent limits remain in force."
+      "Operation resumed; observing the original child checkpoint before deciding recovery. Previous protection evidence remains in the child checkpoint; its protections and spent limits remain in force."
   if (operation.phase === "paused") {
     operation.phase =
       operation.resumePhase ?? (operation.currentMissionId ? "running" : operation.nextRunAt ? "waiting" : "deciding")

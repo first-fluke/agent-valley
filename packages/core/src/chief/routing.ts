@@ -102,10 +102,6 @@ export function selectWorkActor(
       observed.successes / observed.samples >= routing.minSuccessRate
     )
   })
-  if (!eligible.length)
-    throw new Error(
-      "No routing candidate meets the measured minimum success rate. Inspect real failures or configure a new candidate before starting another mission.",
-    )
   const qualified = eligible
     .map((candidate) => ({ candidate, evidence: evidence.find((item) => routeKey(item) === routeKey(candidate)) }))
     .filter(
@@ -120,11 +116,14 @@ export function selectWorkActor(
     .sort((a, b) => a.evidence.successfulDeliverableCostUsd - b.evidence.successfulDeliverableCostUsd)
   const measured = qualified.at(0)
   const initial = measured?.candidate ?? [...eligible].sort((a, b) => price(a) - price(b)).at(0)
-  if (!initial) throw new Error("Restore a ready work routing candidate before continuing this mission.")
   const cancelled = cancelledWorkRunProofs(mission)
   const taskRuns = (mission.operations?.runs ?? []).filter(
     (run) => run.stage === "work" && run.taskId === taskId && !cancelled.has(run.runId),
   )
+  if (hasUnreviewedRoutingProbe(mission, taskId, taskRuns))
+    throw new Error(
+      "This task has an unreviewed bounded routing probe. Resume its retained review or obtain a later Chief repair decision before dispatching more work.",
+    )
   const failed = new Set<string>()
   for (let i = taskRuns.length - 1; i >= 0; i--) {
     const run = taskRuns[i]
@@ -133,14 +132,23 @@ export function selectWorkActor(
     if (run.outcome === "failed" || run.outcome === "rejected") failed.add(routeKey(run))
   }
   const ordered = [
-    initial,
-    ...eligible.filter((item) => routeKey(item) !== routeKey(initial)).sort((a, b) => price(a) - price(b)),
+    ...(initial ? [initial] : []),
+    ...eligible.filter((item) => !initial || routeKey(item) !== routeKey(initial)).sort((a, b) => price(a) - price(b)),
   ]
   const selected = ordered.find((item) => !failed.has(routeKey(item)))
-  if (!selected)
+  if (!selected) {
+    const probe = boundedWorkRoute(mission, taskId, compatible, evidence, taskRuns, failed, routeKey)
+    if (probe)
+      return {
+        actor: { ...actor, agentType: probe.candidate.actorType, model: probe.candidate.model },
+        reason: probe.reason,
+      }
     throw new Error(
-      "Every configured routing candidate failed this task. Inspect recorded reviews and work evidence before resuming; configure a new candidate or a new mission.",
+      eligible.length
+        ? "Every configured routing candidate failed this task. Its bounded probes are spent; obtain a Chief repair decision or reconcile the recorded failures before continuing."
+        : "No routing candidate meets the measured minimum success rate and this task has no remaining bounded probe. Inspect its saved failures and Chief repair checkpoint before continuing.",
     )
+  }
   const reason = failed.size
     ? `Escalated after ${failed.size} actually rejected/failed route(s) for this task.`
     : measured
@@ -169,4 +177,5 @@ export function recordTaskVerdict(mission: Mission, taskId: string, passed: bool
   run.fingerprint = mission.fingerprint
 }
 
+import { boundedWorkRoute, hasUnreviewedRoutingProbe } from "./bounded-work-routing"
 import { unavailableProviders } from "./handoff-contract"
