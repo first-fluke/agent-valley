@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.8](https://github.com/first-fluke/agent-valley/compare/v4.8.7...v4.8.8) (2026-11-06)
+
+
+### Bug Fixes
+
+* **chief:** align planning responses with the shared json limit ([a9cebe7](https://github.com/first-fluke/agent-valley/commit/a9cebe788e537d24326efd3c8a192c03940c780f))
+
 ## [4.8.7](https://github.com/first-fluke/agent-valley/compare/v4.8.6...v4.8.7) (2026-11-06)
 
 
