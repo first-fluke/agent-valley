@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.1](https://github.com/first-fluke/agent-valley/compare/v4.8.0...v4.8.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **chief:** preserve routes after operator interruption ([c17c1d1](https://github.com/first-fluke/agent-valley/commit/c17c1d1b2329883753157a49daf118c4ee75020d))
+
 ## [4.8.0](https://github.com/first-fluke/agent-valley/compare/v4.7.0...v4.8.0) (2026-11-06)
 
 
