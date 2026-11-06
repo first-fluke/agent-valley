@@ -78,6 +78,8 @@ export const operatingRunSchema = z.strictObject({
   outcome: z.enum(["pending", "passed", "rejected", "failed"]),
   /** Execution termination is separate from the independent review verdict. */
   executionState: z.enum(["running", "settled", "unknown"]).optional(),
+  /** Actual native transport result, independent of receipt validation and acceptance review. */
+  nativeOutcome: z.enum(["passed", "failed", "cancelled"]).optional(),
   /** Absent on legacy records, whose executions were always local processes. */
   executionRecovery: z.enum(["local-process", "reconcile"]).optional(),
   /** Framework-attested cancellation; usage remains spent and the native outcome stays failed. */
@@ -95,6 +97,20 @@ export const operatingRunSchema = z.strictObject({
 export type OperatingRun = z.infer<typeof operatingRunSchema>
 export type OperationRun = OperatingRun
 
+export const providerHealthSchema = z.strictObject({
+  consecutiveFailures: z.number().int().nonnegative(),
+  lastOutcomeAt: z.iso.datetime(),
+  cooldownUntil: z.iso.datetime().optional(),
+})
+export type ProviderHealth = z.infer<typeof providerHealthSchema>
+
+export const providerHealthEvidenceSchema = z.strictObject({
+  actorType,
+  model: text.optional(),
+  providerHealth: providerHealthSchema,
+})
+export type ProviderHealthEvidence = z.infer<typeof providerHealthEvidenceSchema>
+
 export const routeEvidenceSchema = z
   .strictObject({
     actorType,
@@ -103,6 +119,7 @@ export const routeEvidenceSchema = z
     successes: z.number().int().nonnegative(),
     totalCostUsd: amount.nullable(),
     successfulDeliverableCostUsd: amount.nullable(),
+    providerHealth: providerHealthSchema.optional(),
   })
   .refine((entry) => entry.successes <= entry.samples, "Route successes cannot exceed actual samples.")
 export type RouteEvidence = z.infer<typeof routeEvidenceSchema>

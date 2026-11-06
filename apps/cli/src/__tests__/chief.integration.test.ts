@@ -467,7 +467,18 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect(protectedResume.status, protectedResume.error).toBe("paused")
     expect(protectedResume.execution).toEqual(spent)
     expect(await calls()).toEqual(beforeResume)
-    const resumed = await runOrder(undefined, { resume: failed.id, retry: true }, root)
+    const waiting = await runOrder(undefined, { resume: failed.id, retry: true }, root)
+    expect(waiting.status, waiting.error).toBe("waiting")
+    expect(waiting.execution?.failureKind).toBe("actor-cooldown")
+    const retryAt = Date.parse(waiting.execution?.nextRunAt ?? "")
+    expect(Number.isFinite(retryAt)).toBe(true)
+    const clock = vi.spyOn(Date, "now").mockReturnValue(retryAt + 1)
+    let resumed: typeof waiting
+    try {
+      resumed = await runOrder(undefined, { resume: failed.id }, root)
+    } finally {
+      clock.mockRestore()
+    }
     expect(resumed.status, resumed.error).toBe("completed")
     expect(resumed.id).toBe(failed.id)
     expect(resumed.personas.find((actor) => actor.id === resumed.chiefId)?.model).toBe("selected-chief-model")

@@ -44,46 +44,59 @@ export function createMissionRun(
     if (context?.handoff) recordHandoffReview(mission, actor, stage, taskId)
     checkAbort()
     assertContract()
-    reserveExecutionRun(mission)
-    if (mission.executionPolicy) {
-      await persist("Actor budget reservation could not be saved. Restore writable mission storage before resuming.")
+    const reserve = async (claim: () => void = () => {}) => {
+      reserveExecutionRun(mission)
+      // Admission claims the actual route before the first asynchronous checkpoint.
+      claim()
+      if (mission.executionPolicy)
+        await persist("Actor budget reservation could not be saved. Restore writable mission storage before resuming.")
     }
+    if (!ports.deferredDispatchAdmission) await reserve()
     const before = await ports.fingerprint(mission)
     checkAbort()
     assertContract()
-    if (effect) {
-      const previous = effect.effectState ?? "not-started"
-      effect.effectState = "running"
-      try {
-        await persist(
-          "External dispatch checkpoint could not be saved. The Actor was not invoked and the effect remains not started.",
-        )
-      } catch (error) {
-        effect.effectState = previous
-        throw error
+    let dispatchAdmitted = false
+    const beforeDispatch = async (claim: () => void = () => {}) => {
+      checkAbort()
+      assertContract()
+      if (ports.deferredDispatchAdmission) await reserve(claim)
+      if (effect) {
+        const previous = effect.effectState ?? "not-started"
+        effect.effectState = "running"
+        try {
+          await persist(
+            "External dispatch checkpoint could not be saved. The Actor was not invoked and the effect remains not started.",
+          )
+        } catch (error) {
+          effect.effectState = previous
+          throw error
+        }
+        try {
+          checkAbort()
+        } catch (error) {
+          effect.effectState = previous
+          await persist(
+            "The Actor was not invoked, but its cancelled dispatch checkpoint could not be saved. The effect remains not started in the retained coordinator state.",
+          )
+          throw error
+        }
       }
-      try {
-        checkAbort()
-      } catch (error) {
-        effect.effectState = previous
-        await persist(
-          "The Actor was not invoked, but its cancelled dispatch checkpoint could not be saved. The effect remains not started in the retained coordinator state.",
-        )
-        throw error
-      }
+      dispatchAdmitted = true
     }
+    if (!ports.deferredDispatchAdmission) await beforeDispatch()
     let output: string
     try {
       output =
-        taskId || context || omaActor
+        taskId || context || omaActor || ports.deferredDispatchAdmission
           ? await ports.runAgent(actor, prompt, mission, stage, {
               ...context,
               ...(taskId ? { taskId } : {}),
               ...(omaActor ? { omaActor } : {}),
+              ...(ports.deferredDispatchAdmission ? { beforeDispatch } : {}),
             })
           : await ports.runAgent(actor, prompt, mission, stage)
     } catch (error) {
-      if (effect) effect.effectState = "unknown"
+      if (effect && dispatchAdmitted) effect.effectState = "unknown"
       assertNoUncertainExecution(mission)
       mission.fingerprint = await ports.fingerprint(mission)
       assertContract()

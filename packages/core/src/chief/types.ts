@@ -90,7 +90,19 @@ export interface Mission {
   containerObservationVerifiedFingerprint?: string
 }
 
+export interface ChiefRunContext {
+  taskId?: string
+  workspace?: Workspace
+  signal?: AbortSignal
+  omaActor?: PreparedOmaActor
+  handoff?: string
+  /** Invoke claim synchronously after reserving a call, before awaiting its durable checkpoint. */
+  beforeDispatch?: (claim: () => void) => Promise<void>
+}
+
 export interface ChiefPorts {
+  /** The native runtime admits the actual route before reserving a model call. */
+  deferredDispatchAdmission?: boolean
   /** Probe supported local CLI installation and authentication; never starts a model run. */
   discoverReadyAgents?(): Promise<string[]>
   /** Read native catalog metadata; never probes availability by starting a model run. */
@@ -110,13 +122,7 @@ export interface ChiefPorts {
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: {
-      taskId?: string
-      workspace?: Workspace
-      signal?: AbortSignal
-      omaActor?: PreparedOmaActor
-      handoff?: string
-    },
+    context?: ChiefRunContext,
   ): Promise<string>
   verify(mission: Mission): Promise<{ ok: boolean; output?: string }>
   save(mission: Mission): Promise<void>

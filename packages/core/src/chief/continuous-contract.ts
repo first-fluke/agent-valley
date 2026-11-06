@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { containerObservationPolicySchema, containerObservationSnapshotSchema } from "./container-observation-policy"
 import { validateContainerObservation } from "./container-observation-state"
+import { providerHealthEvidenceSchema } from "./operations"
 import { sourceIntegrationPolicySchema, sourceIntegrationSummarySchema } from "./source-integration-contract"
 
 export const operationIdSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/)
@@ -63,6 +64,7 @@ export const operationSchema = z
     repositoryRoot: pathSchema,
     charter: z.string().trim().min(1).max(32_000),
     settings: z.record(z.string().min(1).max(80), z.union([z.string().max(32_000), z.boolean()])),
+    actorHealth: z.array(providerHealthEvidenceSchema).max(100).optional(),
     phase: z.enum(["deciding", "running", "accepting", "waiting", "paused", "completed"]),
     pauseKind: z.enum(["interrupted", "blocked", "service-shutdown"]).optional(),
     createdAt: timestampSchema,

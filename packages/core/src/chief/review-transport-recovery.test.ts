@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { ACTOR_COOLDOWN_BASE_MS } from "./actor-health"
 import { coordinate } from "./coordinator"
 import { executionPolicySchema } from "./execution"
 import { brief, fixture, plan, rejected } from "./goal-supervision.fixture"
@@ -79,6 +80,11 @@ describe("native review failures preserve successful work", () => {
     expect(value.mission.tasks[0]?.repairRound ?? 0).toBe(0)
     const saved = structuredClone(value.snapshots.at(-1) as Mission)
     vi.advanceTimersByTime(1_000)
+    const calls = value.runAgent.mock.calls.length
+    expect((await coordinate(saved, value.ports)).status).toBe("waiting")
+    expect(value.runAgent).toHaveBeenCalledTimes(calls)
+    expect(saved.execution?.failureKind).toBe("actor-cooldown")
+    vi.advanceTimersByTime(ACTOR_COOLDOWN_BASE_MS - 1_000)
     expect((await coordinate(saved, value.ports)).status).toBe("completed")
     expect(value.runAgent.mock.calls.filter((call) => call[3] === "work")).toHaveLength(1)
     expect(value.runAgent.mock.calls.filter((call) => call[3] === "review")).toHaveLength(2)
@@ -425,6 +431,10 @@ describe("native review failures preserve successful work", () => {
     ])
     expect(value.mission.tasks.find((state) => state.id === "a")?.parallel).toBeDefined()
     vi.advanceTimersByTime(1_000)
+    const calls = value.runAgent.mock.calls.length
+    expect((await coordinate(value.mission, value.ports)).status).toBe("waiting")
+    expect(value.runAgent).toHaveBeenCalledTimes(calls)
+    vi.advanceTimersByTime(ACTOR_COOLDOWN_BASE_MS - 1_000)
     expect((await coordinate(value.mission, value.ports)).status).toBe("completed")
     expect(value.runAgent.mock.calls.filter((call) => call[3] === "work")).toHaveLength(2)
     expect(parallel.prepare).toHaveBeenCalledTimes(2)

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import { join } from "node:path"
+import { aggregateProviderHealth } from "@agent-valley/core/chief/actor-health"
+import { seedProviderHealthEvidence } from "@agent-valley/core/chief/actor-health-seed"
 import { MissionCapture } from "@agent-valley/core/chief/capture"
 import type { ContinuousOperation } from "@agent-valley/core/chief/continuous-contract"
 import { createContinuousMissionWorkspace } from "@agent-valley/core/chief/continuous-workspace"
@@ -188,6 +190,15 @@ export async function runOrder(
           : config.containerObservationPolicy,
         containerObservation: operation?.containerObservation,
         toolEnvKeys: config.toolEnvKeys,
+        ...(operation?.actorHealth?.length
+          ? {
+              operations: {
+                runs: [],
+                routingEvidence: seedProviderHealthEvidence([], operation.actorHealth),
+                reviewDecisions: [],
+              },
+            }
+          : {}),
         capturePolicy: config.capturePolicy,
         status: "pending",
         tasks: [],
@@ -239,6 +250,11 @@ export async function runOrder(
     }
     if (mission.operatingPolicy?.memory || mission.operatingPolicy?.metricTargets?.length) {
       mission.organizationContext = await organizationContext(repository, mission)
+      if (!options.resume && mission.operations)
+        mission.operations.routingEvidence = seedProviderHealthEvidence(
+          mission.organizationContext.routeEvidence,
+          aggregateProviderHealth(mission),
+        )
       mission.operations ??= {
         runs: [],
         routingEvidence: mission.organizationContext.routeEvidence,

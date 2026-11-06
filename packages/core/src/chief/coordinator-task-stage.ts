@@ -1,3 +1,4 @@
+import { refreshActorCooldown } from "./actor-availability"
 import { ParallelTaskReviewRejected, performParallelWave } from "./coordinator-parallel"
 import { applyTaskReviewResult, applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
@@ -34,6 +35,9 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
   const performTask = async (task: ChiefTask, state: ChiefTaskState) => {
     while (state.status !== "completed") {
       checkAbort()
+      const attemptsBefore = state.attempts
+      const workRunsBefore =
+        mission.operations?.runs.filter((run) => run.stage === "work" && run.taskId === task.id).length ?? 0
       const awaitingReview = state.output !== undefined && state.review === undefined
       state.status = awaitingReview ? "reviewing" : "running"
       if (!awaitingReview && (task.effectScope !== "external" || state.effectState !== "completed")) state.attempts += 1
@@ -78,6 +82,14 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
         reviewStarted = true
         await taskReview(task, state)
       } catch (error) {
+        if (
+          !reviewStarted &&
+          error instanceof MissionPause &&
+          error.kind === "actor-cooldown" &&
+          (mission.operations?.runs.filter((run) => run.stage === "work" && run.taskId === task.id).length ?? 0) ===
+            workRunsBefore
+        )
+          state.attempts = attemptsBefore
         if (!mission.supervision || protectedFailure(error)) throw error
         state.status = reviewStarted ? "reviewing" : "pending"
         if (state.effectState !== "unknown")
@@ -141,12 +153,24 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
       limit > 1 &&
       (wave.length > 1 || wave.some((task) => mission.tasks.find((state) => state.id === task.id)?.parallel))
     ) {
-      const failures = await performParallelWave(mission, ports, wave, {
+      let failures = await performParallelWave(mission, ports, wave, {
         run,
         save,
         review: taskReview,
         fatal: protectedFailure,
       })
+      // Resolve real failures first; a rejected sibling's old probe wait must not hide them.
+      const primary = failures.filter(
+        (failure) => !(failure.error instanceof MissionPause && failure.error.kind === "actor-cooldown"),
+      )
+      failures = primary.length
+        ? primary
+        : failures.flatMap((failure) => {
+            const error = refreshActorCooldown(mission, failure.error)
+            return error === undefined
+              ? []
+              : [{ ...failure, error, reason: error instanceof Error ? error.message : String(error) }]
+          })
       const unrecoverable = failures.find((failure) => protectedFailure(failure.error))
       if (unrecoverable) throw unrecoverable.error
       for (const failure of failures) {

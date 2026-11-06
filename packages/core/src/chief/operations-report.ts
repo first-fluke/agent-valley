@@ -1,3 +1,4 @@
+import { actorRouteHealth } from "./actor-health"
 import { assessMetricTargets } from "./organization"
 import { routeEvidence } from "./routing"
 import type { Mission } from "./types"
@@ -59,6 +60,12 @@ export function operationsReportLines(mission: Mission): string[] {
       (route) =>
         `${route.actorType}/${route.model ?? "CLI 기본값"}: 실제 work ${route.samples}회, 독립 리뷰 통과 ${route.successes}회, 성공 산출물당 누적 비용 추정 ${route.successfulDeliverableCostUsd === null ? "미확인" : `USD ${route.successfulDeliverableCostUsd.toFixed(6)}`}`,
     ),
+    ...evidence.routeQuality
+      .filter((route) => route.providerHealth?.consecutiveFailures)
+      .map((route) => {
+        const health = actorRouteHealth(mission, route)
+        return `${route.actorType}/${route.model ?? "CLI 기본값"}: 연속 실행 실패 ${health.consecutiveFailures}회 / 상태 ${health.state} / ${health.retryAt ? `다음 확인 ${health.retryAt}` : "쿨다운 만료, 단일 재시험 가능"}`
+      }),
     ...evidence.recentRuns
       .filter((run) => run.stage === "work")
       .map(

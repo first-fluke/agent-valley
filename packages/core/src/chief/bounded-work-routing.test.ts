@@ -228,7 +228,11 @@ describe("bounded routing in a closed measured pool", () => {
       if (condition === "running-effect") value.state.effectState = "running"
       if (condition === "spent-repairs") value.state.repairRound = 3
       if (condition === "missing-task") value.mission.tasks = []
-      expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow("no remaining bounded probe")
+      expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
+        ["unknown-run", "running-task"].includes(condition)
+          ? "Actor execution outcome is uncertain"
+          : "no remaining bounded probe",
+      )
     },
   )
 

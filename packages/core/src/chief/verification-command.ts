@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import { realpath } from "node:fs/promises"
 import { join, relative, sep } from "node:path"
+import { cargoVerificationEnvironment } from "./cargo-toolchain"
 import { cargoVerificationInputs } from "./cargo-verification"
 import { safeVerificationCommand, verificationCommandTestPaths } from "./verification-contract"
 import { readVerificationFile } from "./verification-files"
@@ -76,18 +77,24 @@ export async function verificationCommandInputs(
 }
 
 /** Fixed argv only; completion waits for the bounded process to exit. */
-export const executeVerificationCommand: VerificationCommandExecutor = (program, args, options) =>
-  new Promise((resolveCommand, rejectCommand) => {
-    if (!safeVerificationCommand(program, args)) {
-      rejectCommand(new Error("Unsupported automatic verification command. Use explicit tests or read-only Git argv."))
-      return
-    }
+export const executeVerificationCommand: VerificationCommandExecutor = async (program, args, options) => {
+  if (!safeVerificationCommand(program, args))
+    throw new Error("Unsupported automatic verification command. Use explicit tests or read-only Git argv.")
+  if (options.signal?.aborted)
+    throw new Error("Verification interrupted. Resume the mission to rerun its evidence checks.")
+  const startedAt = performance.now()
+  const env = program === "cargo" ? await cargoVerificationEnvironment(options.cwd, process.env) : { ...process.env }
+  return new Promise((resolveCommand, rejectCommand) => {
     if (options.signal?.aborted) {
       rejectCommand(new Error("Verification interrupted. Resume the mission to rerun its evidence checks."))
       return
     }
+    const timeoutMs = options.timeoutMs - (performance.now() - startedAt)
+    if (timeoutMs <= 0) {
+      rejectCommand(new Error("Verification timed out. Repair the test or increase its bounded timeout."))
+      return
+    }
     const detached = process.platform !== "win32"
-    const env = { ...process.env }
     for (const key of [
       "GIT_DIR",
       "GIT_WORK_TREE",
@@ -129,7 +136,7 @@ export const executeVerificationCommand: VerificationCommandExecutor = (program,
     const abort = (): void => stop(new Error("Verification interrupted. Resume the mission to rerun evidence checks."))
     const timer = setTimeout(
       () => stop(new Error("Verification timed out. Repair the test or increase its bounded timeout.")),
-      options.timeoutMs,
+      timeoutMs,
     )
     timer.unref()
     const capture = (chunk: Buffer, stream: "stdout" | "stderr"): void => {
@@ -167,3 +174,4 @@ export const executeVerificationCommand: VerificationCommandExecutor = (program,
       }
     }
   })
+}

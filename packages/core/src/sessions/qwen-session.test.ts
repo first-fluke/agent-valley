@@ -41,7 +41,11 @@ function fakeProcess(
   })
 }
 
-async function run(frames: unknown[], exitCode = 0, config: { model?: string } = {}) {
+async function run(
+  frames: unknown[],
+  exitCode = 0,
+  config: { model?: string; options?: Record<string, unknown> } = {},
+) {
   fakeProcess(frames, exitCode)
   await session.start({ type: "qwen", workspacePath: workspace, timeout: 10, ...config })
   await session.execute("operator prompt through stdin")
@@ -70,7 +74,15 @@ describe("Qwen Code native single-shot session", () => {
     expect(sandbox.planSandboxedSpawn).toHaveBeenCalledWith({
       agentType: "qwen",
       command: "qwen",
-      args: ["--output-format", "stream-json", "--yolo", "--model", "pinned-model"],
+      args: [
+        "--output-format",
+        "stream-json",
+        "--yolo",
+        "--exclude-tools",
+        expect.any(String),
+        "--model",
+        "pinned-model",
+      ],
       workspacePath: workspace,
       env: expect.any(Object),
     })
@@ -78,6 +90,46 @@ describe("Qwen Code native single-shot session", () => {
     expect(complete?.result.tokenUsage).toEqual({ input: 100, output: 12, model: "actual-qwen-model" })
     expect(complete?.result.output).toBe("done")
     expect(session.isAlive()).toBe(false)
+  })
+
+  it.each([undefined, "", "   ", true, 1])(
+    "excludes native Computer Use without an explicit purpose (%j)",
+    async (computerUsePurpose) => {
+      await run([SUCCESS], 0, { options: { computerUsePurpose } })
+      const args = vi.mocked(sandbox.planSandboxedSpawn).mock.calls[0]?.[0].args ?? []
+      const excluded = args[args.indexOf("--exclude-tools") + 1]?.split(",") ?? []
+      expect(excluded).toHaveLength(35)
+      expect(new Set(excluded).size).toBe(35)
+      expect(excluded).toEqual(
+        expect.arrayContaining([
+          "computer_use__list_apps",
+          "computer_use__check_permissions",
+          "computer_use__launch_app",
+          "computer_use__kill_app",
+          "computer_use__start_session",
+          "computer_use__type_text",
+        ]),
+      )
+      expect(excluded.every((name) => /^computer_use__[a-z_]+$/.test(name))).toBe(true)
+      expect(excluded).not.toContain("computer_use__*")
+      expect(excluded).not.toContain("run_shell_command")
+      expect(excluded).not.toContain("read_file")
+    },
+  )
+
+  it("retains native OS consent when trusted options name a Computer Use purpose", async () => {
+    const purpose = "Inspect the requested desktop window"
+    await run([SUCCESS], 0, { model: "pinned-model", options: { computerUsePurpose: purpose } })
+    expect(sandbox.planSandboxedSpawn).toHaveBeenCalledWith({
+      agentType: "qwen",
+      command: "qwen",
+      args: ["--output-format", "stream-json", "--yolo", "--model", "pinned-model"],
+      workspacePath: workspace,
+      env: expect.any(Object),
+    })
+    const args = vi.mocked(sandbox.planSandboxedSpawn).mock.calls[0]?.[0].args ?? []
+    expect(args).not.toContain(purpose)
+    expect(args).not.toContain("--allowed-tools")
   })
 
   it("streams native text/tools, deduplicates changed paths and flushes a final unterminated JSON line", async () => {

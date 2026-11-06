@@ -2,8 +2,11 @@ import { containersHealthy } from "./container-observation-state"
 import { assertExecutionBudget, chiefRecoveryStopped, MissionPause } from "./execution"
 import { validateFinalReview } from "./goal-evidence"
 import { reviewGatesAreCurrent } from "./review-gate-check"
+import { scheduledActorCooldown, scheduledChiefWait } from "./scheduled-wait"
 import { validateMission } from "./schemas"
 import type { Mission } from "./types"
+
+export { scheduledActorCooldown, scheduledChiefWait, scheduledMissionWait } from "./scheduled-wait"
 
 export interface AutomaticMissionRecovery {
   retry: boolean
@@ -54,15 +57,6 @@ export function verifiedMissionEvidence(mission: Mission): boolean {
   } catch {
     return false
   }
-}
-
-export function scheduledChiefWait(mission: Mission): boolean {
-  return (
-    mission.status === "waiting" &&
-    mission.execution?.failureKind === "chief-wait" &&
-    mission.supervision?.decisions.at(-1)?.action === "wait" &&
-    Number.isFinite(Date.parse(mission.execution.nextRunAt ?? ""))
-  )
 }
 
 /** Eligibility only: never resets usage, limits, assignments, effects or the Chief's decision. */
@@ -119,6 +113,12 @@ export function automaticMissionRecovery(
     if (error instanceof MissionPause) return stop(error.message)
     throw error
   }
+  if (scheduledActorCooldown(mission))
+    return {
+      retry: true,
+      reason: state?.pauseReason ?? "Continue the saved Actor cooldown without another Chief recovery decision.",
+      waitUntil: state?.nextRunAt,
+    }
   const supervision = mission.supervision
   if (supervision && (supervision.rounds >= supervision.maxRounds || supervision.stalledRounds >= 3))
     return stop("The Chief exhausted its saved recovery rounds; the goal remains unresolved.")

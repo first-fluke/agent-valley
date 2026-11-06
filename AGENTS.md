@@ -111,6 +111,8 @@ live in `packages/core/src/domain/ports/`.
 
 **Rust verification:** Generated native Cargo checks use the fixed argv contract in `packages/core/src/chief/verification-contract.ts` and bounded workspace input evidence in `packages/core/src/chief/cargo-verification.ts`. Keep native timeout retries separate from malformed-response correction attempts.
 
+**Verification scope:** Prefer deterministic unit, integration, and CLI checks. Do not add or autonomously run Playwright/browser E2E tests, install Playwright packages or browser binaries, or use ComputerUse to work around a blocked command. Relevant screen validation belongs to one final completion check using an already available Aside MCP, chrome-devtools-mcp, or firefox-devtools-mcp. Do not perform screen checks during each task or individual review.
+
 **Runtime data:** Reuse `packages/core/src/workspace/runtime-ignore.ts` before writing project `.agent-valley/` state. Preserve existing ignore rules and tracked files; see [environment setup](docs/guides/environment-setup.md).
 
 **Error message principle:** Include fix instructions, not just warnings. An agent must be able to self-correct from the error message alone.

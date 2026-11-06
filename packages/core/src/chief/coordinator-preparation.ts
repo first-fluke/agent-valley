@@ -19,7 +19,15 @@ export async function resumeMission(context: CoordinatorContext): Promise<StageT
   assertNoUncertainExecution(mission)
   checkAbort()
   assertExecutionDeadline(mission)
-  if (mission.execution?.failureKind === "chief-wait") {
+  if (["chief-wait", "actor-cooldown"].includes(mission.execution?.failureKind ?? "") && mission.execution) {
+    if (
+      mission.execution.failureKind === "actor-cooldown" &&
+      !Number.isFinite(Date.parse(mission.execution.nextRunAt ?? ""))
+    )
+      throw new MissionPause(
+        "The saved Actor cooldown timestamp is missing or invalid. Restore its original nextRunAt before resuming.",
+        "integrity",
+      )
     if (Date.parse(mission.execution.nextRunAt ?? "") > Date.now()) return { kind: "return" }
     delete mission.execution.nextRunAt
     delete mission.execution.pauseReason

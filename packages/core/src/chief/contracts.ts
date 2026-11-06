@@ -157,6 +157,7 @@ export const executionStateSchema = z.strictObject({
       "authentication",
       "rate-limit",
       "provider",
+      "actor-cooldown",
       "environment",
       "implementation",
       "unknown-effect",

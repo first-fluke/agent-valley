@@ -1,5 +1,6 @@
 import type { Workspace } from "../domain/models"
 import { applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
+import { MissionPause } from "./execution"
 import { runJoinedWave } from "./parallel"
 import { workPrompt } from "./prompts"
 import type { ChiefPorts, ChiefStage, ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
@@ -51,6 +52,8 @@ export async function performParallelWave(
     actor: Persona
     workspace: Workspace
     previousOutput?: string
+    previousAttempts: number
+    workRunsBefore: number
   }> = []
   // No Actor starts until all workspace preparations and their checkpoints settle.
   for (const task of wave) {
@@ -71,6 +74,9 @@ export async function performParallelWave(
       continue
     }
     try {
+      const previousAttempts = state.attempts
+      const workRunsBefore =
+        mission.operations?.runs.filter((run) => run.stage === "work" && run.taskId === task.id).length ?? 0
       const previousOutput = state.parallel ? undefined : state.output
       // An output is resumable only when it is bound to its original task workspace.
       if (!state.parallel) delete state.output
@@ -90,7 +96,7 @@ export async function performParallelWave(
         path: state.parallel.path,
         branch: state.parallel.branch,
       }
-      prepared.push({ task, state, actor, workspace, previousOutput })
+      prepared.push({ task, state, actor, workspace, previousOutput, previousAttempts, workRunsBefore })
     } catch (error) {
       state.status = "pending"
       fail(task.id, error)
@@ -125,6 +131,13 @@ export async function performParallelWave(
     const entry = pending[index]
     if (entry && result.status === "rejected") {
       entry.state.status = "pending"
+      if (
+        result.reason instanceof MissionPause &&
+        result.reason.kind === "actor-cooldown" &&
+        (mission.operations?.runs.filter((run) => run.stage === "work" && run.taskId === entry.task.id).length ?? 0) ===
+          entry.workRunsBefore
+      )
+        entry.state.attempts = entry.previousAttempts
       fail(entry.task.id, result.reason)
     }
   })

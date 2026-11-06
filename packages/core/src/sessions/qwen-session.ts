@@ -1,6 +1,46 @@
 import { ClaudeSession } from "./claude-session"
 import { exhaustionMessage, nativeErrorMessage } from "./native-failure"
 
+// Qwen Code 0.20.1's native Computer Use catalog. Built-in deny rules require
+// exact names: `computer_use__*` does not prevent registration or execution.
+const computerUseTools = [
+  "bring_to_front",
+  "check_for_update",
+  "check_permissions",
+  "click",
+  "double_click",
+  "drag",
+  "end_session",
+  "get_accessibility_tree",
+  "get_agent_cursor_state",
+  "get_config",
+  "get_cursor_position",
+  "get_recording_state",
+  "get_screen_size",
+  "get_window_state",
+  "hotkey",
+  "kill_app",
+  "launch_app",
+  "list_apps",
+  "list_windows",
+  "move_cursor",
+  "page",
+  "press_key",
+  "replay_trajectory",
+  "right_click",
+  "scroll",
+  "set_agent_cursor_enabled",
+  "set_agent_cursor_motion",
+  "set_agent_cursor_style",
+  "set_config",
+  "set_value",
+  "start_recording",
+  "start_session",
+  "stop_recording",
+  "type_text",
+  "zoom",
+].map((name) => `computer_use__${name}`)
+
 /** Qwen Code's documented Claude-compatible JSONL envelopes, with Qwen usage/error semantics.
  * https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/
  * Wire source: QwenLM/qwen-code packages/cli/src/nonInteractive/{types,io/BaseJsonOutputAdapter}.ts
@@ -14,6 +54,9 @@ export class QwenSession extends ClaudeSession {
 
   protected override buildArgs(): string[] {
     const args = ["--output-format", "stream-json", "--yolo"]
+    // Only trusted native configuration may opt in; OS consent remains native.
+    const purpose = this.config?.options?.computerUsePurpose
+    if (typeof purpose !== "string" || !purpose.trim()) args.push("--exclude-tools", computerUseTools.join(","))
     if (this.config?.model) args.push("--model", this.config.model)
     return args
   }

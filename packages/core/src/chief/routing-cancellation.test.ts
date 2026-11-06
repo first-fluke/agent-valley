@@ -133,7 +133,11 @@ describe("routing after a proven native operator cancellation", () => {
         condition,
       )
     )
-      expect(() => selectWorkActor(mission, worker, "onboarding")).toThrow("minimum success rate")
+      expect(() => selectWorkActor(mission, worker, "onboarding")).toThrow(
+        ["unknown", "running", "no-finish"].includes(condition)
+          ? "Actor execution outcome is uncertain"
+          : "minimum success rate",
+      )
     else expect(selectWorkActor(mission, worker, "onboarding").actor.agentType).toBe("qwen")
   })
 

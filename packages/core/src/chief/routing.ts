@@ -1,3 +1,5 @@
+import { availableActorRoutes } from "./actor-availability"
+import { aggregateProviderHealth } from "./actor-health"
 import { cancelledWorkRunProofs } from "./cancelled-work-run"
 import type { RouteEvidence, RoutingCandidate } from "./operations"
 import type { Mission, Persona } from "./types"
@@ -20,12 +22,24 @@ export function routeEvidence(mission: Mission): RouteEvidence[] {
       totalCostUsd: 0,
       successfulDeliverableCostUsd: null,
     }
-    if (!cancelled.has(run.runId)) item.samples += 1
+    if (!cancelled.has(run.runId) && run.nativeOutcome !== "cancelled") item.samples += 1
     if (run.outcome === "passed") item.successes += 1
     item.totalCostUsd = item.totalCostUsd === null || run.costUsd === null ? null : item.totalCostUsd + run.costUsd
     item.successfulDeliverableCostUsd =
       item.successes && item.totalCostUsd !== null ? item.totalCostUsd / item.successes : null
     evidence.set(key, item)
+  }
+  for (const health of aggregateProviderHealth(mission)) {
+    if (!health.providerHealth.consecutiveFailures && !evidence.get(routeKey(health))?.providerHealth) continue
+    const item = evidence.get(routeKey(health)) ?? {
+      actorType: health.actorType,
+      ...(health.model ? { model: health.model } : {}),
+      samples: 0,
+      successes: 0,
+      totalCostUsd: 0,
+      successfulDeliverableCostUsd: null,
+    }
+    evidence.set(routeKey(health), { ...item, providerHealth: health.providerHealth })
   }
   return [...evidence.values()]
 }
@@ -79,6 +93,7 @@ export function selectWorkActor(
       throw new Error(
         "Skill compatibility required: the configured Actor/model has no current passing evidence. Refresh oma.skill_compatibility.report_path in av.yaml; explicit Actors are not rerouted.",
       )
+    availableActorRoutes(mission, [{ actorType: actor.agentType, model: actor.model }])
     return { actor, reason: "Preserved the configured Actor and explicit model." }
   }
   const candidates = readyWorkCandidates(mission)
@@ -86,13 +101,14 @@ export function selectWorkActor(
     throw new Error(
       "No configured work routing candidate is ready. Install/login a candidate CLI or update chief.routing.candidates in av.yaml.",
     )
-  const compatible = compatibleRoutes
+  const compatiblePool = compatibleRoutes
     ? candidates.filter((candidate) => compatibleRoutes.has(routeKey(candidate)))
     : candidates
-  if (!compatible.length)
+  if (!compatiblePool.length)
     throw new Error(
       "Skill compatibility required: no ready work candidate has current passing installed evidence. Refresh oma.skill_compatibility.report_path in av.yaml with explicit models before retrying.",
     )
+  const compatible = availableActorRoutes(mission, compatiblePool)
   const evidence = routeEvidence(mission)
   const eligible = compatible.filter((candidate) => {
     const observed = evidence.find((item) => routeKey(item) === routeKey(candidate))
@@ -118,7 +134,8 @@ export function selectWorkActor(
   const initial = measured?.candidate ?? [...eligible].sort((a, b) => price(a) - price(b)).at(0)
   const cancelled = cancelledWorkRunProofs(mission)
   const taskRuns = (mission.operations?.runs ?? []).filter(
-    (run) => run.stage === "work" && run.taskId === taskId && !cancelled.has(run.runId),
+    (run) =>
+      run.stage === "work" && run.taskId === taskId && !cancelled.has(run.runId) && run.nativeOutcome !== "cancelled",
   )
   if (hasUnreviewedRoutingProbe(mission, taskId, taskRuns))
     throw new Error(

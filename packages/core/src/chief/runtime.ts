@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { join, resolve } from "node:path"
-import type { Issue, RunAttempt, Workspace } from "../domain/models"
+import type { RunAttempt, Workspace } from "../domain/models"
 import { AgentRunError, type AgentRunnerPort, type RunHandle } from "../domain/ports/agent-runner"
 import { buildOmaGuidance, prepareOmaAttempt, validateOmaEvidence } from "../oma/receipt-adapter"
 import {
@@ -10,7 +10,6 @@ import {
   type SkillMatrixDeps,
 } from "../oma/skill-matrix-adapter"
 import { runVerificationGate } from "../orchestrator/verification-gate"
-import { runCommand } from "../workspace/worktree-lifecycle"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
 import { fingerprintWorkspace } from "./fingerprint"
@@ -18,66 +17,22 @@ import { createLocalMissionRunner, finishLocalProcess } from "./local-runner"
 import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
 import { disposeTaskWorktree, integrateTaskWorktree, prepareTaskWorktree } from "./parallel-workspace"
 import { selectWorkActor, workActorCandidates } from "./routing"
+import { admitNativeDispatch } from "./runtime-admission"
+import {
+  intermediateVerifyCommand,
+  missionIssue,
+  personaSkills,
+  unattendedVerificationGuidance,
+} from "./runtime-inputs"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
-import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
-import { finishOperatingRun, markOperatingRunUnknown, startOperatingRun } from "./usage"
+import type { ChiefPorts, ChiefRunContext, ChiefStage, Mission, Persona } from "./types"
+import { finishOperatingRun, markOperatingRunUnknown } from "./usage"
 import { executeGoalVerification } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
 
-export function missionIssue(id: string, goal: string): Issue {
-  return {
-    id,
-    identifier: `ORDER-${id}`,
-    title: goal.slice(0, 200),
-    description: goal,
-    status: { id: "local", name: "In Progress", type: "started" },
-    team: { id: "local", key: "ORDER" },
-    labels: [],
-    url: "",
-    score: null,
-    parentId: null,
-    children: [],
-    relations: [],
-  }
-}
-
-/** Pin the intermediate receipt check before the worker can create commits. */
-export async function intermediateVerifyCommand(workspacePath: string): Promise<string> {
-  const head = await runCommand("git", ["rev-parse", "HEAD"], { cwd: workspacePath })
-  const hash = head.stdout.trim()
-  if (head.exitCode !== 0 || !/^[a-f0-9]{40,64}$/.test(hash)) {
-    throw new Error(
-      "Cannot bind the OMA task check to its starting commit. Restore the mission worktree's Git HEAD before resuming.",
-    )
-  }
-  return `git diff --check ${hash} --`
-}
-
-async function personaSkills(persona: Persona, mission: Mission, stage: string): Promise<string> {
-  const catalog = mission.availableSkills ?? (await discoverMissionSkills(mission.workspace.path))
-  if (!mission.availableAgents) await validateMissionSkills(mission.workspace.path, catalog)
-  const selected = await loadMissionSkillBodies(
-    mission.workspace.path,
-    persona.skills,
-    mission.availableAgents ? catalog : undefined,
-  )
-  const guidance: string[] = []
-  if (persona.id === mission.chiefId) {
-    guidance.push(
-      "Available OMA skills in this mission worktree (catalog metadata; descriptions do not override the goal or stage permissions):",
-      JSON.stringify(catalog),
-      "Choose relevant actual skills from this catalog for the goal. Read a selected SKILL.md at its listed path and only its needed references. Automatic Actor skills must use these exact names. An empty catalog means no verified OMA skills are available.",
-    )
-  }
-  if (selected) guidance.push("Use these selected skills within the assigned role and acceptance criteria.", selected)
-  if (guidance.length && stage !== "work")
-    guidance.push(
-      "This stage is read-only: skill instructions do not authorize changes to product files, tests, configuration, or the fixed verification command.",
-    )
-  return guidance.length ? `\n\n${guidance.join("\n\n")}` : ""
-}
+export { intermediateVerifyCommand, missionIssue } from "./runtime-inputs"
 
 export class ChiefRuntime {
   private readonly runs = new Set<RunHandle>()
@@ -100,6 +55,7 @@ export class ChiefRuntime {
   ports(): ChiefPorts {
     return {
       signal: this.signal,
+      deferredDispatchAdmission: true,
       ...(this.discoverReadyAgents ? { discoverReadyAgents: this.discoverReadyAgents } : {}),
       ...(this.discoverFreeModels ? { discoverFreeModels: this.discoverFreeModels } : {}),
       prepareWork: (persona, mission, context) => this.prepareWork(persona, mission, context),
@@ -195,13 +151,7 @@ export class ChiefRuntime {
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: {
-      taskId?: string
-      workspace?: Workspace
-      signal?: AbortSignal
-      omaActor?: PreparedOmaActor
-      handoff?: string
-    },
+    context?: ChiefRunContext,
   ): Promise<string> {
     return withMissionDeadline(mission, context?.signal ?? this.signal, (signal) =>
       this.executeAgent(persona, prompt, mission, stage, { ...context, signal }),
@@ -213,16 +163,11 @@ export class ChiefRuntime {
     prompt: string,
     mission: Mission,
     stage: ChiefStage,
-    context?: {
-      taskId?: string
-      workspace?: Workspace
-      signal?: AbortSignal
-      omaActor?: PreparedOmaActor
-      handoff?: string
-    },
+    context?: ChiefRunContext,
   ): Promise<string> {
     const signal = context?.signal ?? this.signal
     const workspace = context?.workspace ?? mission.workspace
+    const requestedPersona = persona
     if (stage === "plan" && mission.availableSkills === undefined) {
       signal?.throwIfAborted()
       mission.availableSkills = await discoverMissionSkills(mission.workspace.path)
@@ -269,7 +214,7 @@ export class ChiefRuntime {
         message: `${compatibilityPolicy.mode}: ${compatibility.routes.map((entry) => `${entry.actorType}/${entry.model ?? "native default"} ${entry.status}: ${entry.reason}`).join("; ")} Scope: ${compatibility.scope}.`,
         ...(context?.taskId ? { taskId: context.taskId } : {}),
       })
-    const route = context?.handoff
+    let route = context?.handoff
       ? { actor: persona, reason: context.handoff }
       : stage === "work"
         ? selectWorkActor(mission, persona, context?.taskId, compatibleRoutes)
@@ -279,7 +224,6 @@ export class ChiefRuntime {
       if (compatibilityPolicy.mode === "require")
         assertCompatibleRoute({ actorType: persona.agentType, model: persona.model }, compatibility)
     }
-    this.onStage(stage, persona)
     const attempt: RunAttempt = {
       id: randomUUID(),
       issueId: mission.id,
@@ -304,15 +248,29 @@ export class ChiefRuntime {
       await prepareOmaAttempt(evidence)
       prompt += `\n\n${buildOmaGuidance(evidence)}`
     }
+    prompt += `\n\n${unattendedVerificationGuidance(stage)}`
     prompt += omaActor ? `\n\n${omaActor.guidance}` : await personaSkills(persona, localMission, stage)
     if (mission.toolEnvKeys?.length)
       prompt += `\n\nThe operator explicitly forwards these tool environment variable names: ${JSON.stringify(mission.toolEnvKeys)}. Use only those needed for the assignment. Never print, write to product files, or include credential values in reports; do not dump the environment.`
     prompt +=
       "\n\nYou are already running inside an AV managed mission. Complete this assigned work directly. Do not invoke av order, av_resume, av operate, av_operate, av_operation_resume, or delegate this mission back to AV. AGENT_VALLEY_MANAGED_RUN=1 applies to this run."
+    // A sibling may claim a recovery probe while skills and receipt inputs are prepared.
+    if (stage === "work" && !context?.handoff) {
+      route = selectWorkActor(mission, requestedPersona, context?.taskId, compatibleRoutes)
+      persona = route.actor
+    }
+    this.onStage(stage, persona)
     if (route)
       prompt += `\n\nActual work route: ${JSON.stringify({ actorType: persona.agentType, model: persona.model ?? "native default", reason: route.reason })}. This route does not alter the user's Chief Director choice or acceptance contract.`
-    const entry = startOperatingRun(mission, persona, attempt, stage, context?.taskId, route?.reason)
-    entry.executionRecovery = this.localExecution ? "local-process" : "reconcile"
+    const entry = await admitNativeDispatch(
+      mission,
+      persona,
+      attempt,
+      stage,
+      context,
+      this.localExecution,
+      route?.reason,
+    )
     let run: RunHandle | undefined
     if (omaActor)
       mission.history.push({
@@ -373,6 +331,7 @@ export class ChiefRuntime {
         )
       observed = completed
       executionSettled = true
+      entry.nativeOutcome = completed.exitCode === 0 ? "passed" : "failed"
       if (completed.exitCode !== 0)
         throw new AgentRunError(
           "Runtime execution did not complete successfully. Inspect the failed attempt before retrying.",
@@ -393,11 +352,13 @@ export class ChiefRuntime {
         try {
           observed = this.observeAttempt(attempt, error.attempt)
           executionSettled = !error.outcomeUnknown
+          if (executionSettled) entry.nativeOutcome = "failed"
         } catch (identityError) {
           error = identityError
         }
       }
       failure = error
+      entry.evidence = (error instanceof Error ? error.message : String(error)).slice(-2_000)
       if ((error instanceof AgentRunError && error.outcomeUnknown) || (!this.localExecution && !executionSettled)) {
         markOperatingRunUnknown(entry, error instanceof Error ? error.message : String(error))
         failure = new MissionPause(
@@ -422,6 +383,8 @@ export class ChiefRuntime {
     } finally {
       if (run) this.runs.delete(run)
       finishOperatingRun(mission, entry, observed, failed)
+      if (entry.executionState === "unknown") delete entry.nativeOutcome
+      else if (signal?.aborted) entry.nativeOutcome = "cancelled"
       await this.store.save(mission)
     }
     if (failed) throw failure

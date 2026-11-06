@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto"
+import { aggregateProviderHealth } from "./actor-health"
+import { mergeProviderHealthSnapshots } from "./actor-health-seed"
 import { pendingCodeDelivery, successfulCodeDelivery } from "./code-delivery-contract"
 import { containersHealthy, validateContainerObservation } from "./container-observation-state"
 import { acceptContinuousChild } from "./continuous-acceptance"
@@ -14,7 +16,8 @@ import {
   type AutomaticRecoveryContext,
   automaticMissionRecovery,
   automaticRecoveryLimit,
-  scheduledChiefWait,
+  scheduledActorCooldown,
+  scheduledMissionWait,
   verifiedMissionEvidence,
 } from "./continuous-recovery"
 import { assertExecutionDeadline, classifyFailure, MissionPause } from "./execution"
@@ -46,6 +49,33 @@ export async function runContinuousOperation(
     operation.updatedAt = now()
     await ports.save(operation)
   }
+  const assertIdentity = (child: Mission) => {
+    const decision = operation.decision
+    if (
+      child.id !== operation.currentMissionId ||
+      child.repositoryRoot !== operation.repositoryRoot ||
+      decision?.action !== "execute" ||
+      child.goal !== decision.goal
+    )
+      throw new Error(
+        "Saved child identity, repository or goal does not match this operation. Restore the original child before continuing.",
+      )
+    if (JSON.stringify(child.containerObservationPolicy) !== JSON.stringify(operation.containerObservationPolicy))
+      throw new Error(
+        "Saved child container targets differ from the pinned operation contract. Restore the original child policy before continuing.",
+      )
+  }
+  const rememberHealth = async (child: Mission): Promise<Mission> => {
+    assertIdentity(child)
+    const health = mergeProviderHealthSnapshots(operation.actorHealth ?? [], aggregateProviderHealth(child))
+    if (JSON.stringify(health) !== JSON.stringify(operation.actorHealth ?? [])) {
+      operation.actorHealth = health
+      await save()
+    }
+    return child
+  }
+  const runChild = async (id: string, goal: string, baseline: string) =>
+    rememberHealth(await ports.runMission(operation, id, goal, baseline))
   const pause = async (message: string) => {
     if (operation.phase !== "paused" && operation.phase !== "completed") operation.resumePhase = operation.phase
     operation.phase = "paused"
@@ -111,17 +141,20 @@ export async function runContinuousOperation(
         : undefined
     const prior = previous?.attempts ?? 0
     const failedAttempts = previous?.failedAttempts ?? prior
-    const waitKey = scheduledChiefWait(mission)
+    const actorCooldown = scheduledActorCooldown(mission)
+    const waitKey = scheduledMissionWait(mission)
       ? createHash("sha256")
           .update(
             JSON.stringify({
-              decision: mission.supervision?.decisions.at(-1),
+              ...(actorCooldown ? { kind: "actor-cooldown" } : { decision: mission.supervision?.decisions.at(-1) }),
               nextRunAt: mission.execution?.nextRunAt,
             }),
           )
           .digest("hex")
       : undefined
-    const continuation = !!waitKey && waitKey !== previous?.waitContinuationKey
+    // A saved nextRunAt remains present until dispatch; an interrupted delay has not consumed its continuation.
+    const pendingCooldown = actorCooldown && previous?.nextRunAt === mission.execution?.nextRunAt
+    const continuation = !!waitKey && (waitKey !== previous?.waitContinuationKey || pendingCooldown)
     operation.recovery = {
       target: "child",
       checkpointId: mission.id,
@@ -151,7 +184,7 @@ export async function runContinuousOperation(
     await save()
     if (!operation.baseline) throw new Error("The original accepted baseline is missing from the recovery checkpoint.")
     try {
-      const resumed = await ports.runMission(operation, mission.id, mission.goal, operation.baseline.path)
+      const resumed = await runChild(mission.id, mission.goal, operation.baseline.path)
       if (isServiceShutdown(ports.signal) && resumed.execution?.failureKind === "service-shutdown") {
         operation.recovery = pendingRecovery
         throw interruptionPause(ports.signal, "Operation child recovery interrupted.")
@@ -256,19 +289,9 @@ export async function runContinuousOperation(
         const decision = operation.decision
         if (decision?.action !== "execute")
           throw new Error("Restore the saved child execution decision before resuming.")
-        const assertIdentity = (child: Mission) => {
-          if (child.id !== id || child.repositoryRoot !== operation.repositoryRoot || child.goal !== decision.goal)
-            throw new Error(
-              "Saved child identity, repository or goal does not match this operation. Restore the original child before continuing.",
-            )
-          if (JSON.stringify(child.containerObservationPolicy) !== JSON.stringify(operation.containerObservationPolicy))
-            throw new Error(
-              "Saved child container targets differ from the pinned operation contract. Restore the original child policy before continuing.",
-            )
-        }
         let mission = await ports.findMission(id)
         if (mission) {
-          assertIdentity(mission)
+          await rememberHealth(mission)
           if (mission.tasks.some((task) => task.effectState === "unknown")) {
             if (await recoverChild(mission)) continue
             return pause(
@@ -283,7 +306,7 @@ export async function runContinuousOperation(
         if (!mission) {
           if (operation.phase === "accepting")
             return pause(`Completed child ${id} is missing. Restore its saved mission record before continuing.`)
-          mission = await ports.runMission(operation, id, decision.goal, operation.baseline.path)
+          mission = await runChild(id, decision.goal, operation.baseline.path)
         } else if (mission.status !== "completed" && mission.status !== "paused" && mission.status !== "failed") {
           const recovery = operation.recovery
           if (
@@ -297,7 +320,7 @@ export async function runContinuousOperation(
             recovery.reason = `The original child resumed ${mission.status}; joining its saved coordinator without spending another recovery attempt.`
             await save()
           }
-          mission = await ports.runMission(operation, id, decision.goal, operation.baseline.path)
+          mission = await runChild(id, decision.goal, operation.baseline.path)
         }
         assertIdentity(mission)
         if (mission.status !== "completed") {
@@ -316,7 +339,7 @@ export async function runContinuousOperation(
           if (!mission.executionPolicy?.autoResume)
             return pause(`Child ${id} has pending code delivery with automatic recovery disabled.`)
           await waitForRecovery(mission.codeDelivery?.nextRunAt, mission)
-          await ports.runMission(operation, id, decision.goal, operation.baseline.path)
+          await runChild(id, decision.goal, operation.baseline.path)
           continue
         }
         if (!successfulCodeDelivery(mission))
