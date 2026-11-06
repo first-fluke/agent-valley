@@ -93,6 +93,12 @@ export interface Mission {
 export interface ChiefPorts {
   /** Probe supported local CLI installation and authentication; never starts a model run. */
   discoverReadyAgents?(): Promise<string[]>
+  /** Read native catalog metadata; never probes availability by starting a model run. */
+  discoverFreeModels?(
+    agentType: string,
+    workspacePath: string,
+    signal?: AbortSignal,
+  ): Promise<{ models: string[]; defaultModel?: string }>
   /** Validate and bind required OMA inputs before reserving a run or dispatching an external effect. */
   prepareWork?(
     persona: Persona,

@@ -36,16 +36,16 @@ function price(candidate: RoutingCandidate): number {
 
 function readyWorkCandidates(mission: Mission): RoutingCandidate[] {
   const ready = mission.operatingPolicy?.readyActors ?? mission.availableAgents ?? []
-  const exhausted = mission.handoff?.exhaustedAgents ?? []
+  const exhausted = unavailableProviders(mission.handoff)
   const candidates = (mission.operatingPolicy?.routing?.candidates ?? []).filter(
-    (candidate) => ready.includes(candidate.actorType) && !exhausted.some((vendor) => vendor === candidate.actorType),
+    (candidate) => ready.includes(candidate.actorType) && !exhausted.has(candidate.actorType),
   )
-  if (candidates.length || !exhausted.length) return candidates
+  if (candidates.length || !exhausted.size) return candidates
   // An authenticated exhaustion fallback also remains available to subsequent tasks.
   return [
     ...new Map(
       Object.values(mission.handoff?.routes ?? {})
-        .filter((route) => !exhausted.includes(route.agentType))
+        .filter((route) => !exhausted.has(route.agentType))
         .map((route) => {
           const candidate = { actorType: route.agentType, ...(route.model ? { model: route.model } : {}) }
           return [routeKey(candidate), candidate] as const
@@ -163,3 +163,5 @@ export function recordTaskVerdict(mission: Mission, taskId: string, passed: bool
   run.evidence = evidence.slice(0, 2_000) || "Independent review did not provide acceptance evidence."
   run.fingerprint = mission.fingerprint
 }
+
+import { unavailableProviders } from "./handoff-contract"

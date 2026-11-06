@@ -1,7 +1,13 @@
 import type { SupervisionResponse } from "./schemas"
 import type { ChiefPlan, ChiefTaskState, Mission, SupervisionDecision } from "./types"
 
-export function assignTaskStates(mission: Mission, plan: ChiefPlan, preserveEvidence = false): ChiefTaskState[] {
+export function assignTaskStates(
+  mission: Mission,
+  plan: ChiefPlan,
+  preserveEvidence = false,
+  previousPlan = mission.plan,
+  preserveUnchangedWork = false,
+): ChiefTaskState[] {
   return plan.tasks.map((task) => {
     const reviewer =
       mission.personas.find((entry) => entry.id === mission.technicalLeadId && entry.id !== task.personaId) ??
@@ -10,13 +16,27 @@ export function assignTaskStates(mission: Mission, plan: ChiefPlan, preserveEvid
       mission.personas.find((entry) => entry.id !== task.personaId)
     if (!reviewer) throw new Error(`Task ${task.id} needs an independent reviewer. Configure a second Actor.`)
     const previous = preserveEvidence ? mission.tasks.find((state) => state.id === task.id) : undefined
+    const unchanged = previousPlan?.tasks.some(
+      (entry) => entry.id === task.id && JSON.stringify(entry) === JSON.stringify(task),
+    )
+    const preserveWork =
+      preserveUnchangedWork &&
+      unchanged &&
+      previous?.output !== undefined &&
+      (!previous.review || previous.review.passed)
     return {
       id: task.id,
       reviewerId: reviewer.id,
-      status: "pending",
+      status: preserveWork ? "reviewing" : "pending",
       attempts: previous?.attempts ?? 0,
-      ...(previous?.output ? { output: previous.output } : {}),
-      ...(previous?.review ? { review: previous.review } : {}),
+      ...(previous?.repairRound !== undefined ? { repairRound: previous.repairRound } : {}),
+      ...(previous?.output !== undefined && (preserveWork || previous.review || previous.effectState === "completed")
+        ? { output: previous.output }
+        : {}),
+      ...(preserveWork && previous?.parallel && previous.status !== "completed" && !previous.review?.passed
+        ? { parallel: previous.parallel }
+        : {}),
+      ...(previous?.review && !preserveWork ? { review: previous.review } : {}),
       ...(previous?.effectState ? { effectState: previous.effectState } : {}),
     }
   })
@@ -25,9 +45,12 @@ export function assignTaskStates(mission: Mission, plan: ChiefPlan, preserveEvid
 export function applyRecovery(mission: Mission, response: SupervisionResponse): void {
   if (!mission.plan) throw new Error("Chief Director recovery needs an existing plan. Restore the mission checkpoint.")
   if (response.action === "stop" || response.action === "wait") return
+  const previousPlan = structuredClone(mission.plan)
+  const interrupted = mission.tasks.find((state) => state.id === mission.supervision?.pendingRecovery?.taskId)
+  const preserveUnchangedWork = interrupted?.output !== undefined && interrupted.review === undefined
   if (response.action === "replan") {
     const plan = { tasks: response.tasks }
-    const tasks = assignTaskStates(mission, plan, true)
+    const tasks = assignTaskStates(mission, plan, true, previousPlan, preserveUnchangedWork)
     mission.plan = plan
     mission.tasks = tasks
   } else {
@@ -37,7 +60,7 @@ export function applyRecovery(mission: Mission, response: SupervisionResponse): 
       if (response.action === "reassign") task.personaId = response.personaId
       task.instructions = `${task.instructions.split(/\n\nChief(?: Director)? recovery:\n/)[0]}\n\nChief Director recovery:\n${response.instructions}`
     }
-    mission.tasks = assignTaskStates(mission, mission.plan, true)
+    mission.tasks = assignTaskStates(mission, mission.plan, true, previousPlan, preserveUnchangedWork)
   }
   // Recovery can affect other tasks; every approval is refreshed against actual files.
   delete mission.finalReview

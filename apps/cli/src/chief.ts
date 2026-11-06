@@ -31,6 +31,7 @@ import {
   runOperation,
 } from "./chief-continuous"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
+import { discoverFreeModels } from "./chief-free-model-discovery"
 import { createMissionMetricPorts } from "./chief-metrics"
 import { registerMissionCommands } from "./chief-missions"
 import { orderExitCode, printOrderOutcome } from "./chief-outcome"
@@ -98,6 +99,7 @@ export async function runOrder(
     undefined,
     undefined,
     discoverReadyAgents,
+    discoverFreeModels,
   )
   process.once("SIGINT", interrupt)
   process.once("SIGTERM", terminate)

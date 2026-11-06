@@ -1,12 +1,11 @@
-import { performParallelWave } from "./coordinator-parallel"
-import { applyTaskReviewResult, applyWorkResult } from "./coordinator-results"
+import { ParallelTaskReviewRejected, performParallelWave } from "./coordinator-parallel"
+import { applyTaskReviewResult, applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
 import { classifyFailure, MissionPause, pauseForFailure } from "./execution"
 import { readyTaskWave } from "./parallel"
 import { ParallelIntegrationConflict } from "./parallel-workspace"
 import { reviewPrompt, workPrompt } from "./prompts"
 import { selectTaskReviewer } from "./review-routing"
-import { recordTaskVerdict } from "./routing"
 import { parseReview } from "./schemas"
 import type { ChiefTask, ChiefTaskState } from "./types"
 
@@ -16,29 +15,44 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
     const reviewer = selectTaskReviewer(mission, task, state)
     state.status = "reviewing"
     await checkpoint.transition("reviewing", "review", `Reviewing ${task.id} with ${state.reviewerId}.`, task.id)
-    const review = parseReview(await run(reviewer, reviewPrompt(mission, task, state), "review", task.id))
+    let review: ReturnType<typeof parseReview>
+    try {
+      review = parseReview(await run(reviewer, reviewPrompt(mission, task, state), "review", task.id))
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      recordTaskReviewFailure(mission, task.id, reason)
+      await save(
+        "review-pending",
+        `Review for ${task.id} returned no verdict; successful work remains pending review. ${reason}`,
+        task.id,
+      )
+      throw error
+    }
     applyTaskReviewResult(mission, state, review)
     await save("review", state.review.summary, task.id)
   }
   const performTask = async (task: ChiefTask, state: ChiefTaskState) => {
     while (state.status !== "completed") {
       checkAbort()
-      state.status = "running"
-      if (task.effectScope !== "external" || state.effectState !== "completed") state.attempts += 1
+      const awaitingReview = state.output !== undefined && state.review === undefined
+      state.status = awaitingReview ? "reviewing" : "running"
+      if (!awaitingReview && (task.effectScope !== "external" || state.effectState !== "completed")) state.attempts += 1
       if (task.effectScope === "external") state.effectState ??= "not-started"
-      await checkpoint.transition(
-        "executing",
-        "work",
-        `Running ${task.id} with ${task.personaId}, attempt ${state.attempts}.`,
-        task.id,
-      )
+      if (!awaitingReview)
+        await checkpoint.transition(
+          "executing",
+          "work",
+          `Running ${task.id} with ${task.personaId}, attempt ${state.attempts}.`,
+          task.id,
+        )
+      let reviewStarted = false
       try {
         if (task.effectScope === "external" && state.effectState === "unknown")
           throw new MissionPause(
             `External effect ${task.id} has no established destination outcome and will not be repeated.`,
             "unknown-effect",
           )
-        if (task.effectScope !== "external" || state.effectState !== "completed") {
+        if (!awaitingReview && (task.effectScope !== "external" || state.effectState !== "completed")) {
           const output = await run(
             persona(task.personaId),
             workPrompt(mission, task, state, persona(task.personaId)),
@@ -47,12 +61,25 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
           )
           applyWorkResult(task, state, output)
         }
-        await save("work", `Worker returned evidence for ${task.id}.`, task.id)
+        if (awaitingReview && state.parallel) {
+          if (!ports.parallel)
+            throw new Error(
+              "Missing dependency: isolated task workspace ports. Configure parallel integration before reviewing retained Actor output.",
+            )
+          await ports.parallel.integrate(mission, state.parallel)
+          mission.fingerprint = await ports.fingerprint(mission)
+          await save(
+            "parallel-integrated",
+            `Integrated retained work for ${task.id}; independent review remains pending.`,
+            task.id,
+          )
+        }
+        if (!awaitingReview) await save("work", `Worker returned evidence for ${task.id}.`, task.id)
+        reviewStarted = true
         await taskReview(task, state)
       } catch (error) {
-        recordTaskVerdict(mission, task.id, false, error instanceof Error ? error.message : String(error))
         if (!mission.supervision || protectedFailure(error)) throw error
-        state.status = "pending"
+        state.status = reviewStarted ? "reviewing" : "pending"
         if (state.effectState !== "unknown")
           pauseForFailure(mission, error instanceof Error ? error.message : String(error), task.id)
         await requestRecovery(error instanceof Error ? error.message : String(error), task.id)
@@ -91,6 +118,22 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
   while (mission.tasks.some((state) => state.status !== "completed")) {
     const plan = mission.plan
     if (!plan) throw new Error("No task can run. Restore an acyclic plan with complete dependency state.")
+    const pendingReview = plan.tasks.find((task) => {
+      const state = mission.tasks.find((entry) => entry.id === task.id)
+      return (
+        state &&
+        state.status !== "completed" &&
+        state.output !== undefined &&
+        state.review === undefined &&
+        !state.parallel &&
+        task.dependencies.every((id) => mission.tasks.some((entry) => entry.id === id && entry.status === "completed"))
+      )
+    })
+    const pendingState = mission.tasks.find((entry) => entry.id === pendingReview?.id)
+    if (pendingReview && pendingState) {
+      await performTask(pendingReview, pendingState)
+      continue
+    }
     const limit = mission.executionPolicy?.maxParallel ?? 1
     const wave = readyTaskWave(plan, mission.tasks, limit).filter((task) => task.effectScope !== "external")
     if (
@@ -107,11 +150,11 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
       const unrecoverable = failures.find((failure) => protectedFailure(failure.error))
       if (unrecoverable) throw unrecoverable.error
       for (const failure of failures) {
-        recordTaskVerdict(mission, failure.taskId, false, failure.reason)
         pauseForFailure(mission, failure.reason, failure.taskId)
         const state = mission.tasks.find((task) => task.id === failure.taskId)
         if (!state) throw new Error("Recovery task disappeared. Restore the recorded plan.")
         if (
+          (failure.phase === "review" && !(failure.error instanceof ParallelTaskReviewRejected)) ||
           failure.error instanceof ParallelIntegrationConflict ||
           ["environment", "authentication", "provider", "rate-limit"].includes(classifyFailure(failure.reason))
         ) {

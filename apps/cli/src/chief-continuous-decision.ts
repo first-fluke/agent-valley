@@ -17,6 +17,7 @@ import { discoverReadyAgents } from "./chief-agent-discovery"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { consultContinuousDirectors, continuousDirectorAdvice } from "./chief-continuous-council"
 import { assertContinuousDecisionRecovery, runContinuousDecision } from "./chief-continuous-recovery"
+import { discoverFreeModels } from "./chief-free-model-discovery"
 import { createMissionMetricPorts } from "./chief-metrics"
 import type { abortableDelay } from "./chief-supervisor"
 import { prepareChiefToolConfig } from "./chief-tool-config"
@@ -72,7 +73,8 @@ export async function decideContinuousGoal(
   const unlock = await store.lock(decisionId)
   const runtime = (
     dependencies.runtime ??
-    ((storage, signal) => new ChiefRuntime(storage, signal, undefined, undefined, undefined, discoverReadyAgents))
+    ((storage, signal) =>
+      new ChiefRuntime(storage, signal, undefined, undefined, undefined, discoverReadyAgents, discoverFreeModels))
   )(store, dependencies.signal)
   let mission: Mission | undefined
   try {

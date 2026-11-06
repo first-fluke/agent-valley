@@ -41,7 +41,7 @@ export function getAgentAuthEnvKeys(agentType: string): readonly string[] {
 
 /**
  * Build a minimal env for the agent subprocess.
- * Only safe system vars + agent-specific auth keys + explicit config.env are included.
+ * Only safe system vars, allowlisted agent credentials/configuration, and explicit config.env are included.
  */
 export function buildAgentEnv(
   agentType: string,

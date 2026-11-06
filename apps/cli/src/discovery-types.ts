@@ -18,6 +18,7 @@ export interface AuthProbeResult {
 
 export interface AuthProbeOptions {
   env: NodeJS.ProcessEnv
+  cwd?: string
   timeoutMs: number
   maxOutputBytes: number
   signal: AbortSignal

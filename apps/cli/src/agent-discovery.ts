@@ -1,9 +1,10 @@
-import { execFile } from "node:child_process"
+import { spawn } from "node:child_process"
 import { accessSync, constants, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { stripVTControlCharacters } from "node:util"
 import { buildAgentEnv, getAgentAuthEnvKeys } from "@agent-valley/core/sessions/base-session"
+import { signalProcessTree } from "@agent-valley/core/sessions/process-tree"
 import { resolveBinaryPath } from "@agent-valley/core/sessions/sandbox-binary"
 import { parseClientToml } from "./client-toml"
 import type {
@@ -32,28 +33,84 @@ function nonempty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
 
-function defaultProbe(path: string, args: readonly string[], options: AuthProbeOptions): Promise<AuthProbeResult> {
+export function probeNativeCli(
+  path: string,
+  args: readonly string[],
+  options: AuthProbeOptions,
+): Promise<AuthProbeResult> {
+  if (options.signal.aborted) return Promise.reject(new Error("Native CLI metadata probe was cancelled"))
   return new Promise((resolve, reject) => {
-    const child = execFile(
-      path,
-      [...args],
-      {
-        encoding: "utf8",
-        env: options.env,
-        timeout: options.timeoutMs,
-        maxBuffer: options.maxOutputBytes,
-        signal: options.signal,
-        windowsHide: true,
-      },
-      (error, stdout, stderr) => {
-        if (error && (typeof error.code !== "number" || error.killed)) {
-          reject(new Error("Native authentication probe could not complete"))
-        } else {
-          resolve({ exitCode: error ? (error.code as number) : 0, stdout, stderr })
-        }
-      },
-    )
-    child.stdin?.end()
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let reapTimer: ReturnType<typeof setTimeout> | undefined
+    let stopped: Error | undefined
+    let outputBytes = 0
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    const finish = (error?: Error, result?: AuthProbeResult) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      if (reapTimer) clearTimeout(reapTimer)
+      options.signal.removeEventListener("abort", abort)
+      try {
+        signalProcessTree(child, "SIGKILL")
+      } catch {
+        // The probe has its own process group; never target the caller's group.
+      }
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+      child.unref()
+      if (error) reject(error)
+      else if (result) resolve(result)
+    }
+    const child = spawn(path, [...args], {
+      env: options.env,
+      cwd: options.cwd,
+      detached: process.platform !== "win32",
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const stop = (error: Error) => {
+      if (settled || stopped) return
+      stopped = error
+      try {
+        signalProcessTree(child, "SIGKILL")
+      } catch {
+        // Preserve a failed probe even if the OS cannot confirm process cleanup.
+      }
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+      reapTimer = setTimeout(() => finish(error), 250)
+    }
+    const abort = () => stop(new Error("Native CLI metadata probe was cancelled or timed out"))
+    const capture = (chunks: Buffer[], chunk: Buffer | string) => {
+      if (settled || stopped) return
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      outputBytes += buffer.byteLength
+      if (outputBytes > options.maxOutputBytes) {
+        stop(new Error("Native CLI metadata output exceeded the limit"))
+      } else {
+        chunks.push(buffer)
+      }
+    }
+    child.stdout?.on("data", (chunk: Buffer) => capture(stdout, chunk))
+    child.stderr?.on("data", (chunk: Buffer) => capture(stderr, chunk))
+    child.once("error", () => finish(new Error("Native CLI metadata probe could not complete")))
+    child.once("close", (exitCode) => {
+      if (stopped || exitCode === null) {
+        finish(stopped ?? new Error("Native CLI metadata probe could not complete"))
+      } else {
+        finish(undefined, {
+          exitCode,
+          stdout: Buffer.concat(stdout).toString("utf8"),
+          stderr: Buffer.concat(stderr).toString("utf8"),
+        })
+      }
+    })
+    timer = setTimeout(abort, options.timeoutMs)
+    options.signal.addEventListener("abort", abort, { once: true })
+    if (options.signal.aborted) abort()
   })
 }
 
@@ -82,7 +139,7 @@ function defaultDeps(): DiscoveryDeps {
     },
     readFile: (path) => readFileSync(path, "utf8"),
     parseToml: parseClientToml,
-    probe: defaultProbe,
+    probe: probeNativeCli,
   }
 }
 

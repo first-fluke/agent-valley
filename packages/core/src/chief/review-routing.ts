@@ -1,3 +1,4 @@
+import { unavailableProviders } from "./handoff-contract"
 import { latestWorkRun } from "./routing"
 import type { ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
 
@@ -27,7 +28,8 @@ export function selectTaskReviewer(mission: Mission, task: ChiefTask, state: Chi
   const run = latestWorkRun(mission, task.id)
   const worker = run?.actorType ?? mission.personas.find((actor) => actor.id === task.personaId)?.agentType
   if (!worker) throw new Error("Restore this task's actual work Actor before reviewing it.")
-  const ready = policy.readyActors ?? mission.availableAgents ?? []
+  const blocked = unavailableProviders(mission.handoff)
+  const ready = (policy.readyActors ?? mission.availableAgents ?? []).filter((vendor) => !blocked.has(vendor))
   const otherVendor = ready.find((vendor) => vendor !== worker)
   let reviewer = configured
   let reason = "Only one ready vendor; independent Actor review used the same vendor."

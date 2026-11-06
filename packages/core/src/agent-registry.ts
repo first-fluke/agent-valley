@@ -14,7 +14,7 @@ export interface AgentDescriptor {
   id: AgentType
   /** CLI binary name on PATH. */
   binary: string
-  /** Env vars forwarded to the agent subprocess for authentication. */
+  /** Credential and native configuration env vars forwarded to the agent subprocess. */
   envKeys: readonly string[]
   /** Intervention commands the port supports for this agent. */
   capabilities: readonly InterventionCapability[]
@@ -95,7 +95,21 @@ export const AGENT_REGISTRY: Record<AgentType, AgentDescriptor> = Object.freeze(
   opencode: {
     id: "opencode",
     binary: "opencode",
-    envKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "XDG_DATA_HOME"],
+    envKeys: [
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENROUTER_API_KEY",
+      "OPENCODE_API_KEY",
+      "OPENCODE_DISABLE_FREE_MODELS",
+      "OPENCODE_DISABLE_MODELS_FETCH",
+      "OPENCODE_CONFIG",
+      "OPENCODE_CONFIG_CONTENT",
+      "OPENCODE_CONFIG_DIR",
+      "XDG_CONFIG_HOME",
+      "XDG_DATA_HOME",
+      "XDG_STATE_HOME",
+      "XDG_CACHE_HOME",
+    ],
     capabilities: ["append_prompt", "abort"],
     genAiSystem: "opencode",
   },

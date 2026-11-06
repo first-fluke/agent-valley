@@ -1,7 +1,14 @@
 import { classifyAgentExhaustion } from "../domain/agent-exhaustion"
 import { createMissionCheckpoint } from "./coordinator-checkpoint"
 import { assertNoUncertainExecution, classifyFailure, MissionPause, reserveExecutionRun } from "./execution"
-import { handoffActor, handoffPrompt, prepareHandoff, recordHandoffReview } from "./handoff"
+import {
+  FreeModelRouteUnavailable,
+  handoffActor,
+  handoffPrompt,
+  prepareHandoff,
+  recordHandoffReview,
+  refreshFreeModelRoute,
+} from "./handoff"
 import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
 
 export class ReadOnlyViolation extends Error {}
@@ -14,6 +21,7 @@ export function createMissionRun(
   checkAbort: () => void,
   persist = createMissionCheckpoint(mission, ports, assertContract).persist,
 ) {
+  const validatedFreeRoutes = new Set<string>()
   const runOnce = async (
     actor: Persona,
     prompt: string,
@@ -121,21 +129,31 @@ export function createMissionRun(
     taskId?: string,
     context?: { workspace?: Mission["workspace"]; signal?: AbortSignal },
   ): Promise<string> => {
+    checkAbort()
+    ports.signal?.throwIfAborted()
     let selected = handoffActor(mission, actor)
     let reason = selected === actor ? undefined : "Continue the saved authenticated handoff route."
     let currentPrompt = reason ? handoffPrompt(mission, prompt, stage, taskId) : prompt
+    const workspace = context?.workspace?.path ?? mission.workspace.path
+    const rememberFreeRoute = () => {
+      if (selected.model && mission.handoff?.freeRoutes?.[selected.id] === selected.model)
+        validatedFreeRoutes.add(`${workspace}\0${selected.model}`)
+    }
     const redirect = async (error: unknown): Promise<boolean> => {
       checkAbort()
       let next: Awaited<ReturnType<typeof prepareHandoff>>
       try {
         next = await prepareHandoff(mission, ports, selected, stage, taskId, error)
       } catch (failure) {
+        ports.signal?.throwIfAborted()
+        checkAbort()
         // Exhausted providers and spent continuation allowances survive a stopped supervisor.
         await persist("Handoff checkpoint could not be saved. Restore writable mission storage before resuming.")
         throw failure
       }
       if (!next) return false
       selected = next.actor
+      rememberFreeRoute()
       reason = next.reason
       currentPrompt = handoffPrompt(mission, prompt, stage, taskId)
       mission.history.push({
@@ -147,7 +165,31 @@ export function createMissionRun(
       await persist("Handoff checkpoint could not be saved. Restore writable mission storage before resuming.")
       return true
     }
+    try {
+      const refreshed = await refreshFreeModelRoute(mission, ports, actor, selected, workspace, validatedFreeRoutes)
+      if (refreshed) {
+        selected = refreshed.actor
+        reason = refreshed.reason
+        currentPrompt = handoffPrompt(mission, prompt, stage, taskId)
+        mission.history.push({
+          at: new Date().toISOString(),
+          stage: "handoff",
+          message: reason,
+          ...(taskId ? { taskId } : {}),
+        })
+        await persist(
+          "Free model route checkpoint could not be saved. Restore writable mission storage before resuming.",
+        )
+      }
+    } catch (error) {
+      if (!(error instanceof FreeModelRouteUnavailable) || !(await redirect(error))) throw error
+    }
     for (;;) {
+      if (
+        actor.id !== mission.chiefId &&
+        mission.handoff?.unavailableAgents?.some((vendor) => vendor === selected.agentType)
+      )
+        await redirect(new Error("Model is unavailable"))
       if (mission.handoff?.exhaustedAgents.some((vendor) => vendor === selected.agentType))
         await redirect(new Error("usage_limit_reached"))
       try {

@@ -164,6 +164,24 @@ describe("buildAgentEnv", () => {
     }
   })
 
+  test("uses the same OpenCode model policy and catalog paths in native runs", () => {
+    const source = {
+      OPENCODE_API_KEY: "opencode-test",
+      OPENCODE_DISABLE_FREE_MODELS: "1",
+      OPENCODE_DISABLE_MODELS_FETCH: "true",
+      OPENCODE_CONFIG: "/project/opencode.json",
+      OPENCODE_CONFIG_CONTENT: '{"model":"opencode/configured"}',
+      OPENCODE_CONFIG_DIR: "/project/config",
+      XDG_CONFIG_HOME: "/custom/config",
+      XDG_DATA_HOME: "/custom/data",
+      XDG_STATE_HOME: "/custom/state",
+      XDG_CACHE_HOME: "/custom/cache",
+    }
+    const env = buildAgentEnv("opencode", {}, { ...source, UNRELATED_SECRET: "private" })
+    expect(env).toEqual(source)
+    expect(buildAgentEnv("codex", {}, source).OPENCODE_CONFIG).toBeUndefined()
+  })
+
   test("merges extra env vars", () => {
     const env = buildAgentEnv("claude", { MY_VAR: "hello" })
     expect(env.MY_VAR).toBe("hello")

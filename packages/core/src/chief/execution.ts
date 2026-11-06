@@ -35,6 +35,12 @@ export function isNativeAgentTimeout(reason: string): boolean {
   return /^Agent timed out after \d+(?:\.\d+)?s$/i.test(reason)
 }
 
+/** Explicit native model selection failures are prerequisites, not transient provider outages. */
+export function isUnavailableAgentModel(reason: string): boolean {
+  const normalized = reason.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ")
+  return /\bmodel not (?:found|available)\b|(?:^|:\s*)(?:the )?model (?:is )?unavailable(?:[.!:]|$)/i.test(normalized)
+}
+
 export function classifyFailure(reason: string): FailureKind {
   if (
     /unauthori[sz]ed|authentication|login required|log in|expired token|invalid.*(?:token|api.key)|\b401\b|\b403\b/i.test(
@@ -43,6 +49,7 @@ export function classifyFailure(reason: string): FailureKind {
   )
     return "authentication"
   if (/rate.?limit|too many requests|\b429\b/i.test(reason)) return "rate-limit"
+  if (isUnavailableAgentModel(reason)) return "environment"
   if (
     isNativeAgentTimeout(reason) ||
     /\b50[0234]\b|econnreset|econnrefused|etimedout|fetch failed|temporarily unavailable|overloaded|network error/i.test(

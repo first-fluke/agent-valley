@@ -1,7 +1,7 @@
 import type { Workspace } from "../domain/models"
+import { applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import { runJoinedWave } from "./parallel"
 import { workPrompt } from "./prompts"
-import { recordTaskVerdict } from "./routing"
 import type { ChiefPorts, ChiefStage, ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
 
 export interface ParallelWaveHooks {
@@ -20,6 +20,7 @@ export interface ParallelWaveFailure {
   taskId: string
   error: unknown
   reason: string
+  phase?: "work" | "integration" | "review"
 }
 export class ParallelTaskReviewRejected extends Error {}
 
@@ -34,9 +35,9 @@ export async function performParallelWave(
   if (!parallel) throw new Error("Configure isolated task workspace ports before running a parallel wave.")
   ports.signal?.throwIfAborted()
   const failures = new Map<string, ParallelWaveFailure>()
-  const fail = (taskId: string, error: unknown) => {
+  const fail = (taskId: string, error: unknown, phase: ParallelWaveFailure["phase"] = "work") => {
     const reason = error instanceof Error ? error.message : String(error)
-    failures.set(taskId, { taskId, error, reason })
+    failures.set(taskId, { taskId, error, reason, phase })
   }
   let queued: Promise<void> = Promise.resolve()
   const save = (stage: string, message: string, taskId?: string) => {
@@ -111,7 +112,7 @@ export async function performParallelWave(
         workspace,
         signal,
       })
-      state.output = output.slice(-32_000)
+      applyWorkResult(task, state, output)
       await save(
         "parallel-output",
         `Actor ${actor.id} returned output for ${task.id}; isolated edits remain at ${workspace.path}.`,
@@ -124,12 +125,6 @@ export async function performParallelWave(
     const entry = pending[index]
     if (entry && result.status === "rejected") {
       entry.state.status = "pending"
-      recordTaskVerdict(
-        mission,
-        entry.task.id,
-        false,
-        result.reason instanceof Error ? result.reason.message : String(result.reason),
-      )
       fail(entry.task.id, result.reason)
     }
   })
@@ -156,8 +151,7 @@ export async function performParallelWave(
       integrated.push(entry)
     } catch (error) {
       state.status = "pending"
-      recordTaskVerdict(mission, task.id, false, error instanceof Error ? error.message : String(error))
-      fail(task.id, error)
+      fail(task.id, error, "integration")
       if (hooks.fatal?.(error)) break
     }
   }
@@ -191,12 +185,12 @@ export async function performParallelWave(
           `Task ${task.id} awaits the Chief's repair decision; the previous Actor workspace remains in history.`,
           task.id,
         )
-        fail(task.id, new ParallelTaskReviewRejected(reason))
+        fail(task.id, new ParallelTaskReviewRejected(reason), "review")
       }
     } catch (error) {
-      state.status = "pending"
-      recordTaskVerdict(mission, task.id, false, error instanceof Error ? error.message : String(error))
-      fail(task.id, error)
+      state.status = "reviewing"
+      recordTaskReviewFailure(mission, task.id, error instanceof Error ? error.message : String(error))
+      fail(task.id, error, "review")
       if (hooks.fatal?.(error)) break
     }
   }

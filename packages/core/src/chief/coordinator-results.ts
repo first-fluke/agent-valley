@@ -1,4 +1,4 @@
-import { recordTaskVerdict } from "./routing"
+import { latestWorkRun, recordTaskVerdict } from "./routing"
 import type { parsePlanningResponse } from "./schemas"
 import { assignTaskStates } from "./supervision"
 import type { ChiefPlan, ChiefPorts, ChiefTask, ChiefTaskState, Mission, Review, Verification } from "./types"
@@ -26,7 +26,24 @@ export function applyPlanningResult(
 
 export function applyWorkResult(task: ChiefTask, state: ChiefTaskState, output: string): void {
   state.output = output.slice(-32_000)
+  delete state.review
   if (task.effectScope === "external") state.effectState = "completed"
+}
+
+/** A failed reviewer call supplies no acceptance verdict about the successful work. */
+export function recordTaskReviewFailure(mission: Mission, taskId: string, reason: string): void {
+  const work = latestWorkRun(mission, taskId)
+  const decision = mission.operations?.reviewDecisions.findLast(
+    (entry) =>
+      !entry.gateId &&
+      entry.taskId === taskId &&
+      entry.outcome === "assigned" &&
+      (!work || !entry.runId || entry.runId === work.runId),
+  )
+  if (decision) {
+    decision.outcome = "failed"
+    decision.reason = `${decision.reason}\nReview execution failed without a verdict: ${reason}`.slice(-2_000)
+  }
 }
 
 export function applyTaskReviewResult(

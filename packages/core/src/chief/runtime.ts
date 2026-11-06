@@ -91,6 +91,7 @@ export class ChiefRuntime {
     private readonly skillMatrixDeps?: SkillMatrixDeps,
     runner?: AgentRunnerPort,
     private readonly discoverReadyAgents?: () => Promise<string[]>,
+    private readonly discoverFreeModels?: ChiefPorts["discoverFreeModels"],
   ) {
     this.localExecution = runner === undefined
     this.runner = runner ?? createLocalMissionRunner(store)
@@ -100,6 +101,7 @@ export class ChiefRuntime {
     return {
       signal: this.signal,
       ...(this.discoverReadyAgents ? { discoverReadyAgents: this.discoverReadyAgents } : {}),
+      ...(this.discoverFreeModels ? { discoverFreeModels: this.discoverFreeModels } : {}),
       prepareWork: (persona, mission, context) => this.prepareWork(persona, mission, context),
       save: (mission) => this.store.save(mission),
       fingerprint: async (mission) => {
