@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.3](https://github.com/first-fluke/agent-valley/compare/v4.8.2...v4.8.3) (2026-11-06)
+
+
+### Tests
+
+* **config:** align integration with OMA trigger policy ([8926ca8](https://github.com/first-fluke/agent-valley/commit/8926ca89646c4c3d658d7572d5deb72e025b6ff6))
+
 ## [4.8.2](https://github.com/first-fluke/agent-valley/compare/v4.8.1...v4.8.2) (2026-11-06)
 
 
