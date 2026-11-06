@@ -228,9 +228,12 @@ describe("durable A2A execution service", () => {
 
   it("rejects storage redirected outside the repository", async () => {
     const other = await fixtureRepository()
+    const ignore = await readFile(join(root, ".gitignore"), "utf8")
     try {
       await symlink(other, join(root, ".agent-valley"))
       await expect(new A2aJobStore(root).lock()).rejects.toThrow("inside its repository")
+      expect(await readFile(join(root, ".gitignore"), "utf8")).toBe(ignore)
+      expect(await readFile(join(other, "result.txt"), "utf8")).toBe("0\n")
     } finally {
       await rm(other, { recursive: true, force: true })
     }

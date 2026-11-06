@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, realpath } from "node:fs/promises"
+import { lstat, mkdir, readdir, readFile, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { writeJsonAtomic } from "../util/atomic-json"
 import { lockRecord } from "../util/record-lock"
@@ -25,6 +25,7 @@ export class A2aJobStore {
   }
 
   async lock(): Promise<() => Promise<void>> {
+    await this.assertExistingStorage()
     await ensureRuntimeGitignore(this.root)
     await this.prepare()
     return lockRecord(join(this.directory, "repository.lock"), "A2A repository execution")
@@ -35,6 +36,7 @@ export class A2aJobStore {
       const value = a2aJobSchema.parse(job)
       if (value.root !== this.root)
         throw new Error("A2A record belongs to another repository. Restore its original root.")
+      await this.assertExistingStorage()
       await ensureRuntimeGitignore(this.root)
       await this.prepare()
       await writeJsonAtomic(this.path(value.id), value)
@@ -59,6 +61,23 @@ export class A2aJobStore {
         .sort()
         .map((name) => this.load(name.slice(0, -5))),
     )
+  }
+
+  private async assertExistingStorage(): Promise<void> {
+    for (const [path, message] of [
+      [
+        join(this.root, ".agent-valley"),
+        "A2A storage must stay inside its repository. Restore .agent-valley as a local directory.",
+      ],
+      [this.directory, "A2A storage must be a local directory. Restore .agent-valley/a2a before running or resuming."],
+    ] as const) {
+      const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined
+        throw error
+      })
+      if (info && (!info.isDirectory() || info.isSymbolicLink() || (await realpath(path)) !== path))
+        throw new Error(message)
+    }
   }
 
   private path(id: string): string {
