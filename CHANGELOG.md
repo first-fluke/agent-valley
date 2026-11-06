@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.2](https://github.com/first-fluke/agent-valley/compare/v4.8.1...v4.8.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **chief:** continue bounded work when routing quality drops ([d644ce8](https://github.com/first-fluke/agent-valley/commit/d644ce884abbfefb23a1530925ad448b2fca80af))
+
 ## [4.8.1](https://github.com/first-fluke/agent-valley/compare/v4.8.0...v4.8.1) (2026-11-06)
 
 
