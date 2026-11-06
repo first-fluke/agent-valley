@@ -6,6 +6,23 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.0](https://github.com/first-fluke/agent-valley/compare/v4.7.0...v4.8.0) (2026-11-06)
+
+
+### Features
+
+* **chief:** apply verified cycles to source before continuing ([eb14eba](https://github.com/first-fluke/agent-valley/commit/eb14eba91ded8a7c0a34d2c7ce77b7fe56f9cd17))
+
+
+### Bug Fixes
+
+* **chief:** preserve saved orders during source handoff ([0501add](https://github.com/first-fluke/agent-valley/commit/0501add756f7b39ad07a53e96ae28600c21b89ff))
+
+
+### Refactors
+
+* **chief:** share continuous operation port definitions ([8dd59de](https://github.com/first-fluke/agent-valley/commit/8dd59debc87c102ce6f068a8e98a1b7c40460357))
+
 ## [4.7.0](https://github.com/first-fluke/agent-valley/compare/v4.6.0...v4.7.0) (2026-11-06)
 
 
