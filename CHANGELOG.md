@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.4](https://github.com/first-fluke/agent-valley/compare/v4.8.3...v4.8.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **chief:** decompose independent work by module boundaries ([c83c47a](https://github.com/first-fluke/agent-valley/commit/c83c47ae1e65ffaa908b767157bf1ed0d28ac520))
+
 ## [4.8.3](https://github.com/first-fluke/agent-valley/compare/v4.8.2...v4.8.3) (2026-11-06)
 
 
