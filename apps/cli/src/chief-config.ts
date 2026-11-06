@@ -18,6 +18,7 @@ import { AGENT_TYPES } from "./doctor-checks"
 
 export interface OrderOptions {
   once?: boolean
+  sourceIntegration?: string
   workspace?: string
   verify?: string
   agent?: string

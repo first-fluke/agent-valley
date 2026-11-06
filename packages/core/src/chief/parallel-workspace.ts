@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { dirname, join, sep } from "node:path"
+import { integrateContentTransaction } from "./content-transaction"
 import {
   type ParallelBaseline,
   type ParallelDelivery,
@@ -213,54 +214,12 @@ export async function integrateTaskDelivery(
     throw new Error(
       "Parallel delivery does not match its persisted task identity and patch. Inspect the saved artifacts before recovery.",
     )
-  const patch = await readFile(location.patch)
-  if (hash(patch) !== delivery.patchSha256)
-    throw new Error("Parallel delivery patch changed. Restore its saved SHA256 before integration.")
-  const current = await captureParallelBaseline(mission.workspace.path)
-  const images = await parallelTreeImages(mission.workspace.path, current.tree)
-  const differs = (side: "before" | "after") =>
-    delivery.changes
-      .filter((change) => !same(images.get(change.path) ?? null, change[side]))
-      .map((change) => change.path)
-  const changedPaths = delivery.changes.map((change) => change.path)
-  const before = differs("before")
-  const after = differs("after")
-  if (delivery.status !== "prepared" && !after.length) {
-    delivery.status = "applied"
-    await writeParallelJson(location.delivery, delivery)
-    input.status = "applied"
-    return { alreadyApplied: true, changedPaths }
-  }
-  if (delivery.status === "applied")
-    throw new ParallelIntegrationConflict(delivery.workspace.taskId, after, "Previously integrated task files changed.")
-  if (before.length)
-    throw new ParallelIntegrationConflict(
-      delivery.workspace.taskId,
-      before,
-      delivery.status === "applying"
-        ? "Integration was interrupted or task files changed; inspect its partial delivery."
-        : undefined,
-    )
-  if (patch.length) await parallelGit(mission.workspace.path, ["apply", "--check", "--binary", location.patch])
-  delivery.status = "applying"
-  await writeParallelJson(location.delivery, delivery)
-  if (patch.length)
-    await parallelGit(mission.workspace.path, ["apply", "--binary", "--whitespace=nowarn", location.patch])
-  const final = await captureParallelBaseline(mission.workspace.path)
-  const applied = await parallelTreeImages(mission.workspace.path, final.tree)
-  const remaining = delivery.changes
-    .filter((change) => !same(applied.get(change.path) ?? null, change.after))
-    .map((change) => change.path)
-  if (remaining.length)
-    throw new ParallelIntegrationConflict(
-      delivery.workspace.taskId,
-      remaining,
-      "Applied task patch did not match its saved post images.",
-    )
-  delivery.status = "applied"
-  await writeParallelJson(location.delivery, delivery)
+  const result = await integrateContentTransaction(mission.workspace.path, delivery, {
+    save: () => writeParallelJson(location.delivery, delivery),
+    conflict: (paths, detail) => new ParallelIntegrationConflict(delivery.workspace.taskId, paths, detail),
+  })
   input.status = "applied"
-  return { alreadyApplied: false, changedPaths }
+  return result
 }
 
 /** No failed or unmerged Actor edits are removed. Patch receipts remain for resume/audit. */

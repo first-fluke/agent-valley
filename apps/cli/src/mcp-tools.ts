@@ -50,7 +50,7 @@ export function createAvMcpServer(api: MissionApiPort, options: AvMcpOptions): M
     "av_order",
     {
       description:
-        "Start continuous Chief Director supervision by default and return operationId immediately. The Chief selects successive goals, executes, verifies and reports them until stopped or paused; cycles optionally bounds verified improvements. Set once:true to complete one goal and return missionId. Budgets apply to each mission and decision, not a global spending cap. requestId deduplicates submissions. verify is an optional trusted completion command.",
+        "Start continuous Chief Director supervision by default and return operationId immediately. The Chief selects successive goals, executes, verifies and reports them until stopped or paused; cycles optionally bounds verified improvements. New continuous orders apply verified changes to source files before the next cycle; sourceIntegration:snapshot-only keeps private snapshots instead. Source application does not stage, commit or push. Set once:true to complete one goal and return missionId. Budgets apply to each mission and decision, not a global spending cap. requestId deduplicates submissions. verify is an optional trusted completion command.",
       inputSchema: mcpOrderSchema,
       annotations: write,
     },

@@ -98,8 +98,9 @@ function completedMission(id: string, goal: string, workspace: Mission["workspac
 }
 
 describe("continuous operation CLI", () => {
-  it("keeps two verified changes across cycles and preserves the original source checkout", async () => {
+  it("applies two verified changes progressively to source while preserving its HEAD and index", async () => {
     const sourceHead = (await execute("git", ["rev-parse", "HEAD"], { cwd: root })).stdout
+    const sourceIndex = await readFile(join(root, ".git", "index"))
     const decisions = vi
       .fn()
       .mockResolvedValueOnce({
@@ -120,6 +121,8 @@ describe("continuous operation CLI", () => {
         await writeFile(join(workspace.path, "service.txt"), "login fixed\n")
         await writeFile(join(workspace.path, "new.txt"), "retained untracked change\n")
       } else {
+        expect(await readFile(join(root, "service.txt"), "utf8")).toBe("login fixed\n")
+        expect(await readFile(join(root, "new.txt"), "utf8")).toBe("retained untracked change\n")
         expect(await readFile(join(workspace.path, "service.txt"), "utf8")).toBe("login fixed\n")
         expect(await readFile(join(workspace.path, "new.txt"), "utf8")).toBe("retained untracked change\n")
         await writeFile(join(workspace.path, "service.txt"), "login and checkout fixed\n")
@@ -141,9 +144,10 @@ describe("continuous operation CLI", () => {
     expect(result.settings).toMatchObject({ actor: "codex", model: "chosen-model", verify: "git diff --check" })
     expect(result.history.map((entry) => entry.goal)).toEqual(["Improve login", "Improve checkout"])
     expect(await readFile(join(result.baseline?.path ?? "", "service.txt"), "utf8")).toBe("login and checkout fixed\n")
-    expect(await readFile(join(root, "service.txt"), "utf8")).toBe("initial\n")
+    expect(await readFile(join(root, "service.txt"), "utf8")).toBe("login and checkout fixed\n")
     expect((await execute("git", ["rev-parse", "HEAD"], { cwd: root })).stdout).toBe(sourceHead)
-    expect((await execute("git", ["status", "--porcelain"], { cwd: root })).stdout).toBe("")
+    expect(await readFile(join(root, ".git", "index"))).toEqual(sourceIndex)
+    expect((await execute("git", ["status", "--porcelain"], { cwd: root })).stdout).toContain(" M service.txt")
     expect((await operationStore(root).load(result.id)).completedCycles).toBe(2)
     expect(await readFile(join(root, ".agent-valley", "operation-reports", `${result.id}.md`), "utf8")).toContain(
       "Verified completed improvements: 2 / 2",

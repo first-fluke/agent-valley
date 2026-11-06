@@ -61,6 +61,39 @@ describe("asynchronous operation API", () => {
     expect(await api.cancel(id)).toMatchObject({ cancelRequested: true })
     expect(signal).toHaveBeenCalledWith(12345)
   })
+  it("passes an explicit snapshot-only policy through the detached launch", async () => {
+    const { api, launch } = fixture()
+    await api.order({ goal: "Inspect privately", sourceIntegration: "snapshot-only" })
+    expect(launch.mock.calls[0]?.[0].args).toEqual(expect.arrayContaining(["--source-integration", "snapshot-only"]))
+    expect(() => api.order({ goal: "One task", once: true, sourceIntegration: "worktree" })).toThrow()
+  })
+  it("can enable source catch-up on a completed operation without extending its cycle budget", async () => {
+    const { api, launch, liveness } = fixture()
+    const first = await api.operate({ charter: "Improve maintainability" })
+    const id = String(first.operationId)
+    const now = new Date().toISOString()
+    await new ContinuousOperationStore(join(root, ".agent-valley/operations")).save({
+      id,
+      repositoryRoot: root,
+      charter: "Improve maintainability",
+      settings: { actor: "codex" },
+      phase: "completed",
+      createdAt: now,
+      updatedAt: now,
+      completedCycles: 1,
+      cycleLimit: 1,
+      waitIntervalSec: 60,
+      history: [],
+    })
+    liveness.mockReturnValue("stopped")
+    await expect(api.resume({ operationId: id })).rejects.toThrow("cycle limit")
+    expect(await api.resume({ operationId: id, requestId: "catch-up", sourceIntegration: "worktree" })).toMatchObject({
+      accepted: true,
+      completedCycles: 1,
+      cycleLimit: 1,
+    })
+    expect(launch.mock.calls.at(-1)?.[0].args).toEqual(["order", "--resume", id, "--source-integration", "worktree"])
+  })
   it("uses order as the continuous entry and refuses single-goal mode rather than ignoring it", async () => {
     const { api, launch } = fixture()
     const first = await api.order({ goal: "Improve conversion", requestId: "unified-order", cycles: 2 })

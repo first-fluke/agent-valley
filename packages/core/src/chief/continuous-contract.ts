@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { containerObservationPolicySchema, containerObservationSnapshotSchema } from "./container-observation-policy"
 import { validateContainerObservation } from "./container-observation-state"
+import { sourceIntegrationPolicySchema, sourceIntegrationSummarySchema } from "./source-integration-contract"
 
 export const operationIdSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/)
 const pathSchema = z.string().min(1).max(4096)
@@ -54,6 +55,7 @@ const historyEntrySchema = z.strictObject({
   evidence: z.array(z.string().min(1).max(4000)).max(40),
   completedAt: timestampSchema,
   baselinePath: pathSchema,
+  sourceIntegration: sourceIntegrationSummarySchema.optional(),
 })
 export const operationSchema = z
   .strictObject({
@@ -74,6 +76,8 @@ export const operationSchema = z
     decisionObservation: containerObservationSnapshotSchema.optional(),
     decisionObservationRevision: z.number().int().min(1).optional(),
     baseline: continuousBaselineSchema.optional(),
+    sourceIntegrationPolicy: sourceIntegrationPolicySchema.optional(),
+    sourceIntegration: sourceIntegrationSummarySchema.optional(),
     currentMissionId: operationIdSchema.optional(),
     decisionId: operationIdSchema.optional(),
     decision: continuousDecisionSchema.optional(),

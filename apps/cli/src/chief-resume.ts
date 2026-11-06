@@ -7,6 +7,7 @@ import {
 } from "@agent-valley/core/chief/execution"
 import type { Mission } from "@agent-valley/core/chief/types"
 import type { OrderOptions } from "./chief-config"
+import { deliveryResumeKeys } from "./chief-delivery-resume"
 
 export function validateResumeOptions(goal: string | undefined, options: OrderOptions): void {
   const allowed = new Set([
@@ -23,10 +24,11 @@ export function validateResumeOptions(goal: string | undefined, options: OrderOp
     "effectResult",
     "accountRun",
     "accountCost",
+    ...deliveryResumeKeys,
   ])
   if (goal || Object.keys(options).some((key) => !allowed.has(key)))
     throw new Error(
-      "Pass only --resume <id> with optional --retry, budget increases or effect reconciliation; the saved goal, Actors and checks stay fixed.",
+      "Pass only --resume <id> with optional --retry, budget increases, effect reconciliation or explicit delivery activation; the saved goal, Actors and checks stay fixed.",
     )
 }
 

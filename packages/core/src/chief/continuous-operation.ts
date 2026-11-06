@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { pendingCodeDelivery, successfulCodeDelivery } from "./code-delivery-contract"
 import type { ContainerObservationSnapshot } from "./container-observation-policy"
 import { containersHealthy, validateContainerObservation } from "./container-observation-state"
+import { acceptContinuousChild } from "./continuous-acceptance"
 import {
   type ContinuousBaseline,
   type ContinuousDecision,
@@ -19,6 +20,7 @@ import {
 } from "./continuous-recovery"
 import { assertExecutionDeadline, classifyFailure, MissionPause } from "./execution"
 import { interruptionPause, isServiceShutdown } from "./service-shutdown"
+import type { SourceIntegrationSummary } from "./source-integration-contract"
 import type { Mission } from "./types"
 
 export interface ContinuousOperationPorts {
@@ -28,6 +30,11 @@ export interface ContinuousOperationPorts {
   findMission(id: string): Promise<Mission | undefined>
   runMission(operation: Operation, id: string, goal: string, baselinePath: string): Promise<Mission>
   accept(operation: Operation, mission?: Mission): Promise<ContinuousBaseline>
+  integrateSource?(
+    operation: Operation,
+    previous: ContinuousBaseline,
+    next: ContinuousBaseline,
+  ): Promise<SourceIntegrationSummary>
   save(operation: Operation): Promise<void>
   delay(milliseconds: number, signal?: AbortSignal): Promise<void>
   observeContainers?(operation: Operation): Promise<ContainerObservationSnapshot>
@@ -345,39 +352,7 @@ export async function runContinuousOperation(
             )
           }
         }
-        operation.phase = "accepting"
-        await save()
-        const baseline = continuousBaselineSchema.parse(await ports.accept(operation, mission))
-        if (
-          baseline.operationId !== operation.id ||
-          baseline.repositoryRoot !== operation.repositoryRoot ||
-          baseline.missionId !== id
-        )
-          throw new Error(
-            "Accepted snapshot identity does not match the completed child. Restore its snapshot receipt before continuing.",
-          )
-        operation.baseline = baseline
-        operation.completedCycles += 1
-        operation.history = [
-          ...operation.history,
-          {
-            missionId: id,
-            goal: decision.goal,
-            reason: decision.reason,
-            evidence: decision.evidence,
-            completedAt: now(),
-            baselinePath: baseline.path,
-          },
-        ].slice(-20)
-        operation.currentMissionId = undefined
-        operation.decisionId = undefined
-        operation.decision = undefined
-        operation.decisionObservation = undefined
-        operation.decisionObservationRevision = undefined
-        operation.nextRunAt = undefined
-        operation.recovery = undefined
-        operation.phase = "deciding"
-        await save()
+        await acceptContinuousChild(operation, mission, ports, save, now)
       }
       if (operation.cycleLimit !== undefined && operation.completedCycles >= operation.cycleLimit) {
         operation.phase = "completed"

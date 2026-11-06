@@ -29,6 +29,8 @@ function summary(operation: Operation): Record<string, unknown> {
     currentMissionId: operation.currentMissionId,
     decisionId: operation.decisionId,
     baselineWorkspace: operation.baseline?.path,
+    sourceIntegrationPolicy: operation.sourceIntegrationPolicy ?? { mode: "snapshot-only" },
+    sourceIntegration: operation.sourceIntegration,
     nextRunAt: operation.nextRunAt,
     createdAt: operation.createdAt,
     updatedAt: operation.updatedAt,
@@ -149,11 +151,12 @@ export class OperationApi {
       if (resuming) {
         const operation = await this.load(id)
         if (!operation) throw new Error("Operation was not found. Use av_operations first.")
-        if (operation.phase === "completed")
+        if (operation.phase === "completed" && input.sourceIntegration === undefined)
           throw new Error("Operation reached its cycle limit. Start a new charter for more work.")
         const release = await this.store.lock(id)
         await release()
         args.push("--resume", id)
+        if (input.sourceIntegration !== undefined) args.push("--source-integration", input.sourceIntegration)
       } else {
         const options = {
           workspace: this.workspace,
@@ -167,8 +170,18 @@ export class OperationApi {
         }
         await (this.dependencies.validateOrder ?? resolveOrderConfig)(this.root, options)
         args.push("--operation-id", id, "--workspace", this.workspace)
-        for (const key of ["cycles", "interval", "verify", "parallel", "runs", "duration", "cost"] as const)
-          if (input[key] !== undefined) args.push(`--${key}`, String(input[key]))
+        for (const key of [
+          "cycles",
+          "interval",
+          "verify",
+          "parallel",
+          "runs",
+          "duration",
+          "cost",
+          "sourceIntegration",
+        ] as const)
+          if (input[key] !== undefined)
+            args.push(key === "sourceIntegration" ? "--source-integration" : `--${key}`, String(input[key]))
         args.push("--", input.charter)
       }
       const job: MissionJob = {

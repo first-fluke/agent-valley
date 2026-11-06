@@ -31,6 +31,7 @@ import {
   runOperation,
 } from "./chief-continuous"
 import { saveAndDeliverMissionReport } from "./chief-delivery"
+import { enableMissionDelivery } from "./chief-delivery-resume"
 import { discoverFreeModels } from "./chief-free-model-discovery"
 import { createMissionMetricPorts } from "./chief-metrics"
 import { registerMissionCommands } from "./chief-missions"
@@ -59,19 +60,6 @@ export async function runOrder(
   root = process.cwd(),
 ): Promise<Mission> {
   assertNotManagedRun()
-  if (
-    options.resume &&
-    [
-      options.deliver,
-      options.deliveryPaths,
-      options.deliveryMessage,
-      options.deliveryRemote,
-      options.deliverySkipPrePush,
-    ].some((value) => value !== undefined)
-  )
-    throw new Error(
-      "Code delivery retains its saved branch, paths, commit message and hook policy. Resume without replacement delivery options.",
-    )
   if (
     !options.resume &&
     [options.retry, options.resolveEffect, options.effectResult, options.accountRun, options.accountCost].some(
@@ -123,6 +111,7 @@ export async function runOrder(
       resetHandoffForRetry(mission, options.retry)
       await store.save(mission)
       await store.recoverProcesses(id, mission)
+      await enableMissionDelivery(mission, options, store)
       if (mission.status === "paused") return mission
     } else {
       if (!goal?.trim())
@@ -382,9 +371,13 @@ export async function dispatchOrder(
     }).filter(([key, value]) => value !== undefined && !["agent", "chief", "personas"].includes(key)),
   ) as ContinuousOptions
   if (single) {
-    if (normalized.cycles !== undefined || normalized.interval !== undefined)
+    if (
+      normalized.cycles !== undefined ||
+      normalized.interval !== undefined ||
+      normalized.sourceIntegration !== undefined
+    )
       throw new Error(
-        "--cycles and --interval apply to continuing orders. Omit them when using --once or resuming a single mission.",
+        "--cycles, --interval and --source-integration apply to continuing orders. Omit them when using --once or resuming a single mission.",
       )
     const { once: _once, cycles: _cycles, interval: _interval, ...missionOptions } = normalized
     const result = await (missionOptions.worker || missionOptions.supervise === false
@@ -424,6 +417,12 @@ export function registerChiefCommands(program: Command): void {
     .option("--cycles <count>", "Cumulative verified improvement limit; default continues until stopped")
     .option("--interval <seconds>", "Wait before selecting again when no new goal is justified (default 300)")
     .option("--workspace <path>", "Target Git repository (defaults to av.yaml)")
+    .addOption(
+      new Option(
+        "--source-integration <mode>",
+        "Apply each verified cycle to source files (new orders: worktree; saved orders retain policy)",
+      ).choices(["worktree", "snapshot-only"]),
+    )
     .option("--verify <command>", "Trusted completion check (defaults to av.yaml)")
     .option("--deliver <branch>", "Commit and push only verified, reviewed work to the selected source branch")
     .option("--delivery-paths <json>", "JSON array of exact product files allowed for code delivery")

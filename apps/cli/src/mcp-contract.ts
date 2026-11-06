@@ -13,6 +13,7 @@ const budgets = {
   cost: z.number().finite().positive().optional(),
 }
 const continuousControls = {
+  sourceIntegration: z.enum(["worktree", "snapshot-only"]).optional(),
   cycles: z.number().int().min(1).max(1_000_000).optional(),
   interval: z.number().int().min(1).max(86_400).optional(),
 }
@@ -29,7 +30,7 @@ export const mcpOrderSchema = z
   })
   .superRefine((input, context) => {
     if (input.once)
-      for (const key of ["cycles", "interval"] as const)
+      for (const key of ["cycles", "interval", "sourceIntegration"] as const)
         if (input[key] !== undefined)
           context.addIssue({
             code: "custom",
@@ -54,7 +55,11 @@ export const mcpOperateSchema = z.strictObject({
   parallel: z.number().int().min(1).max(8).optional(),
   ...budgets,
 })
-export const mcpOperationResumeSchema = z.strictObject({ operationId: missionIdSchema, requestId })
+export const mcpOperationResumeSchema = z.strictObject({
+  operationId: missionIdSchema,
+  requestId,
+  sourceIntegration: z.enum(["worktree", "snapshot-only"]).optional(),
+})
 export type McpOperateInput = z.infer<typeof mcpOperateSchema>
 export type McpOperationResumeInput = z.infer<typeof mcpOperationResumeSchema>
 export interface McpReportResult extends Record<string, unknown> {

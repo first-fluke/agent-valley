@@ -1,6 +1,6 @@
 # Unattended code delivery
 
-An authorized order can implement a change, review and verify it, commit it on the source branch and push it without a per-run approval. Enable delivery explicitly and name the exact product files. The default order still retains its work in the Mission workspace.
+An authorized order can implement a change, review and verify it, commit it on the source branch and push it without a per-run approval. Enable delivery explicitly and name the exact product files. Single-goal orders retain their work in the Mission workspace by default. New [continuous orders](./chief-continuous.md) apply verified changes to source files by default, preserving the index and refs; that local file application does not establish a commit or push.
 
 ```sh
 av order "Implement the scoped change" --once \
@@ -14,9 +14,9 @@ av order "Implement the scoped change" --once \
 
 `approved-message.txt` contains the intended commit message and any trailers required by the repository. `--delivery-remote` selects an existing named Git remote; its default is `origin`. The source must start on the selected branch with a clean index and worktree. Preserve unrelated edits before creating the order.
 
-The saved policy pins the branch, remote, original base, exact paths and message. A resume uses that policy rather than replacement delivery flags. Private settings, credentials and runtime paths cannot be delivered. A changed path outside the allowlist, a symlink, stale verification or an unexpected source change stops delivery while preserving the work.
+The saved policy pins the branch, remote, original base, exact paths and message. A resume uses that policy rather than replacement delivery flags. If an existing mission or continuous operation has no delivery policy, `av order --resume ID --deliver main --delivery-paths '["src/feature.ts"]'` can enable one after validating the clean source and settled execution state. Already verified work is delivered without restarting implementation or resetting its budgets. Enabling commit and push delivery on an operation disables worktree-only source application while retaining previous application receipts. Previously applied local files must first be preserved/committed so the source satisfies the clean-worktree requirement. Existing delivery policies cannot be replaced. Private settings, credentials and runtime paths cannot be delivered. A changed path outside the allowlist, a symlink, stale verification or an unexpected source change stops delivery while preserving the work.
 
-An operator can add `--delivery-skip-pre-push` alongside `--deliver` to authorize `git push --no-verify`. This skips only the pre-push hook; normal commit hooks and the Mission's independent reviews and trusted verification remain enabled. The optional setting is saved with the delivery policy and continuing-order settings, cannot be added or replaced on resume, and cannot be changed by an Actor. The push attempt records this authorization in Mission history and the rendered report without claiming that skipped checks passed. Omit the flag to keep normal push hooks.
+An operator can add `--delivery-skip-pre-push` alongside `--deliver` to authorize `git push --no-verify`. This skips only the pre-push hook; normal commit hooks and the Mission's independent reviews and trusted verification remain enabled. The optional setting is saved when the delivery policy is first enabled, cannot replace an existing policy on resume, and cannot be changed by an Actor. The push attempt records this authorization in Mission history and the rendered report without claiming that skipped checks passed. Omit the flag to keep normal push hooks.
 
 ## Completion and recovery
 

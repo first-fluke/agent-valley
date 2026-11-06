@@ -1,30 +1,43 @@
 import { execFile } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { mkdir, realpath } from "node:fs/promises"
+import { realpath } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { promisify } from "node:util"
 import { collectContainerObservation } from "@agent-valley/core/chief/container-observation"
-import { containerObservationLines } from "@agent-valley/core/chief/container-observation-state"
+import { recordContinuousAcceptance } from "@agent-valley/core/chief/continuous-acceptance-record"
 import { type ContinuousOperation, operationSchema } from "@agent-valley/core/chief/continuous-contract"
 import { type ContinuousOperationPorts, runContinuousOperation } from "@agent-valley/core/chief/continuous-operation"
+import {
+  assertSettledSourceIntegrations,
+  integrateContinuousSource,
+} from "@agent-valley/core/chief/continuous-source-integration"
 import { ContinuousOperationStore } from "@agent-valley/core/chief/continuous-store"
 import { prepareContinuousBaseline } from "@agent-valley/core/chief/continuous-workspace"
 import { executionState, finalizeAbandonedRuns } from "@agent-valley/core/chief/execution"
 import { clearedGitEnvironment } from "@agent-valley/core/chief/parallel-git"
-import { markdown } from "@agent-valley/core/chief/reports"
 import { serviceShutdownPause } from "@agent-valley/core/chief/service-shutdown"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
-import { writeTextAtomic } from "@agent-valley/core/util/atomic-json"
 import { ensureRuntimeGitignore } from "@agent-valley/core/workspace/runtime-ignore"
 import { type Command, Option } from "commander"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { decideContinuousGoal } from "./chief-continuous-decision"
 import { rearmContinuousDecision } from "./chief-continuous-recovery"
+import { createOperationProgressReporter, renderOperationReport, saveOperationReport } from "./chief-continuous-report"
+import { deliveryResumeKeys, enableOperationDelivery, hasDeliveryResumeOptions } from "./chief-delivery-resume"
+
+export { renderOperationReport } from "./chief-continuous-report"
+
 import { reobserveLocalExecutions } from "./chief-local-recovery"
 import { applyResumeOptions } from "./chief-resume"
+import {
+  initialSourceIntegration,
+  resumeSourceIntegration,
+  sourceIntegrationCheckpoint,
+} from "./chief-source-integration"
 import { abortableDelay, superviseOrder } from "./chief-supervisor"
 import { assertNotManagedRun } from "./managed-run"
+import { pruneOperationArtifacts } from "./operations-prune"
 
 const execute = promisify(execFile)
 const orderKeys = [
@@ -121,6 +134,12 @@ async function newOperation(
     if (value !== undefined) settings[key] = value
   }
   const repositoryRoot = await realpath(config.workspace)
+  const sourceIntegrationPolicy = await initialSourceIntegration(
+    repositoryRoot,
+    id,
+    options.sourceIntegration,
+    options.deliver,
+  )
   Object.assign(settings, {
     workspace: repositoryRoot,
     verify: config.verifyCommand,
@@ -152,6 +171,7 @@ async function newOperation(
     cycleLimit: integerOption(options.cycles, "--cycles", 1_000_000),
     waitIntervalSec: integerOption(options.interval, "--interval", 86_400) ?? 300,
     containerObservationPolicy: config.containerObservationPolicy,
+    sourceIntegrationPolicy,
     history: [],
   })
 }
@@ -181,55 +201,6 @@ export async function initializeOperation(
   }
 }
 
-export function renderOperationReport(operation: ContinuousOperation): string {
-  const lines = [
-    `# Operation ${operation.id}`,
-    "",
-    `Charter: ${operation.charter}`,
-    `Status: ${operation.phase}`,
-    `Verified completed improvements: ${operation.completedCycles}${operation.cycleLimit ? ` / ${operation.cycleLimit}` : ""}`,
-    `Chief Director: ${operation.settings.actor} / ${operation.settings.model ?? "pinned native default"}`,
-    "",
-    "AV chooses a concrete improvement, verifies and reviews it, keeps the accepted result, then selects the next improvement. Model calls and API charges can continue until stopped; token savings are not its success criterion.",
-    "",
-  ]
-  if (operation.currentMissionId) lines.push(`Current child: ${operation.currentMissionId}`)
-  if (operation.decisionId) {
-    lines.push(`Decision checkpoint: ${operation.decisionId}`)
-    lines.push(`Decision usage record: .agent-valley/operation-decisions/${operation.id}/${operation.decisionId}.json`)
-  }
-  if (operation.baseline) lines.push(`Accepted workspace: ${operation.baseline.path}`)
-  if (operation.decision) lines.push(`Latest decision: ${operation.decision.action} — ${operation.decision.reason}`)
-  if (operation.nextRunAt) lines.push(`Next decision: ${operation.nextRunAt}`)
-  if (operation.recovery) {
-    lines.push(
-      `Recovery disposition: ${operation.recovery.disposition}; ${operation.recovery.target} ${operation.recovery.checkpointId}; ${operation.recovery.attempts} attempts.`,
-    )
-    lines.push(`Recovery evidence: ${markdown(operation.recovery.reason, 16_000)}`)
-    if (operation.recovery.nextRunAt) lines.push(`Next recovery: ${operation.recovery.nextRunAt}`)
-  }
-  if (operation.error) lines.push(`Paused reason: ${operation.error}`)
-  lines.push(
-    ...containerObservationLines(operation.containerObservationPolicy, operation.containerObservation).map((line) =>
-      markdown(line, 2_200),
-    ),
-  )
-  if (operation.containerObservationRevision)
-    lines.push(`Observation transition: ${operation.containerObservationRevision}`)
-  for (const entry of operation.history) {
-    lines.push("", `## ${entry.goal}`, "", entry.reason, `Verified child: ${entry.missionId}`)
-    if (entry.evidence.length) lines.push(`Evidence: ${entry.evidence.join("; ")}`)
-  }
-  lines.push("", `Resume: av order --resume ${operation.id}`, "")
-  return lines.join("\n")
-}
-
-async function saveOperationReport(root: string, operation: ContinuousOperation): Promise<void> {
-  const directory = join(root, ".agent-valley", "operation-reports")
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  await writeTextAtomic(join(directory, `${operation.id}.md`), renderOperationReport(operation))
-}
-
 export interface ContinuousRunDependencies {
   signal?: AbortSignal
   decide?: ContinuousOperationPorts["decide"]
@@ -237,6 +208,7 @@ export interface ContinuousRunDependencies {
   delay?: ContinuousOperationPorts["delay"]
   now?: ContinuousOperationPorts["now"]
   observeContainers?: ContinuousOperationPorts["observeContainers"]
+  integrateSource?: ContinuousOperationPorts["integrateSource"]
 }
 
 /** The operation lock covers selection and acceptance; existing supervisors own child lifecycle and interruption. */
@@ -253,6 +225,7 @@ export async function runOperation(
   const storage = operationStore(root)
   const unlock = await storage.lock(id)
   const controller = new AbortController()
+  const reportProgress = createOperationProgressReporter(root)
   const stop = () => controller.abort(dependencies.signal?.reason)
   const terminate = () => controller.abort(options.service ? serviceShutdownPause() : undefined)
   dependencies.signal?.addEventListener("abort", stop, { once: true })
@@ -264,10 +237,17 @@ export async function runOperation(
   try {
     let operation: ContinuousOperation
     if (options.resume) {
+      if (options.deliver && options.sourceIntegration === "worktree")
+        throw new Error("Use either --source-integration worktree or --deliver, not both.")
       if (charter !== undefined)
         throw new Error("An operation keeps its original charter. Omit the charter when using --resume.")
       if (
-        orderKeys.some((key) => options[key] !== undefined && !(decisionBudgetKeys as readonly string[]).includes(key))
+        orderKeys.some(
+          (key) =>
+            options[key] !== undefined &&
+            !(decisionBudgetKeys as readonly string[]).includes(key) &&
+            !(deliveryResumeKeys as readonly string[]).includes(key),
+        )
       )
         throw new Error(
           "An operation retains its Chief Director and child settings. Reconcile or resume its active child with av order; omit Actor/settings flags on operation resume.",
@@ -322,6 +302,26 @@ export async function runOperation(
       if (interval !== undefined) operation.waitIntervalSec = interval
       if (operation.repositoryRoot !== (await realpath(String(operation.settings.workspace))))
         throw new Error("Operation repository identity changed. Restore its original repository before resuming.")
+      if (hasDeliveryResumeOptions(options)) {
+        await assertSettledSourceIntegrations(
+          operation.repositoryRoot,
+          operation.id,
+          sourceIntegrationCheckpoint(operation).pendingIds,
+        )
+        await enableOperationDelivery(
+          operation,
+          options,
+          root,
+          (current) => storage.save(current),
+          (current) => {
+            current.sourceIntegrationPolicy = { mode: "snapshot-only" }
+          },
+        )
+      } else {
+        await resumeSourceIntegration(operation, options.sourceIntegration, root, controller.signal, (current) =>
+          storage.save(current),
+        )
+      }
     } else {
       if (
         await storage.load(id).catch((error: NodeJS.ErrnoException) => {
@@ -334,7 +334,9 @@ export async function runOperation(
     }
     await ensureRuntimeGitignore(operation.repositoryRoot)
     await storage.save(operation)
+    await recordContinuousAcceptance(operation)
     await saveOperationReport(root, operation)
+    await reportProgress(operation)
     console.log(`Operation ${id}\nCharter: ${operation.charter}\nResume: av order --resume ${id}`)
     const missions = new MissionStore(join(root, ".agent-valley", "missions"))
     return await runContinuousOperation(operation, {
@@ -402,9 +404,14 @@ export async function runOperation(
           mission?.verification?.fingerprint,
         )
       },
+      integrateSource:
+        dependencies.integrateSource ??
+        ((current, previous, next) => integrateContinuousSource(current, previous, next, controller.signal)),
       save: async (current) => {
         await storage.save(current)
+        await recordContinuousAcceptance(current)
         await saveOperationReport(root, current)
+        await reportProgress(current)
       },
       delay: dependencies.delay ?? abortableDelay,
     })
@@ -423,6 +430,12 @@ export function registerContinuousCommands(program: Command): void {
     .command("operate [charter]", { hidden: true })
     .description("Deprecated alias for av order; resume existing operating charters")
     .option("--workspace <path>", "Target Git repository (defaults to av.yaml)")
+    .addOption(
+      new Option(
+        "--source-integration <mode>",
+        "Apply verified cycles to source files, or preserve snapshots only",
+      ).choices(["worktree", "snapshot-only"]),
+    )
     .option("--verify <command>", "Trusted completion check for each improvement")
     .option("--actor <type>", "Pinned Chief Director CLI")
     .option("--model <id>", "Pinned Chief Director model")
@@ -453,7 +466,15 @@ export function registerContinuousCommands(program: Command): void {
     .command("operations")
     .description("List saved operating charters or read an operation report")
     .option("--report <id>", "Print the saved operation report")
-    .action(async (options: { report?: string }) => {
+    .option("--prune <id>", "Preview removal of recoverable obsolete baseline clones")
+    .option("--apply", "With --prune, remove only confirmed eligible baseline clones")
+    .action(async (options: { report?: string; prune?: string; apply?: boolean }) => {
+      if (options.prune) {
+        if (options.report) throw new Error("Use either --report or --prune for an operation.")
+        await pruneOperationArtifacts(options.prune, { apply: options.apply })
+        return
+      }
+      if (options.apply) throw new Error("Use --apply only with --prune <operation-id>.")
       const storage = operationStore(process.cwd())
       if (options.report) {
         console.log(renderOperationReport(await storage.load(options.report)))
