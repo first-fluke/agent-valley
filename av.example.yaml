@@ -60,7 +60,6 @@ delivery:
   #   enabled: false                # GitHub webhook on each code repo -> /api/webhook/github, "Pull request reviews"
   #   webhook_secret: whsec_xxx     # That webhook's secret; Linear tracker only (GitHub tracker uses github.webhook_secret)
   #   ignore_authors: []            # GitHub logins never followed up
-
 # ── Prompt Template ───────────────────────────────────────────────────
 # Template variables: {{issue.identifier}}, {{issue.title}}, {{issue.description}},
 # {{workspace_path}}, {{attempt.id}}, {{retry_count}}, {{retry_reason}}
