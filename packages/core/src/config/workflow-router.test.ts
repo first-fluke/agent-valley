@@ -286,6 +286,24 @@ describe("loadTriggerTable", () => {
   test("returns null for a directory with no triggers.json", () => {
     expect(loadTriggerTable("/nonexistent/path/that/does/not/exist")).toBeNull()
   })
+
+  test("retains legacy nonpersistent workflow and skill routing when loading an older OMA table", () => {
+    const root = mkdtempSync(join(tmpdir(), "av-trigger-legacy-"))
+    const hookDir = join(root, ".agents", "hooks", "core")
+    mkdirSync(hookDir, { recursive: true })
+    try {
+      writeFileSync(join(hookDir, "triggers.json"), JSON.stringify(makeTable()))
+      const table = loadTriggerTable(root)
+      expect(table).not.toBeNull()
+      if (!table) throw new Error("Expected the legacy trigger table")
+      expect(routeIssue("Debug the backend service auth flow", table)).toMatchObject({
+        workflows: expect.arrayContaining(["debug"]),
+        skills: expect.arrayContaining(["oma-backend"]),
+      })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("getCachedTriggerTable", () => {
@@ -360,21 +378,35 @@ describe("integration: real triggers.json", () => {
   test("real triggers.json parses and loads", () => {
     const table = loadTriggerTable(projectRoot)
     expect(table).not.toBeNull()
-    expect(table?.workflows.debug).toBeDefined()
+    // OMA 20.36.3 (upstream 77d28af1) keeps only explicitly named persistent
+    // modes in this table. Other workflows start through their slash command.
+    for (const name of ["orchestrate", "ultrawork", "work", "ralph"])
+      expect(table?.workflows[name]?.persistent).toBe(true)
+    expect(table?.workflows.debug).toBeUndefined()
     expect(table?.skills["oma-backend"]).toBeDefined()
+    expect(table?.skills["oma-debug"]).toBeDefined()
     // informationalPatterns is a dict keyed by language (Record<string,
     // string[]>), NOT a flat array — confirmed against the real file.
     expect(Array.isArray(table?.informationalPatterns)).toBe(false)
     expect(Array.isArray(table?.informationalPatterns["*"])).toBe(true)
   })
 
-  test("real triggers.json routes a debug+backend sample issue", () => {
+  test("real triggers.json supplies backend guidance without starting an implicit workflow", () => {
     const table = loadTriggerTable(projectRoot)
     expect(table).not.toBeNull()
     if (!table) throw new Error("expected table to load")
     const result = routeIssue("Debug the backend service auth flow — users can't log in", table)
-    expect(result.workflows).toContain("debug")
+    expect(result.workflows).toEqual([])
     expect(result.skills).toContain("oma-backend")
+  })
+
+  test("real triggers.json routes debugging and backend skills through their current intent keywords", () => {
+    const table = loadTriggerTable(projectRoot)
+    expect(table).not.toBeNull()
+    if (!table) throw new Error("expected table to load")
+    const result = routeIssue("Find the root cause in the backend service auth flow and write a regression test", table)
+    expect(result.skills).toEqual(expect.arrayContaining(["oma-debug", "oma-backend"]))
+    expect(result.workflows).toEqual([])
   })
 
   test("real triggers.json never routes any persistent workflow", () => {
