@@ -69,6 +69,12 @@ flowchart LR
 
 The Chief Director consults its Technical Director, Design Director, and Marketing Director concurrently, then turns even a broad request, such as “make onboarding easier,” into a concrete interpretation, assumptions, success criteria, and verification checks. It plans at most 12 tasks with acceptance criteria and acyclic dependencies. Up to three independent Actors run in separate task worktrees by default; dependencies wait for reviewed and integrated prerequisites. The Chief Director integrates accepted changes, and conflicting changes return to repair. `--parallel 1` preserves serial execution in the mission worktree. A different Actor reviews each task. Advisory, planning, supervision, review, and reporting stages must leave product files unchanged.
 
+For independent work, planning and Chief-selected replanning divide tasks along the repository's existing module, service, domain or layer boundaries. Stable interfaces can be reused immediately. When an interface must change, a contract task first defines the shared API, data shape or schema; its consumers can then run in parallel. For example, daemon and CLI implementations can share a completed IPC contract, with their combined behavior checked after both implementations are integrated. A small goal can remain one task, and layer names alone do not create dependencies.
+
+Each task records its owned files, input/output interfaces and local acceptance checks in the existing `instructions` and `acceptance` fields. Shared manifests, lockfiles, registries and exports have one writer. Dependencies represent actual consumed artifacts or shared-file ordering. Actors use the agreed interfaces and report changes needed in another owner's files. File ownership is planning guidance; isolated worktrees and content checks enforce integration consistency. Concurrent edits to the same file can conflict even when they change different lines.
+
+Combined behavior is covered by an integration task when needed and by the mission's existing reviews and immutable verification checks. These planning instructions apply when creating or explicitly replanning a mission. Resuming a saved plan retains its task graph, goal, acceptance criteria and spent limits.
+
 ### Additional review gates
 
 Configure `chief.review_gates` in `av.yaml` to add checks such as a security review between task execution and verification:
