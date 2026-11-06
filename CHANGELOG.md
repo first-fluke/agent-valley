@@ -6,6 +6,18 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.8.6](https://github.com/first-fluke/agent-valley/compare/v4.8.5...v4.8.6) (2026-11-06)
+
+
+### Bug Fixes
+
+* **chief:** back off failing actors and avoid interactive stalls ([15f3550](https://github.com/first-fluke/agent-valley/commit/15f3550ae08108542ec2df2c7b33a941fc77311f))
+
+
+### Tests
+
+* **cli:** harden worker readiness and cleanup fixtures ([cdcbc01](https://github.com/first-fluke/agent-valley/commit/cdcbc01582ef4fd419d5ccc06e20ca041ae219c3))
+
 ## [4.8.5](https://github.com/first-fluke/agent-valley/compare/v4.8.4...v4.8.5) (2026-11-06)
 
 
