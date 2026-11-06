@@ -91,8 +91,6 @@ export function applyResumeOptions(mission: Mission, goal: string | undefined, o
   if (changed) {
     const state = executionState(mission)
     state.interventionAt = new Date().toISOString()
-    state.retries = 0
-    state.crashRestarts = 0
     delete state.pauseReason
     delete state.nextRunAt
     delete state.failureKind

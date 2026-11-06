@@ -1,4 +1,4 @@
-import { assertExecutionBudget, executionPolicySchema } from "@agent-valley/core/chief/execution"
+import { assertExecutionBudget, chiefRecoveryStopped, executionPolicySchema } from "@agent-valley/core/chief/execution"
 import type { OperatingRun } from "@agent-valley/core/chief/operations"
 import { mission as missionFixture } from "@agent-valley/core/chief/reports.fixture"
 import { goalVerificationContractDigest, goalVerificationContractSchema } from "@agent-valley/core/chief/verification"
@@ -54,8 +54,8 @@ describe("operator resume without weakening acceptance or resetting spend", () =
     expect(current.execution).toMatchObject({
       startedAt: original.execution?.startedAt,
       runsStarted: 10,
-      retries: 0,
-      crashRestarts: 0,
+      retries: 3,
+      crashRestarts: 3,
       interventionAt: new Date(now).toISOString(),
     })
     expect(current.goal).toBe(original.goal)
@@ -106,16 +106,37 @@ describe("operator resume without weakening acceptance or resetting spend", () =
     expect(current).toEqual(before)
   })
 
-  it("explicit retry renews provider retry allowance while retaining spent calls and original checks", () => {
+  it("explicit retry reopens a Chief stop while retaining spent retries, restarts and original checks", () => {
     const current = mission()
+    current.supervision?.decisions.push({
+      round: 1,
+      at: new Date(now - 1_000).toISOString(),
+      action: "stop",
+      reason: "Repair the execution environment before continuing",
+      fingerprint: "same",
+    })
+    const original = structuredClone(current)
+    expect(chiefRecoveryStopped(current)).toBe(true)
     applyResumeOptions(current, undefined, { resume: current.id, retry: true })
     expect(current.execution).toMatchObject({
-      retries: 0,
-      crashRestarts: 0,
+      retries: 3,
+      crashRestarts: 3,
       runsStarted: 10,
       startedAt: new Date(now - 50_000).toISOString(),
+      interventionAt: new Date(now).toISOString(),
     })
+    expect(chiefRecoveryStopped(current)).toBe(false)
+    expect(current.status).toBe("pending")
+    expect(current.execution?.pauseReason).toBeUndefined()
+    expect(current.execution?.nextRunAt).toBeUndefined()
+    expect(current.execution?.failureKind).toBeUndefined()
     expect(current.supervision?.rounds).toBe(1)
+    expect(current.supervision?.decisions).toEqual(original.supervision?.decisions)
+    expect(current.supervision?.pendingRecovery).toBeUndefined()
+    expect(current.executionPolicy).toEqual(original.executionPolicy)
+    expect(current.goal).toBe(original.goal)
+    expect(current.plan).toEqual(original.plan)
+    expect(current.tasks).toEqual(original.tasks)
     expect(current.verifyCommand).toBe("bun test")
     expect(() => assertExecutionBudget(current)).toThrow("call limit")
   })
