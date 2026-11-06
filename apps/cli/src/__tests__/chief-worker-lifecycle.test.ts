@@ -11,9 +11,14 @@ vi.mock("node:child_process", async (importOriginal) => {
 })
 
 const canaries: ChildProcess[] = []
-const workerPids = new Set<number>()
+const controllers = new Set<AbortController>()
 const workers: Promise<number | null>[] = []
 let directory: string
+const publishPid = [
+  "const pending = `${process.argv[2]}.pending`",
+  "writeFileSync(pending, String(process.pid))",
+  "renameSync(pending, process.argv[2])",
+].join("\n")
 
 async function bounded<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -29,14 +34,14 @@ async function bounded<T>(promise: Promise<T>, milliseconds: number): Promise<T>
   }
 }
 
-async function readyPid(path: string): Promise<number> {
+async function readyPid(path: string, read = () => readFile(path, "utf8")): Promise<number> {
   const deadline = Date.now() + 5_000
   while (Date.now() < deadline) {
-    const content = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+    const content = await read().catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return undefined
       throw error
     })
-    if (content !== undefined) {
+    if (content?.trim()) {
       const pid = Number(content)
       if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("The fixture did not report a positive owned PID.")
       return pid
@@ -56,6 +61,40 @@ function alive(pid: number): boolean {
   }
 }
 
+function startWorker(args: string[], entry: string) {
+  const controller = new AbortController()
+  // Register cancellation before spawn/readiness so a failed ready check cannot leak the child.
+  controllers.add(controller)
+  const worker = runOrderWorker(args, directory, controller.signal, {
+    entry,
+    terminateGraceMs: 50,
+    killWaitMs: 1_000,
+  })
+  workers.push(worker)
+  return { controller, worker }
+}
+
+async function cleanupOwnedProcesses(): Promise<void> {
+  const children = new Set([
+    ...canaries.splice(0),
+    ...vi.mocked(spawn).mock.results.flatMap((result) => (result.type === "return" ? [result.value] : [])),
+  ])
+  const closed = [...children].map((child) =>
+    child.exitCode !== null || child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => child.once("close", () => resolve())),
+  )
+  for (const controller of controllers) controller.abort()
+  controllers.clear()
+  const settled: PromiseSettledResult<unknown>[] = await Promise.allSettled(
+    workers.splice(0).map((worker) => bounded(worker, 2_000)),
+  )
+  // Only handles returned by this test's spawn mock are eligible for fallback cleanup.
+  for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL")
+  settled.push(...(await Promise.allSettled(closed.map((promise) => bounded(promise, 2_000)))))
+  for (const result of settled) if (result.status === "rejected") throw result.reason
+}
+
 beforeEach(async () => {
   vi.useRealTimers()
   vi.mocked(spawn).mockClear()
@@ -63,32 +102,65 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  for (const child of canaries) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL")
-  for (const pid of workerPids) {
-    try {
-      process.kill(pid, "SIGKILL")
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
-    }
+  try {
+    await cleanupOwnedProcesses()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
   }
-  await Promise.allSettled([
-    ...workers.splice(0).map((worker) => bounded(worker, 2_000)),
-    ...canaries
-      .splice(0)
-      .map((child) =>
-        bounded(
-          child.exitCode !== null || child.signalCode !== null
-            ? Promise.resolve()
-            : new Promise<void>((resolve) => child.once("close", () => resolve())),
-          2_000,
-        ),
-      ),
-  ])
-  workerPids.clear()
-  await rm(directory, { recursive: true, force: true })
 })
 
 describe("owned order worker lifecycle", () => {
+  it("waits for the PID after observing the ready file between creation and its first write", async () => {
+    const ready = join(directory, "partial.ready")
+    await writeFile(ready, "")
+    let reads = 0
+    const pid = await readyPid(ready, async () => {
+      const content = await readFile(ready, "utf8")
+      if (++reads === 1) {
+        expect(content).toBe("")
+        await writeFile(ready, String(process.pid))
+      }
+      return content
+    })
+    expect(pid).toBe(process.pid)
+    expect(reads).toBe(2)
+  })
+
+  it.each(["0", "-1", "not-a-pid"])(
+    "rejects a published invalid PID without treating it as pending: %s",
+    async (content) => {
+      const read = vi.fn(async () => content)
+      await expect(readyPid("unused", read)).rejects.toThrow("positive owned PID")
+      expect(read).toHaveBeenCalledOnce()
+    },
+  )
+
+  it("cancels and joins the owned worker even when its ready receipt is invalid", async () => {
+    const entry = join(directory, "invalid-ready.mjs")
+    const ready = join(directory, "invalid.ready")
+    await writeFile(
+      entry,
+      [
+        'import { writeFileSync } from "node:fs"',
+        'process.on("SIGTERM", () => {})',
+        'writeFileSync(process.argv[2], "not-a-pid")',
+        "setInterval(() => {}, 1000)",
+      ].join("\n"),
+    )
+    const { controller, worker } = startWorker([ready], entry)
+    const result = vi.mocked(spawn).mock.results.at(-1)
+    const owned = result?.type === "return" ? result.value : undefined
+    if (!owned?.pid) throw new Error("Expected the directly owned worker handle")
+    await expect(readyPid(ready)).rejects.toThrow("positive owned PID")
+    expect(alive(owned.pid)).toBe(true)
+
+    await cleanupOwnedProcesses()
+
+    expect(controller.signal.aborted).toBe(true)
+    expect(await worker).toBeNull()
+    expect(alive(owned.pid)).toBe(false)
+  })
+
   it("kills and joins a SIGTERM-ignoring worker while leaving a separate owned canary alive", async () => {
     const entry = join(directory, "ignore-term.mjs")
     const ready = join(directory, "worker.ready")
@@ -96,9 +168,9 @@ describe("owned order worker lifecycle", () => {
     await writeFile(
       entry,
       [
-        'import { writeFileSync } from "node:fs"',
+        'import { renameSync, writeFileSync } from "node:fs"',
         'process.on("SIGTERM", () => writeFileSync(process.argv[3], "ignored TERM"))',
-        "writeFileSync(process.argv[2], String(process.pid))",
+        publishPid,
         "setInterval(() => {}, 1000)",
       ].join("\n"),
     )
@@ -106,20 +178,13 @@ describe("owned order worker lifecycle", () => {
     const canaryReady = join(directory, "canary.ready")
     await writeFile(
       canaryEntry,
-      'import { writeFileSync } from "node:fs"\nwriteFileSync(process.argv[2], String(process.pid))\nsetInterval(() => {}, 1000)\n',
+      `import { renameSync, writeFileSync } from "node:fs"\n${publishPid}\nsetInterval(() => {}, 1000)\n`,
     )
     const canary = spawn(process.execPath, [canaryEntry, canaryReady], { cwd: directory, stdio: "ignore" })
     canaries.push(canary)
     const canaryPid = await readyPid(canaryReady)
-    const controller = new AbortController()
-    const worker = runOrderWorker([ready, term], directory, controller.signal, {
-      entry,
-      terminateGraceMs: 50,
-      killWaitMs: 1_000,
-    })
-    workers.push(worker)
+    const { controller, worker } = startWorker([ready, term], entry)
     const pid = await readyPid(ready)
-    workerPids.add(pid)
     expect(alive(pid)).toBe(true)
     expect(alive(canaryPid)).toBe(true)
 
@@ -129,7 +194,6 @@ describe("owned order worker lifecycle", () => {
     expect(exit).toBeNull()
     expect(await readFile(term, "utf8")).toBe("ignored TERM")
     expect(alive(pid)).toBe(false)
-    workerPids.delete(pid)
     expect(alive(canaryPid)).toBe(true)
     expect(canary.exitCode).toBeNull()
     expect(canary.signalCode).toBeNull()
@@ -140,14 +204,9 @@ describe("owned order worker lifecycle", () => {
     const ready = join(directory, "normal.ready")
     await writeFile(
       entry,
-      'import { writeFileSync } from "node:fs"\nwriteFileSync(process.argv[2], String(process.pid))\nprocess.exitCode = Number(process.argv[3])\n',
+      `import { renameSync, writeFileSync } from "node:fs"\n${publishPid}\nprocess.exitCode = Number(process.argv[3])\n`,
     )
-    const worker = runOrderWorker([ready, "17"], directory, new AbortController().signal, {
-      entry,
-      terminateGraceMs: 50,
-      killWaitMs: 1_000,
-    })
-    workers.push(worker)
+    const { worker } = startWorker([ready, "17"], entry)
 
     expect(await bounded(worker, 2_000)).toBe(17)
     expect(alive(await readyPid(ready))).toBe(false)
