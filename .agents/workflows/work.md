@@ -4,7 +4,7 @@ description: Coordinate multiple agents for a complex multi-domain project using
 disable-model-invocation: true
 ---
 
-- **Response language follows `language` setting in `.agents/oma-config.yaml` if configured.**
+- **Response language: the user's prompt language first, then `language` in `.agents/oma-config.yaml`, then English.**
 - Follow `.agents/skills/_shared/core/execution-policy.md` for authorization, clarification, verification, and completion. Execute required steps on the selected path in dependency order; apply documented branch and skip conditions.
 - Follow `.agents/skills/_shared/core/code-intelligence.md`: discover the configured provider’s tools; use native search only for paths outside this project or ignored paths when unavailable or timed out. Do not install a provider or track a repository automatically.
 - Use native file tools and `.agents/skills/_shared/runtime/memory-protocol.md` for durable coordination state; code-intelligence memory tools are not required.
@@ -111,7 +111,8 @@ wait
 
 ## Step 5: Monitor Agent Progress
 
-- Use memory read tool to poll `progress-{agent}[-{sessionId}].md` files
+- Apply the deadline, cancellation, resource ownership, and bounded monitoring rules in `.agents/skills/_shared/core/execution-policy.md`. Cancellation or deadline exhaustion stops dispatch and recovery; perform only bounded shutdown and a partial handoff.
+- Prefer host completion notifications. If polling is needed, one coordinator reads changed `progress-{agent}[-{sessionId}].md` files with bounded backoff.
 - Use configured symbol/pattern tools or native search to verify API contract alignment between agents
 - Use memory edit tool to record monitoring results
 
@@ -152,7 +153,7 @@ Apply the shared per-task attempt and cost budget in `.agents/skills/oma-orchest
    oma state verify --workflow work --checkpoint remediation-choice --instance "<finding ID and revision/attempt>"
    ```
 3. Dispatch authorized fixes to their owners with the recorded action and evidence. If a defined comparison is active, refresh affected measurements after the fix and verify required checks. Record actual experiment decisions with evidence.
-4. Before each new fix cycle, apply the loop termination check:
+4. Before each new fix cycle, apply cancellation/deadline precedence from the shared execution policy, then the loop termination check:
 
    > **Fix Loop termination conditions** (OR, whichever fires first wins):
    > 1. Total fix cycles have reached the configured maximum (default: 5). Do not start another cycle; report the remaining CRITICAL/HIGH findings and stop.

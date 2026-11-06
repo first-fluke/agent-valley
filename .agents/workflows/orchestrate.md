@@ -4,7 +4,7 @@ description: Automated parallel agent execution that spawns CLI subagents via na
 disable-model-invocation: true
 ---
 
-- **Response language follows `language` setting in `.agents/oma-config.yaml` if configured.**
+- **Response language: the user's prompt language first, then `language` in `.agents/oma-config.yaml`, then English.**
 - Follow `.agents/skills/_shared/core/execution-policy.md` for authorization, clarification, verification, and completion. Execute required steps on the selected path in dependency order; apply documented branch and skip conditions.
 - Follow `.agents/skills/_shared/core/code-intelligence.md`: discover the configured provider's tools; do not install or track a repository; if unavailable or timed out, use native search only for paths outside this project or ignored paths, and record that limit.
 - Persist coordination artifacts through the file-memory contract in `.agents/skills/_shared/runtime/memory-protocol.md`. That path is independent of code-intelligence MCP tools.
@@ -158,7 +158,7 @@ Spawn agents using `oma agent spawn {agent_id} {prompt_file} {session_id} --task
 ## Step 4: Monitor Progress
 
 Use `oma agent status {session_id} {agent_id}` to check process health.
-Also poll `progress-{agentId}-{taskId}-{runId}-{sessionId}.md` for logic updates.
+Prefer host completion notifications. If polling is needed, one coordinator reads changed `progress-{agentId}-{taskId}-{runId}-{sessionId}.md` files with bounded backoff. Apply `.agents/skills/_shared/core/execution-policy.md` for the execution deadline, cancellation, resource ownership, and shutdown; cancellation or deadline exhaustion prevents re-dispatch and gate repair.
 
 - Update `task-board-{sessionId}.md` with turn counts and status changes.
 - Watch for: completion, failures, crashes.

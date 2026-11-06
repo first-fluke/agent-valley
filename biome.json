@@ -33,6 +33,12 @@
   },
   "overrides": [
     {
+      "includes": [".github/agents/*.md", ".github/prompts/*.md"],
+      "formatter": {
+        "enabled": false
+      }
+    },
+    {
       "includes": ["CHANGELOG.md"],
       "formatter": {
         "enabled": false

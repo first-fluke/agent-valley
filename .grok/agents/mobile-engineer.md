@@ -1,7 +1,8 @@
 ---
 name: mobile-engineer
-description: Flutter/React Native/Swift native mobile implementation. Use for
-  mobile app, widgets, SwiftUI, platform feature work.
+description: Flutter/React Native/Swift native/Kotlin Android native mobile
+  implementation. Use for mobile app, widgets, SwiftUI, Jetpack Compose,
+  platform feature work.
 tools: run_terminal_cmd, read_file, search_replace, list_dir, grep
 model: grok-build
 maxTurns: 100

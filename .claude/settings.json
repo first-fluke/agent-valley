@@ -61,6 +61,30 @@
         ],
         "matcher": "Edit|Write|NotebookEdit|MultiEdit"
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "name": "oma-hook-SubagentStart",
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/oma-hook.sh\" --vendor 'claude' --event 'SubagentStart'",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "name": "oma-hook-SubagentStop",
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/oma-hook.sh\" --vendor 'claude' --event 'SubagentStop'",
+            "timeout": 8
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

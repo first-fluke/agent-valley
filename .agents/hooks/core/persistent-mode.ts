@@ -23,7 +23,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { agyConversationId } from "./agy-input.ts";
+import {
+  agyConversationId,
+  isAgyNonBlockingStopReason,
+  readAgyResponse,
+} from "./agy-input.ts";
+import {
+  captureCodeFingerprint,
+  sameCodeFingerprint,
+} from "./code-fingerprint.ts";
 import { UNKNOWN_SESSION_ID } from "./constants.ts";
 import { makeBlockOutput } from "./hook-output.ts";
 import { isDeactivationRequest } from "./keyword-detector.ts";
@@ -310,7 +318,11 @@ async function emitGateEvent(
     const { emitEvent } = await import("./state-emit.ts");
     await emitEvent(projectDir, state.omaSid, {
       kind,
-      payload: { workflow: state.workflow, ...payload },
+      payload: {
+        workflow: state.workflow,
+        ...("head" in payload ? {} : await captureCodeFingerprint(projectDir)),
+        ...payload,
+      },
     });
   } catch {
     // best-effort — never let event I/O change the stop decision
@@ -692,6 +704,7 @@ export async function run(
     if (gateKeyword) {
       const argv = resolveGateArgv(gateKeyword, projectDir);
       if (argv) {
+        const fingerprint = await captureCodeFingerprint(projectDir);
         const budgetMs = Math.max(1, gateDeadline - Date.now());
         if (gateRanThisStop && budgetMs < MIN_GATE_RUN_MS) {
           // An earlier workflow's gate spent this Stop's budget. That gate's
@@ -710,10 +723,15 @@ export async function run(
         }
         gateRanThisStop = true;
         const gate = await runGateCommand(argv, projectDir, budgetMs);
-        if (gate.passed) {
+        const codeChanged = !sameCodeFingerprint(
+          fingerprint,
+          await captureCodeFingerprint(projectDir),
+        );
+        if (gate.passed && !codeChanged) {
           // The gate is the mechanical proof of completion: allow the stop.
           deactivate(projectDir, workflow, sessionId);
           await emitGateEvent(projectDir, state, "gate.passed", {
+            ...fingerprint,
             gate: gateKeyword,
             summary: `stop gate '${gateKeyword}' passed for /${workflow}`,
           });
@@ -730,12 +748,15 @@ export async function run(
         incrementReinforcement(projectDir, workflow, sessionId, state);
         const budget = formatSeconds(gateBudgetMs);
         await emitGateEvent(projectDir, state, "gate.failed", {
+          ...fingerprint,
           gate: gateKeyword,
           timedOut: gate.timedOut,
           ...(gate.timedOut ? { budgetMs } : {}),
-          summary: gate.timedOut
-            ? `stop gate '${gateKeyword}' timed out after ${budget} (Stop-hook gate budget) for /${workflow}`
-            : `stop gate '${gateKeyword}' failed for /${workflow}`,
+          summary: codeChanged
+            ? "code changed during gate"
+            : gate.timedOut
+              ? `stop gate '${gateKeyword}' timed out after ${budget} (Stop-hook gate budget) for /${workflow}`
+              : `stop gate '${gateKeyword}' failed for /${workflow}`,
         });
         const quicker = ["lint", "typecheck"]
           .filter((keyword) => keyword !== gateKeyword)
@@ -745,10 +766,14 @@ export async function run(
           `[OMA PERSISTENT MODE: ${workflow.toUpperCase()}]`,
           gate.timedOut
             ? `Stop gate '${gateKeyword}' timed out after ${budget} — the Stop-hook gate budget — and its process tree was stopped (reinforcement ${state.reinforcementCount}/${MAX_REINFORCEMENTS}).`
-            : `Stop gate '${gateKeyword}' FAILED (reinforcement ${state.reinforcementCount}/${MAX_REINFORCEMENTS}).`,
+            : codeChanged
+              ? `Stop gate '${gateKeyword}' FAILED: code changed during gate (reinforcement ${state.reinforcementCount}/${MAX_REINFORCEMENTS}).`
+              : `Stop gate '${gateKeyword}' FAILED (reinforcement ${state.reinforcementCount}/${MAX_REINFORCEMENTS}).`,
           gate.timedOut
             ? `A gate runs inside the Stop hook and must finish within ${budget}: make the \`${gateKeyword}\` script faster (e.g. only the affected tests), or switch to a quicker gate with ${quicker}.`
-            : `Fix the failures below, then finish the workflow — the stop is allowed only when the gate passes.`,
+            : codeChanged
+              ? "Run the gate again after code changes are finished."
+              : `Fix the failures below, then finish the workflow — the stop is allowed only when the gate passes.`,
           gate.outputTail
             ? `--- gate output (tail) ---\n${gate.outputTail}`
             : "",
@@ -794,6 +819,9 @@ async function main() {
   }
 
   const vendor = detectVendorFromInput(input, "stop", import.meta.filename);
+  if (vendor === "antigravity" && isAgyNonBlockingStopReason(input)) {
+    process.exit(0);
+  }
   const projectDir = getProjectDir(vendor, input);
   const sessionId = getSessionId(input);
 
@@ -808,6 +836,9 @@ async function main() {
     input.content,
     input.message,
     input.transcript,
+    vendor === "antigravity"
+      ? readAgyResponse(input.transcriptPath)
+      : undefined,
   ]
     .filter((v): v is string => typeof v === "string")
     .join(" ");

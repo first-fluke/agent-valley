@@ -49,6 +49,30 @@
         ],
         "matcher": "apply_patch|Edit|Write"
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "name": "oma-hook-SubagentStart",
+            "type": "command",
+            "command": "'.codex/hooks/oma-hook.sh' --vendor 'codex' --event 'SubagentStart'",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "name": "oma-hook-SubagentStop",
+            "type": "command",
+            "command": "'.codex/hooks/oma-hook.sh' --vendor 'codex' --event 'SubagentStop'",
+            "timeout": 8
+          }
+        ]
+      }
     ]
   }
 }
