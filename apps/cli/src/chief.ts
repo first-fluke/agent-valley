@@ -386,9 +386,11 @@ export async function dispatchOrder(
   }
   if (normalized.supervise === false)
     throw new Error("Continuing orders require supervision. Add --once to run one goal with --no-supervise.")
-  if (normalized.retry || normalized.resolveEffect !== undefined || normalized.effectResult !== undefined)
+  if (normalized.retry && !normalized.resume)
+    throw new Error("Use --resume <operation-id> with --retry to retry a saved continuing order.")
+  if (normalized.resolveEffect !== undefined || normalized.effectResult !== undefined)
     throw new Error(
-      "Resume the saved child mission ID for --retry or external-effect reconciliation. Run av operations to find its current child; the continuing order retains its charter.",
+      "Resume the saved child mission ID for external-effect reconciliation. Run av operations to find its current child; the continuing order retains its charter.",
     )
   const {
     once: _once,

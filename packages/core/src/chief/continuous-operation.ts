@@ -22,6 +22,8 @@ import { interruptionPause, isServiceShutdown } from "./service-shutdown"
 import type { Mission } from "./types"
 
 export interface ContinuousOperationPorts {
+  /** One operator-authorized selection attempt; saved automatic attempt counts are retained. */
+  retryDecision?: boolean
   decide(operation: Operation, decisionId: string): Promise<ContinuousDecision>
   findMission(id: string): Promise<Mission | undefined>
   runMission(operation: Operation, id: string, goal: string, baselinePath: string): Promise<Mission>
@@ -172,8 +174,11 @@ export async function runContinuousOperation(
     }
     return true
   }
+  let operatorDecisionRetry = ports.retryDecision === true
   const selectDecision = async (id: string): Promise<ContinuousDecision> => {
     while (true) {
+      const explicitRetry = operatorDecisionRetry
+      operatorDecisionRetry = false
       const previous =
         operation.recovery?.target === "decision" && operation.recovery.checkpointId === id
           ? structuredClone(operation.recovery)
@@ -182,7 +187,7 @@ export async function runContinuousOperation(
         operation.recovery?.target === "decision" && operation.recovery.checkpointId === id
           ? operation.recovery.attempts
           : 0
-      if (prior >= automaticRecoveryLimit)
+      if (prior >= automaticRecoveryLimit && !explicitRetry)
         throw new Error(
           "Bounded automatic goal-selection recovery exhausted its attempts; the saved decision remains unresolved.",
         )

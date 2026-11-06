@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto"
 import type { ContinuousDecision } from "@agent-valley/core/chief/continuous-contract"
 import { parseContinuousDecision } from "@agent-valley/core/chief/continuous-contract"
 import { CheckpointError, ReadOnlyViolation } from "@agent-valley/core/chief/coordinator-run"
 import {
   assertExecutionBudget,
   assertExecutionDeadline,
+  assertNoUncertainExecution,
   classifyFailure,
   executionState,
   MissionPause,
@@ -13,6 +15,27 @@ import { interruptionPause } from "@agent-valley/core/chief/service-shutdown"
 import type { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { abortableDelay } from "./chief-supervisor"
+
+/** An explicit operator retry permits one corrected response without replenishing automatic retries. */
+export function rearmContinuousDecision(mission: Mission): void {
+  const state = executionState(mission)
+  const reason = mission.error ?? state.pauseReason ?? ""
+  if (
+    mission.status !== "paused" ||
+    state.failureKind !== "implementation" ||
+    !reason.startsWith("Invalid Chief decision")
+  )
+    throw new Error(
+      "Operation --retry requires a paused invalid-JSON decision. Inspect its saved blocker or resume the active child instead.",
+    )
+  assertNoUncertainExecution(mission)
+  assertExecutionBudget(mission)
+  mission.history.push({
+    at: new Date().toISOString(),
+    stage: "continuous-decision-operator-retry",
+    message: `${randomUUID()}: Operator authorized one corrected JSON decision after repairing its source; ${state.runsStarted} spent calls and ${state.retries} automatic retries remain recorded.`,
+  })
+}
 
 export function assertContinuousDecisionRecovery(mission: Mission): void {
   const state = executionState(mission)
@@ -40,15 +63,32 @@ export async function runContinuousDecision(
 ): Promise<ContinuousDecision> {
   assertContinuousDecisionRecovery(mission)
   const state = executionState(mission)
+  const permit = mission.history.findLast((entry) => entry.stage === "continuous-decision-operator-retry")
+  const authorized =
+    permit &&
+    !mission.history.some(
+      (entry) => entry.stage === "continuous-decision-operator-retry-consumed" && entry.message === permit.message,
+    )
   if (
     mission.status === "paused" &&
     state.failureKind !== "service-shutdown" &&
-    state.retries >= (mission.executionPolicy?.maxRetries ?? 0)
+    state.retries >= (mission.executionPolicy?.maxRetries ?? 0) &&
+    !authorized
   )
     throw new MissionPause(
       mission.error ?? "Bounded Chief decision recovery exhausted its attempts.",
       state.failureKind ?? "implementation",
     )
+  if (authorized) {
+    assertNoUncertainExecution(mission)
+    assertExecutionBudget(mission)
+    mission.history.push({
+      at: new Date().toISOString(),
+      stage: "continuous-decision-operator-retry-consumed",
+      message: permit.message,
+    })
+    await store.save(mission)
+  }
   let correction = mission.history.findLast((entry) => entry.stage === "continuous-decision-invalid")?.message
   while (true) {
     while (state.nextRunAt && Date.parse(state.nextRunAt) > Date.now()) {

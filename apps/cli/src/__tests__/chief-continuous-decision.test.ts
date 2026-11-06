@@ -293,6 +293,61 @@ describe("read-only persistent Chief operation decisions", () => {
     ).toHaveLength(1)
   })
 
+  it("permits one explicit corrected decision without resetting exhausted automatic retries", async () => {
+    const current = await operation()
+    current.settings.runs = "20"
+    current.decisionId = "decision-explicit-retry"
+    current.phase = "paused"
+    vi.useFakeTimers()
+    const fake = dependencies(async () => "not JSON")
+    fake.result.delay = async (milliseconds) => {
+      vi.advanceTimersByTime(milliseconds)
+    }
+    await expect(decideContinuousGoal(current, current.decisionId, root, fake.result)).rejects.toThrow("exhausted")
+    const store = new MissionStore(join(root, ".agent-valley", "operation-decisions", current.id))
+    const before = await store.load(current.decisionId)
+    expect(before.execution).toMatchObject({ retries: 3, runsStarted: 7 })
+    current.recovery = {
+      target: "decision",
+      checkpointId: current.decisionId,
+      attempts: 3,
+      disposition: "protected",
+      reason: before.error ?? "Invalid Chief decision",
+    }
+    await operationStore(root).save(current)
+    const decide = async (parent: typeof current, id: string) => {
+      expect(parent.recovery?.attempts).toBe(4)
+      return decideContinuousGoal(parent, id, root, fake.result)
+    }
+    await runOperation(undefined, { resume: current.id }, root, { decide })
+    expect(fake.call).toHaveBeenCalledTimes(4)
+    await runOperation(undefined, { resume: current.id, retry: true }, root, { decide })
+    expect(fake.call).toHaveBeenCalledTimes(5)
+    const failed = await store.load(current.decisionId)
+    expect(failed.execution).toMatchObject({ retries: 3, runsStarted: 8, startedAt: before.execution?.startedAt })
+    expect(failed.executionPolicy).toEqual(before.executionPolicy)
+    expect(
+      failed.history.filter((entry) => entry.stage === "continuous-decision-operator-retry-consumed"),
+    ).toHaveLength(1)
+    await runOperation(undefined, { resume: current.id }, root, { decide })
+    expect(fake.call).toHaveBeenCalledTimes(5)
+    fake.call.mockImplementation(async (mission) => {
+      expect(mission.execution).toMatchObject({ retries: 3, runsStarted: 9 })
+      return JSON.stringify({ action: "wait", reason: "Fresh observations needed" })
+    })
+    const controller = new AbortController()
+    await runOperation(undefined, { resume: current.id, retry: true }, root, {
+      signal: controller.signal,
+      decide: (parent, id) => decideContinuousGoal(parent, id, root, fake.result),
+      delay: async () => {
+        controller.abort()
+      },
+    })
+    expect(fake.call).toHaveBeenCalledTimes(6)
+    expect((await store.load(current.decisionId)).status).toBe("completed")
+    expect(fake.advisory).toHaveBeenCalledTimes(3)
+  })
+
   it.each(["401 authentication required", "ENOENT missing CLI"])(
     "reports unavailable goal selection without retry or changing Chief for %s",
     async (reason) => {

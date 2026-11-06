@@ -152,6 +152,29 @@ describe("one public order command", () => {
     expect(dependencies.single).not.toHaveBeenCalled()
   })
 
+  it("routes an explicit retry to a saved operation while retaining child-only effect reconciliation", async () => {
+    const dependencies = runners()
+    await operationStore(root).save(dependencies.current)
+
+    await dispatchOrder(undefined, { resume: dependencies.current.id, retry: true }, root, dependencies)
+
+    expect(dependencies.continuous).toHaveBeenCalledWith(
+      undefined,
+      { resume: dependencies.current.id, retry: true },
+      root,
+    )
+    await expect(dispatchOrder("New goal", { retry: true }, root, dependencies)).rejects.toThrow("--resume")
+    await expect(
+      dispatchOrder(
+        undefined,
+        { resume: dependencies.current.id, retry: true, resolveEffect: "external", effectResult: "completed" },
+        root,
+        dependencies,
+      ),
+    ).rejects.toThrow("child mission ID for external-effect")
+    expect(dependencies.continuous).toHaveBeenCalledOnce()
+  })
+
   it("keeps legacy internal workers single and makes every new worker launch explicit --once", async () => {
     const dependencies = runners()
     await dispatchOrder("Child goal", { worker: true, missionId: "child-one" }, root, dependencies)

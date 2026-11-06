@@ -9,7 +9,7 @@ import { type ContinuousOperation, operationSchema } from "@agent-valley/core/ch
 import { type ContinuousOperationPorts, runContinuousOperation } from "@agent-valley/core/chief/continuous-operation"
 import { ContinuousOperationStore } from "@agent-valley/core/chief/continuous-store"
 import { prepareContinuousBaseline } from "@agent-valley/core/chief/continuous-workspace"
-import { finalizeAbandonedRuns } from "@agent-valley/core/chief/execution"
+import { executionState, finalizeAbandonedRuns } from "@agent-valley/core/chief/execution"
 import { clearedGitEnvironment } from "@agent-valley/core/chief/parallel-git"
 import { markdown } from "@agent-valley/core/chief/reports"
 import { serviceShutdownPause } from "@agent-valley/core/chief/service-shutdown"
@@ -19,6 +19,7 @@ import { writeTextAtomic } from "@agent-valley/core/util/atomic-json"
 import { type Command, Option } from "commander"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { decideContinuousGoal } from "./chief-continuous-decision"
+import { rearmContinuousDecision } from "./chief-continuous-recovery"
 import { reobserveLocalExecutions } from "./chief-local-recovery"
 import { applyResumeOptions } from "./chief-resume"
 import { abortableDelay, superviseOrder } from "./chief-supervisor"
@@ -270,7 +271,7 @@ export async function runOperation(
           "An operation retains its Chief Director and child settings. Reconcile or resume its active child with av order; omit Actor/settings flags on operation resume.",
         )
       operation = await storage.load(id)
-      if (decisionBudgetKeys.some((key) => options[key] !== undefined)) {
+      if (options.retry || decisionBudgetKeys.some((key) => options[key] !== undefined)) {
         if (operation.currentMissionId || !operation.decisionId)
           throw new Error(
             "Operation resume budget reconciliation applies only to an active decision checkpoint. Adjust the current child's budget with av order --resume <child-id>.",
@@ -285,11 +286,25 @@ export async function runOperation(
             )
           await decisions.recoverProcesses(decision.id, decision)
           finalizeAbandonedRuns(decision)
+          const priorStatus = decision.status
+          const priorExecution = { ...executionState(decision) }
           const adjustments: OrderOptions = { resume: decision.id }
           for (const key of decisionBudgetKeys) if (options[key] !== undefined) adjustments[key] = options[key]
-          applyResumeOptions(decision, undefined, adjustments)
+          if (decisionBudgetKeys.some((key) => options[key] !== undefined))
+            applyResumeOptions(decision, undefined, adjustments)
+          if (options.retry) {
+            decision.status = priorStatus
+            Object.assign(executionState(decision), {
+              retries: priorExecution.retries,
+              crashRestarts: priorExecution.crashRestarts,
+              failureKind: priorExecution.failureKind,
+              pauseReason: priorExecution.pauseReason,
+              nextRunAt: priorExecution.nextRunAt,
+            })
+            rearmContinuousDecision(decision)
+          }
           await decisions.save(decision)
-          operation.recovery = undefined
+          if (!options.retry) operation.recovery = undefined
         } finally {
           await unlockDecision()
         }
@@ -321,6 +336,7 @@ export async function runOperation(
     const missions = new MissionStore(join(root, ".agent-valley", "missions"))
     return await runContinuousOperation(operation, {
       signal: controller.signal,
+      ...(options.retry ? { retryDecision: true } : {}),
       ...(dependencies.now ? { now: dependencies.now } : {}),
       observeContainers:
         dependencies.observeContainers ??

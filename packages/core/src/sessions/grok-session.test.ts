@@ -315,7 +315,7 @@ describe("GrokSession — streaming output", () => {
     expect(output).toBe(bigChunk.slice(-10240))
   })
 
-  test("invokes grok with --single, --output-format streaming-json, --always-approve; prompt passed as --single argument (not stdin)", async () => {
+  test("invokes grok with --single, --output-format streaming-messages-json, --always-approve; prompt passed as --single argument (not stdin)", async () => {
     // Argv is echoed back inside a "text" event's data field so the test
     // can read it via the "complete" event — matches the technique used by
     // agy-session.test.ts's "capture-args" mock (a marker-file write from
@@ -341,7 +341,7 @@ exit 0
     expect(captured).toContain("--single")
     expect(captured).toContain("distinctive-test-prompt")
     expect(captured).toContain("--output-format")
-    expect(captured).toContain("streaming-json")
+    expect(captured).toContain("streaming-messages-json")
     expect(captured).toContain("--always-approve")
   })
 
