@@ -1,0 +1,48 @@
+amends "package://github.com/jdx/hk/releases/download/v2.10.0/hk@2.10.0#/Config.pkl"
+
+min_hk_version = "2.10.0"
+
+hooks {
+  ["pre-commit"] {
+    fix = false
+    stage = false
+    stash = "none"
+    steps {
+      ["biome"] {
+        glob = List("**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs", "**/*.json", "**/*.md")
+        check = new Command {
+          argv = List("bun", "run", "biome", "check", "--no-errors-on-unmatched", "{{files}}")
+        }
+      }
+    }
+  }
+  ["commit-msg"] {
+    steps {
+      ["co-author-guard"] {
+        check = new Command {
+          argv = List("sh", ".githooks/commit-msg", "{{commit_msg_file}}")
+        }
+      }
+      ["commitlint"] {
+        depends = "co-author-guard"
+        check = new Command {
+          argv = List("bun", "run", "commitlint", "--edit", "{{commit_msg_file}}")
+        }
+      }
+    }
+  }
+  ["pre-push"] {
+    fix = false
+    stage = false
+    stash = "none"
+    steps {
+      ["affected-checks"] {
+        // Preserve all pushed refs; hk's file list alone covers only the first.
+        stdin = "{{hook_stdin}}"
+        check = new Command {
+          argv = List("bun", "scripts/pre-push.mjs", "--files", "{{files}}")
+        }
+      }
+    }
+  }
+}

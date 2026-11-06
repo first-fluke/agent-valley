@@ -7,6 +7,9 @@ const root = dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   test: {
     globals: false,
+    // A changed-file hook must retain Vitest's related-test selection even
+    // when its inputs include package.json or the Vitest configuration.
+    ...(process.env.AV_CHANGED_PRE_PUSH === "1" ? { forceRerunTriggers: [] } : {}),
     // Git/process integration suites spawn several children per worker.
     // CPU-count fanout exhausts process/IO capacity on large developer hosts.
     maxWorkers: 4,
