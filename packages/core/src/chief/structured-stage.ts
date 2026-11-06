@@ -32,6 +32,88 @@ interface LegacyTimeout {
   pauseAt: string
 }
 
+interface PlanningCancellation {
+  key: string
+  attempts: number
+  cancelledRunId: string
+  reservationAt: string
+  pauseAt: string
+}
+
+/** A pause request alone cannot prove termination or that no response reached the parser. */
+function settledPlanningCancellations(mission: Mission, stage: ChiefStage, key: string): PlanningCancellation[] {
+  const runs = mission.operations?.runs ?? []
+  if (
+    stage !== "plan" ||
+    !runs.length ||
+    mission.tasks.some((task) => task.effectState === "unknown" || task.effectState === "running") ||
+    runs.some(
+      (run) =>
+        run.executionState !== "settled" ||
+        !Number.isFinite(Date.parse(run.startedAt)) ||
+        !Number.isFinite(Date.parse(run.finishedAt ?? "")),
+    )
+  )
+    return []
+  const messages = new Set([
+    "Operator stopped the order. Its checks and worktree were retained; repair any interrupted effects before resuming with --retry.",
+    "Mission interrupted. Its checks, budget and child workspace records were retained for resume.",
+    "The OS-owned service is shutting down. Re-observe the saved execution before continuing the same goal within its original limits.",
+  ])
+  const cancellations: PlanningCancellation[] = []
+  for (let index = 0; index < mission.history.length; index += 1) {
+    const reservation = mission.history[index]
+    if (reservation?.stage !== "structured-stage-attempt") continue
+    let record: { key?: string; attempts?: number }
+    try {
+      record = JSON.parse(reservation.message) as typeof record
+    } catch {
+      continue
+    }
+    if (record.key !== key || ![1, 2].includes(record.attempts ?? 0)) continue
+    const reservedAt = Date.parse(reservation.at)
+    for (const entry of mission.history.slice(index + 1)) {
+      if (
+        ["structured-stage-attempt", "structured-stage-invalid", "structured-stage-transient"].includes(entry.stage)
+      ) {
+        let following: { key?: string }
+        try {
+          following = JSON.parse(entry.message) as typeof following
+        } catch {
+          break
+        }
+        if (following.key === key) break
+      }
+      if (entry.stage !== "paused" || entry.taskId || !messages.has(entry.message)) continue
+      const pausedAt = Date.parse(entry.at)
+      if (!Number.isFinite(reservedAt) || !Number.isFinite(pausedAt) || pausedAt < reservedAt) break
+      const overlapping = runs.filter(
+        (run) => Date.parse(run.startedAt) <= pausedAt && Date.parse(run.finishedAt ?? "") >= reservedAt,
+      )
+      const run = overlapping.length === 1 ? overlapping[0] : undefined
+      if (
+        run?.stage === stage &&
+        run.actorId === mission.chiefId &&
+        !run.taskId &&
+        run.executionRecovery === "local-process" &&
+        run.outcome === "failed" &&
+        Date.parse(run.startedAt) >= reservedAt &&
+        Date.parse(run.finishedAt ?? "") >= Date.parse(run.startedAt) &&
+        Date.parse(run.finishedAt ?? "") <= pausedAt
+      )
+        cancellations.push({
+          key,
+          attempts: record.attempts as number,
+          cancelledRunId: run.runId,
+          reservationAt: reservation.at,
+          pauseAt: entry.at,
+        })
+      break
+    }
+  }
+  return cancellations
+}
+
 /** Only the old planning-timeout wrapper plus one settled native run establishes this missing release. */
 function legacyPlanningTimeout(mission: Mission, stage: ChiefStage, key: string): LegacyTimeout | undefined {
   const runs = mission.operations?.runs ?? []
@@ -123,6 +205,8 @@ export async function runStructuredStage<T>(options: StructuredStage<T>): Promis
   let attempts = 0
   let reason = "No validated response is available for this saved context."
   const legacy = legacyPlanningTimeout(mission, stage, key)
+  const cancellations = settledPlanningCancellations(mission, stage, key)
+  const releasedReservations = new Set<string>()
   let legacyReleased = false
   let pendingReservation: { attempts: number; at: string } | undefined
   for (const entry of mission.history) {
@@ -133,6 +217,7 @@ export async function runStructuredStage<T>(options: StructuredStage<T>): Promis
       attempts?: number
       reason?: string
       legacyRunId?: string
+      cancelledRunId?: string
       reservationAt?: string
       pauseAt?: string
     }
@@ -147,6 +232,23 @@ export async function runStructuredStage<T>(options: StructuredStage<T>): Promis
     if (!Number.isInteger(record.attempts) || (record.attempts ?? 0) < 1 || (record.attempts ?? 3) > 2)
       throw new CheckpointError("Structured response attempt history is invalid. Preserve its spent attempt count.")
     if (entry.stage === "structured-stage-transient") {
+      if (record.cancelledRunId !== undefined) {
+        const proof = cancellations.find(
+          (candidate) =>
+            candidate.cancelledRunId === record.cancelledRunId &&
+            candidate.attempts === record.attempts &&
+            candidate.reservationAt === record.reservationAt &&
+            candidate.pauseAt === record.pauseAt,
+        )
+        if (!proof || releasedReservations.has(proof.reservationAt) || attempts < 1)
+          throw new CheckpointError(
+            "Cancelled planning release lacks unique settled execution proof. Restore the original checkpoint before retrying.",
+          )
+        releasedReservations.add(proof.reservationAt)
+        if (pendingReservation?.at === proof.reservationAt) pendingReservation = undefined
+        attempts -= 1
+        continue
+      }
       if (record.legacyRunId !== undefined) {
         if (
           !legacy ||
@@ -161,6 +263,7 @@ export async function runStructuredStage<T>(options: StructuredStage<T>): Promis
             "Legacy timeout release history lacks unique settled execution proof. Restore the original checkpoint before retrying.",
           )
         legacyReleased = true
+        releasedReservations.add(legacy.reservationAt)
         if (pendingReservation?.at === record.reservationAt) pendingReservation = undefined
         attempts -= 1
         continue
@@ -174,6 +277,7 @@ export async function runStructuredStage<T>(options: StructuredStage<T>): Promis
           "Structured response timeout history has no matching reservation. Restore the original checkpoint before retrying.",
         )
       pendingReservation = undefined
+      if (record.reservationAt) releasedReservations.add(record.reservationAt)
       attempts -= 1
       continue
     }
@@ -194,6 +298,24 @@ export async function runStructuredStage<T>(options: StructuredStage<T>): Promis
       `Reconciled legacy planning timeout ${legacy.legacyRunId} from its reservation, exact pause and settled execution evidence. Retained all spent calls, time, cost and retries; only its unused JSON response slot was released.`,
     )
     attempts -= 1
+  }
+  if (!mission.plan) {
+    for (const cancellation of cancellations) {
+      if (releasedReservations.has(cancellation.reservationAt)) continue
+      if (attempts < 1)
+        throw new CheckpointError("Cancelled planning history cannot release another structured response slot.")
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "structured-stage-transient",
+        message: JSON.stringify(cancellation),
+      })
+      await save(
+        "structured-output",
+        `Reconciled cancelled planning call ${cancellation.cancelledRunId} from its exact pause and settled native execution. Released only its unused JSON response slot; calls, elapsed time, cost and recovery usage remain spent.`,
+      )
+      attempts -= 1
+      releasedReservations.add(cancellation.reservationAt)
+    }
   }
   while (attempts < 2) {
     assertExecutionDeadline(mission)

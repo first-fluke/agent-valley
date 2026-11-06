@@ -15,6 +15,12 @@ export interface RuntimeIgnoreChange {
 const entry = ".agent-valley/"
 const gitOptions = { env: { ...clearedGitEnvironment, LC_ALL: "C" } }
 
+/** Exact bytes appended when AV needs to restore its repository-local runtime rule. */
+export function appendRuntimeGitignoreRule(before: string | null): string {
+  const newline = before?.includes("\r\n") ? "\r\n" : "\n"
+  return `${before ?? ""}${before && !before.endsWith("\n") ? newline : ""}${entry}${newline}`
+}
+
 function failure(path: string): Error {
   return new Error(
     `Cannot prepare AV runtime exclusion in ${path}. Restore a writable, regular .gitignore file without a symbolic link, retain its existing rules, then retry.`,
@@ -71,11 +77,10 @@ export async function prepareRuntimeGitignore(root: string): Promise<RuntimeIgno
     if (ignored.exitCode !== 1) throw failure(path)
   }
   if (!(mode & 0o222)) throw failure(path)
-  const newline = before?.includes("\r\n") ? "\r\n" : "\n"
   return {
     path,
     before,
-    after: `${before ?? ""}${before && !before.endsWith("\n") ? newline : ""}${entry}${newline}`,
+    after: appendRuntimeGitignoreRule(before),
     mode,
   }
 }

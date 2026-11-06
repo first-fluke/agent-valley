@@ -2,6 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFil
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { appendRuntimeGitignoreRule } from "../workspace/runtime-ignore"
 import type { ContinuousBaseline } from "./continuous-contract"
 import { operation as operationFixture } from "./continuous-operation.fixture"
 import { integrateContinuousSource, prepareSourceIntegration } from "./continuous-source-integration"
@@ -271,6 +272,80 @@ describe("continuous verified source worktree integration", () => {
 
     expect(JSON.parse(await readFile(recordPath(), "utf8")).alreadySatisfied).toEqual([])
     expect((await lstat(join(root, "script.sh"))).mode & 0o111).toBe(0o111)
+  })
+
+  it.each(["existing/\n", "existing/", "existing/\r\n"])(
+    "projects only AV's canonical runtime append while applying the verified target rule: %j",
+    async (initialIgnore) => {
+      await writeFile(join(root, ".gitignore"), initialIgnore)
+      const { operation, previous } = await fixture()
+      const newline = initialIgnore.includes("\r\n") ? "\r\n" : "\n"
+      const verifiedIgnore = `${initialIgnore}${initialIgnore.endsWith("\n") ? "" : newline}/target/${newline}`
+      const next = await accepted(previous, async (path) => {
+        await writeFile(join(path, ".gitignore"), verifiedIgnore)
+        await writeFile(join(path, "product.txt"), "Verified product\n")
+      })
+      await writeFile(join(root, ".gitignore"), appendRuntimeGitignoreRule(initialIgnore))
+      await writeFile(join(root, "other.txt"), "Staged operator edit\n")
+      await git(["add", "other.txt"])
+      await writeFile(join(root, "other.txt"), "Unstaged operator continuation\n")
+      const index = await readFile(join(root, ".git", "index"))
+      const refs = await git(["show-ref"])
+
+      const result = await integrateContinuousSource(operation, previous, next)
+
+      expect(await readFile(join(root, ".gitignore"), "utf8")).toBe(appendRuntimeGitignoreRule(verifiedIgnore))
+      expect(await readFile(join(previous.path, ".gitignore"), "utf8")).toBe(initialIgnore)
+      expect(await readFile(join(next.path, ".gitignore"), "utf8")).toBe(verifiedIgnore)
+      expect(await readFile(join(root, ".git", "index"))).toEqual(index)
+      expect(await git(["show-ref"])).toBe(refs)
+      expect(await readFile(join(root, "other.txt"), "utf8")).toBe("Unstaged operator continuation\n")
+      const receipt = JSON.parse(await readFile(recordPath(), "utf8"))
+      expect(receipt.gitignoreProjection.verifiedBefore).toEqual(
+        receipt.verifiedChanges.find((change: { path: string }) => change.path === ".gitignore").before,
+      )
+      expect(receipt.gitignoreProjection.verifiedAfter).toEqual(
+        receipt.verifiedChanges.find((change: { path: string }) => change.path === ".gitignore").after,
+      )
+      expect(receipt.gitignoreProjection.sourceBefore).not.toEqual(receipt.gitignoreProjection.verifiedBefore)
+      expect(receipt.gitignoreProjection.sourceAfter).not.toEqual(receipt.gitignoreProjection.verifiedAfter)
+      expect(await integrateContinuousSource(operation, previous, next)).toEqual(result)
+    },
+  )
+
+  it("does not project arbitrary source ignore edits or delete the runtime-protected ignore file", async () => {
+    await writeFile(join(root, ".gitignore"), "existing/\n")
+    const { operation, previous } = await fixture()
+    const next = await accepted(previous, (path) => writeFile(join(path, ".gitignore"), "existing/\n/target/\n"))
+    const userIgnore = `${appendRuntimeGitignoreRule("existing/\n")}# unrelated operator rule\n`
+    await writeFile(join(root, ".gitignore"), userIgnore)
+
+    await expect(integrateContinuousSource(operation, previous, next)).rejects.toThrow("overlap")
+    expect(await readFile(join(root, ".gitignore"), "utf8")).toBe(userIgnore)
+    const deletion = await accepted(previous, (path) => rm(join(path, ".gitignore")), "delete-ignore")
+    await writeFile(join(root, ".gitignore"), appendRuntimeGitignoreRule("existing/\n"))
+
+    await expect(integrateContinuousSource(operation, previous, deletion)).rejects.toThrow("cannot delete")
+    expect(await readFile(join(root, ".gitignore"), "utf8")).toBe(appendRuntimeGitignoreRule("existing/\n"))
+  })
+
+  it("rejects a tampered runtime-ignore projection without changing either verified or source bytes", async () => {
+    await writeFile(join(root, ".gitignore"), "existing/\n")
+    const { operation, previous } = await fixture()
+    const next = await accepted(previous, (path) => writeFile(join(path, ".gitignore"), "existing/\n/target/\n"))
+    await writeFile(join(root, ".gitignore"), appendRuntimeGitignoreRule("existing/\n"))
+    await integrateContinuousSource(operation, previous, next)
+    const result = await readFile(join(root, ".gitignore"), "utf8")
+    const receipt = JSON.parse(await readFile(recordPath(), "utf8"))
+    receipt.gitignoreProjection.sourceAfter.oid = "0".repeat(40)
+    await writeFile(recordPath(), JSON.stringify(receipt))
+
+    await expect(integrateContinuousSource(operation, previous, next)).rejects.toThrow(
+      "saved runtime-ignore projection differs",
+    )
+
+    expect(await readFile(join(root, ".gitignore"), "utf8")).toBe(result)
+    expect(await readFile(join(next.path, ".gitignore"), "utf8")).toBe("existing/\n/target/\n")
   })
 
   it("rejects symlinked product paths and private receipt storage", async () => {

@@ -6,6 +6,7 @@ import { lockRecord } from "../util/record-lock"
 import { codeDeliveryPath } from "./code-delivery-contract"
 import { integrateContentTransaction } from "./content-transaction"
 import { type ContinuousBaseline, type Operation, operationIdSchema } from "./continuous-contract"
+import { gitignoreProjectionSchema, projectContinuousGitignore } from "./continuous-gitignore"
 import { validateContinuousBaseline } from "./continuous-workspace"
 import { parallelDeliverySchema } from "./parallel-contract"
 import { captureParallelBaseline, parallelGit, parallelTreeImages, writeParallelJson } from "./parallel-git"
@@ -24,6 +25,8 @@ const receiptSchema = z.strictObject({
   patchPath: parallelDeliverySchema.shape.patchPath,
   patchSha256: parallelDeliverySchema.shape.patchSha256,
   verifiedChanges: parallelDeliverySchema.shape.changes,
+  sourceChanges: parallelDeliverySchema.shape.changes,
+  gitignoreProjection: gitignoreProjectionSchema.optional(),
   alreadySatisfied: z.array(z.string().refine(codeDeliveryPath)).max(1_000),
   changes: parallelDeliverySchema.shape.changes,
   status: parallelDeliverySchema.shape.status,
@@ -267,26 +270,36 @@ export async function integrateContinuousSource(
     const existing = saved ? receiptSchema.parse(JSON.parse(saved.toString("utf8"))) : undefined
     const source = await captureParallelBaseline(root)
     const images = await parallelTreeImages(root, source.tree)
+    const projected = await projectContinuousGitignore(
+      next.path,
+      root,
+      directory,
+      verifiedChanges.find((change) => change.path === ".gitignore"),
+      images.get(".gitignore"),
+      existing?.gitignoreProjection,
+    )
+    const sourceChanges = verifiedChanges.map((change) =>
+      change.path === ".gitignore" && projected ? projected.change : change,
+    )
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
     const alreadySatisfied =
       existing?.alreadySatisfied ??
-      verifiedChanges
-        .filter((change) => same(images.get(change.path) ?? null, change.after))
-        .map((change) => change.path)
+      sourceChanges.filter((change) => same(images.get(change.path) ?? null, change.after)).map((change) => change.path)
     if (
       new Set(alreadySatisfied).size !== alreadySatisfied.length ||
-      alreadySatisfied.some((path) => !verifiedChanges.some((change) => change.path === path))
+      alreadySatisfied.some((path) => !sourceChanges.some((change) => change.path === path))
     )
       throw new Error(
         "The already-satisfied source paths differ from the full verified cycle delta. Restore the original receipt before retrying.",
       )
-    const changes = verifiedChanges.filter((change) => !alreadySatisfied.includes(change.path))
-    const patch = await sourcePatch(
+    const changes = sourceChanges.filter((change) => !alreadySatisfied.includes(change.path))
+    let patch = await sourcePatch(
       next.path,
       previous.baselineTree,
       next.baselineTree,
-      changes.map((change) => change.path),
+      changes.filter((change) => !projected || change.path !== ".gitignore").map((change) => change.path),
     )
+    if (projected && changes.some((change) => change.path === ".gitignore")) patch += projected.patch
     const patchSha256 = createHash("sha256").update(patch).digest("hex")
     const identity = {
       version: 1 as const,
@@ -301,6 +314,8 @@ export async function integrateContinuousSource(
       patchPath,
       patchSha256,
       verifiedChanges,
+      sourceChanges,
+      gitignoreProjection: projected?.projection,
       alreadySatisfied,
       changes,
     }
@@ -337,7 +352,7 @@ export async function integrateContinuousSource(
           const current = await captureParallelBaseline(root)
           const currentImages = await parallelTreeImages(root, current.tree)
           if (
-            verifiedChanges.some(
+            sourceChanges.some(
               (change) =>
                 alreadySatisfied.includes(change.path) && !same(currentImages.get(change.path) ?? null, change.after),
             )
@@ -357,7 +372,7 @@ export async function integrateContinuousSource(
     })
     const final = await captureParallelBaseline(root)
     const finalImages = await parallelTreeImages(root, final.tree)
-    if (verifiedChanges.some((change) => !same(finalImages.get(change.path) ?? null, change.after)))
+    if (sourceChanges.some((change) => !same(finalImages.get(change.path) ?? null, change.after)))
       throw new Error(
         "Source files no longer match the full verified cycle delta. Preserve the source and its receipt before retrying.",
       )

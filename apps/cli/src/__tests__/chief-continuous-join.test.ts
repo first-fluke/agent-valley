@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ContinuousOperation } from "@agent-valley/core/chief/continuous-contract"
@@ -23,11 +23,16 @@ beforeEach(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), "av-operation-join-")))
   missions = new MissionStore(join(root, ".agent-valley", "missions"))
   vi.spyOn(console, "log").mockImplementation(() => {})
-  vi.mocked(prepareContinuousBaseline).mockImplementation(async (_repository, _id, _source, childId) => ({
-    ...baseline(childId),
-    repositoryRoot: root,
-    sourceWorkspacePath: join(root, "child"),
-  }))
+  vi.mocked(prepareContinuousBaseline).mockImplementation(async (_repository, id, _source, childId) => {
+    const directory = join(root, ".agent-valley", "operations", id, "baselines", childId ?? "initial")
+    await mkdir(directory, { recursive: true })
+    return {
+      ...baseline(childId),
+      repositoryRoot: root,
+      sourceWorkspacePath: join(root, "child"),
+      path: join(directory, "workspace"),
+    }
+  })
 })
 
 afterEach(async () => {
@@ -76,7 +81,11 @@ async function seed() {
     phase: "paused",
     pauseKind: "blocked",
     resumePhase: "running",
-    baseline: { ...baseline(), repositoryRoot: root },
+    baseline: {
+      ...baseline(),
+      repositoryRoot: root,
+      path: join(root, ".agent-valley", "operations", "operation", "baselines", "initial", "workspace"),
+    },
     currentMissionId: child.id,
     decision: { action: "execute", goal: child.goal, reason: "Observed failure", evidence: ["Login evidence"] },
     cycleLimit: 1,
@@ -133,6 +142,19 @@ describe("continuous operation joins a live child", () => {
     expect(runMission).not.toHaveBeenCalled()
     expect(decide).not.toHaveBeenCalled()
     expect(prepareContinuousBaseline).toHaveBeenCalledOnce()
+    expect(
+      JSON.parse(
+        await readFile(
+          join(root, ".agent-valley", "operations", parent.id, "baselines", child.id, "acceptance.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({
+      operationId: parent.id,
+      missionId: child.id,
+      cycle: 1,
+      baselinePath: result.baseline?.path,
+    })
     expect((await missions.load(child.id)).execution).toMatchObject({
       startedAt: child.execution?.startedAt,
       runsStarted: 4,
