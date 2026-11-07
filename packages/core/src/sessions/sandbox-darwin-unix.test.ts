@@ -121,7 +121,7 @@ describe.skipIf(process.platform !== "darwin")("Darwin named Unix socket confine
     },
   )
 
-  it("keeps TCP listeners denied", () => {
+  it("allows TCP listeners (Seatbelt's localhost filter accepts every local bind address)", () => {
     const result = run(
       `
       const server=require('node:net').createServer();
@@ -131,8 +131,7 @@ describe.skipIf(process.platform !== "darwin")("Darwin named Unix socket confine
     `,
       [],
     )
-    expect(result.status, result.stderr).toBe(3)
-    expect(result.stdout.trim()).toBe("EPERM")
+    expect(result.status, result.stderr).toBe(2)
   })
 
   it("preserves credential read and write denies inside an otherwise allowed workspace", () => {

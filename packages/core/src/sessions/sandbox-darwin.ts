@@ -24,11 +24,14 @@
  *   - Outbound network restricted to HTTP/HTTPS ports, plus local DNS
  *     resolution and local unix-domain sockets (ssh-agent and similar —
  *     these never leave the host).
- *   - opencode only: loopback TCP (bind/inbound/outbound on localhost) for
- *     its own CLI session server; no other TCP listeners.
+ *   - TCP listeners (bind/inbound, plus loopback outbound) for opencode's CLI
+ *     session server and for workspace tests that bind 127.0.0.1. Seatbelt's
+ *     "localhost" address filter accepts every local bind address (verified on
+ *     macOS 26: 0.0.0.0 and LAN addresses pass too), so the real limit is the
+ *     outbound rule set, not the listener address.
  *   - Named Unix-domain listeners limited to the workspace, the OS tmp
- *     directory and the shared system tmp dirs; TCP listeners and other
- *     local socket paths stay denied.
+ *     directory and the shared system tmp dirs; other local socket paths
+ *     stay denied.
  *
  * Credential denylist (closes a HIGH-severity secret-exfiltration gap —
  * see docs/harness/SAFETY.md § 2 residual gaps and the sandbox result
@@ -253,15 +256,13 @@ ${unixListenerRules}
 (allow network-outbound (remote udp "*:53"))
 (allow network-outbound (remote tcp "*:443"))
 (allow network-outbound (remote tcp "*:80"))
-${
-  req.agentType === "opencode"
-    ? `; opencode serves its own CLI session over a loopback HTTP server; without this it exits
-; before readiness and the real provider error never surfaces. Loopback only.
+; TCP listeners: opencode serves its CLI session over a localhost HTTP server, and
+; workspace test suites bind 127.0.0.1 listeners (daemon/IPC/non-contact tests). Seatbelt
+; only accepts "*" or "localhost" here and "localhost" matches every local bind address,
+; so outbound egress above is what keeps actors from reaching other hosts.
 (allow network-bind (local ip "localhost:*"))
 (allow network-inbound (local ip "localhost:*"))
-(allow network-outbound (remote ip "localhost:*"))`
-    : ""
-}
+(allow network-outbound (remote ip "localhost:*"))
 `
 }
 

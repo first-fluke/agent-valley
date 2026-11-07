@@ -242,7 +242,7 @@ describe("buildDarwinSandboxCommand", () => {
     expect(opencode).toContain(`(allow file-write* (subpath "${homedir()}/.local/share/opencode"))`)
     expect(opencode).toContain(`(allow file-write* (subpath "${homedir()}/.config/opencode"))`)
     expect(opencode).toContain(`(deny file-read* (subpath "${homedir()}/.claude"))`)
-    // opencode serves its CLI session over loopback; other agents keep TCP listeners denied.
+    // Loopback TCP is allowed for every agent: opencode's session server and 127.0.0.1 test listeners.
     expect(opencode).toContain('(allow network-bind (local ip "localhost:*"))')
     expect(opencode).toContain('(allow network-inbound (local ip "localhost:*"))')
     expect(opencode).toContain('(allow network-outbound (remote ip "localhost:*"))')
