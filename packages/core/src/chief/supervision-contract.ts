@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { actorTaskSchema, normalizeActorAssignment } from "./actor-contract"
+import { actorTaskData, actorTaskSchema, normalizeActorAssignment } from "./actor-contract"
 import { parseJson, validatePlan } from "./plan-validation"
 import type { ChiefPlan, Mission } from "./types"
 
@@ -36,10 +36,40 @@ export function validateOriginalAcceptance(plan: ChiefPlan, mission: Mission): v
   }
 }
 
+/**
+ * A replan entry `{"id":"task-1","retain":true}` keeps an accepted task exactly as recorded: its previous
+ * definition replaces the entry, so its acceptance stays verbatim and its completed state survives the
+ * replan. Rewriting an accepted task as a "retain the deliverable" assignment used to reset it and spend
+ * an Actor run plus a review on a no-op. A retain flag on a task that was never accepted is dropped and
+ * the entry must define the task normally.
+ */
+export function resolveRetainedReplanTasks(value: unknown, mission: Mission): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value
+  const input = value as Record<string, unknown>
+  if (input.action !== "replan" || !Array.isArray(input.tasks)) return value
+  const tasks = input.tasks.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry
+    const { retain, ...task } = entry as Record<string, unknown>
+    if (retain !== true) return task
+    const previous = mission.plan?.tasks.find((candidate) => candidate.id === task.id)
+    const state = mission.tasks.find((candidate) => candidate.id === task.id)
+    const accepted =
+      previous &&
+      state?.status === "completed" &&
+      state.output !== undefined &&
+      state.review?.passed === true &&
+      state.fingerprint !== undefined
+    return accepted ? actorTaskData(previous) : task
+  })
+  return { ...input, tasks }
+}
+
 export function parseSupervisionResponse(source: string, mission: Mission): SupervisionResponse {
   // The shared JSON bound in parseJson and the per-field text limits apply; a supervision-only
   // 8,000-character cutoff rejected valid repair decisions and burned a recovery round each time.
-  const decision = supervisionResponseSchema.parse(normalizeActorAssignment(parseJson(source, "Supervision")))
+  const decision = supervisionResponseSchema.parse(
+    normalizeActorAssignment(resolveRetainedReplanTasks(parseJson(source, "Supervision"), mission)),
+  )
   if (
     mission.tasks.some((task) => task.effectState === "unknown") &&
     decision.action !== "wait" &&

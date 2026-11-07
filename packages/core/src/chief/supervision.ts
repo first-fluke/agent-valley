@@ -1,5 +1,5 @@
 import type { SupervisionResponse } from "./schemas"
-import type { ChiefPlan, ChiefTaskState, Mission, SupervisionDecision } from "./types"
+import type { ChiefPlan, ChiefTask, ChiefTaskState, Mission, SupervisionDecision } from "./types"
 
 export function assignTaskStates(
   mission: Mission,
@@ -43,13 +43,24 @@ export function assignTaskStates(
   })
 }
 
+/** Key order differs between a stored plan and a re-parsed Chief response; compare task definitions by content. */
+function canonicalTask(task: ChiefTask): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(task)
+        .filter(([, value]) => value !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right)),
+    ),
+  )
+}
+
 /** A targeted decision resets its named task, changed task definitions and every dependent downstream task. */
 function recoveryResetTaskIds(previousPlan: ChiefPlan, plan: ChiefPlan, targetId?: string): Set<string> {
   const reset = new Set<string>()
   if (targetId) reset.add(targetId)
   for (const task of plan.tasks) {
     const previous = previousPlan.tasks.find((entry) => entry.id === task.id)
-    if (!previous || JSON.stringify(previous) !== JSON.stringify(task)) reset.add(task.id)
+    if (!previous || canonicalTask(previous) !== canonicalTask(task)) reset.add(task.id)
   }
   for (;;) {
     const size = reset.size
