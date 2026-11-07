@@ -16,7 +16,7 @@ import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion, nativeErrorMessage } from "./native-failure"
-import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
+import { BoundedResultText, MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 
 export const GROK_COMMAND = "grok"
 
@@ -28,8 +28,7 @@ export class GrokSession extends BaseSession {
   private filesChanged: string[] = []
   private started = false
   /** Complete legacy answer, retained only within the native result bound. */
-  private outputText = ""
-  private outputExceeded = false
+  private outputText = new BoundedResultText()
   private stderrExhaustion?: () => string | undefined
 
   async start(config: AgentConfig): Promise<void> {
@@ -44,8 +43,7 @@ export class GrokSession extends BaseSession {
     }
 
     this.filesChanged = []
-    this.outputText = ""
-    this.outputExceeded = false
+    this.outputText.reset()
     this.stderrExhaustion = undefined
     this.startedAt = Date.now()
 
@@ -126,7 +124,7 @@ export class GrokSession extends BaseSession {
         if (data) {
           // Progress streams independently; the complete answer has a fixed bound.
           this.emit({ type: "output", chunk: data })
-          this.appendResultText(data)
+          this.outputText.append(data)
         }
         return
       }
@@ -141,16 +139,6 @@ export class GrokSession extends BaseSession {
           this.handleToolUse(e)
         }
     }
-  }
-
-  private appendResultText(chunk: string): void {
-    if (this.outputExceeded) return
-    if (chunk.length > MAX_NATIVE_RESULT_LENGTH - this.outputText.length) {
-      this.outputExceeded = true
-      this.outputText = ""
-      return
-    }
-    this.outputText += chunk
   }
 
   private handleResult(e: Record<string, unknown>): void {
@@ -242,7 +230,7 @@ export class GrokSession extends BaseSession {
       return
     }
 
-    if (this.outputExceeded) {
+    if (this.outputText.exceeded) {
       this.emitError("CRASH", nativeResultLimitMessage("Grok"), false)
       return
     }
@@ -251,7 +239,7 @@ export class GrokSession extends BaseSession {
       type: "complete",
       result: {
         exitCode: 0,
-        output: this.outputText,
+        output: this.outputText.text,
         durationMs: this.elapsedMs(),
         filesChanged: this.filesChanged,
         tokenUsage: this.extractTokenUsage(e),

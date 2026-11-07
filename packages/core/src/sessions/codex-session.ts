@@ -17,7 +17,7 @@ import {
 } from "./codex-protocol"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion } from "./native-failure"
-import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
+import { BoundedResultText, MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 
 export class CodexSession extends BaseSession {
   private rpcId = 0
@@ -28,8 +28,7 @@ export class CodexSession extends BaseSession {
   private tokenUsage: { input: number; output: number; model: string } | undefined
   private filesChanged: string[] = []
   private outputTail = ""
-  private legacyOutput = ""
-  private legacyOutputExceeded = false
+  private legacyOutput = new BoundedResultText()
   private finalAnswer: string | undefined
   private finalAnswerExceeded = false
   private completedMessage: string | undefined
@@ -92,8 +91,7 @@ export class CodexSession extends BaseSession {
 
     this.filesChanged = []
     this.outputTail = ""
-    this.legacyOutput = ""
-    this.legacyOutputExceeded = false
+    this.legacyOutput.reset()
     this.finalAnswer = undefined
     this.finalAnswerExceeded = false
     this.completedMessage = undefined
@@ -405,12 +403,7 @@ export class CodexSession extends BaseSession {
       case "item/agentMessage/delta": {
         const chunk = (msg.params?.delta as string | undefined) ?? ""
         this.outputTail = (this.outputTail + chunk).slice(-10240)
-        if (!this.legacyOutputExceeded) {
-          if (chunk.length > MAX_NATIVE_RESULT_LENGTH - this.legacyOutput.length) {
-            this.legacyOutputExceeded = true
-            this.legacyOutput = ""
-          } else this.legacyOutput += chunk
-        }
+        this.legacyOutput.append(chunk)
         this.emit({ type: "output", chunk })
         break
       }
@@ -500,12 +493,13 @@ export class CodexSession extends BaseSession {
           (this.finalAnswer === undefined &&
             this.completedMessage === undefined &&
             !this.phasedMessageSeen &&
-            this.legacyOutputExceeded)
+            this.legacyOutput.exceeded)
         ) {
           this.emitError("CRASH", nativeResultLimitMessage("Codex"), false)
           break
         }
-        const output = this.finalAnswer ?? this.completedMessage ?? (this.phasedMessageSeen ? "" : this.legacyOutput)
+        const output =
+          this.finalAnswer ?? this.completedMessage ?? (this.phasedMessageSeen ? "" : this.legacyOutput.text)
         const result = this.buildRunResult(output, this.filesChanged)
         if (!result) break
         result.exitCode = 0

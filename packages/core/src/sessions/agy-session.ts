@@ -21,7 +21,7 @@
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { captureExhaustion, exhaustionMessage } from "./native-failure"
-import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
+import { BoundedResultText, nativeResultLimitMessage } from "./native-result"
 
 // ── CLI surface (verified against `agy --help` v1.1.3) ─────────────────────
 
@@ -107,8 +107,7 @@ export class AgySession extends BaseSession {
   private started = false
   private conversationId: string | null = null
   private tailBuffer = ""
-  private finalOutput = ""
-  private outputExceeded = false
+  private finalOutput = new BoundedResultText()
 
   async start(config: AgentConfig): Promise<void> {
     this.config = config
@@ -140,8 +139,7 @@ export class AgySession extends BaseSession {
 
     this.filesChanged = []
     this.tailBuffer = ""
-    this.finalOutput = ""
-    this.outputExceeded = false
+    this.finalOutput.reset()
     this.startedAt = Date.now()
 
     const config = this.config
@@ -213,13 +211,8 @@ export class AgySession extends BaseSession {
 
     proc.stdout.on("data", (chunk: Buffer) => {
       const text = decoder.decode(chunk, { stream: true })
-      if (!this.outputExceeded) {
-        if (text.length > MAX_NATIVE_RESULT_LENGTH - this.finalOutput.length) {
-          this.outputExceeded = true
-          this.finalOutput = ""
-        } else this.finalOutput += text
-      }
-      if (this.outputExceeded) {
+      this.finalOutput.append(text)
+      if (this.finalOutput.exceeded) {
         if (buffer) this.emitTextChunk(buffer)
         buffer = ""
         this.emitTextChunk(text)
@@ -249,11 +242,11 @@ export class AgySession extends BaseSession {
 
     const exitCode = code ?? -1
     if (exitCode === 0) {
-      if (this.outputExceeded) {
+      if (this.finalOutput.exceeded) {
         this.emitError("CRASH", nativeResultLimitMessage("Antigravity"), false)
         return
       }
-      const result = this.buildRunResult(this.finalOutput, this.filesChanged)
+      const result = this.buildRunResult(this.finalOutput.text, this.filesChanged)
       if (!result) return
       this.emit({ type: "complete", result })
     } else {
