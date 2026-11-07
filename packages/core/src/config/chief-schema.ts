@@ -3,7 +3,12 @@ import { type CapturePolicy, capturePolicySchema } from "../chief/capture-schema
 import { containerObservationPolicySchema } from "../chief/container-observation-policy"
 import { type ExecutionPolicy, executionPolicySchema } from "../chief/execution"
 import { metricSourcePolicySchema } from "../chief/metric-source-policy"
-import { type ChiefOperatingPolicy, chiefOperatingPolicySchema } from "../chief/operations"
+import {
+  type ChiefOperatingPolicy,
+  chiefOperatingPolicySchema,
+  DEFAULT_EVIDENCE_WINDOW,
+  MAX_EVIDENCE_WINDOW,
+} from "../chief/operations"
 import { metricTargetSchema } from "../chief/organization-types"
 import { reportDeliveryPolicySchema } from "../chief/report-delivery-contract"
 import { reviewGatesSchema } from "../chief/review-gates"
@@ -41,6 +46,7 @@ export const chiefConfigSchema = z.strictObject({
         .max(20),
       min_samples: z.number().int().min(1).max(1_000).default(3),
       min_success_rate: z.number().min(0).max(1).default(0.8),
+      evidence_window: z.number().int().min(1).max(MAX_EVIDENCE_WINDOW).default(DEFAULT_EVIDENCE_WINDOW),
     })
     .optional(),
   review_vendor: z.enum(["prefer", "require", "off"]).optional(),
@@ -107,9 +113,15 @@ export function chiefOperatingPolicy(
           })),
           minSamples: config.routing.min_samples,
           minSuccessRate: config.routing.min_success_rate,
+          evidenceWindow: config.routing.evidence_window,
         }
       : automatic && readyActors.length > 1
-        ? { candidates: readyActors.map((actorType) => ({ actorType })), minSamples: 3, minSuccessRate: 0.8 }
+        ? {
+            candidates: readyActors.map((actorType) => ({ actorType })),
+            minSamples: 3,
+            minSuccessRate: 0.8,
+            evidenceWindow: DEFAULT_EVIDENCE_WINDOW,
+          }
         : undefined,
     reviewVendor: config.review_vendor ?? "prefer",
     reviewGates: config.review_gates,

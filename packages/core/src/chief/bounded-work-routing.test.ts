@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { OperatingRun } from "./operations"
+import { degradedWorkRoute } from "./bounded-work-routing"
+import type { OperatingRun, RouteEvidence, RouteOutcome, RoutingCandidate } from "./operations"
 import { operationsEvidence } from "./operations-report"
 import { routeEvidence, routeKey, selectWorkActor } from "./routing"
 import { routingCancellationFixture } from "./routing-cancellation.fixture"
@@ -119,7 +120,9 @@ describe("bounded routing in a closed measured pool", () => {
     const second = selectWorkActor(value.mission, value.worker, "onboarding")
     expect(second.actor.agentType).toBe("codex")
     recordProbe(value, second, "codex-probe")
-    expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow("no remaining bounded probe")
+    expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
+      "Every configured routing candidate failed this task",
+    )
     expect(
       value.mission.operations?.runs.filter((entry) => entry.routingReason?.startsWith("Bounded routing probe")),
     ).toHaveLength(2)
@@ -173,7 +176,9 @@ describe("bounded routing in a closed measured pool", () => {
         { ...value.rejection, runId: "qwen-failed", actorType: "qwen" },
         { ...value.rejection, runId: "codex-failed", actorType: "codex" },
       )
-      expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow("no remaining bounded probe")
+      expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
+        "Every configured routing candidate failed this task",
+      )
       if (!value.mission.supervision) throw new Error("Expected Chief supervision")
       value.mission.supervision.rounds = 1
       value.mission.supervision.decisions.push({
@@ -214,7 +219,9 @@ describe("bounded routing in a closed measured pool", () => {
           fingerprint: "same",
           taskId: condition === "other-task" ? "different" : "onboarding",
         })
-      expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow("no remaining bounded probe")
+      expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
+        "Every configured routing candidate failed this task",
+      )
     },
   )
 
@@ -244,9 +251,98 @@ describe("bounded routing in a closed measured pool", () => {
       "no ready work candidate",
     )
     if (value.mission.operatingPolicy) value.mission.operatingPolicy.readyActors = ["opencode"]
-    expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow("no remaining bounded probe")
+    expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
+      "Every configured routing candidate failed this task",
+    )
     delete value.mission.availableAgents
     value.worker.model = "explicit-model"
     expect(selectWorkActor(value.mission, value.worker, "onboarding").actor).toBe(value.worker)
+  })
+})
+
+/** The accepted probe is spent for this checkpoint and the later escalation failed on the other route. */
+function spentPool() {
+  const value = closedPool()
+  if (value.mission.operatingPolicy) value.mission.operatingPolicy.readyActors = ["codex", "qwen"]
+  recordProbe(value, selectWorkActor(value.mission, value.worker, "onboarding"), "accepted-probe", "passed")
+  value.mission.operations?.runs.push({ ...value.rejection, runId: "later-failure", actorType: "codex" })
+  return value
+}
+
+describe("degraded routing below the measured minimum", () => {
+  it("keeps working on the best measured ready route instead of failing the whole mission", () => {
+    const { mission, worker } = spentPool()
+    const before = structuredClone(mission)
+    const selected = selectWorkActor(mission, worker, "onboarding")
+    expect(selected.actor).toMatchObject({ id: "worker", agentType: "qwen" })
+    expect(selected.reason).toBe("Degraded: every route is below min_success_rate; selected the best measured route.")
+    expect(mission).toEqual(before)
+  })
+
+  it("still fails honestly once every ready route failed this task", () => {
+    const { mission, worker, rejection } = spentPool()
+    mission.operations?.runs.push({ ...rejection, runId: "qwen-failed", actorType: "qwen" })
+    expect(() => selectWorkActor(mission, worker, "onboarding")).toThrow(
+      "Every configured routing candidate failed this task",
+    )
+  })
+})
+
+describe("degraded route ordering", () => {
+  const candidates: RoutingCandidate[] = [
+    { actorType: "codex", inputPerMillionUsd: 3, outputPerMillionUsd: 3 },
+    { actorType: "qwen", inputPerMillionUsd: 1, outputPerMillionUsd: 1 },
+    { actorType: "opencode", inputPerMillionUsd: 1, outputPerMillionUsd: 1 },
+  ]
+
+  /** A poor lifetime aggregate with a full recent window: only the window may decide the order. */
+  function record(actorType: string, passed: number): RouteEvidence {
+    return {
+      actorType,
+      samples: 30,
+      successes: 0,
+      totalCostUsd: null,
+      successfulDeliverableCostUsd: null,
+      recent: Array.from(
+        { length: 10 },
+        (_, index): RouteOutcome => ({
+          at: new Date(Date.UTC(2026, 10, 8, 0, index)).toISOString(),
+          outcome: index < passed ? "passed" : "failed",
+        }),
+      ),
+    }
+  }
+
+  function select(evidence: RouteEvidence[], pool: RoutingCandidate[] = candidates) {
+    const { mission } = closedPool()
+    return degradedWorkRoute(mission, "onboarding", pool, evidence, mission.operations?.runs ?? [], 10, routeKey)
+  }
+
+  it("prefers the highest windowed success rate over the configured price", () => {
+    expect(select([record("codex", 6), record("qwen", 4)])?.candidate.actorType).toBe("codex")
+  })
+
+  it("breaks a rate tie by configured price and then by candidate order", () => {
+    expect(select([record("codex", 5), record("qwen", 5)])?.candidate.actorType).toBe("qwen")
+    expect(select([record("qwen", 5), record("opencode", 5)])?.candidate.actorType).toBe("qwen")
+  })
+
+  it("keeps the saved checkpoint protection and returns nothing for an empty pool", () => {
+    const { mission } = closedPool()
+    const state = mission.tasks[0]
+    if (!state) throw new Error("Expected the saved task")
+    state.effectState = "unknown"
+    expect(
+      degradedWorkRoute(
+        mission,
+        "onboarding",
+        candidates,
+        [record("qwen", 9)],
+        mission.operations?.runs ?? [],
+        10,
+        routeKey,
+      ),
+    ).toBeUndefined()
+    expect(select([record("codex", 5)], [])).toBeUndefined()
   })
 })

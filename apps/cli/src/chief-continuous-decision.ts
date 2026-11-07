@@ -196,6 +196,7 @@ export async function decideContinuousGoal(
         operation.repositoryRoot,
         operation.charter,
         mission.operatingPolicy?.metricTargets,
+        mission.operatingPolicy?.routing?.evidenceWindow,
       )
     await store.save(mission)
     const current = mission

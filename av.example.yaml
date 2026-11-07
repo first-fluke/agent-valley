@@ -191,6 +191,17 @@ verify:
 #     auto_resume: true            # Foreground supervisor resumes scheduled retries
 #     # max_estimated_cost_usd: 10 # Configured-price estimate; unknown usage pauses calls
 #   review_vendor: prefer
+#   # Work routing judges success rate on the newest evidence_window samples per route,
+#   # so an old failure streak cannot block a healthy Actor forever. When every route stays
+#   # below min_success_rate and its bounded probes are spent, AV degrades to the best
+#   # measured ready route that has not failed this task instead of failing the mission.
+#   # routing:
+#   #   min_samples: 3
+#   #   min_success_rate: 0.8
+#   #   evidence_window: 10       # 1..1000 recent work samples per route
+#   #   candidates:
+#   #     - actor_type: codex
+#   #       # Supply input_per_million_usd/output_per_million_usd from your own pricing.
 #   # Optional extra checks; each gate reviews every task before verification.
 #   # review_gates:
 #   #   - id: security

@@ -14,8 +14,12 @@ export const routingCandidateSchema = z.strictObject({
 })
 export type RoutingCandidate = z.infer<typeof routingCandidateSchema>
 
+/** Eligibility reads only the newest work samples per route; lifetime totals stay for reporting. */
+export const DEFAULT_EVIDENCE_WINDOW = 10
+export const MAX_EVIDENCE_WINDOW = 1_000
+
 export interface ChiefOperatingPolicy {
-  routing?: { candidates: RoutingCandidate[]; minSamples: number; minSuccessRate: number }
+  routing?: { candidates: RoutingCandidate[]; minSamples: number; minSuccessRate: number; evidenceWindow?: number }
   reviewVendor: "prefer" | "require" | "off"
   reviewGates?: ReviewGate[]
   readyActors?: string[]
@@ -30,6 +34,7 @@ export const chiefOperatingPolicySchema = z.strictObject({
       candidates: z.array(routingCandidateSchema).min(1).max(20),
       minSamples: z.number().int().min(1).max(1_000),
       minSuccessRate: z.number().min(0).max(1),
+      evidenceWindow: z.number().int().min(1).max(MAX_EVIDENCE_WINDOW).optional(),
     })
     .optional(),
   reviewVendor: z.enum(["prefer", "require", "off"]),
@@ -111,6 +116,13 @@ export const providerHealthEvidenceSchema = z.strictObject({
 })
 export type ProviderHealthEvidence = z.infer<typeof providerHealthEvidenceSchema>
 
+/** One counted work sample. Records saved before windowing have no `recent` and keep lifetime rates. */
+export const routeOutcomeSchema = z.strictObject({
+  at: text,
+  outcome: z.enum(["passed", "failed", "rejected"]),
+})
+export type RouteOutcome = z.infer<typeof routeOutcomeSchema>
+
 export const routeEvidenceSchema = z
   .strictObject({
     actorType,
@@ -119,6 +131,7 @@ export const routeEvidenceSchema = z
     successes: z.number().int().nonnegative(),
     totalCostUsd: amount.nullable(),
     successfulDeliverableCostUsd: amount.nullable(),
+    recent: z.array(routeOutcomeSchema).max(MAX_EVIDENCE_WINDOW).optional(),
     providerHealth: providerHealthSchema.optional(),
   })
   .refine((entry) => entry.successes <= entry.samples, "Route successes cannot exceed actual samples.")

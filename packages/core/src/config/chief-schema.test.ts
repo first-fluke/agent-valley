@@ -34,6 +34,18 @@ describe("Chief policy configuration", () => {
     expect(chiefCapturePolicy(config)).toMatchObject({ enabled: true, targetUrl: "http://localhost:3000", video: true })
     expect(config.reporting?.destinations[0]?.channel).toBe("slack")
   })
+  it("maps a bounded routing evidence window and defaults it for configured and automatic pools", () => {
+    const candidates = [{ actor_type: "codex" }]
+    const configured = chiefConfigSchema.parse({ routing: { candidates } })
+    expect(configured.routing?.evidence_window).toBe(10)
+    expect(chiefOperatingPolicy(configured, ["codex"]).routing?.evidenceWindow).toBe(10)
+    expect(chiefOperatingPolicy(chiefConfigSchema.parse({}), ["codex", "qwen"]).routing?.evidenceWindow).toBe(10)
+    const custom = chiefConfigSchema.parse({ routing: { candidates, evidence_window: 25 } })
+    expect(chiefOperatingPolicy(custom, ["codex"]).routing?.evidenceWindow).toBe(25)
+    for (const evidence_window of [0, 1_001, 1.5])
+      expect(chiefConfigSchema.safeParse({ routing: { candidates, evidence_window } }).success).toBe(false)
+  })
+
   it("rejects literal secrets, duplicate destinations and untargeted recordings", () => {
     expect(() =>
       chiefConfigSchema.parse({

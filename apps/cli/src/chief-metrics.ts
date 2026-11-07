@@ -30,7 +30,10 @@ async function organizationContext(
   now: number,
 ): Promise<OrganizationContext> {
   const targets = mission.operatingPolicy?.metricTargets ?? []
-  const context = retainMetricEvidence(await loadOrganizationContext(repository, mission.goal, targets), mission)
+  const context = retainMetricEvidence(
+    await loadOrganizationContext(repository, mission.goal, targets, mission.operatingPolicy?.routing?.evidenceWindow),
+    mission,
+  )
   if (!mission.metricSourcePolicy || !mission.observationStartedAt || !targets.length) return context
   const observed = evaluateMetricObservation(
     mission.metricSourcePolicy,

@@ -144,6 +144,68 @@ describe("measured work routing", () => {
   })
 })
 
+describe("windowed route evidence", () => {
+  function history(mission: ReturnType<typeof setup>, count: number, outcome: OperatingRun["outcome"], offset = 0) {
+    for (let index = 0; index < count; index += 1)
+      mission.operations.runs.push(
+        run({
+          runId: `codex-${outcome}-${offset + index}`,
+          taskId: "earlier-task",
+          outcome,
+          startedAt: new Date(Date.UTC(2026, 9, 4, 0, offset + index)).toISOString(),
+          finishedAt: new Date(Date.UTC(2026, 9, 4, 0, offset + index, 1)).toISOString(),
+        }),
+      )
+  }
+
+  it("recovers a route whose failures fell out of the evidence window and keeps lifetime totals", () => {
+    const mission = setup()
+    history(mission, 12, "failed")
+    history(mission, 10, "passed", 12)
+    const evidence = routeEvidence(mission).find((entry) => entry.actorType === "codex")
+    expect(evidence).toMatchObject({ samples: 22, successes: 10 })
+    expect(evidence?.recent).toHaveLength(10)
+    expect(evidence?.recent?.every((entry) => entry.outcome === "passed")).toBe(true)
+    expect(selectWorkActor(mission, fixtureActor(mission, "worker"), "onboarding").actor.agentType).toBe("codex")
+  })
+
+  it("stops preferring a route whose newest window fails even when its lifetime rate qualifies", () => {
+    const mission = setup()
+    history(mission, 40, "passed")
+    history(mission, 10, "failed", 40)
+    const evidence = routeEvidence(mission).find((entry) => entry.actorType === "codex")
+    expect((evidence?.successes ?? 0) / (evidence?.samples ?? 1)).toBeGreaterThanOrEqual(0.8)
+    expect(evidence?.recent?.every((entry) => entry.outcome === "failed")).toBe(true)
+    expect(selectWorkActor(mission, fixtureActor(mission, "worker"), "onboarding").actor.agentType).toBe("claude")
+  })
+
+  it("uses the configured window instead of the default ten samples", () => {
+    const mission = setup()
+    if (mission.operatingPolicy.routing) mission.operatingPolicy.routing.evidenceWindow = 3
+    history(mission, 5, "failed")
+    history(mission, 3, "passed", 5)
+    expect(routeEvidence(mission)[0]?.recent).toHaveLength(3)
+    expect(selectWorkActor(mission, fixtureActor(mission, "worker"), "onboarding").actor.agentType).toBe("codex")
+  })
+
+  it("keeps the lifetime rate for a saved record that has no per-run history", () => {
+    const mission = setup()
+    mission.operations.routingEvidence = [
+      {
+        actorType: "codex",
+        model: "cheap",
+        samples: 26,
+        successes: 17,
+        totalCostUsd: 1,
+        successfulDeliverableCostUsd: 0.05,
+      },
+    ]
+    history(mission, 1, "passed")
+    expect(routeEvidence(mission)[0]).toMatchObject({ samples: 27, successes: 18 })
+    expect(selectWorkActor(mission, fixtureActor(mission, "worker"), "onboarding").actor.agentType).toBe("claude")
+  })
+})
+
 describe("actual run usage", () => {
   it("records actual adapter tokens, elapsed timestamps and configured-price estimates without approving work", () => {
     const mission = setup()

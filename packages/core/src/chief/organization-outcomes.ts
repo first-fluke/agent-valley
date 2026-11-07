@@ -8,7 +8,7 @@ import { runCommand } from "../workspace/worktree-lifecycle"
 import { archivedWorkCancellation, cancelledWorkRunProofs } from "./cancelled-work-run"
 import { isNativeAgentTimeout } from "./execution"
 import { fingerprintWorkspace } from "./fingerprint"
-import type { operatingRunSchema, RouteEvidence } from "./operations"
+import { DEFAULT_EVIDENCE_WINDOW, type operatingRunSchema, type RouteEvidence, type RouteOutcome } from "./operations"
 import { appendOrganizationRecord, organizationRecordKey, readOrganizationRecords } from "./organization-store"
 import {
   type MemoryEvidence,
@@ -17,6 +17,7 @@ import {
   organizationOutcomeSchema,
 } from "./organization-types"
 import { reviewGatesAreCurrent } from "./review-gate-check"
+import { appendRouteOutcome } from "./route-quality"
 import type { Mission } from "./types"
 
 const evidenceInputSchema = memoryEvidenceSchema.partial({ sha256: true })
@@ -182,14 +183,17 @@ export async function recordMissionOrganizationOutcome(
     finalReviewPassed: !!mission.finalReview?.passed && mission.finalReview.findings.length === 0,
   })
 }
-export async function getOrganizationRouteEvidence(sourceRepo: string): Promise<RouteEvidence[]> {
+export async function getOrganizationRouteEvidence(
+  sourceRepo: string,
+  evidenceWindow = DEFAULT_EVIDENCE_WINDOW,
+): Promise<RouteEvidence[]> {
   const outcomes = await listOrganizationOutcomes(sourceRepo)
-  const runs = new Map<string, z.infer<typeof operatingRunSchema>>()
+  const runs = new Map<string, z.infer<typeof operatingRunSchema> & { outcome: RouteOutcome["outcome"] }>()
   for (const outcome of outcomes)
     for (const run of outcome.runs) {
       if (run.stage !== "work" || !run.taskId || run.outcome === "pending") continue
       const id = `${outcome.missionId}:${run.runId}`
-      if (!runs.has(id)) runs.set(id, run)
+      if (!runs.has(id)) runs.set(id, { ...run, outcome: run.outcome })
     }
   const groups = new Map<string, RouteEvidence>()
   for (const run of runs.values()) {
@@ -203,7 +207,10 @@ export async function getOrganizationRouteEvidence(sourceRepo: string): Promise<
       totalCostUsd: 0,
       successfulDeliverableCostUsd: null,
     }
-    if (!archivedWorkCancellation(run) && !isNativeAgentTimeout(run.evidence ?? "")) group.samples++
+    if (!archivedWorkCancellation(run) && !isNativeAgentTimeout(run.evidence ?? "")) {
+      group.samples++
+      appendRouteOutcome(group, { at: run.finishedAt ?? run.startedAt, outcome: run.outcome }, evidenceWindow)
+    }
     if (run.outcome === "passed") group.successes++
     group.totalCostUsd = group.totalCostUsd === null || run.costUsd === null ? null : group.totalCostUsd + run.costUsd
     group.successfulDeliverableCostUsd =

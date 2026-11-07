@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { realpath } from "node:fs/promises"
+import { DEFAULT_EVIDENCE_WINDOW } from "./operations"
 import { compareBusinessMetrics, listBusinessExperiments, listBusinessMetrics } from "./organization-metrics"
 import { getOrganizationRouteEvidence, listOrganizationOutcomes } from "./organization-outcomes"
 import { appendOrganizationRecord, readOrganizationRecords } from "./organization-store"
@@ -43,6 +44,7 @@ export async function loadOrganizationContext(
   sourceRepo: string,
   goal: string,
   targets: MetricTarget[] = [],
+  evidenceWindow = DEFAULT_EVIDENCE_WINDOW,
 ): Promise<OrganizationContext> {
   const [repositoryRoot, memories, metrics, experiments, outcomes, routeEvidence] = await Promise.all([
     realpath(sourceRepo),
@@ -50,7 +52,7 @@ export async function loadOrganizationContext(
     listBusinessMetrics(sourceRepo),
     listBusinessExperiments(sourceRepo),
     listOrganizationOutcomes(sourceRepo),
-    getOrganizationRouteEvidence(sourceRepo),
+    getOrganizationRouteEvidence(sourceRepo, evidenceWindow),
   ])
   const names = new Set(targets.map((target) => target.name))
   const relevantMetrics = names.size ? metrics.filter((sample) => names.has(sample.name)) : metrics

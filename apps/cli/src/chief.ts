@@ -46,7 +46,12 @@ import { prepareMissionDependencies } from "./chief-workspace-dependencies"
 import { assertNotManagedRun } from "./managed-run"
 
 async function organizationContext(repository: string, mission: Mission) {
-  const context = await loadOrganizationContext(repository, mission.goal, mission.operatingPolicy?.metricTargets)
+  const context = await loadOrganizationContext(
+    repository,
+    mission.goal,
+    mission.operatingPolicy?.metricTargets,
+    mission.operatingPolicy?.routing?.evidenceWindow,
+  )
   if (mission.operatingPolicy?.memory === false) {
     context.memories = []
     context.outcomes = []

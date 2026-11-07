@@ -273,9 +273,33 @@ describe("evidence-bound mission outcomes", () => {
         model: "operator-model",
         samples: 2,
         successes: 1,
+        recent: [
+          { at: "2026-01-01T00:00:02Z", outcome: "passed" },
+          { at: "2026-01-01T00:00:02Z", outcome: "failed" },
+        ],
         totalCostUsd: null,
         successfulDeliverableCostUsd: null,
       },
+    ])
+  })
+
+  it("seeds only the newest configured window of outcomes for the next cycle", async () => {
+    await recordOrganizationOutcome(
+      source,
+      outcome({
+        runs: [
+          run({ runId: "newest", finishedAt: "2026-01-01T00:00:04Z" }),
+          run({ runId: "oldest", outcome: "failed", finishedAt: "2026-01-01T00:00:01Z" }),
+          run({ runId: "newer", finishedAt: "2026-01-01T00:00:03Z" }),
+          run({ runId: "older", outcome: "failed", finishedAt: "2026-01-01T00:00:02Z" }),
+        ],
+      }),
+    )
+    const [evidence] = await getOrganizationRouteEvidence(source, 2)
+    expect(evidence).toMatchObject({ samples: 4, successes: 2 })
+    expect(evidence?.recent).toEqual([
+      { at: "2026-01-01T00:00:03Z", outcome: "passed" },
+      { at: "2026-01-01T00:00:04Z", outcome: "passed" },
     ])
   })
 
@@ -290,6 +314,7 @@ describe("evidence-bound mission outcomes", () => {
         model: undefined,
         samples: 1,
         successes: 1,
+        recent: [{ at: "2026-01-01T00:00:02Z", outcome: "passed" }],
         totalCostUsd: null,
         successfulDeliverableCostUsd: null,
       },
