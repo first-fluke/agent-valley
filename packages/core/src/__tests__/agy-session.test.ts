@@ -17,7 +17,7 @@ import * as sandboxModule from "../sessions/sandbox"
 const MOCK_DIR = resolve(tmpdir(), "av-test-agy-mock")
 const MOCK_SCRIPT = resolve(MOCK_DIR, "agy")
 
-type MockBehavior = "plain-text" | "multiline" | "error-exit" | "capture-args" | "large-output"
+type MockBehavior = "plain-text" | "multiline" | "error-exit" | "capture-args" | "large-output" | "large-json"
 
 function writeMockAgy(behavior: MockBehavior): void {
   mkdirSync(MOCK_DIR, { recursive: true })
@@ -25,6 +25,14 @@ function writeMockAgy(behavior: MockBehavior): void {
   let script: string
 
   switch (behavior) {
+    case "large-json":
+      script = `#!/bin/bash
+cat <<'AV_JSON_RESULT'
+${JSON.stringify({ tasks: [{ instructions: "y".repeat(20_000) }] }, null, 2)}
+AV_JSON_RESULT
+exit 0
+`
+      break
     case "plain-text":
       script = `#!/bin/bash
 echo 'Hello from Agy'
@@ -288,7 +296,22 @@ describe("AgySession", () => {
     expect(firstId).toBe(secondId)
   })
 
-  test("streams large output without unbounded accumulation", async () => {
+  test("preserves a complete multiline JSON answer above 10KB", async () => {
+    writeMockAgy("large-json")
+    const { AgySession } = await import("../sessions/agy-session")
+    const session = new AgySession()
+    let output = ""
+    session.on("complete", (event) => {
+      output = event.result.output
+    })
+    await session.start({ type: "antigravity", timeout: 30, workspacePath: "/tmp" })
+    await session.execute("test")
+    expect(output.length).toBeGreaterThan(10_240)
+    expect(output).toContain("\n")
+    expect(JSON.parse(output)).toEqual({ tasks: [{ instructions: "y".repeat(20_000) }] })
+  })
+
+  test("fails oversized output without returning a truncated success or accumulating without a bound", async () => {
     writeMockAgy("large-output")
 
     const { AgySession } = await import("../sessions/agy-session")
@@ -296,13 +319,13 @@ describe("AgySession", () => {
 
     let chunkCount = 0
     let completed = false
-    let finalOutputLength = 0
+    const errors: AgentEvent[] = []
 
     session.on("output", () => chunkCount++)
-    session.on("complete", (e) => {
+    session.on("complete", () => {
       completed = true
-      finalOutputLength = e.result.output.length
     })
+    session.on("error", (event) => errors.push(event))
 
     await session.start({ type: "antigravity", timeout: 30, workspacePath: "/tmp" })
 
@@ -310,10 +333,11 @@ describe("AgySession", () => {
     await session.execute("test prompt")
     const memAfter = process.memoryUsage().heapUsed
 
-    expect(chunkCount).toBe(1000)
-    expect(completed).toBe(true)
-    // Final result is capped, not the full ~1MB stream
-    expect(finalOutputLength).toBeLessThanOrEqual(10 * 1024)
+    expect(chunkCount).toBeGreaterThan(0)
+    expect(completed).toBe(false)
+    expect(errors).toEqual([
+      expect.objectContaining({ error: expect.objectContaining({ message: expect.stringContaining("256000") }) }),
+    ])
 
     const memGrowthMB = (memAfter - memBefore) / 1024 / 1024
     expect(memGrowthMB).toBeLessThan(50)

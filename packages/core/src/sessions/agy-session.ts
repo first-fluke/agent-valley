@@ -21,6 +21,7 @@
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { captureExhaustion, exhaustionMessage } from "./native-failure"
+import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 
 // ── CLI surface (verified against `agy --help` v1.1.3) ─────────────────────
 
@@ -93,7 +94,7 @@ export const AGY_FLAG_PRINT_TIMEOUT = "--print-timeout"
  */
 export const AGY_MAX_PROMPT_ARG_BYTES = 100_000
 
-/** Cap on the retained "tail" of streamed output, mirrors BaseSession.buildRunResult's 10KB cap. */
+/** Cap on diagnostic output retained after a failed process. */
 const OUTPUT_TAIL_CAP = 10 * 1024
 
 /** Format a whole-second timeout as the Go-style duration string agy's --print-timeout expects, e.g. 90 -> "90s". */
@@ -106,6 +107,8 @@ export class AgySession extends BaseSession {
   private started = false
   private conversationId: string | null = null
   private tailBuffer = ""
+  private finalOutput = ""
+  private outputExceeded = false
 
   async start(config: AgentConfig): Promise<void> {
     this.config = config
@@ -137,6 +140,8 @@ export class AgySession extends BaseSession {
 
     this.filesChanged = []
     this.tailBuffer = ""
+    this.finalOutput = ""
+    this.outputExceeded = false
     this.startedAt = Date.now()
 
     const config = this.config
@@ -188,9 +193,8 @@ export class AgySession extends BaseSession {
   //
   // agy print mode emits plain text only (no --output-format flag exists,
   // confirmed via `agy --help`) — every stdout line is streamed as-is via
-  // an `output` event, never buffered whole (OOM safety, matches
-  // ClaudeSession's "stream-only" comment). A bounded tail (last
-  // OUTPUT_TAIL_CAP bytes) is retained for the final `complete` event.
+  // an `output` event. The final answer is retained within the shared native
+  // bound; a separate OUTPUT_TAIL_CAP diagnostic tail is kept on failure.
   // There is no structured usage payload to parse, so `tokenUsage` is
   // always left undefined here — exactly like GeminiSession's old CLI
   // fallback did when no usageMetadata was present — and BudgetService
@@ -208,7 +212,20 @@ export class AgySession extends BaseSession {
     let buffer = ""
 
     proc.stdout.on("data", (chunk: Buffer) => {
-      buffer += decoder.decode(chunk, { stream: true })
+      const text = decoder.decode(chunk, { stream: true })
+      if (!this.outputExceeded) {
+        if (text.length > MAX_NATIVE_RESULT_LENGTH - this.finalOutput.length) {
+          this.outputExceeded = true
+          this.finalOutput = ""
+        } else this.finalOutput += text
+      }
+      if (this.outputExceeded) {
+        if (buffer) this.emitTextChunk(buffer)
+        buffer = ""
+        this.emitTextChunk(text)
+        return
+      }
+      buffer += text
       const lines = buffer.split("\n")
       buffer = lines.pop() ?? ""
 
@@ -232,7 +249,12 @@ export class AgySession extends BaseSession {
 
     const exitCode = code ?? -1
     if (exitCode === 0) {
-      const result = this.buildRunResult(this.tailBuffer, this.filesChanged)
+      if (this.outputExceeded) {
+        this.emitError("CRASH", nativeResultLimitMessage("Antigravity"), false)
+        return
+      }
+      const result = this.buildRunResult(this.finalOutput, this.filesChanged)
+      if (!result) return
       this.emit({ type: "complete", result })
     } else {
       this.emitError(

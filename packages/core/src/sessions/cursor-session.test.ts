@@ -403,8 +403,24 @@ describe("CursorSession", () => {
     expect(tokenUsage).toBeUndefined()
   })
 
-  test("result output is capped at 10KB", async () => {
-    const bigResult = "y".repeat(20_000)
+  test("rejects an oversized native result without emitting truncated success", async () => {
+    writeMockCursorAgent([JSON.stringify({ type: "result", result: "x".repeat(256_001), is_error: false })])
+    const { CursorSession } = await import("./cursor-session")
+    const session = new CursorSession()
+    const errors: string[] = []
+    let completed = false
+    session.on("error", (event) => errors.push(event.error.message))
+    session.on("complete", () => {
+      completed = true
+    })
+    await session.start({ type: "cursor", timeout: 30, workspacePath: "/tmp" })
+    await session.execute("test")
+    expect(completed).toBe(false)
+    expect(errors).toEqual([expect.stringContaining("exceeds 256000 characters")])
+  })
+
+  test.each([20_000, 256_000])("preserves a complete %i-character native result", async (size) => {
+    const bigResult = `BEGIN${"y".repeat(size - 8)}END`
     writeMockCursorAgent([JSON.stringify({ type: "result", result: bigResult, is_error: false, duration_ms: 100 })])
 
     const { CursorSession } = await import("./cursor-session")
@@ -418,7 +434,7 @@ describe("CursorSession", () => {
     await session.start({ type: "cursor", timeout: 30, workspacePath: "/tmp" })
     await session.execute("test")
 
-    expect(output.length).toBe(10240)
+    expect(output).toBe(bigResult)
   })
 
   test("rejects prompts exceeding MAX_PROMPT_ARG_LENGTH with an actionable error, without spawning", async () => {

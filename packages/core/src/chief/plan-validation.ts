@@ -5,12 +5,13 @@ import type { ChiefPlan, Persona } from "./types"
 export const MAX_JSON_RESPONSE_LENGTH = 128_000
 
 /** Find one complete JSON value without treating braces inside strings as boundaries. */
-function embeddedJson(content: string): unknown {
+function jsonCandidates(content: string) {
   const brackets: string[] = []
   let start = -1
   let quoted = false
   let escaped = false
   let found = false
+  let malformed = false
   let result: unknown
   for (let index = 0; index < content.length; index++) {
     const character = content[index]
@@ -31,6 +32,7 @@ function embeddedJson(content: string): unknown {
     else if (character === "{" || character === "[") brackets.push(character)
     else if (character === "}" || character === "]") {
       if (brackets.pop() !== (character === "}" ? "{" : "[")) {
+        malformed = true
         start = -1
         brackets.length = 0
         continue
@@ -44,18 +46,49 @@ function embeddedJson(content: string): unknown {
       } catch {
         continue
       }
-      if (found) throw new Error("Multiple JSON values are ambiguous")
+      if (found) return { count: 2, result, incomplete: false, malformed }
       result = value
       found = true
     }
   }
-  if (!found || start >= 0) throw new Error("No unique complete JSON value")
-  return result
+  return { count: found ? 1 : 0, result, incomplete: start >= 0, malformed }
 }
 
-export function parseJson(source: string, stage: string): unknown {
-  if (source.length > MAX_JSON_RESPONSE_LENGTH)
-    throw new Error(`${stage} response exceeds 128 KB. Return only the requested JSON.`)
+function embeddedJson(content: string): unknown {
+  let opening: { start: number; body: number; width: number } | undefined
+  let fence: { start: number; body: number; bodyEnd: number; end: number } | undefined
+  let offset = 0
+  for (const line of content.split("\n")) {
+    const delimiter = /^[ \t]*(`{3,})(json)?[ \t]*\r?$/i.exec(line)
+    const width = delimiter?.[1]?.length
+    if (opening) {
+      if (width && !delimiter?.[2] && width >= opening.width) {
+        if (fence) throw new Error("Multiple JSON fences are ambiguous")
+        fence = { start: opening.start, body: opening.body, bodyEnd: offset, end: offset + line.length + 1 }
+        opening = undefined
+      }
+    } else if (width) {
+      opening = { start: offset, body: offset + line.length + 1, width }
+    }
+    offset += line.length + 1
+  }
+  if (opening) throw new Error("JSON fence is incomplete")
+  if (fence) {
+    // An explicit payload must validate as a whole; never salvage a fragment of it.
+    const result = JSON.parse(content.slice(fence.body, fence.bodyEnd))
+    const outside = `${content.slice(0, fence.start)}\n${content.slice(fence.end)}`
+    if (jsonCandidates(outside).count) throw new Error("Multiple JSON values are ambiguous")
+    return result
+  }
+  const candidate = jsonCandidates(content)
+  if (candidate.count !== 1 || candidate.incomplete || candidate.malformed)
+    throw new Error("No unique complete JSON value")
+  return candidate.result
+}
+
+export function parseJson(source: string, stage: string, maxLength = MAX_JSON_RESPONSE_LENGTH): unknown {
+  if (source.length > maxLength)
+    throw new Error(`${stage} response exceeds ${maxLength / 1_000} KB. Return only the requested JSON.`)
   const content = source.trim()
   try {
     return JSON.parse(content)

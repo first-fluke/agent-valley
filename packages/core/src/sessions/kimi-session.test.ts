@@ -378,8 +378,24 @@ describe("KimiSession", () => {
     expect(tokenUsage).toBeUndefined()
   })
 
-  test("result output is capped at 10KB", async () => {
-    const bigResult = "y".repeat(20_000)
+  test("rejects an oversized native result without emitting truncated success", async () => {
+    writeMockKimi([JSON.stringify({ type: "result", result: "x".repeat(256_001), is_error: false })])
+    const { KimiSession } = await import("./kimi-session")
+    const session = new KimiSession()
+    const errors: string[] = []
+    let completed = false
+    session.on("error", (event) => errors.push(event.error.message))
+    session.on("complete", () => {
+      completed = true
+    })
+    await session.start({ type: "kimi", timeout: 30, workspacePath: WORKSPACE_DIR })
+    await session.execute("test")
+    expect(completed).toBe(false)
+    expect(errors).toEqual([expect.stringContaining("exceeds 256000 characters")])
+  })
+
+  test.each([20_000, 256_000])("preserves a complete %i-character native result", async (size) => {
+    const bigResult = `BEGIN${"y".repeat(size - 8)}END`
     writeMockKimi([JSON.stringify({ type: "result", result: bigResult, is_error: false, duration_ms: 100 })])
 
     const { KimiSession } = await import("./kimi-session")
@@ -393,7 +409,7 @@ describe("KimiSession", () => {
     await session.start({ type: "kimi", timeout: 30, workspacePath: WORKSPACE_DIR })
     await session.execute("test")
 
-    expect(output.length).toBe(10240)
+    expect(output).toBe(bigResult)
   })
 
   test('detects "No model configured" (plain text, non-JSON) and surfaces an actionable AUTH_FAILED error', async () => {

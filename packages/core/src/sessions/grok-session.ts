@@ -16,12 +16,9 @@ import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion, nativeErrorMessage } from "./native-failure"
+import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 
 export const GROK_COMMAND = "grok"
-
-/** Max bytes of concatenated answer text retained for RunResult.output. */
-const MAX_OUTPUT_BYTES = 10 * 1024
-const MAX_RESULT_LENGTH = 256_000
 
 /** Tool name substrings (case-insensitive) treated as file-writing tool calls. */
 const WRITE_TOOL_HINTS = ["write"]
@@ -30,8 +27,9 @@ const EDIT_TOOL_HINTS = ["edit", "str_replace", "patch"]
 export class GrokSession extends BaseSession {
   private filesChanged: string[] = []
   private started = false
-  /** Bounded tail of concatenated `type:"text"` chunks — the answer text. */
-  private outputTail = ""
+  /** Complete legacy answer, retained only within the native result bound. */
+  private outputText = ""
+  private outputExceeded = false
   private stderrExhaustion?: () => string | undefined
 
   async start(config: AgentConfig): Promise<void> {
@@ -46,7 +44,8 @@ export class GrokSession extends BaseSession {
     }
 
     this.filesChanged = []
-    this.outputTail = ""
+    this.outputText = ""
+    this.outputExceeded = false
     this.stderrExhaustion = undefined
     this.startedAt = Date.now()
 
@@ -125,10 +124,9 @@ export class GrokSession extends BaseSession {
       case "text": {
         const data = typeof e.data === "string" ? e.data : undefined
         if (data) {
-          // Stream per-chunk — the bounded tail (not full accumulation)
-          // is what backs RunResult.output, keeping this OOM-safe.
+          // Progress streams independently; the complete answer has a fixed bound.
           this.emit({ type: "output", chunk: data })
-          this.appendOutputTail(data)
+          this.appendResultText(data)
         }
         return
       }
@@ -145,11 +143,14 @@ export class GrokSession extends BaseSession {
     }
   }
 
-  private appendOutputTail(chunk: string): void {
-    this.outputTail += chunk
-    if (this.outputTail.length > MAX_OUTPUT_BYTES) {
-      this.outputTail = this.outputTail.slice(-MAX_OUTPUT_BYTES)
+  private appendResultText(chunk: string): void {
+    if (this.outputExceeded) return
+    if (chunk.length > MAX_NATIVE_RESULT_LENGTH - this.outputText.length) {
+      this.outputExceeded = true
+      this.outputText = ""
+      return
     }
+    this.outputText += chunk
   }
 
   private handleResult(e: Record<string, unknown>): void {
@@ -177,12 +178,8 @@ export class GrokSession extends BaseSession {
       )
       return
     }
-    if (e.result.length > MAX_RESULT_LENGTH) {
-      this.emitError(
-        "CRASH",
-        "Grok final answer exceeds 256000 characters. Return a smaller response and write large deliverables to files.",
-        false,
-      )
+    if (e.result.length > MAX_NATIVE_RESULT_LENGTH) {
+      this.emitError("CRASH", nativeResultLimitMessage("Grok"), false)
       return
     }
     this.emit({
@@ -245,11 +242,16 @@ export class GrokSession extends BaseSession {
       return
     }
 
+    if (this.outputExceeded) {
+      this.emitError("CRASH", nativeResultLimitMessage("Grok"), false)
+      return
+    }
+
     this.emit({
       type: "complete",
       result: {
         exitCode: 0,
-        output: this.outputTail,
+        output: this.outputText,
         durationMs: this.elapsedMs(),
         filesChanged: this.filesChanged,
         tokenUsage: this.extractTokenUsage(e),

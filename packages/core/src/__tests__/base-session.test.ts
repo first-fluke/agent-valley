@@ -6,7 +6,7 @@
 import type { ChildProcess } from "node:child_process"
 import { spawn } from "node:child_process"
 import { EventEmitter } from "node:events"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { AgentConfig, AgentEvent } from "../sessions/agent-session"
 import { BaseSession, buildAgentEnv, waitForExit, waitForStreamCompletion } from "../sessions/base-session"
 
@@ -503,16 +503,55 @@ describe("BaseSession — helpers", () => {
     expect(err.recoverable).toBe(true)
   })
 
-  test("buildRunResult caps output at 10KB", () => {
+  test.each(["error", "complete"] as const)("keeps the first %s terminal event and still streams output", (first) => {
+    const complete = {
+      type: "complete" as const,
+      result: { exitCode: 0, output: "done", durationMs: 1, filesChanged: [] },
+    }
+    const errors = vi.fn()
+    const completes = vi.fn()
+    const output = vi.fn()
+    session.on("error", errors)
+    session.on("complete", completes)
+    session.on("output", output)
+    if (first === "error") session.testEmitError("CRASH", "original failure", false)
+    else session.testEmit(complete)
+    session.testEmit(complete)
+    session.testEmitError("CRASH", "late failure", false)
+    session.testEmit({ type: "output", chunk: "late log" })
+    expect(errors).toHaveBeenCalledTimes(first === "error" ? 1 : 0)
+    expect(completes).toHaveBeenCalledTimes(first === "complete" ? 1 : 0)
+    expect(output).toHaveBeenCalledWith({ type: "output", chunk: "late log" })
+  })
+
+  test("accepts a new completion after a new process resets the prior terminal state", async () => {
+    const completes = vi.fn()
+    session.on("complete", completes)
+    session.testEmitError("CRASH", "previous run failed", false)
+    await session.start({ type: "test", timeout: 30, workspacePath: "/tmp" })
+    session.testEmit({ type: "complete", result: { exitCode: 0, output: "next run", durationMs: 1, filesChanged: [] } })
+    expect(completes).toHaveBeenCalledOnce()
+  })
+
+  test("buildRunResult preserves a complete answer above 10KB", () => {
     const bigOutput = "y".repeat(20_000)
     const result = session.testBuildRunResult(bigOutput)
-    expect(result.output.length).toBe(10 * 1024)
+    expect(result?.output).toBe(bigOutput)
+  })
+
+  test("buildRunResult emits a failure and returns no result above the shared bound", () => {
+    const errors = vi.fn()
+    session.on("error", errors)
+    expect(session.testBuildRunResult("x".repeat(256_001))).toBeUndefined()
+    expect(errors).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.objectContaining({ message: expect.stringContaining("256000") }) }),
+    )
   })
 
   test("buildRunResult preserves short output", () => {
     const result = session.testBuildRunResult("short output", ["file1.ts"])
-    expect(result.output).toBe("short output")
-    expect(result.filesChanged).toEqual(["file1.ts"])
+    expect(result?.output).toBe("short output")
+    expect(result?.filesChanged).toEqual(["file1.ts"])
   })
 
   test("elapsedMs returns time since start", async () => {

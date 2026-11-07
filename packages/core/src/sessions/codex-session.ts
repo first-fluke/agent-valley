@@ -17,6 +17,7 @@ import {
 } from "./codex-protocol"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion } from "./native-failure"
+import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 
 export class CodexSession extends BaseSession {
   private rpcId = 0
@@ -27,8 +28,12 @@ export class CodexSession extends BaseSession {
   private tokenUsage: { input: number; output: number; model: string } | undefined
   private filesChanged: string[] = []
   private outputTail = ""
+  private legacyOutput = ""
+  private legacyOutputExceeded = false
   private finalAnswer: string | undefined
+  private finalAnswerExceeded = false
   private completedMessage: string | undefined
+  private completedMessageExceeded = false
   private phasedMessageSeen = false
   private cancellation: Promise<void> | undefined
   private shutdown: Promise<void> | undefined
@@ -87,8 +92,12 @@ export class CodexSession extends BaseSession {
 
     this.filesChanged = []
     this.outputTail = ""
+    this.legacyOutput = ""
+    this.legacyOutputExceeded = false
     this.finalAnswer = undefined
+    this.finalAnswerExceeded = false
     this.completedMessage = undefined
+    this.completedMessageExceeded = false
     this.phasedMessageSeen = false
     this.tokenUsage = undefined
     this.terminalEventReceived = false
@@ -396,6 +405,12 @@ export class CodexSession extends BaseSession {
       case "item/agentMessage/delta": {
         const chunk = (msg.params?.delta as string | undefined) ?? ""
         this.outputTail = (this.outputTail + chunk).slice(-10240)
+        if (!this.legacyOutputExceeded) {
+          if (chunk.length > MAX_NATIVE_RESULT_LENGTH - this.legacyOutput.length) {
+            this.legacyOutputExceeded = true
+            this.legacyOutput = ""
+          } else this.legacyOutput += chunk
+        }
         this.emit({ type: "output", chunk })
         break
       }
@@ -429,9 +444,15 @@ export class CodexSession extends BaseSession {
         if (item?.type === "agentMessage") {
           if (item.phase != null) this.phasedMessageSeen = true
           if (typeof item.text === "string") {
-            const text = item.text.slice(-10240)
-            if (item.phase === "final_answer") this.finalAnswer = text
-            else if (item.phase == null) this.completedMessage = text
+            const exceeded = item.text.length > MAX_NATIVE_RESULT_LENGTH
+            const text = exceeded ? undefined : item.text
+            if (item.phase === "final_answer") {
+              this.finalAnswer = text
+              this.finalAnswerExceeded = exceeded
+            } else if (item.phase == null) {
+              this.completedMessage = text
+              this.completedMessageExceeded = exceeded
+            }
           }
         }
         if (item?.type === "fileChange") {
@@ -472,9 +493,21 @@ export class CodexSession extends BaseSession {
           break
         }
         // Progress deltas stay live, but structured consumers need the answer
-        // declared by the protocol. Older delta-only servers retain their tail.
-        const output = this.finalAnswer ?? this.completedMessage ?? (this.phasedMessageSeen ? "" : this.outputTail)
+        // declared by the protocol. Older delta-only servers retain the bounded full answer.
+        if (
+          this.finalAnswerExceeded ||
+          (this.finalAnswer === undefined && this.completedMessageExceeded) ||
+          (this.finalAnswer === undefined &&
+            this.completedMessage === undefined &&
+            !this.phasedMessageSeen &&
+            this.legacyOutputExceeded)
+        ) {
+          this.emitError("CRASH", nativeResultLimitMessage("Codex"), false)
+          break
+        }
+        const output = this.finalAnswer ?? this.completedMessage ?? (this.phasedMessageSeen ? "" : this.legacyOutput)
         const result = this.buildRunResult(output, this.filesChanged)
+        if (!result) break
         result.exitCode = 0
         const usage = this.tokenUsage ?? extractTokenUsage(msg.params, this.config?.model)
         if (usage) result.tokenUsage = usage

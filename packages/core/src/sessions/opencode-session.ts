@@ -109,6 +109,7 @@ import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion, exhaustionMessage, nativeErrorMessage } from "./native-failure"
+import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 
 export const OPENCODE_COMMAND = "opencode"
 
@@ -122,7 +123,7 @@ export const OPENCODE_COMMAND = "opencode"
  */
 export const MAX_PROMPT_ARG_LENGTH = 100_000
 
-/** Max bytes of concatenated output-chunk text retained for RunResult.output. */
+/** Diagnostic output tail; final response retention has a separate bound. */
 const MAX_OUTPUT_BYTES = 10 * 1024
 
 /** Max bytes of raw stdout+stderr tail retained for unauth-message detection. */
@@ -139,8 +140,10 @@ const AUTH_FAILURE_PATTERN =
 export class OpencodeSession extends BaseSession {
   private filesChanged: string[] = []
   private started = false
-  /** Bounded tail of streamed text chunks — backs RunResult.output when no explicit terminal event is seen. */
+  /** Bounded diagnostic tail of streamed text chunks. */
   private outputTail = ""
+  private fullOutput = ""
+  private outputOverflow = false
   /** Raw stdout+stderr tail, used only for AUTH_FAILED detection on non-zero exit. */
   private rawTail = ""
   /** Opportunistically captured from an unconfirmed terminal-shaped event, if one appears — see module doc comment. */
@@ -170,6 +173,8 @@ export class OpencodeSession extends BaseSession {
 
     this.filesChanged = []
     this.outputTail = ""
+    this.fullOutput = ""
+    this.outputOverflow = false
     this.rawTail = ""
     this.explicitResult = undefined
     this.explicitTokenUsage = undefined
@@ -243,11 +248,15 @@ export class OpencodeSession extends BaseSession {
       )
       return
     }
+    if (this.explicitResult === undefined && this.outputOverflow) {
+      this.emitError("CRASH", nativeResultLimitMessage("OpenCode"), false)
+      return
+    }
     this.emit({
       type: "complete",
       result: {
         exitCode: 0,
-        output: this.explicitResult ?? this.outputTail,
+        output: this.explicitResult ?? this.fullOutput,
         durationMs: this.elapsedMs(),
         filesChanged: this.filesChanged,
         tokenUsage: this.explicitTokenUsage,
@@ -267,6 +276,11 @@ export class OpencodeSession extends BaseSession {
     if (this.outputTail.length > MAX_OUTPUT_BYTES) {
       this.outputTail = this.outputTail.slice(-MAX_OUTPUT_BYTES)
     }
+    if (this.outputOverflow) return
+    if (this.fullOutput.length + chunk.length > MAX_NATIVE_RESULT_LENGTH) {
+      this.fullOutput = ""
+      this.outputOverflow = true
+    } else this.fullOutput += chunk
   }
 
   /**
@@ -386,7 +400,11 @@ export class OpencodeSession extends BaseSession {
 
     const text = (e.result as string | undefined) ?? (e.text as string | undefined) ?? (e.output as string | undefined)
     if (typeof text === "string" && text.length > 0) {
-      this.explicitResult = text.length > MAX_OUTPUT_BYTES ? text.slice(-MAX_OUTPUT_BYTES) : text
+      if (text.length > MAX_NATIVE_RESULT_LENGTH) {
+        this.emitError("CRASH", nativeResultLimitMessage("OpenCode"), false)
+        return
+      }
+      this.explicitResult = text
     }
 
     const usage =

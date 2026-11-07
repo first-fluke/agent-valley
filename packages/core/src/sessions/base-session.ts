@@ -14,6 +14,7 @@ import type {
   RunResult,
 } from "./agent-session"
 import { rootAndGroupAbsent, signalProcessTree } from "./process-tree"
+import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 import { planSandboxedSpawn } from "./sandbox"
 
 /** Env vars safe to pass to agent subprocesses */
@@ -307,7 +308,10 @@ export abstract class BaseSession implements AgentSession {
   }
 
   protected emit(event: AgentEvent): void {
-    if (event.type === "complete" || event.type === "error") this.terminalEventReceived = true
+    if (event.type === "complete" || event.type === "error") {
+      if (this.terminalEventReceived) return
+      this.terminalEventReceived = true
+    }
     const handlers = this.listeners.get(event.type)
     if (handlers) {
       for (const handler of handlers) {
@@ -398,11 +402,14 @@ export abstract class BaseSession implements AgentSession {
     })
   }
 
-  protected buildRunResult(output: string, filesChanged: string[] = []): RunResult {
-    const maxOutput = 10 * 1024
+  protected buildRunResult(output: string, filesChanged: string[] = []): RunResult | undefined {
+    if (output.length > MAX_NATIVE_RESULT_LENGTH) {
+      this.emitError("CRASH", nativeResultLimitMessage(this.config?.type ?? "Agent"), false)
+      return
+    }
     return {
       exitCode: this.process?.exitCode ?? -1,
-      output: output.length > maxOutput ? output.slice(0, maxOutput) : output,
+      output,
       durationMs: this.elapsedMs(),
       filesChanged,
     }

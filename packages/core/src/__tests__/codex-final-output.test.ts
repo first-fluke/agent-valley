@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { parseJson } from "../chief/plan-validation"
 import type { RunResult } from "../sessions/agent-session"
 import { CodexSession } from "../sessions/codex-session"
+import { MAX_NATIVE_RESULT_LENGTH } from "../sessions/native-result"
 import { planSandboxedSpawn } from "../sessions/sandbox"
 
 vi.mock("../sessions/sandbox", () => ({ planSandboxedSpawn: vi.fn() }))
@@ -91,6 +92,34 @@ afterEach(async () => {
 })
 
 describe("Codex final answer output", () => {
+  test.each(["final_answer", undefined, "delta-only"])("preserves JSON above 10KB through %s", async (phase) => {
+    const payload = { tasks: [{ instructions: "x".repeat(20_000) }] }
+    const text = JSON.stringify(payload)
+    const events =
+      phase === "delta-only" ? [delta(text.slice(0, 12_000)), delta(text.slice(12_000))] : [message(text, phase)]
+    const { results } = await start([events])
+    expect(results[0]?.output).toBe(text)
+    expect(JSON.parse(results[0]?.output ?? "")).toEqual(payload)
+  })
+
+  test.each(["final_answer", undefined, "delta-only"])("fails instead of truncating oversized %s output", (phase) => {
+    const session = new CodexSession()
+    Object.assign(session, { threadId: "fixture-thread", turnId: "fixture-turn" })
+    const complete = vi.fn()
+    const error = vi.fn()
+    session.on("complete", complete)
+    session.on("error", error)
+    const handle = (session as unknown as { handleMessage(event: unknown): void }).handleMessage.bind(session)
+    const text = "x".repeat(MAX_NATIVE_RESULT_LENGTH + 1)
+    const event = phase === "delta-only" ? delta(text) : message(text, phase)
+    handle(event)
+    handle({ method: "turn/completed", params: { turn: { id: "fixture-turn", status: "completed" } } })
+    expect(complete).not.toHaveBeenCalled()
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.objectContaining({ message: expect.stringContaining("256000") }) }),
+    )
+  })
+
   test("keeps progress live and passes only the declared final answer to the Chief JSON parser", async () => {
     const progress = "I will inspect the fixture before returning the requested JSON."
     const { results, chunks } = await start([

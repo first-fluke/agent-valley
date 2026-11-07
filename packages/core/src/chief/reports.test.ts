@@ -12,6 +12,26 @@ describe("Chief Director outcome report contract", () => {
   })
 
   it.each([
+    (json: string) => `The verified outcome follows.\n${json}\nThis report retains the recorded evidence.`,
+    (json: string) => `The verified outcome follows.\n\`\`\`json\n${json}\n\`\`\`\nEnd of report.`,
+  ])("accepts one strict report object surrounded by native narration", (wrap) => {
+    const value = { ...report(), summary: 'Markdown **result** with {braces} and a "quoted" label.' }
+    expect(parseReport(wrap(JSON.stringify(value)))).toEqual(value)
+  })
+
+  it.each([
+    (json: string) => `${json}\n${json}`,
+    (json: string) => `${json}\n{"unfinished":`,
+    (json: string) => `Report:\n${json.slice(0, -1)},}\nEnd.`,
+  ])("rejects ambiguous, incomplete or malformed reports instead of choosing an answer", (wrap) => {
+    expect(() => parseReport(wrap(JSON.stringify(report())))).toThrow(/not valid JSON/)
+  })
+
+  it("retains the strict report shape when extracting narrated JSON", () => {
+    expect(() => parseReport(`Report follows.\n${JSON.stringify({ ...report(), completed: true })}`)).toThrow()
+  })
+
+  it.each([
     [
       "missing eli5",
       (value: Record<string, unknown>) => {

@@ -4,6 +4,7 @@ import { containerCompletionVerified, containerObservationReport } from "./conta
 import { finalCriteria } from "./goal-evidence"
 import { operationsEvidence, operationsReportLines } from "./operations-report"
 import { assessMetricTargets } from "./organization"
+import { parseJson } from "./plan-validation"
 import { verificationIncompleteReasons } from "./report-verification"
 import type { ChiefReport, Mission, Review, Verification } from "./types"
 
@@ -294,10 +295,9 @@ export function reportPrompt(mission: Mission): string {
 export function parseReport(source: string): ChiefReport {
   if (source.length > 64_000)
     throw new Error("Chief Director report exceeds 64 KB. Return concise JSON matching the report schema.")
-  const content = source.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, "$1")
   let value: unknown
   try {
-    value = JSON.parse(content)
+    value = parseJson(source, "Chief Director report", 64_000)
   } catch {
     throw new Error(
       "Chief Director report is not valid JSON. Return one JSON object with a meaningful eli5 explanation.",

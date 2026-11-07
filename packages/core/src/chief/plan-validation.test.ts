@@ -21,6 +21,28 @@ describe("structured JSON response boundaries", () => {
     expect(parseJson('Plan follows:\n{"tasks":[]}\nEnd of plan.', "Planning")).toEqual({ tasks: [] })
   })
 
+  it("isolates a fenced payload from unmatched brackets in surrounding prose", () => {
+    expect(parseJson('Placeholder {actor\n```json\n{"tasks":[]}\n```\nKeep [literal.', "Planning")).toEqual({
+      tasks: [],
+    })
+  })
+
+  it("does not salvage a valid inner fragment from a malformed fenced object", () => {
+    expect(() => parseJson('```json\n{"broken":[} {"tasks":[]} }\n```', "Planning")).toThrow()
+  })
+
+  it("does not salvage a later fragment after an unfenced bracket mismatch", () => {
+    expect(() => parseJson('Plan: {"broken":[} {"tasks":[]} }', "Planning")).toThrow()
+  })
+
+  it("rejects a separate JSON answer outside the fenced payload", () => {
+    expect(() => parseJson('First: {"first":1}\n```json\n{"tasks":[]}\n```', "Planning")).toThrow()
+  })
+
+  it("accepts matching longer fences and Windows line endings", () => {
+    expect(parseJson('Plan:\r\n````JSON\r\n{"tasks":[]}\r\n`````\r\nDone.', "Planning")).toEqual({ tasks: [] })
+  })
+
   it("ignores braces, brackets and escaped quotes inside JSON strings", () => {
     const value = { note: 'Keep { braces } and [ brackets ]; quote: "yes", path: C:\\work' }
     expect(parseJson(`Explanation\n${JSON.stringify(value)}\nFinished.`, "Planning")).toEqual(value)
@@ -73,5 +95,11 @@ describe("structured JSON response boundaries", () => {
   it("enforces the bound on the whole response before extracting a small object", () => {
     const source = `${" ".repeat(MAX_JSON_RESPONSE_LENGTH)}{"tasks":[]}`
     expect(() => parseJson(source, "Planning")).toThrow("exceeds 128 KB")
+  })
+
+  it("preserves a caller's larger bounded response contract", () => {
+    const value = { value: "x".repeat(MAX_JSON_RESPONSE_LENGTH) }
+    expect(parseJson(JSON.stringify(value), "Decision", 256_000)).toEqual(value)
+    expect(() => parseJson(JSON.stringify(value), "Planning")).toThrow("exceeds 128 KB")
   })
 })

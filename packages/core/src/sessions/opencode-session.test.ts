@@ -306,7 +306,55 @@ describe("OpencodeSession", () => {
     expect(result.tokenUsage).toBeUndefined()
   })
 
-  test("does not OOM with large streamed output (bounded tail, not full accumulation)", async () => {
+  test.each(["result", "text"])("preserves complete large %s responses, including the first character", async (kind) => {
+    const output = `BEGIN${"x".repeat(255_992)}END`
+    writeMockOpencode([
+      JSON.stringify(kind === "result" ? { type: "result", result: output } : { type: "assistant-text", text: output }),
+    ])
+    const { OpencodeSession } = await import("./opencode-session")
+    const session = new OpencodeSession()
+    let completed: string | undefined
+    session.on("complete", (event) => {
+      completed = event.result.output
+    })
+    await session.start({ type: "opencode", timeout: 30, workspacePath: WORKSPACE_DIR })
+    await session.execute("test")
+    expect(completed).toBe(output)
+  })
+
+  test("rejects an oversized explicit result without emitting truncated success", async () => {
+    writeMockOpencode([JSON.stringify({ type: "result", result: "x".repeat(256_001) })])
+    const { OpencodeSession } = await import("./opencode-session")
+    const session = new OpencodeSession()
+    const errors: string[] = []
+    let completed = false
+    session.on("error", (event) => errors.push(event.error.message))
+    session.on("complete", () => {
+      completed = true
+    })
+    await session.start({ type: "opencode", timeout: 30, workspacePath: WORKSPACE_DIR })
+    await session.execute("test")
+    expect(completed).toBe(false)
+    expect(errors).toEqual([expect.stringContaining("exceeds 256000 characters")])
+  })
+
+  test("keeps an explicit final answer after a large diagnostic tool stream", async () => {
+    writeMockOpencode([
+      JSON.stringify({ type: "tool", output: "x".repeat(256_001) }),
+      JSON.stringify({ type: "result", result: "final answer" }),
+    ])
+    const { OpencodeSession } = await import("./opencode-session")
+    const session = new OpencodeSession()
+    let output: string | undefined
+    session.on("complete", (event) => {
+      output = event.result.output
+    })
+    await session.start({ type: "opencode", timeout: 30, workspacePath: WORKSPACE_DIR })
+    await session.execute("test")
+    expect(output).toBe("final answer")
+  })
+
+  test("bounds oversized streamed output and rejects completion instead of truncating it", async () => {
     const bigChunk = "x".repeat(1024)
     const lines: string[] = []
     for (let i = 0; i < 1000; i++) {
@@ -319,13 +367,13 @@ describe("OpencodeSession", () => {
 
     let chunkCount = 0
     let completed = false
-    let finalOutputLength = 0
+    const errors: string[] = []
 
     session.on("output", () => chunkCount++)
-    session.on("complete", (e) => {
+    session.on("complete", () => {
       completed = true
-      finalOutputLength = e.result.output.length
     })
+    session.on("error", (event) => errors.push(event.error.message))
 
     await session.start({ type: "opencode", timeout: 60, workspacePath: WORKSPACE_DIR })
 
@@ -334,8 +382,8 @@ describe("OpencodeSession", () => {
     const memAfter = process.memoryUsage().heapUsed
 
     expect(chunkCount).toBe(1000)
-    expect(completed).toBe(true)
-    expect(finalOutputLength).toBeLessThanOrEqual(10 * 1024)
+    expect(completed).toBe(false)
+    expect(errors).toEqual([expect.stringContaining("exceeds 256000 characters")])
 
     const memGrowthMB = (memAfter - memBefore) / 1024 / 1024
     expect(memGrowthMB).toBeLessThan(50)

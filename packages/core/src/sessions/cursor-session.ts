@@ -56,6 +56,7 @@ import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion, nativeErrorMessage } from "./native-failure"
+import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 
 export const CURSOR_COMMAND = "cursor-agent"
 
@@ -286,12 +287,16 @@ export class CursorSession extends BaseSession {
       this.emitError("CRASH", nativeErrorMessage(e, "cursor-agent reported an error result"), true)
       return
     }
+    if (result.length > MAX_NATIVE_RESULT_LENGTH) {
+      this.emitError("CRASH", nativeResultLimitMessage("Cursor"), false)
+      return
+    }
 
     this.emit({
       type: "complete",
       result: {
         exitCode: 0,
-        output: result.length > 10240 ? result.slice(-10240) : result,
+        output: result,
         durationMs,
         filesChanged: this.filesChanged,
         tokenUsage: this.extractTokenUsage(e),

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { AgentEvent } from "../sessions/agent-session"
+import { MAX_NATIVE_RESULT_LENGTH } from "../sessions/native-result"
 import * as sandboxModule from "../sessions/sandbox"
 
 const MOCK_DIR = resolve(tmpdir(), "av-test-grok-mock")
@@ -142,7 +143,7 @@ describe("GrokSession — streaming output", () => {
     expect(result.output).not.toContain("Let me think")
   })
 
-  test("does not OOM with large streamed output (bounded tail, not full accumulation)", async () => {
+  test("bounds oversized legacy answer memory and fails instead of returning a truncated success", async () => {
     const bigChunk = "x".repeat(1024)
     const lines: string[] = []
     for (let i = 0; i < 1000; i++) {
@@ -157,13 +158,13 @@ describe("GrokSession — streaming output", () => {
 
     let chunkCount = 0
     let completed = false
-    let finalOutputLength = 0
+    const errors: AgentEvent[] = []
 
     session.on("output", () => chunkCount++)
-    session.on("complete", (e) => {
+    session.on("complete", () => {
       completed = true
-      finalOutputLength = e.result.output.length
     })
+    session.on("error", (event) => errors.push(event))
 
     await session.start({ type: "grok", timeout: 60, workspacePath: "/tmp" })
 
@@ -172,9 +173,10 @@ describe("GrokSession — streaming output", () => {
     const memAfter = process.memoryUsage().heapUsed
 
     expect(chunkCount).toBe(1000)
-    expect(completed).toBe(true)
-    // Bounded tail, not the full ~1MB stream
-    expect(finalOutputLength).toBeLessThanOrEqual(10 * 1024)
+    expect(completed).toBe(false)
+    expect(errors).toEqual([
+      expect.objectContaining({ error: expect.objectContaining({ message: expect.stringContaining("256000") }) }),
+    ])
 
     const memGrowthMB = (memAfter - memBefore) / 1024 / 1024
     expect(memGrowthMB).toBeLessThan(50)
@@ -223,6 +225,27 @@ describe("GrokSession — streaming output", () => {
 
     expect(error).not.toBeNull()
     expect((error as unknown as { error: { message: string } }).error.message).toBe("something went wrong")
+  })
+
+  test("does not let a late successful end replace an oversized result failure", async () => {
+    writeMockGrokLines([
+      JSON.stringify({ type: "result", result: "x".repeat(MAX_NATIVE_RESULT_LENGTH + 1) }),
+      endEvent(),
+      JSON.stringify({ type: "result", result: "late success" }),
+    ])
+    const { GrokSession } = await import("../sessions/grok-session")
+    const session = new GrokSession()
+    const complete = vi.fn()
+    const errors = vi.fn()
+    session.on("complete", complete)
+    session.on("error", errors)
+    await session.start({ type: "grok", timeout: 30, workspacePath: "/tmp" })
+    await session.execute("test")
+    expect(complete).not.toHaveBeenCalled()
+    expect(errors).toHaveBeenCalledOnce()
+    expect(errors).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.objectContaining({ message: expect.stringContaining("256000") }) }),
+    )
   })
 
   test("extracts tokenUsage from the 'end' event's usage + modelUsage (real schema)", async () => {
@@ -295,9 +318,14 @@ describe("GrokSession — streaming output", () => {
     expect(tokenUsage).toBeUndefined()
   })
 
-  test("result output (concatenated text chunks) is capped at 10KB", async () => {
-    const bigChunk = "y".repeat(20_000)
-    writeMockGrokLines([JSON.stringify({ type: "text", data: bigChunk }), endEvent()])
+  test("preserves complete legacy JSON across text chunks above 10KB", async () => {
+    const payload = { tasks: [{ instructions: "y".repeat(20_000) }] }
+    const bigChunk = JSON.stringify(payload)
+    writeMockGrokLines([
+      JSON.stringify({ type: "text", data: bigChunk.slice(0, 12_000) }),
+      JSON.stringify({ type: "text", data: bigChunk.slice(12_000) }),
+      endEvent(),
+    ])
 
     const { GrokSession } = await import("../sessions/grok-session")
     const session = new GrokSession()
@@ -310,9 +338,22 @@ describe("GrokSession — streaming output", () => {
     await session.start({ type: "grok", timeout: 30, workspacePath: "/tmp" })
     await session.execute("test")
 
-    expect(output.length).toBe(10240)
-    // Bounded tail keeps the *last* 10KB
-    expect(output).toBe(bigChunk.slice(-10240))
+    expect(output).toBe(bigChunk)
+    expect(JSON.parse(output)).toEqual(payload)
+  })
+
+  test("preserves a legacy answer exactly at the shared bound", async () => {
+    const answer = "x".repeat(MAX_NATIVE_RESULT_LENGTH)
+    writeMockGrokLines([JSON.stringify({ type: "text", data: answer }), endEvent()])
+    const { GrokSession } = await import("../sessions/grok-session")
+    const session = new GrokSession()
+    let output = ""
+    session.on("complete", (event) => {
+      output = event.result.output
+    })
+    await session.start({ type: "grok", timeout: 30, workspacePath: "/tmp" })
+    await session.execute("test")
+    expect(output).toBe(answer)
   })
 
   test("invokes grok with --single, --output-format streaming-messages-json, --always-approve; prompt passed as --single argument (not stdin)", async () => {

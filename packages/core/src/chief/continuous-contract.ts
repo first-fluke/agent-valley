@@ -2,6 +2,7 @@ import { z } from "zod"
 import { containerObservationPolicySchema, containerObservationSnapshotSchema } from "./container-observation-policy"
 import { validateContainerObservation } from "./container-observation-state"
 import { providerHealthEvidenceSchema } from "./operations"
+import { parseJson } from "./plan-validation"
 import { sourceIntegrationPolicySchema, sourceIntegrationSummarySchema } from "./source-integration-contract"
 
 export const operationIdSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/)
@@ -23,7 +24,7 @@ export type ContinuousDecision = z.infer<typeof continuousDecisionSchema>
 export function parseContinuousDecision(output: string): ContinuousDecision {
   try {
     if (output.length > 256_000) throw new Error("Decision output exceeds its limit")
-    return continuousDecisionSchema.parse(JSON.parse(output))
+    return continuousDecisionSchema.parse(parseJson(output, "Chief decision", 256_000))
   } catch {
     throw new Error(
       'Invalid Chief decision. Return only strict JSON: {"action":"execute","goal":"…","reason":"…","evidence":["source/window"]} or {"action":"wait","reason":"…"}; keep it below 256000 characters.',

@@ -13,6 +13,7 @@ import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion } from "./native-failure"
+import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 
 export class ClaudeSession extends BaseSession {
   protected filesChanged: string[] = []
@@ -179,11 +180,15 @@ export class ClaudeSession extends BaseSession {
             true,
           )
         } else {
+          if (result.length > MAX_NATIVE_RESULT_LENGTH) {
+            this.emitError("CRASH", nativeResultLimitMessage(this.vendor), false)
+            break
+          }
           this.emit({
             type: "complete",
             result: {
               exitCode: 0,
-              output: result.length > 10240 ? result.slice(-10240) : result,
+              output: result,
               durationMs,
               filesChanged: this.filesChanged,
               tokenUsage: this.extractTokenUsage(e),

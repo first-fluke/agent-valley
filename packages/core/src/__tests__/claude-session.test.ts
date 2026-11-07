@@ -10,6 +10,7 @@ import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { AgentEvent } from "../sessions/agent-session"
+import { MAX_NATIVE_RESULT_LENGTH } from "../sessions/native-result"
 import * as sandboxModule from "../sessions/sandbox"
 
 // We need to override the spawn command. ClaudeSession spawns "claude" —
@@ -276,8 +277,9 @@ describe("ClaudeSession — streaming output", () => {
     expect(tokenUsage).toBeUndefined()
   })
 
-  test("result output is capped at 10KB", async () => {
-    const bigResult = "y".repeat(20_000)
+  test("preserves a complete final JSON response above 10KB", async () => {
+    const payload = { tasks: [{ instructions: "y".repeat(20_000) }] }
+    const bigResult = JSON.stringify(payload)
     writeMockClaude([
       JSON.stringify({
         type: "result",
@@ -298,6 +300,25 @@ describe("ClaudeSession — streaming output", () => {
     await session.start({ type: "claude", timeout: 30, workspacePath: "/tmp" })
     await session.execute("test")
 
-    expect(output.length).toBe(10240)
+    expect(output).toBe(bigResult)
+    expect(JSON.parse(output)).toEqual(payload)
+  })
+
+  test("fails explicitly instead of truncating a final answer above the shared bound", async () => {
+    writeMockClaude([
+      JSON.stringify({ type: "result", result: "x".repeat(MAX_NATIVE_RESULT_LENGTH + 1), is_error: false }),
+    ])
+    const { ClaudeSession } = await import("../sessions/claude-session")
+    const session = new ClaudeSession()
+    const completed = vi.fn()
+    const errors: AgentEvent[] = []
+    session.on("complete", completed)
+    session.on("error", (event) => errors.push(event))
+    await session.start({ type: "claude", timeout: 30, workspacePath: "/tmp" })
+    await session.execute("test")
+    expect(completed).not.toHaveBeenCalled()
+    expect(errors).toEqual([
+      expect.objectContaining({ error: expect.objectContaining({ message: expect.stringContaining("256000") }) }),
+    ])
   })
 })
