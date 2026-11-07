@@ -4,6 +4,7 @@ import { lstat, readlink, realpath } from "node:fs/promises"
 import { dirname, resolve, sep } from "node:path"
 import { clearedGitEnvironment } from "../util/git-environment"
 import { runCommand } from "../workspace/worktree-lifecycle"
+import { isActorConfigPath } from "./actor-config"
 
 /** Hash product files, including untracked deliverables, without commit timestamps or run receipts. */
 export async function fingerprintWorkspace(
@@ -20,6 +21,7 @@ export async function fingerprintWorkspace(
   const hash = createHash("sha256")
   for (const name of [...new Set(files.stdout.split("\0").filter(Boolean))].sort()) {
     if (/^(?:\.agent-valley\/|\.agents\/(?:state|results)\/)/.test(name)) continue
+    if (isActorConfigPath(name)) continue
     if (excludedPaths.has(name)) continue
     const path = resolve(workspacePath, name)
     if (!path.startsWith(`${resolve(workspacePath)}${sep}`))

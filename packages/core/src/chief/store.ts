@@ -5,7 +5,7 @@ import { writeJsonAtomic } from "../util/atomic-json"
 import { lockRecord } from "../util/record-lock"
 import { ActiveMissionProcess } from "./active-process"
 import { reconcileExecution } from "./execution"
-import { missionSchema } from "./schemas"
+import { missionSchema, observedMissionSchema } from "./schemas"
 import type { Mission } from "./types"
 
 export class MissionStore {
@@ -90,13 +90,25 @@ export class MissionStore {
   }
 
   async load(id: string): Promise<Mission> {
-    const content = JSON.parse(await readFile(this.path(id), "utf8")) as { version?: unknown; mission?: unknown }
-    if (content.version !== 1)
-      throw new Error("Unsupported mission record version. Use the Agent Valley version that created this mission.")
-    const mission = missionSchema.parse(content.mission)
+    const mission = missionSchema.parse(await this.record(id))
     if (mission.id !== id)
       throw new Error("Mission file identity does not match its filename. Restore the original record.")
     return mission
+  }
+
+  /** Control-plane observation tolerates fields added by newer AV versions; execution still loads strictly. */
+  async observe(id: string): Promise<Mission> {
+    const mission = observedMissionSchema.parse(await this.record(id))
+    if (mission.id !== id)
+      throw new Error("Mission file identity does not match its filename. Restore the original record.")
+    return mission as unknown as Mission
+  }
+
+  private async record(id: string): Promise<unknown> {
+    const content = JSON.parse(await readFile(this.path(id), "utf8")) as { version?: unknown; mission?: unknown }
+    if (content.version !== 1)
+      throw new Error("Unsupported mission record version. Use the Agent Valley version that created this mission.")
+    return content.mission
   }
 
   async list(): Promise<Mission[]> {

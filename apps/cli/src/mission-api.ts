@@ -341,7 +341,8 @@ export class MissionApi implements MissionApiPort {
       const stat = await lstat(path)
       if (!stat.isFile() || stat.isSymbolicLink())
         throw new Error(`Mission record must be a regular file: ${path}. Remove the symlink before retrying.`)
-      return await this.store.load(id)
+      // Long-lived MCP servers must observe records written by newer AV versions; the launched runtime revalidates.
+      return await this.store.observe(id)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
       throw error

@@ -80,6 +80,23 @@ describe("MissionStore", () => {
     await expect(store.load("order-1")).rejects.toThrow("identity does not match")
   })
 
+  it("observes records with fields added by newer AV versions while execution loads stay strict", async () => {
+    const store = new MissionStore(root)
+    const value = mission()
+    const newer = {
+      ...value,
+      futurePolicy: { enabled: true },
+      tasks: [{ id: "task-1", status: "completed", parallel: { snapshotTree: "a".repeat(40) } }],
+    }
+    await writeFile(join(root, "order-1.json"), JSON.stringify({ version: 1, mission: newer }))
+    expect(await store.observe("order-1")).toEqual(newer)
+    await expect(store.load("order-1")).rejects.toThrow()
+    await writeFile(join(root, "order-1.json"), JSON.stringify({ version: 2, mission: newer }))
+    await expect(store.observe("order-1")).rejects.toThrow("Unsupported mission record version")
+    await writeFile(join(root, "order-1.json"), JSON.stringify({ version: 1, mission: { ...newer, id: "other" } }))
+    await expect(store.observe("order-1")).rejects.toThrow("identity does not match")
+  })
+
   it("lists only mission records and handles a missing directory", async () => {
     const store = new MissionStore(join(root, "missions"))
     expect(await store.list()).toEqual([])
@@ -162,6 +179,22 @@ describe("workspace fingerprint", () => {
     }
     expect(await fingerprintWorkspace(root)).toBe(original)
     await writeFile(join(root, "report.md"), "Actual deliverable")
+    expect(await fingerprintWorkspace(root)).not.toBe(original)
+  })
+
+  it("ignores actor CLI configuration migrations, tracked or untracked", async () => {
+    await mkdir(join(root, ".qwen"), { recursive: true })
+    await writeFile(join(root, ".qwen", "settings.json"), '{"version":1}')
+    await exec("git", ["add", ".qwen/settings.json"], { cwd: root })
+    const original = await fingerprintWorkspace(root)
+    // Native CLIs migrate tracked settings and create untracked configuration during a run.
+    await writeFile(join(root, ".qwen", "settings.json"), '{"version":2}')
+    for (const directory of [".codex", ".claude", ".cursor", ".gemini", ".opencode", ".grok", ".kimi-code"]) {
+      await mkdir(join(root, directory), { recursive: true })
+      await writeFile(join(root, directory, "settings.json"), "migrated")
+    }
+    expect(await fingerprintWorkspace(root)).toBe(original)
+    await writeFile(join(root, "product.txt"), "edited")
     expect(await fingerprintWorkspace(root)).not.toBe(original)
   })
 

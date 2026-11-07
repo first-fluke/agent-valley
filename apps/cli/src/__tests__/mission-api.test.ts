@@ -292,6 +292,31 @@ describe("durable mission API", () => {
     expect(dependencies.launch).toHaveBeenCalledTimes(2)
   })
 
+  it("resumes and observes a mission record carrying fields written by a newer AV version", async () => {
+    const started = await order({ goal: "Fix login", requestId: "newer-record" })
+    const mission = missionFixture()
+    mission.id = String(started.missionId)
+    mission.repositoryRoot = root
+    mission.status = "paused"
+    const newer = {
+      ...mission,
+      futurePolicy: { enabled: true },
+      tasks: mission.tasks.map((task) => ({ ...task, parallel: { snapshotTree: "a".repeat(40) } })),
+    }
+    await mkdir(join(root, ".agent-valley/missions"), { recursive: true })
+    await writeFile(
+      join(root, ".agent-valley/missions", `${mission.id}.json`),
+      JSON.stringify({ version: 1, mission: newer }),
+    )
+    vi.mocked(dependencies.liveness).mockReturnValue("stopped")
+    expect(await api.resume({ missionId: mission.id, retry: true, requestId: "resume-newer-record" })).toMatchObject({
+      accepted: true,
+      missionId: mission.id,
+    })
+    expect(await api.status(mission.id)).toMatchObject({ missionId: mission.id })
+    await expect(store.load(mission.id)).rejects.toThrow()
+  })
+
   it("blocks recursive delegation from AV-managed Actors", async () => {
     await api.close()
     api = await MissionApi.create(root, { ...dependencies, env: { AGENT_VALLEY_MANAGED_RUN: "1" } })

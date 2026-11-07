@@ -3,6 +3,7 @@ import { constants } from "node:fs"
 import { lstat, open, realpath } from "node:fs/promises"
 import { relative, resolve, sep } from "node:path"
 import { z } from "zod"
+import { isActorConfigPath } from "../workspace/actor-config"
 import { runCommand } from "../workspace/worktree-lifecycle"
 import { archivedWorkCancellation, cancelledWorkRunProofs } from "./cancelled-work-run"
 import { isNativeAgentTimeout } from "./execution"
@@ -120,7 +121,7 @@ async function deliveredArtifacts(workspace: string): Promise<{ path: string }[]
   if (changed.exitCode !== 0 || untracked.exitCode !== 0)
     throw new Error("Cannot collect delivered files for organization memory. Restore the worktree Git metadata.")
   const paths = [...new Set(`${changed.stdout}\0${untracked.stdout}`.split("\0").filter(Boolean))]
-    .filter((path) => !/^(?:\.agent-valley|\.agents|\.claude|\.codex|\.cursor)\//.test(path))
+    .filter((path) => !/^(?:\.agent-valley|\.agents)\//.test(path) && !isActorConfigPath(path))
     .sort()
   const evidence: { path: string }[] = []
   for (const path of paths) {

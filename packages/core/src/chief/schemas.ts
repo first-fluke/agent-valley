@@ -173,6 +173,13 @@ export const missionSchema = z
       })
   })
 
+/** Long-lived control planes tolerate additive record fields; the launched runtime revalidates the full contract. */
+export const observedMissionSchema = z.looseObject({
+  id,
+  status: z.string().trim().min(1),
+  tasks: z.array(z.looseObject({ id: z.string().trim().min(1), status: z.string().trim().min(1) })),
+})
+
 export function parsePlan(source: string, personas: Persona[]): ChiefPlan {
   const plan = planSchema.parse(parseJson(source, "Planning"))
   validatePlan(plan, personas)
