@@ -12,6 +12,13 @@ import { parallelDeliverySchema } from "./parallel-contract"
 import { captureParallelBaseline, parallelGit, parallelTreeImages, writeParallelJson } from "./parallel-git"
 import type { SourceIntegrationPolicy, SourceIntegrationSummary } from "./source-integration-contract"
 
+/**
+ * Per-cycle product path ceiling. Evidence directories legitimately grow with every repair attempt
+ * (one verified cycle shipped 1,039 files under .arc-verify/), so this guards against runaway
+ * integration rather than a normal verified cycle.
+ */
+const MAX_SOURCE_PRODUCT_PATHS = 5_000
+
 const receiptSchema = z.strictObject({
   version: z.literal(1),
   operationId: operationIdSchema,
@@ -27,7 +34,7 @@ const receiptSchema = z.strictObject({
   verifiedChanges: parallelDeliverySchema.shape.changes,
   sourceChanges: parallelDeliverySchema.shape.changes,
   gitignoreProjection: gitignoreProjectionSchema.optional(),
-  alreadySatisfied: z.array(z.string().refine(codeDeliveryPath)).max(1_000),
+  alreadySatisfied: z.array(z.string().refine(codeDeliveryPath)).max(MAX_SOURCE_PRODUCT_PATHS),
   changes: parallelDeliverySchema.shape.changes,
   status: parallelDeliverySchema.shape.status,
   at: z.iso.datetime().optional(),
@@ -263,9 +270,9 @@ export async function integrateContinuousSource(
         )
       return [{ path, before: base, after: result }]
     })
-    if (verifiedChanges.length > 1_000)
+    if (verifiedChanges.length > MAX_SOURCE_PRODUCT_PATHS)
       throw new Error(
-        "The verified cycle exceeds 1000 source product paths. Preserve its snapshot and split source integration into a smaller verified cycle before retrying.",
+        `The verified cycle exceeds ${MAX_SOURCE_PRODUCT_PATHS} source product paths. Preserve its snapshot and split source integration into a smaller verified cycle before retrying.`,
       )
     const existing = saved ? receiptSchema.parse(JSON.parse(saved.toString("utf8"))) : undefined
     const source = await captureParallelBaseline(root)
