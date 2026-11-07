@@ -242,10 +242,23 @@ export async function integrateContinuousSource(
     const assertIdentity = async () => {
       signal?.throwIfAborted()
       const current = await prepareSourceIntegration(root, operation.id)
-      if (current.branch !== policy.branch || current.head !== policy.head)
-        throw new Error(
-          "Source branch or HEAD moved from the saved integration target. Preserve local changes and reconcile the pinned source before resuming.",
-        )
+      if (current.branch === policy.branch && current.head === policy.head) return
+      // An operator who committed the already-applied worktree leaves a clean same-branch fast-forward;
+      // re-pin to it instead of pausing the cycle. Anything else still needs explicit reconciliation.
+      if (
+        current.branch === policy.branch &&
+        !(await parallelGit(root, ["status", "--porcelain"])).trim() &&
+        (await parallelGit(root, ["merge-base", "--is-ancestor", policy.head, current.head]).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        policy.head = current.head
+        return
+      }
+      throw new Error(
+        "Source branch or HEAD moved from the saved integration target. Preserve local changes and reconcile the pinned source before resuming.",
+      )
     }
     await assertIdentity()
     let directory = root
