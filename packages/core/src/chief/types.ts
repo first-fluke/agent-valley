@@ -66,6 +66,8 @@ export interface Mission {
   finalReview?: Review
   verification?: Verification
   history: import("./contracts").MissionEvent[]
+  /** Operator notes recorded with `--note` on resume; newest last. */
+  operatorNotes?: import("./contracts").OperatorNote[]
   error?: string
   fingerprint?: string
   initialFingerprint?: string

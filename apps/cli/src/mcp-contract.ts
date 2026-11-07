@@ -42,6 +42,7 @@ export const mcpResumeSchema = z.strictObject({
   missionId: missionIdSchema,
   requestId,
   retry: z.boolean().optional(),
+  note: z.string().trim().min(1).max(4_000).optional(),
   rounds: z.number().int().min(1).max(50).optional(),
   ...budgets,
 })

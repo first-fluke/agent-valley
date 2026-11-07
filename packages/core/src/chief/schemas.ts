@@ -133,6 +133,10 @@ export const missionSchema = z
     finalReview: reviewSchema.optional(),
     verification: verificationSchema.optional(),
     history: z.array(z.strictObject({ at: text, stage: text, message: text, taskId: id.optional() })),
+    operatorNotes: z
+      .array(z.strictObject({ at: text, text: z.string().trim().min(1).max(4_000) }))
+      .max(50)
+      .optional(),
     error: text.optional(),
     fingerprint: text.optional(),
     initialFingerprint: text.optional(),

@@ -16,6 +16,7 @@ export function validateResumeOptions(goal: string | undefined, options: OrderOp
     "supervise",
     "service",
     "retry",
+    "note",
     "runs",
     "duration",
     "cost",
@@ -41,6 +42,15 @@ export function applyResumeOptions(mission: Mission, goal: string | undefined, o
     return parsed
   }
   let changed = options.retry === true
+  const note = options.note?.trim()
+  if (options.note !== undefined && !note)
+    throw new Error("--note needs text describing what changed since the last attempt.")
+  if (note) {
+    if (note.length > 4_000)
+      throw new Error("--note must stay within 4000 characters; point to a file for longer context.")
+    mission.operatorNotes = [...(mission.operatorNotes ?? []), { at: new Date().toISOString(), text: note }]
+    changed = true
+  }
   if (options.accountRun || options.accountCost !== undefined) {
     if (!options.accountRun || options.accountCost === undefined)
       throw new Error("Use --account-run <id> with --account-cost <usd> after inspecting billing.")
@@ -99,8 +109,9 @@ export function applyResumeOptions(mission: Mission, goal: string | undefined, o
     mission.history.push({
       at: state.interventionAt,
       stage: "operator-intervention",
-      message:
-        "Operator resumed the original goal with reconciled effects or adjusted execution limits; prior decisions and checks were retained.",
+      message: note
+        ? `Operator resumed the original goal with a note for Actors and the Chief; prior decisions and checks were retained. Note: ${note}`
+        : "Operator resumed the original goal with reconciled effects or adjusted execution limits; prior decisions and checks were retained.",
     })
   } else if (mission.status === "paused" || mission.status === "failed") {
     const recovery = automaticMissionRecovery(mission)

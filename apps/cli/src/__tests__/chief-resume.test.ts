@@ -46,6 +46,36 @@ function unknownCostRun(): OperatingRun {
 }
 
 describe("operator resume without weakening acceptance or resetting spend", () => {
+  it("records an operator note for Actors and the Chief without touching the goal or spent budget", () => {
+    const current = mission()
+    const original = structuredClone(current)
+    applyResumeOptions(current, undefined, {
+      resume: current.id,
+      retry: true,
+      note: "  Sandbox now permits TCP listeners; re-run the TCP privacy test.  ",
+    })
+    expect(current.operatorNotes).toEqual([
+      { at: new Date(now).toISOString(), text: "Sandbox now permits TCP listeners; re-run the TCP privacy test." },
+    ])
+    expect(current.status).toBe("pending")
+    expect(current.goal).toBe(original.goal)
+    expect(current.executionPolicy).toEqual(original.executionPolicy)
+    expect(current.execution).toMatchObject({
+      runsStarted: 10,
+      retries: 3,
+      interventionAt: new Date(now).toISOString(),
+    })
+    expect(current.history.at(-1)?.message).toContain("Sandbox now permits TCP listeners")
+    applyResumeOptions(current, undefined, { resume: current.id, note: "Second note" })
+    expect(current.operatorNotes?.map((entry) => entry.text)).toEqual([
+      "Sandbox now permits TCP listeners; re-run the TCP privacy test.",
+      "Second note",
+    ])
+    expect(() => applyResumeOptions(current, undefined, { resume: current.id, note: "   " })).toThrow(
+      "--note needs text",
+    )
+  })
+
   it("increases limits while retaining original goal, roster, checks, spent calls and elapsed time", () => {
     const current = mission()
     const original = structuredClone(current)

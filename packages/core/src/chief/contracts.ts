@@ -65,6 +65,12 @@ export interface MissionEvent {
   taskId?: string
 }
 
+/** Operator instruction recorded on resume: an environment or prerequisite change that outranks earlier evidence. */
+export interface OperatorNote {
+  at: string
+  text: string
+}
+
 export interface Verification {
   ok: boolean
   output?: string

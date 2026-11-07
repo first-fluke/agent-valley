@@ -34,6 +34,7 @@ function orderOptions(input: McpOrderInput | McpResumeInput): OrderOptions {
   if ("missionId" in input) {
     options.resume = input.missionId
     options.retry = input.retry
+    if (input.note !== undefined) options.note = input.note
     if (input.rounds !== undefined) options.rounds = String(input.rounds)
   } else {
     options.verify = input.verify

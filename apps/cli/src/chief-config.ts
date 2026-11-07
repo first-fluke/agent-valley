@@ -34,6 +34,8 @@ export interface OrderOptions {
   oma?: boolean
   resume?: string
   retry?: boolean
+  /** Operator note recorded on resume; read by Actors and the Chief before repeating earlier conclusions. */
+  note?: string
   runs?: string
   duration?: string
   cost?: string

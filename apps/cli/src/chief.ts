@@ -485,6 +485,10 @@ export function registerChiefCommands(program: Command): void {
     .option("--account-run <run-id>", "Reconcile a finished run whose usage/cost was lost")
     .option("--account-cost <usd>", "Operator-observed USD cost for --account-run; stored separately from native usage")
     .option("--retry", "Resume after repairing a blocker; retain prior evidence and spent budget")
+    .option(
+      "--note <text>",
+      "Record an operator note on resume (environment or prerequisite change) that Actors and the Chief read before repeating earlier conclusions",
+    )
     .option("--resolve-effect <task-id>", "Reconcile an interrupted external action before resuming")
     .option("--effect-result <result>", "External destination inspection result: completed or not-applied")
     .option("--no-supervise", "With --once, run directly without worker crash restart or observation polling")
