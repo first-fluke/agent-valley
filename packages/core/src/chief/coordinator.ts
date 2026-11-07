@@ -49,7 +49,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
   const run = createMissionRun(mission, ports, assertContract, checkAbort, checkpoint.persist)
   const generateReport = createMissionReporter(mission, ports, run, persona, fatal)
   const requestRecovery = createChiefRecovery(mission, ports, { run, persona, save, checkAbort })
-  const requestRepair = async (reason: string) => {
+  const requestRepair = async (reason: string, resetTaskIds?: ReadonlySet<string> | null) => {
     if ((mission.repairRound ?? 0) >= mission.maxRepairs) {
       if (mission.supervision) {
         await requestRecovery(reason)
@@ -60,8 +60,14 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
       )
     }
     mission.repairRound = (mission.repairRound ?? 0) + 1
-    // Preserve rejection evidence in prompts; invalidate all task approvals because repair may affect dependencies.
-    resetTaskApprovals(mission, { keepReviews: true })
+    if (resetTaskIds === null)
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "repair-scope",
+        message: "The final review named no specific task; every task approval is reset for repair.",
+      })
+    // Preserve rejection evidence in prompts; a scoped final-review repair resets only the named tasks and dependents.
+    resetTaskApprovals(mission, { keepReviews: true, ...(resetTaskIds ? { resetTaskIds } : {}) })
     await save("repair", reason)
   }
 

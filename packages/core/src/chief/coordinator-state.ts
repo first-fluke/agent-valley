@@ -1,4 +1,4 @@
-import type { Mission } from "./types"
+import type { Mission, Review } from "./types"
 
 export class ContractViolation extends Error {}
 
@@ -61,7 +61,7 @@ export function createMissionContract(mission: Mission) {
 /** Partial deliveries survive drift; repair deliberately creates a new Actor attempt. */
 export function resetTaskApprovals(
   mission: Mission,
-  options: { keepReviews?: boolean; preserveUnfinished?: boolean } = {},
+  options: { keepReviews?: boolean; preserveUnfinished?: boolean; resetTaskIds?: ReadonlySet<string> } = {},
 ): void {
   delete mission.observationStartedAt
   delete mission.containerObservationVerifiedFingerprint
@@ -69,6 +69,23 @@ export function resetTaskApprovals(
     mission.gateReviews = mission.gateReviews.filter((entry) => !entry.review.passed)
   } else delete mission.gateReviews
   for (const state of mission.tasks) {
+    // A scoped final-review repair keeps approved tasks the findings do not name (same rule as Chief recovery).
+    if (
+      options.resetTaskIds &&
+      !options.resetTaskIds.has(state.id) &&
+      state.status === "completed" &&
+      state.output !== undefined &&
+      state.review?.passed &&
+      state.fingerprint !== undefined
+    ) {
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "task-preserved",
+        taskId: state.id,
+        message: `Kept ${state.id} completed with its passing review and deliverable fingerprint; the final-review repair does not reset it.`,
+      })
+      continue
+    }
     const preserve = options.preserveUnfinished && state.parallel && state.status !== "completed"
     state.status = "pending"
     if (!options.keepReviews) delete state.review
@@ -84,5 +101,23 @@ export function resetTaskApprovals(
       delete state.parallel
       if (state.effectState !== "completed") delete state.output
     }
+  }
+}
+
+/** Derive a final-review repair scope from the task ids its findings name, plus their transitive dependents. */
+export function finalReviewRepairScope(mission: Mission, review: Review): ReadonlySet<string> | null {
+  const tasks = mission.plan?.tasks ?? []
+  const findings = review.findings.join("\n")
+  const scope = new Set<string>()
+  for (const task of tasks) {
+    const escaped = task.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    if (new RegExp(`(?<![a-zA-Z0-9_-])${escaped}(?![a-zA-Z0-9_-])`).test(findings)) scope.add(task.id)
+  }
+  if (!scope.size) return null
+  for (;;) {
+    const size = scope.size
+    for (const task of tasks)
+      if (!scope.has(task.id) && task.dependencies.some((id) => scope.has(id))) scope.add(task.id)
+    if (scope.size === size) return scope
   }
 }

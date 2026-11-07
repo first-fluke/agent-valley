@@ -18,7 +18,7 @@ export interface CoordinatorContext {
   run: ReturnType<typeof createMissionRun>
   generateReport: ReturnType<typeof createMissionReporter>
   requestRecovery: ReturnType<typeof createChiefRecovery>
-  requestRepair(reason: string): Promise<void>
+  requestRepair(reason: string, resetTaskIds?: ReadonlySet<string> | null): Promise<void>
   persona(id: string): Persona
   save(stage: string, message: string, taskId?: string): Promise<void>
   assertContract(): void

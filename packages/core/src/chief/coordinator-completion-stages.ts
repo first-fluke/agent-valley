@@ -3,6 +3,7 @@ import { applyVerificationResult } from "./coordinator-results"
 import { assertCurrentReviewGates } from "./coordinator-review-gates"
 import { ReadOnlyViolation } from "./coordinator-run"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
+import { finalReviewRepairScope } from "./coordinator-state"
 import { MissionPause, pauseForFailure, recordPause } from "./execution"
 import { reviewPrompt } from "./prompts"
 import { fallbackReport } from "./reports"
@@ -98,7 +99,7 @@ export async function approveMission(context: CoordinatorContext): Promise<Stage
   }
   await save("final-review", mission.finalReview.summary)
   if (!mission.finalReview.passed) {
-    await requestRepair(mission.finalReview.findings.join("; "))
+    await requestRepair(mission.finalReview.findings.join("; "), finalReviewRepairScope(mission, mission.finalReview))
     return { kind: "next", stage: "tasks" }
   }
   if ((await ports.fingerprint(mission)) !== mission.verification?.fingerprint) {
