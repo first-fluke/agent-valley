@@ -16,6 +16,8 @@ export interface ParallelWaveHooks {
   save(stage: string, message: string, taskId?: string): Promise<void>
   review(task: ChiefTask, state: ChiefTaskState): Promise<void>
   fatal?(error: unknown): boolean
+  /** Shared mission-state mutex; review Actor calls overlap, but checkpoints and outcomes stay serialized. */
+  serialize?<T>(fn: () => Promise<T> | T): Promise<T>
 }
 export interface ParallelWaveFailure {
   taskId: string
@@ -40,12 +42,15 @@ export async function performParallelWave(
     const reason = error instanceof Error ? error.message : String(error)
     failures.set(taskId, { taskId, error, reason, phase })
   }
-  let queued: Promise<void> = Promise.resolve()
-  const save = (stage: string, message: string, taskId?: string) => {
-    const next = queued.then(() => hooks.save(stage, message, taskId))
+  let queued: Promise<unknown> = Promise.resolve()
+  const localSerialize = <T>(fn: () => Promise<T> | T): Promise<T> => {
+    const next = queued.then(fn)
     queued = next.catch(() => {})
     return next
   }
+  const serialize = hooks.serialize ?? localSerialize
+  const rawSave = (stage: string, message: string, taskId?: string) => hooks.save(stage, message, taskId)
+  const save = (stage: string, message: string, taskId?: string) => serialize(() => rawSave(stage, message, taskId))
   const prepared: Array<{
     task: ChiefTask
     state: ChiefTaskState
@@ -170,42 +175,60 @@ export async function performParallelWave(
   }
   if ([...failures.values()].some((failure) => hooks.fatal?.(failure.error)))
     return wave.flatMap((task) => failures.get(task.id) ?? [])
-  for (const { task, state } of integrated) {
-    const record = state.parallel
-    if (!record) continue
-    try {
-      ports.signal?.throwIfAborted()
-      await hooks.review(task, state)
-      if (state.review?.passed) {
-        state.status = "completed"
-        await save("task-completed", `Task ${task.id} passed independent review after parallel integration.`, task.id)
-        // Only confirmed integrated edits may be disposed; failed work stays available.
-        await parallel.dispose(record).catch(async (error: unknown) => {
-          await save(
-            "parallel-retained",
-            `Task ${task.id} completed, but its workspace was retained at ${record.path}: ${error instanceof Error ? error.message : String(error)}`,
-            task.id,
-          )
+  // Reviews are read-only inspections of the integrated worktree: overlap them up to the parallel limit,
+  // while every mission-state mutation and checkpoint stays on the shared serialized queue.
+  const reviewLimit = Math.max(1, mission.executionPolicy?.maxParallel ?? 1)
+  let reviewStopped = false
+  await runJoinedWave(
+    integrated,
+    async ({ task, state }, signal) => {
+      const record = state.parallel
+      if (!record || reviewStopped) return
+      try {
+        signal.throwIfAborted()
+        ports.signal?.throwIfAborted()
+        await hooks.review(task, state)
+        await serialize(async () => {
+          if (state.review?.passed) {
+            state.status = "completed"
+            await rawSave(
+              "task-completed",
+              `Task ${task.id} passed independent review after parallel integration.`,
+              task.id,
+            )
+            // Only confirmed integrated edits may be disposed; failed work stays available.
+            await parallel.dispose(record).catch(async (error: unknown) => {
+              await rawSave(
+                "parallel-retained",
+                `Task ${task.id} completed, but its workspace was retained at ${record.path}: ${error instanceof Error ? error.message : String(error)}`,
+                task.id,
+              )
+            })
+          } else {
+            state.status = "pending"
+            const reason = `Task ${task.id} failed independent review: ${state.review?.findings.join("; ") ?? "No passing review"}. Actor edits retained at ${record.path}.`
+            await rawSave("parallel-review-rejected", reason, task.id)
+            delete state.parallel
+            delete state.output
+            await rawSave(
+              "parallel-repair-pending",
+              `Task ${task.id} awaits the Chief's repair decision; the previous Actor workspace remains in history.`,
+              task.id,
+            )
+            fail(task.id, new ParallelTaskReviewRejected(reason), "review")
+          }
         })
-      } else {
-        state.status = "pending"
-        const reason = `Task ${task.id} failed independent review: ${state.review?.findings.join("; ") ?? "No passing review"}. Actor edits retained at ${record.path}.`
-        await save("parallel-review-rejected", reason, task.id)
-        delete state.parallel
-        delete state.output
-        await save(
-          "parallel-repair-pending",
-          `Task ${task.id} awaits the Chief's repair decision; the previous Actor workspace remains in history.`,
-          task.id,
-        )
-        fail(task.id, new ParallelTaskReviewRejected(reason), "review")
+      } catch (error) {
+        await serialize(async () => {
+          state.status = "reviewing"
+          recordTaskReviewFailure(mission, task.id, error instanceof Error ? error.message : String(error))
+        })
+        fail(task.id, error, "review")
+        if (hooks.fatal?.(error)) reviewStopped = true
       }
-    } catch (error) {
-      state.status = "reviewing"
-      recordTaskReviewFailure(mission, task.id, error instanceof Error ? error.message : String(error))
-      fail(task.id, error, "review")
-      if (hooks.fatal?.(error)) break
-    }
-  }
+    },
+    ports.signal,
+    reviewLimit,
+  )
   return wave.flatMap((task) => failures.get(task.id) ?? [])
 }

@@ -55,6 +55,35 @@ describe("dependency-ready parallel waves", () => {
     ])
   })
 
+  it("bounds concurrent children to the supplied limit while preserving input order", async () => {
+    const twoStarted = barrier()
+    const finish = barrier()
+    const started: number[] = []
+    let active = 0
+    let maxActive = 0
+    const running = runJoinedWave(
+      [1, 2, 3, 4],
+      async (id) => {
+        active += 1
+        maxActive = Math.max(maxActive, active)
+        started.push(id)
+        if (started.length === 2) twoStarted.release()
+        await finish.wait
+        active -= 1
+        return id
+      },
+      undefined,
+      2,
+    )
+    await twoStarted.wait
+    expect(started).toEqual([1, 2])
+    expect(maxActive).toBe(2)
+    finish.release()
+    expect(await running).toEqual([1, 2, 3, 4].map((value) => ({ status: "fulfilled", value })))
+    expect(started).toEqual([1, 2, 3, 4])
+    expect(maxActive).toBe(2)
+  })
+
   it("joins other children before exposing a failure to recovery", async () => {
     const blocked = barrier()
     const entered = barrier()

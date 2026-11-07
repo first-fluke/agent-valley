@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { ParallelTaskReviewRejected, type ParallelWaveHooks, performParallelWave } from "./coordinator-parallel"
 import { fixture } from "./goal-supervision.fixture"
 import type { TaskWorktreeRecord } from "./parallel-workspace"
-import type { ChiefPorts, ChiefTask, Mission } from "./types"
+import { type ChiefPorts, type ChiefTask, executionPolicySchema, type Mission } from "./types"
 
 function barrier() {
   let release: () => void = () => {}
@@ -249,5 +249,150 @@ describe("parallel Chief task coordination", () => {
     ])
     expect(parallel.prepare).not.toHaveBeenCalled()
     expect(hooks.run).not.toHaveBeenCalled()
+  })
+
+  it("overlaps independent reviews up to maxParallel only after every integration finished", async () => {
+    const { mission, ports, wave, hooks, events } = setup()
+    wave.push({
+      id: "c",
+      title: "c",
+      personaId: "worker",
+      instructions: "Work c",
+      acceptance: ["Verified c"],
+      dependencies: [],
+    })
+    mission.tasks.push({ id: "c", reviewerId: "reviewer", status: "pending", attempts: 0 })
+    mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 2 })
+    const started = barrier()
+    const finish = barrier()
+    const reviewed: string[] = []
+    let active = 0
+    let maxActive = 0
+    hooks.review = vi.fn(async (task, state) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      reviewed.push(task.id)
+      events.push(`review:${task.id}`)
+      if (reviewed.length === 2) started.release()
+      await finish.wait
+      active -= 1
+      state.review = { passed: true, summary: "Inspected real output", findings: [] }
+    })
+    const running = performParallelWave(mission, ports, wave, hooks)
+    await started.wait
+    expect(maxActive).toBe(2)
+    expect(reviewed).toHaveLength(2)
+    const firstReview = events.findIndex((event) => event.startsWith("review:"))
+    const lastIntegration = events.reduce((last, event, index) => (event.startsWith("integrate:") ? index : last), -1)
+    expect(lastIntegration).toBeLessThan(firstReview)
+    finish.release()
+    expect(await running).toEqual([])
+    expect(reviewed).toHaveLength(3)
+    expect(maxActive).toBe(2)
+    expect(mission.tasks.every((state) => state.status === "completed")).toBe(true)
+  })
+
+  it("serializes mission-state checkpoints while the review Actor calls overlap", async () => {
+    const { mission, ports, wave, hooks } = setup()
+    mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 2 })
+    const bothReviewing = barrier()
+    const finish = barrier()
+    let reviewCount = 0
+    let reviewActive = 0
+    let maxReviewActive = 0
+    let saving = 0
+    let maxSaving = 0
+    hooks.review = vi.fn(async (_task, state) => {
+      reviewActive += 1
+      maxReviewActive = Math.max(maxReviewActive, reviewActive)
+      if (++reviewCount === 2) bothReviewing.release()
+      await finish.wait
+      reviewActive -= 1
+      state.review = { passed: true, summary: "Inspected real output", findings: [] }
+    })
+    const checkpoint = hooks.save
+    hooks.save = vi.fn(async (stage, message, taskId) => {
+      saving += 1
+      maxSaving = Math.max(maxSaving, saving)
+      await Promise.resolve()
+      await Promise.resolve()
+      await checkpoint(stage, message, taskId)
+      saving -= 1
+    })
+    const running = performParallelWave(mission, ports, wave, hooks)
+    await bothReviewing.wait
+    finish.release()
+    expect(await running).toEqual([])
+    expect(maxReviewActive).toBe(2)
+    expect(maxSaving).toBe(1)
+  })
+
+  it("stops starting reviews after a fatal review failure and joins the in-flight review", async () => {
+    const { mission, ports, wave, hooks } = setup()
+    wave.push({
+      id: "c",
+      title: "c",
+      personaId: "worker",
+      instructions: "Work c",
+      acceptance: ["Verified c"],
+      dependencies: [],
+    })
+    mission.tasks.push({ id: "c", reviewerId: "reviewer", status: "pending", attempts: 0 })
+    mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 2 })
+    const violation = new Error("Review changed the product")
+    const bStarted = barrier()
+    const fatalSeen = barrier()
+    const finish = barrier()
+    const reviewed: string[] = []
+    hooks.review = vi.fn(async (task, state) => {
+      reviewed.push(task.id)
+      if (task.id === "a") {
+        await bStarted.wait
+        throw violation
+      }
+      if (task.id === "b") {
+        bStarted.release()
+        await finish.wait
+      }
+      state.review = { passed: true, summary: "Passed", findings: [] }
+    })
+    hooks.fatal = (error) => {
+      if (error === violation) fatalSeen.release()
+      return error === violation
+    }
+    const running = performParallelWave(mission, ports, wave, hooks)
+    await bStarted.wait
+    await fatalSeen.wait
+    finish.release()
+    const failures = await running
+    expect(reviewed).toEqual(["a", "b"])
+    expect(failures.find((failure) => failure.taskId === "a")?.error).toBe(violation)
+    expect(mission.tasks.find((state) => state.id === "c")?.status).toBe("reviewing")
+  })
+
+  it("reviews sequentially in plan order when maxParallel is 1", async () => {
+    const { mission, ports, wave, hooks, events } = setup()
+    mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 1 })
+    const order: string[] = []
+    let active = 0
+    let maxActive = 0
+    hooks.review = vi.fn(async (task, state) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      order.push(task.id)
+      events.push(`review:${task.id}`)
+      await Promise.resolve()
+      active -= 1
+      state.review = { passed: true, summary: "Inspected real output", findings: [] }
+    })
+    expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
+    expect(order).toEqual(["a", "b"])
+    expect(maxActive).toBe(1)
+    expect(events.filter((event) => /^(integrate|review):/.test(event))).toEqual([
+      "integrate:a",
+      "integrate:b",
+      "review:a",
+      "review:b",
+    ])
   })
 })

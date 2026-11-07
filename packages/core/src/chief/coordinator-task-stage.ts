@@ -12,25 +12,40 @@ import type { ChiefTask, ChiefTaskState } from "./types"
 
 export async function runTaskStage(context: CoordinatorContext): Promise<StageTransition> {
   const { mission, ports, checkpoint, run, persona, save, checkAbort, requestRecovery, protectedFailure } = context
+  // Review Actor calls overlap, but every mission-state mutation and checkpoint stays serialized so saved
+  // checkpoints remain consistent across concurrent independent reviews.
+  let mutationQueue: Promise<unknown> = Promise.resolve()
+  const serialize = <T>(fn: () => Promise<T> | T): Promise<T> => {
+    const next = mutationQueue.then(fn)
+    mutationQueue = next.catch(() => {})
+    return next
+  }
   const taskReview = async (task: ChiefTask, state: ChiefTaskState) => {
-    const reviewer = selectTaskReviewer(mission, task, state)
-    state.status = "reviewing"
-    await checkpoint.transition("reviewing", "review", `Reviewing ${task.id} with ${state.reviewerId}.`, task.id)
+    const { reviewer, prompt } = await serialize(async () => {
+      const reviewer = selectTaskReviewer(mission, task, state)
+      state.status = "reviewing"
+      await checkpoint.transition("reviewing", "review", `Reviewing ${task.id} with ${state.reviewerId}.`, task.id)
+      return { reviewer, prompt: reviewPrompt(mission, task, state) }
+    })
     let review: ReturnType<typeof parseReview>
     try {
-      review = parseReview(await run(reviewer, reviewPrompt(mission, task, state), "review", task.id))
+      review = parseReview(await run(reviewer, prompt, "review", task.id))
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      recordTaskReviewFailure(mission, task.id, reason)
-      await save(
-        "review-pending",
-        `Review for ${task.id} returned no verdict; successful work remains pending review. ${reason}`,
-        task.id,
-      )
+      await serialize(async () => {
+        recordTaskReviewFailure(mission, task.id, reason)
+        await save(
+          "review-pending",
+          `Review for ${task.id} returned no verdict; successful work remains pending review. ${reason}`,
+          task.id,
+        )
+      })
       throw error
     }
-    applyTaskReviewResult(mission, state, review)
-    await save("review", state.review.summary, task.id)
+    await serialize(async () => {
+      applyTaskReviewResult(mission, state, review)
+      await save("review", state.review.summary, task.id)
+    })
   }
   const performTask = async (task: ChiefTask, state: ChiefTaskState) => {
     while (state.status !== "completed") {
@@ -158,6 +173,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
         save,
         review: taskReview,
         fatal: protectedFailure,
+        serialize,
       })
       // Resolve real failures first; a rejected sibling's old probe wait must not hide them.
       const primary = failures.filter(

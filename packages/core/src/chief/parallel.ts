@@ -10,13 +10,15 @@ export function readyTaskWave(plan: ChiefPlan, states: ChiefTaskState[], limit: 
     .slice(0, limit)
 }
 
-/** Starts every child before waiting, preserves input order, and joins on abort. */
+/** Starts up to `limit` children at once, preserves input order, and joins on abort. */
 export async function runJoinedWave<T, R>(
   items: readonly T[],
   run: (item: T, signal: AbortSignal) => Promise<R>,
   signal?: AbortSignal,
+  limit: number = Math.max(1, items.length),
 ): Promise<PromiseSettledResult<R>[]> {
   signal?.throwIfAborted()
+  if (!Number.isInteger(limit) || limit < 1) throw new Error("Use a positive integer parallel Actor limit.")
   const children = items.map(() => new AbortController())
   const abort = () => {
     for (const child of children) child.abort(signal?.reason)
@@ -24,16 +26,24 @@ export async function runJoinedWave<T, R>(
   signal?.addEventListener("abort", abort, { once: true })
   try {
     if (signal?.aborted) abort()
-    return await Promise.allSettled(
-      items.map((item, index) => {
+    const results: PromiseSettledResult<R>[] = new Array(items.length)
+    let next = 0
+    const worker = async () => {
+      while (next < items.length) {
+        const index = next++
         const child = children[index]
-        if (!child) throw new Error("Restore the parallel Actor wave before continuing.")
-        return Promise.resolve().then(() => {
+        const item = items[index]
+        if (!child || item === undefined) throw new Error("Restore the parallel Actor wave before continuing.")
+        try {
           child.signal.throwIfAborted()
-          return run(item, child.signal)
-        })
-      }),
-    )
+          results[index] = { status: "fulfilled", value: await run(item, child.signal) }
+        } catch (error) {
+          results[index] = { status: "rejected", reason: error }
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()))
+    return results
   } finally {
     signal?.removeEventListener("abort", abort)
   }
