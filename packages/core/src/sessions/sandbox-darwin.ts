@@ -24,6 +24,8 @@
  *   - Outbound network restricted to HTTP/HTTPS ports, plus local DNS
  *     resolution and local unix-domain sockets (ssh-agent and similar —
  *     these never leave the host).
+ *   - opencode only: loopback TCP (bind/inbound/outbound on localhost) for
+ *     its own CLI session server; no other TCP listeners.
  *   - Named Unix-domain listeners limited to the workspace, the OS tmp
  *     directory and the shared system tmp dirs; TCP listeners and other
  *     local socket paths stay denied.
@@ -251,6 +253,15 @@ ${unixListenerRules}
 (allow network-outbound (remote udp "*:53"))
 (allow network-outbound (remote tcp "*:443"))
 (allow network-outbound (remote tcp "*:80"))
+${
+  req.agentType === "opencode"
+    ? `; opencode serves its own CLI session over a loopback HTTP server; without this it exits
+; before readiness and the real provider error never surfaces. Loopback only.
+(allow network-bind (local ip "localhost:*"))
+(allow network-inbound (local ip "localhost:*"))
+(allow network-outbound (remote ip "localhost:*"))`
+    : ""
+}
 `
 }
 

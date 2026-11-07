@@ -242,6 +242,10 @@ describe("buildDarwinSandboxCommand", () => {
     expect(opencode).toContain(`(allow file-write* (subpath "${homedir()}/.local/share/opencode"))`)
     expect(opencode).toContain(`(allow file-write* (subpath "${homedir()}/.config/opencode"))`)
     expect(opencode).toContain(`(deny file-read* (subpath "${homedir()}/.claude"))`)
+    // opencode serves its CLI session over loopback; other agents keep TCP listeners denied.
+    expect(opencode).toContain('(allow network-bind (local ip "localhost:*"))')
+    expect(opencode).toContain('(allow network-inbound (local ip "localhost:*"))')
+    expect(opencode).toContain('(allow network-outbound (remote ip "localhost:*"))')
   })
 
   test.skipIf(process.platform !== "darwin")("commits in a real linked worktree and denies sibling metadata", () => {
