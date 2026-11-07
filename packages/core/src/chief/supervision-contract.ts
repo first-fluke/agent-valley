@@ -37,8 +37,8 @@ export function validateOriginalAcceptance(plan: ChiefPlan, mission: Mission): v
 }
 
 export function parseSupervisionResponse(source: string, mission: Mission): SupervisionResponse {
-  if (source.length > 8_000)
-    throw new Error("Chief Director supervision response exceeds 8,000 characters. Return a concise recovery decision.")
+  // The shared JSON bound in parseJson and the per-field text limits apply; a supervision-only
+  // 8,000-character cutoff rejected valid repair decisions and burned a recovery round each time.
   const decision = supervisionResponseSchema.parse(normalizeActorAssignment(parseJson(source, "Supervision")))
   if (
     mission.tasks.some((task) => task.effectState === "unknown") &&

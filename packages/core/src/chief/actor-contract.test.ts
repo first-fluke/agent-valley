@@ -160,6 +160,19 @@ describe("Director and Actor contract compatibility", () => {
     },
   )
 
+  it("accepts a valid repair decision longer than the former 8,000-character cutoff", () => {
+    const { mission } = fixture()
+    mission.plan = structuredClone(plan)
+    const source = JSON.stringify({
+      action: "repair",
+      reason: "Detailed inspection evidence follows.",
+      instructions: "x".repeat(9_000),
+      taskId: "onboarding",
+    })
+    expect(source.length).toBeGreaterThan(8_000)
+    expect(parseSupervisionResponse(source, mission)).toMatchObject({ action: "repair", taskId: "onboarding" })
+  })
+
   it("accepts canonical recovery assignments and preserves legacy task state IDs", () => {
     const { mission } = fixture()
     mission.plan = structuredClone(plan)
