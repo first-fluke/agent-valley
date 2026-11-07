@@ -202,6 +202,16 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           "The supplied changeSet was computed by AV from git objects (the Actor's integrated snapshot versus its baseline), not claimed by the Actor. Start provenance verification from its file list, sizes, sha256 hashes and unified diff instead of rediscovering changed files; still inspect the integrated deliverables and verify the cited revisions.",
         ]
       : []),
+    ...(hasSourceEvidence
+      ? [
+          "Provenance is sufficient when the supplied snapshotRef/workerRef revisions resolve and the integrated deliverable bytes match the receipt or changeSet hashes. Object ids cited only inside Actor-authored manifests (intermediate trees or local commits of a disposed Actor workspace) are not required to resolve; note them as unavailable without treating them as a blocker.",
+        ]
+      : []),
+    ...(mission.containerObservationPolicy
+      ? []
+      : [
+          "No container or service observation policy is configured for this mission: do not require a deployment target inventory, target health, availability or recent-error observations, and do not treat the sandbox's deliberate av.yaml read denial as a blocker. Numeric targets in goal criteria mean the goal's own documented targets.",
+        ]),
     "Reject incomplete requirements, missing deliverables, weakened tests, correctness defects, or missing evidence.",
     ...(mission.technicalLeadId
       ? [
