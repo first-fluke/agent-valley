@@ -13,7 +13,9 @@ let home: string
 let outside: string
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync("/tmp/avs-"))
+  // The shared system tmp dirs are writable and listener-capable inside the sandbox, so the
+  // external/home fixtures must live elsewhere; the repository checkout is outside every grant.
+  root = realpathSync(mkdtempSync(join(process.cwd(), ".avs-")))
   workspace = join(root, "w")
   workspaceAlias = join(root, "wa")
   temporary = join(root, "t")
@@ -23,7 +25,7 @@ beforeEach(() => {
   for (const path of [workspace, temporary, home, outside, join(home, ".cache"), join(home, ".claude")]) mkdirSync(path)
   symlinkSync(workspace, workspaceAlias, "dir")
   symlinkSync(temporary, temporaryAlias, "dir")
-  // Keep external fixture/cache paths outside the sandbox's temporary allowance.
+  // Keep the OS temporary allowance pointed inside the fixture, away from the external paths.
   vi.stubEnv("TMPDIR", temporaryAlias)
 })
 

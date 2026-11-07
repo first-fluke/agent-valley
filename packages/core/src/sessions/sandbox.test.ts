@@ -202,6 +202,9 @@ describe("buildDarwinSandboxCommand", () => {
     expect(profile).toContain("(allow pseudo-tty)")
     expect(profile).toContain('(allow file-ioctl (literal "/dev/ptmx"))')
     expect(profile).toContain('(allow file-write-data (literal "/dev/ptmx"))')
+    // openpty needs the slave device too; verified on macOS 26 (otherwise "out of pty devices").
+    expect(profile).toContain('(allow file-write* (regex #"^/dev/ttys[0-9]+$"))')
+    expect(profile).toContain('(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))')
     // The added grants must not outrank the credential denies (last match wins).
     expect(profile.indexOf('(allow file-write* (subpath "/tmp"))')).toBeLessThan(
       profile.indexOf('(deny file-write* (subpath "/home/actor/.config/agent-valley"))'),

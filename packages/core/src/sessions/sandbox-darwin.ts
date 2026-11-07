@@ -15,9 +15,12 @@
  *     create fixed scratch paths there (`/private/tmp/arc-uid-501` for
  *     Cargo, npm/bun caches, shell helpers) regardless of `TMPDIR`, so
  *     denying them fails otherwise healthy actor commands with EPERM.
- *   - Pseudo-terminal allocation (`pseudo-tty` + `/dev/ptmx` ioctl), so an
- *     actor CLI or review shell can open a pty instead of failing at
- *     `grantpt` with EPERM.
+ *   - Pseudo-terminal allocation (`pseudo-tty`, the `/dev/ptmx` ioctl and
+ *     write/ioctl on the `/dev/ttysNNN` slave devices), so an actor CLI or
+ *     review shell can open a pty instead of failing at `grantpt` with
+ *     EPERM or "out of pty devices". Verified on macOS 26: the master
+ *     ioctl alone still fails; the slave device grant is what makes
+ *     `openpty` succeed.
  *   - Outbound network restricted to HTTP/HTTPS ports, plus local DNS
  *     resolution and local unix-domain sockets (ssh-agent and similar —
  *     these never leave the host).
@@ -227,8 +230,12 @@ ${denyReadRules}
 ${writeRules}
 ${gitWriteRules}
 ${deviceWriteRules}
-; Pty allocation ioctls the master device; write-data alone is not enough.
+; Pty allocation ioctls the master device, then opens and configures the
+; slave (/dev/ttysNNN). Without the slave grant openpty fails with
+; "out of pty devices" even though pseudo-tty and the ptmx ioctl are allowed.
 (allow file-ioctl (literal "/dev/ptmx"))
+(allow file-write* (regex #"^/dev/ttys[0-9]+$"))
+(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))
 ${denyWriteRules}
 
 ; Network — outbound denied by default. Local DNS + unix-domain sockets
