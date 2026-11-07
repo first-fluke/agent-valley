@@ -19,11 +19,18 @@ describe("Chief Director outcome report contract", () => {
     expect(parseReport(wrap(JSON.stringify(value)))).toEqual(value)
   })
 
+  it("repairs a complete narrated report while preserving its strict schema and text", () => {
+    const value = { ...report(), summary: 'Keep {source} and "quoted" evidence unchanged.' }
+    const source = `${JSON.stringify(value).slice(0, -1)},}`
+    expect(parseReport(`Report:\n\`\`\`json\n${source}\n\`\`\`\nEnd.`)).toEqual(value)
+    const invalid = `${JSON.stringify(value).slice(0, -1)},completed:true,}`
+    expect(() => parseReport(invalid)).toThrow()
+  })
+
   it.each([
     (json: string) => `${json}\n${json}`,
     (json: string) => `${json}\n{"unfinished":`,
-    (json: string) => `Report:\n${json.slice(0, -1)},}\nEnd.`,
-  ])("rejects ambiguous, incomplete or malformed reports instead of choosing an answer", (wrap) => {
+  ])("rejects ambiguous or incomplete reports instead of choosing an answer", (wrap) => {
     expect(() => parseReport(wrap(JSON.stringify(report())))).toThrow(/not valid JSON/)
   })
 

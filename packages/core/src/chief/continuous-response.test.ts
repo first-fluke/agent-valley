@@ -10,6 +10,17 @@ describe("continuous Chief response parsing", () => {
     expect(parseContinuousDecision(wrap(JSON.stringify(decision)))).toEqual(decision)
   })
 
+  it("repairs a complete narrated decision without accepting extra schema fields", () => {
+    const source = "{action:'wait',reason:'Awaiting source',}"
+    expect(parseContinuousDecision(`Decision:\n\`\`\`json\n${source}\n\`\`\`\nEnd.`)).toEqual({
+      action: "wait",
+      reason: "Awaiting source",
+    })
+    expect(() => parseContinuousDecision("{action:'wait',reason:'Awaiting source',run:'command',}")).toThrow(
+      "Invalid Chief decision",
+    )
+  })
+
   it("preserves the existing decision allowance above the planning response limit", () => {
     const decision = {
       action: "execute",
@@ -26,9 +37,8 @@ describe("continuous Chief response parsing", () => {
   it.each([
     (json: string) => `${json}\n${json}`,
     (json: string) => `${json}\n{"unfinished":`,
-    (json: string) => `Decision:\n${json.slice(0, -1)},}\nEnd.`,
     (json: string) => `Decision:\n[${json}]\nEnd.`,
-  ])("keeps ambiguous, incomplete, malformed or non-object decisions invalid", (wrap) => {
+  ])("keeps ambiguous, incomplete or non-object decisions invalid", (wrap) => {
     expect(() => parseContinuousDecision(wrap('{"action":"wait","reason":"Awaiting source"}'))).toThrow(
       "Invalid Chief decision",
     )

@@ -68,8 +68,43 @@ describe("structured JSON response boundaries", () => {
     expect(() => parsePlan('Plan:\n[{"tasks":[]}]\nDone.', [])).toThrow()
   })
 
-  it("does not repair invalid JSON syntax", () => {
-    expect(() => parseJson('Plan:\n{"tasks":[],}\nDone.', "Planning")).toThrow()
+  it.each([
+    ['{"value":1,}', { value: 1 }],
+    ['{"first":1 "second":2}', { first: 1, second: 2 }],
+    ["{'value':'kept'}", { value: "kept" }],
+    ['{value:"kept"}', { value: "kept" }],
+    ['{"value":"undefined",}', { value: "undefined" }],
+  ] as const)("repairs minor syntax in one complete bare, fenced or narrated object: %s", (source, value) => {
+    for (const wrapped of [source, `\`\`\`json\n${source}\n\`\`\``, `Plan:\n${source}\nDone.`]) {
+      expect(parseJson(wrapped, "Planning")).toEqual(value)
+    }
+  })
+
+  it("preserves string contents while repairing surrounding syntax", () => {
+    const value = { note: 'Keep { braces } and [ brackets ], ... and "quotes", path C:\\work' }
+    const source = `${JSON.stringify(value).slice(0, -1)},}`
+    expect(parseJson(source, "Planning")).toEqual(value)
+  })
+
+  it("keeps strict plan schema validation after repairing syntax", () => {
+    expect(parseJson("{tasks:[],}", "Planning")).toEqual({ tasks: [] })
+    expect(() => parsePlan("{tasks:[],}", [])).toThrow()
+  })
+
+  it.each([
+    '{"tasks":[{"id":"one"}]',
+    '{"note":"unfinished}',
+    "{note:'unfinished}",
+    '{"tasks":[}}',
+    '{"tasks":[...]}',
+    '{"value":}',
+    '{"value":,"next":1}',
+    '{"value":undefined}',
+    '{"value":}\n{"valid":1}',
+    '{first:1}\n{second:2}',
+  ])("does not repair incomplete, mismatched, omitted or ambiguous content: %s", (source) => {
+    expect(() => parseJson(source, "Planning")).toThrow()
+    expect(() => parseJson(`\`\`\`json\n${source}\n\`\`\``, "Planning")).toThrow()
   })
 
   it("rejects a truncated JSON object", () => {
@@ -78,6 +113,10 @@ describe("structured JSON response boundaries", () => {
 
   it("rejects two distinct fenced JSON answers", () => {
     expect(() => parseJson('```json\n{"first":1}\n```\n```json\n{"second":2}\n```', "Planning")).toThrow()
+  })
+
+  it("rejects a valid fenced answer followed by an incomplete second JSON object", () => {
+    expect(() => parseJson('```json\n{"value":1}\n```\n{"unfinished":', "Planning")).toThrow()
   })
 
   it("rejects two distinct unfenced JSON answers", () => {
@@ -101,5 +140,13 @@ describe("structured JSON response boundaries", () => {
     const value = { value: "x".repeat(MAX_JSON_RESPONSE_LENGTH) }
     expect(parseJson(JSON.stringify(value), "Decision", 256_000)).toEqual(value)
     expect(() => parseJson(JSON.stringify(value), "Planning")).toThrow("exceeds 128 KB")
+  })
+
+  it.each([MAX_JSON_RESPONSE_LENGTH, 256_000])("bounds both original and repaired text at %s characters", (limit) => {
+    const overhead = '{value:""}'.length
+    const source = `{value:"${"x".repeat(limit - overhead)}"}`
+    expect(source.length).toBe(limit)
+    expect(() => parseJson(source, "Planning", limit)).toThrow()
+    expect(() => parseJson(`${source} `, "Planning", limit)).toThrow()
   })
 })
