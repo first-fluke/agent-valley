@@ -395,12 +395,21 @@ export async function dispatchOrder(
     if (
       normalized.cycles !== undefined ||
       normalized.interval !== undefined ||
-      normalized.sourceIntegration !== undefined
+      normalized.sourceIntegration !== undefined ||
+      normalized.charterAppend !== undefined ||
+      normalized.charterSupersede !== undefined
     )
       throw new Error(
-        "--cycles, --interval and --source-integration apply to continuing orders. Omit them when using --once or resuming a single mission.",
+        "--cycles, --interval, --source-integration and charter amendments apply to continuing orders. Omit them when using --once or resuming a single mission.",
       )
-    const { once: _once, cycles: _cycles, interval: _interval, ...missionOptions } = normalized
+    const {
+      once: _once,
+      cycles: _cycles,
+      interval: _interval,
+      charterAppend: _charterAppend,
+      charterSupersede: _charterSupersede,
+      ...missionOptions
+    } = normalized
     const result = await (missionOptions.worker || missionOptions.supervise === false
       ? (dependencies.single ?? runOrder)(goal, missionOptions, root)
       : (dependencies.supervised ?? superviseOrder)(goal, missionOptions, root))
@@ -437,6 +446,8 @@ export function registerChiefCommands(program: Command): void {
     .option("--once", "Stop after one verified goal instead of continuing improvements")
     .option("--cycles <count>", "Cumulative verified improvement limit; default continues until stopped")
     .option("--interval <seconds>", "Wait before selecting again when no new goal is justified (default 300)")
+    .option("--charter-append <text>", "On operation resume, record an operator correction to the saved charter")
+    .option("--charter-supersede <ids>", "With --charter-append, retract earlier amendment IDs (comma-separated)")
     .option("--workspace <path>", "Target Git repository (defaults to av.yaml)")
     .addOption(
       new Option(

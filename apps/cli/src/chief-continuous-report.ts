@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import type { CodeDelivery } from "@agent-valley/core/chief/code-delivery-contract"
 import { containerObservationLines } from "@agent-valley/core/chief/container-observation-state"
-import type { ContinuousOperation } from "@agent-valley/core/chief/continuous-contract"
+import { activeCharterAmendments, type ContinuousOperation } from "@agent-valley/core/chief/continuous-contract"
 import { markdown } from "@agent-valley/core/chief/reports"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { writeTextAtomic } from "@agent-valley/core/util/atomic-json"
@@ -41,10 +41,15 @@ export function renderOperationReport(
   delivery?: CodeDelivery,
   unavailable = false,
 ): string {
+  const active = new Set(activeCharterAmendments(operation).map((entry) => entry.id))
   const lines = [
     `# Operation ${operation.id}`,
     "",
     `Charter: ${operation.charter}`,
+    ...(operation.charterAmendments ?? []).map(
+      (entry) =>
+        `Charter amendment #${entry.id} at ${entry.at}${active.has(entry.id) ? "" : " (superseded; retained for audit)"}: ${entry.text}`,
+    ),
     `Status: ${operation.phase}`,
     `Verified completed improvements: ${operation.completedCycles}${operation.cycleLimit ? ` / ${operation.cycleLimit}` : ""}`,
     `Chief Director: ${operation.settings.actor} / ${operation.settings.model ?? "pinned native default"}`,

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { containerObservationPolicySchema } from "@agent-valley/core/chief/container-observation-policy"
+import { activeCharterAmendments } from "@agent-valley/core/chief/continuous-contract"
 import { createContinuousMissionWorkspace } from "@agent-valley/core/chief/continuous-workspace"
 import { fingerprintWorkspace } from "@agent-valley/core/chief/fingerprint"
 import { MissionStore } from "@agent-valley/core/chief/store"
@@ -281,5 +282,76 @@ describe("continuous operation CLI", () => {
     await expect(runOperation(undefined, { resume: operation.id, model: "different-model" }, root)).rejects.toThrow(
       "retains its Chief Director",
     )
+  })
+
+  it("records an operator charter correction on resume without rewriting the saved charter", async () => {
+    const created = await initializeOperation("Improve", { workspace: root }, root)
+    const controller = new AbortController()
+    const decide = vi.fn().mockResolvedValue({ action: "wait", reason: "Need fresh observations" })
+    const result = await runOperation(
+      undefined,
+      { resume: created.id, charterAppend: "The actor sandbox now permits /tmp writes." },
+      root,
+      {
+        signal: controller.signal,
+        decide,
+        delay: async () => {
+          controller.abort()
+        },
+      },
+    )
+    expect(result.charter).toBe("Improve")
+    expect(result.completedCycles).toBe(0)
+    expect(result.charterAmendments).toEqual([
+      { id: 1, at: expect.any(String), text: "The actor sandbox now permits /tmp writes." },
+    ])
+    expect((await operationStore(root).load(created.id)).charterAmendments).toHaveLength(1)
+    expect(renderOperationReport(result)).toContain("Charter amendment #1")
+  })
+
+  it("retracts an earlier amendment on the next resume and keeps both in the audit trail", async () => {
+    const created = await initializeOperation("Improve", { workspace: root }, root)
+    const decide = vi.fn().mockResolvedValue({ action: "wait", reason: "Need fresh observations" })
+    // Each resume needs its own controller: the previous run aborted its own wait.
+    const pausedRun = () => {
+      const controller = new AbortController()
+      return {
+        signal: controller.signal,
+        decide,
+        delay: async () => {
+          controller.abort()
+        },
+      }
+    }
+    await runOperation(undefined, { resume: created.id, charterAppend: "Avoid /tmp writes." }, root, pausedRun())
+    const result = await runOperation(
+      undefined,
+      { resume: created.id, charterAppend: "/tmp writes are permitted.", charterSupersede: "1" },
+      root,
+      pausedRun(),
+    )
+    expect(result.charter).toBe("Improve")
+    expect(activeCharterAmendments(result).map((entry) => entry.id)).toEqual([2])
+    const report = renderOperationReport(result)
+    expect(report).toContain("Charter amendment #1")
+    expect(report).toContain("(superseded; retained for audit)")
+    expect(report).toContain("Charter amendment #2")
+  })
+
+  it("rejects charter amendments outside an operation resume and invalid supersede targets", async () => {
+    await expect(runOperation("Improve", { workspace: root, charterAppend: "Correction" }, root)).rejects.toThrow(
+      "Charter amendments correct a saved operation",
+    )
+    const created = await initializeOperation("Improve", { workspace: root }, root)
+    await expect(runOperation(undefined, { resume: created.id, charterSupersede: "1" }, root)).rejects.toThrow(
+      "Add --charter-append",
+    )
+    await expect(
+      runOperation(undefined, { resume: created.id, charterAppend: "Correction", charterSupersede: "0" }, root),
+    ).rejects.toThrow("--charter-supersede takes comma-separated")
+    await expect(
+      runOperation(undefined, { resume: created.id, charterAppend: "Correction", charterSupersede: "9" }, root),
+    ).rejects.toThrow("not recorded")
+    expect((await operationStore(root).load(created.id)).charterAmendments).toBeUndefined()
   })
 })

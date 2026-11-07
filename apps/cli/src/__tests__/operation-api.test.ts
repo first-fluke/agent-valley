@@ -94,6 +94,45 @@ describe("asynchronous operation API", () => {
     })
     expect(launch.mock.calls.at(-1)?.[0].args).toEqual(["order", "--resume", id, "--source-integration", "worktree"])
   })
+  it("passes operator charter amendments through the detached resume launch", async () => {
+    const { api, launch, liveness } = fixture()
+    const first = await api.operate({ charter: "Improve maintainability" })
+    const id = String(first.operationId)
+    const now = new Date().toISOString()
+    await new ContinuousOperationStore(join(root, ".agent-valley/operations")).save({
+      id,
+      repositoryRoot: root,
+      charter: "Improve maintainability",
+      settings: { actor: "codex" },
+      phase: "paused",
+      createdAt: now,
+      updatedAt: now,
+      completedCycles: 1,
+      waitIntervalSec: 60,
+      history: [],
+    })
+    liveness.mockReturnValue("stopped")
+    expect(
+      await api.resume({
+        operationId: id,
+        requestId: "amend",
+        charterAppend: "The actor sandbox now permits /tmp writes.",
+        charterSupersede: [1],
+      }),
+    ).toMatchObject({ accepted: true, operationId: id })
+    expect(launch.mock.calls.at(-1)?.[0].args).toEqual([
+      "order",
+      "--resume",
+      id,
+      "--charter-append",
+      "The actor sandbox now permits /tmp writes.",
+      "--charter-supersede",
+      "1",
+    ])
+    expect(() => api.resume({ operationId: id, charterSupersede: [1] })).toThrow("charterAppend")
+    expect(() => api.resume({ operationId: id, charterAppend: " " })).toThrow()
+  })
+
   it("uses order as the continuous entry and refuses single-goal mode rather than ignoring it", async () => {
     const { api, launch } = fixture()
     const first = await api.order({ goal: "Improve conversion", requestId: "unified-order", cycles: 2 })

@@ -55,11 +55,23 @@ export const mcpOperateSchema = z.strictObject({
   parallel: z.number().int().min(1).max(8).optional(),
   ...budgets,
 })
-export const mcpOperationResumeSchema = z.strictObject({
-  operationId: missionIdSchema,
-  requestId,
-  sourceIntegration: z.enum(["worktree", "snapshot-only"]).optional(),
-})
+export const mcpOperationResumeSchema = z
+  .strictObject({
+    operationId: missionIdSchema,
+    requestId,
+    sourceIntegration: z.enum(["worktree", "snapshot-only"]).optional(),
+    charterAppend: z.string().trim().min(1).max(8_000).optional(),
+    charterSupersede: z.array(z.number().int().min(1).max(50)).max(50).optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.charterSupersede !== undefined && input.charterAppend === undefined)
+      context.addIssue({
+        code: "custom",
+        path: ["charterAppend"],
+        message:
+          "charterSupersede retracts earlier amendments alongside your correction. Add charterAppend with the operator instruction that replaces them.",
+      })
+  })
 export type McpOperateInput = z.infer<typeof mcpOperateSchema>
 export type McpOperationResumeInput = z.infer<typeof mcpOperationResumeSchema>
 export interface McpReportResult extends Record<string, unknown> {

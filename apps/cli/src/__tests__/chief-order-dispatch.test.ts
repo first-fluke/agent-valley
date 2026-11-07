@@ -135,6 +135,34 @@ describe("one public order command", () => {
     expect(dependencies.supervised).not.toHaveBeenCalled()
   })
 
+  it("routes operator charter amendments to the saved operation and rejects them for single missions", async () => {
+    const dependencies = runners()
+    await operationStore(root).save(dependencies.current)
+    await dispatchOrder(
+      undefined,
+      {
+        resume: dependencies.current.id,
+        charterAppend: "The actor sandbox now permits /tmp writes.",
+        charterSupersede: "1",
+      },
+      root,
+      dependencies,
+    )
+    expect(dependencies.continuous).toHaveBeenCalledWith(
+      undefined,
+      {
+        resume: dependencies.current.id,
+        charterAppend: "The actor sandbox now permits /tmp writes.",
+        charterSupersede: "1",
+      },
+      root,
+    )
+    await expect(
+      dispatchOrder("Goal", { once: true, charterAppend: "Correction" }, root, dependencies),
+    ).rejects.toThrow("charter amendments apply to continuing orders")
+    expect(dependencies.supervised).not.toHaveBeenCalled()
+  })
+
   it("rejoins the owning order after an implicitly resumed child completes", async () => {
     const dependencies = runners()
     const parent = dependencies.current
@@ -345,6 +373,8 @@ describe("one public order command", () => {
     expect(command?.helpInformation()).toContain("--once")
     expect(command?.helpInformation()).toContain("--cycles <count>")
     expect(command?.helpInformation()).toContain("--interval <seconds>")
+    expect(command?.helpInformation()).toContain("--charter-append <text>")
+    expect(command?.helpInformation()).toContain("--charter-supersede <ids>")
     expect(program.commands.some((entry) => entry.name() === "operate")).toBe(true)
   })
 })

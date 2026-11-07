@@ -456,4 +456,17 @@ describe("read-only persistent Chief operation decisions", () => {
     expect(prompt).toContain("Installed skill catalog")
     expect(prompt).toContain("oma-market")
   })
+
+  it("carries operator charter amendments as instructions and omits superseded ones", async () => {
+    const current = await operation()
+    current.charterAmendments = [
+      { id: 1, at: "2026-10-05T00:00:00.000Z", text: "Avoid /tmp writes." },
+      { id: 2, at: "2026-10-06T00:00:00.000Z", text: "/tmp writes are permitted.", supersedes: [1] },
+    ]
+    const prompt = continuousDecisionPrompt(current, reportMission(), [])
+    expect(prompt).toContain("The charter and its recorded operator amendments are the operator instruction")
+    expect(prompt).toContain("the newest amendment wins over conflicting charter or earlier amendment text")
+    expect(prompt).toContain("/tmp writes are permitted.")
+    expect(prompt).not.toContain("Avoid /tmp writes.")
+  })
 })

@@ -86,6 +86,20 @@ Verified changes are carried to the next improvement using private Git snapshots
 
 Progress and reports distinguish child verification, source file application, Git commit and confirmed remote push. A child finishing does not mean the charter is complete. The parent records acceptance and continues with a visible decision checkpoint unless it reaches a cycle limit or a saved wait/stop condition.
 
+## Correcting a saved charter
+
+The original charter stays immutable: saved decision checkpoints keep their identity, and the audit trail keeps the instruction each cycle ran under. When an operator instruction becomes wrong or incomplete — for example a caution about a sandbox limit that AV has since changed — record a correction on resume instead of opening a new operation:
+
+```bash
+av order --resume OPERATION_ID --charter-append "The actor sandbox now permits /tmp writes; disregard the earlier caution."
+# Retract an earlier amendment while stating its replacement:
+av order --resume OPERATION_ID --charter-append "Use only the staging API." --charter-supersede 1
+```
+
+Amendments are operator instructions, not evidence. The newest amendment wins over conflicting charter or earlier amendment text, and `--charter-supersede` removes earlier amendment IDs from the Chief's prompt while retaining them in the record for audit. `av operations --report OPERATION_ID` lists every amendment with its ID, timestamp and superseded state. Only the CLI/MCP operator path records amendments; Actor output, reports, tool metadata and organization memory cannot create or expand them.
+
+The operation must not be running: its owner lock rejects a concurrent resume, so stop it (Ctrl-C) or wait for its saved pause first. Amendments leave the charter text, pinned Chief, child settings, spent budgets and cycle count unchanged, and they do not resolve uncertain external effects. Each amendment is at most 8 KB, with at most 50 amendments and 32 KB of amendment text per operation; beyond that, start a new order with a corrected charter. MCP clients use `charterAppend` and `charterSupersede` on `av_operation_resume`.
+
 ## Retained workspaces
 
 After stopping the operation so its owner lock is released, preview reclaimable frozen baseline clones with `av operations --prune OPERATION_ID`. Add `--apply` to remove only the candidates that pass the ownership, clean-tree, liveness and recovery checks. The initial, current, previous and last source-applied baselines, active references, all child/decision workspaces, failed-work evidence and original receipts are retained. Unknown or modified artifacts are skipped with reasons. This command does not remove Git objects from the current baseline or delete source files.
@@ -96,4 +110,4 @@ Accepted cycles also receive immutable per-cycle receipts, so pruning can verify
 
 Submit the operating charter as `goal` to `av_order`; it returns an operation ID immediately. Set `once: true` on the same tool to complete one goal and receive a mission ID. `av_operations`, `av_operation_status`, `av_operation_report`, `av_operation_resume` and `av_operation_cancel` inspect and control continuous operations. Use a stable `requestId` to deduplicate repeated submissions. Disconnecting the client leaves the detached operation running. Cancellation is asynchronous: poll until the operation is paused and its supervisor has stopped.
 
-Managed Actors cannot recursively start or resume operations. They return their findings to the supervising Chief. Use existing `av_status` and `av_report` with child mission IDs for detailed evidence. Operation resume retains the original charter and settings; CLI `--cycles` can extend a bounded operation.
+Managed Actors cannot recursively start or resume operations. They return their findings to the supervising Chief. Use existing `av_status` and `av_report` with child mission IDs for detailed evidence. Operation resume retains the original charter and settings; CLI `--cycles` can extend a bounded operation and `--charter-append` records an operator correction without rewriting the charter.

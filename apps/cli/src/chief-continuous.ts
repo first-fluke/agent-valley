@@ -5,7 +5,11 @@ import { join, resolve } from "node:path"
 import { promisify } from "node:util"
 import { collectContainerObservation } from "@agent-valley/core/chief/container-observation"
 import { recordContinuousAcceptance } from "@agent-valley/core/chief/continuous-acceptance-record"
-import { type ContinuousOperation, operationSchema } from "@agent-valley/core/chief/continuous-contract"
+import {
+  type ContinuousOperation,
+  nextCharterAmendments,
+  operationSchema,
+} from "@agent-valley/core/chief/continuous-contract"
 import { type ContinuousOperationPorts, runContinuousOperation } from "@agent-valley/core/chief/continuous-operation"
 import {
   assertSettledSourceIntegrations,
@@ -67,6 +71,18 @@ const decisionBudgetKeys = ["runs", "duration", "cost", "accountRun", "accountCo
 export interface ContinuousOptions extends OrderOptions {
   cycles?: string
   interval?: string
+  charterAppend?: string
+  charterSupersede?: string
+}
+
+/** Recorded amendment IDs are operator input; reject anything that is not a positive integer list. */
+function amendmentIds(value: string): number[] {
+  const ids = value.split(",").map((entry) => Number(entry.trim()))
+  if (!ids.length || ids.some((id) => !Number.isInteger(id) || id < 1))
+    throw new Error(
+      "--charter-supersede takes comma-separated recorded amendment IDs, e.g. --charter-supersede 1,3. Inspect av operations --report <operation-id>.",
+    )
+  return ids
 }
 
 function integerOption(value: string | undefined, name: string, maximum: number): number | undefined {
@@ -235,6 +251,14 @@ export async function runOperation(
     process.once("SIGTERM", terminate)
   }
   try {
+    if (!options.resume && (options.charterAppend !== undefined || options.charterSupersede !== undefined))
+      throw new Error(
+        "Charter amendments correct a saved operation. Use av order --resume <operation-id> --charter-append <text>.",
+      )
+    if (options.charterSupersede !== undefined && options.charterAppend === undefined)
+      throw new Error(
+        "--charter-supersede retracts earlier amendments alongside your correction. Add --charter-append <text>.",
+      )
     let operation: ContinuousOperation
     if (options.resume) {
       if (options.deliver && options.sourceIntegration === "worktree")
@@ -253,6 +277,15 @@ export async function runOperation(
           "An operation retains its Chief Director and child settings. Reconcile or resume its active child with av order; omit Actor/settings flags on operation resume.",
         )
       operation = await storage.load(id)
+      if (options.charterAppend !== undefined)
+        operation.charterAmendments = nextCharterAmendments(
+          operation,
+          {
+            text: options.charterAppend,
+            ...(options.charterSupersede !== undefined ? { supersedes: amendmentIds(options.charterSupersede) } : {}),
+          },
+          new Date(dependencies.now?.() ?? Date.now()).toISOString(),
+        )
       if (options.retry || decisionBudgetKeys.some((key) => options[key] !== undefined)) {
         if (operation.currentMissionId || !operation.decisionId)
           throw new Error(
@@ -454,6 +487,8 @@ export function registerContinuousCommands(program: Command): void {
     .option("--account-cost <usd>", "Observed USD cost for the decision --account-run after inspecting billing")
     .option("--cycles <count>", "Cumulative verified improvement limit; default continues until stopped")
     .option("--interval <seconds>", "Wait before selecting again when no new goal is justified (default 300)")
+    .option("--charter-append <text>", "On operation resume, record an operator correction to the saved charter")
+    .option("--charter-supersede <ids>", "With --charter-append, retract earlier amendment IDs (comma-separated)")
     .option("--resume <id>", "Resume the saved charter and accepted work")
     .addOption(new Option("--operation-id <id>", "Internal operation identity").hideHelp())
     .action(async (charter: string | undefined, options: ContinuousOptions) => {

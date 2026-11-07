@@ -157,6 +157,10 @@ export class OperationApi {
         await release()
         args.push("--resume", id)
         if (input.sourceIntegration !== undefined) args.push("--source-integration", input.sourceIntegration)
+        if ("charterAppend" in input && input.charterAppend !== undefined)
+          args.push("--charter-append", input.charterAppend)
+        if ("charterSupersede" in input && input.charterSupersede !== undefined)
+          args.push("--charter-supersede", input.charterSupersede.join(","))
       } else {
         const options = {
           workspace: this.workspace,

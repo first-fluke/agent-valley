@@ -59,11 +59,79 @@ const historyEntrySchema = z.strictObject({
   baselinePath: pathSchema,
   sourceIntegration: sourceIntegrationSummarySchema.optional(),
 })
+/**
+ * Operator-only charter corrections. The original charter stays immutable so saved decision
+ * checkpoints keep their identity and the audit trail keeps the instruction each cycle ran under.
+ */
+export const charterAmendmentSchema = z.strictObject({
+  id: z.number().int().min(1).max(50),
+  at: timestampSchema,
+  text: z.string().trim().min(1).max(8_000),
+  supersedes: z.array(z.number().int().min(1).max(50)).max(50).optional(),
+})
+export type CharterAmendment = z.infer<typeof charterAmendmentSchema>
+
+export const charterAmendmentsSchema = z
+  .array(charterAmendmentSchema)
+  .max(50)
+  .superRefine((amendments, context) => {
+    for (const [index, entry] of amendments.entries()) {
+      if (entry.id !== index + 1)
+        context.addIssue({
+          code: "custom",
+          path: [index, "id"],
+          message:
+            "Charter amendment IDs stay sequential from 1 in recorded order. Append with av order --resume <operation-id> --charter-append.",
+        })
+      for (const target of entry.supersedes ?? [])
+        if (target >= entry.id)
+          context.addIssue({
+            code: "custom",
+            path: [index, "supersedes"],
+            message: "A charter amendment can only supersede an earlier recorded amendment ID.",
+          })
+    }
+    if (amendments.reduce((total, entry) => total + entry.text.length, 0) > 32_000)
+      context.addIssue({
+        code: "custom",
+        message:
+          "Charter amendments exceed their 32000 character budget. Start a new order with a corrected charter instead of extending this one.",
+      })
+  })
+
+/** Superseded entries stay in the record for audit but no longer instruct the Chief. */
+export function activeCharterAmendments(operation: ContinuousOperation): CharterAmendment[] {
+  const amendments = operation.charterAmendments ?? []
+  const superseded = new Set(amendments.flatMap((entry) => entry.supersedes ?? []))
+  return amendments.filter((entry) => !superseded.has(entry.id))
+}
+
+/** Resume-only operator input. Actor output, reports and organization memory never reach this path. */
+export function nextCharterAmendments(
+  operation: ContinuousOperation,
+  input: { text: string; supersedes?: number[] },
+  at: string,
+): CharterAmendment[] {
+  const amendments = operation.charterAmendments ?? []
+  const supersedes = input.supersedes?.length ? [...new Set(input.supersedes)].sort((a, b) => a - b) : undefined
+  const known = new Set(amendments.map((entry) => entry.id))
+  for (const id of supersedes ?? [])
+    if (!known.has(id))
+      throw new Error(
+        `Charter amendment ${id} is not recorded. Inspect av operations --report <operation-id> for its amendment IDs.`,
+      )
+  return charterAmendmentsSchema.parse([
+    ...amendments,
+    { id: amendments.length + 1, at, text: input.text, ...(supersedes ? { supersedes } : {}) },
+  ])
+}
+
 export const operationSchema = z
   .strictObject({
     id: operationIdSchema,
     repositoryRoot: pathSchema,
     charter: z.string().trim().min(1).max(32_000),
+    charterAmendments: charterAmendmentsSchema.optional(),
     settings: z.record(z.string().min(1).max(80), z.union([z.string().max(32_000), z.boolean()])),
     actorHealth: z.array(providerHealthEvidenceSchema).max(100).optional(),
     phase: z.enum(["deciding", "running", "accepting", "waiting", "paused", "completed"]),

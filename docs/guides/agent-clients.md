@@ -48,7 +48,7 @@ Ask the client, for example: “Use AV to implement the checkout goal in this re
 | `av_operations`       | List continuous operations                                                                                                                                      |
 | `av_operation_status` | Inspect an operation and its current child mission                                                                                                              |
 | `av_operation_report` | Read decisions, progress and child evidence references                                                                                                          |
-| `av_operation_resume` | Resume the saved operating charter                                                                                                                              |
+| `av_operation_resume` | Resume the saved operating charter; optional `charterAppend`/`charterSupersede` record operator corrections without rewriting it                                |
 | `av_operation_cancel` | Stop the continuous operation and its active work                                                                                                               |
 | `av_missions`         | List saved missions in the bound repository                                                                                                                     |
 | `av_status`           | Inspect progress, actual state, and blockers by mission ID                                                                                                      |
