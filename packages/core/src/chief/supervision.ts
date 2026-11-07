@@ -43,27 +43,70 @@ export function assignTaskStates(
   })
 }
 
+/** A targeted decision resets its named task, changed task definitions and every dependent downstream task. */
+function recoveryResetTaskIds(previousPlan: ChiefPlan, plan: ChiefPlan, targetId?: string): Set<string> {
+  const reset = new Set<string>()
+  if (targetId) reset.add(targetId)
+  for (const task of plan.tasks) {
+    const previous = previousPlan.tasks.find((entry) => entry.id === task.id)
+    if (!previous || JSON.stringify(previous) !== JSON.stringify(task)) reset.add(task.id)
+  }
+  for (;;) {
+    const size = reset.size
+    for (const task of plan.tasks)
+      if (!reset.has(task.id) && task.dependencies.some((id) => reset.has(id))) reset.add(task.id)
+    if (reset.size === size) return reset
+  }
+}
+
 export function applyRecovery(mission: Mission, response: SupervisionResponse): void {
   if (!mission.plan) throw new Error("Chief Director recovery needs an existing plan. Restore the mission checkpoint.")
   if (response.action === "stop" || response.action === "wait") return
   const previousPlan = structuredClone(mission.plan)
-  const interrupted = mission.tasks.find((state) => state.id === mission.supervision?.pendingRecovery?.taskId)
+  const previousStates = mission.tasks
+  const interrupted = previousStates.find((state) => state.id === mission.supervision?.pendingRecovery?.taskId)
   const preserveUnchangedWork = interrupted?.output !== undefined && interrupted.review === undefined
+  let plan: ChiefPlan
+  let targetId: string | undefined
   if (response.action === "replan") {
-    const plan = { tasks: response.tasks }
-    const tasks = assignTaskStates(mission, plan, true, previousPlan, preserveUnchangedWork)
-    mission.plan = plan
-    mission.tasks = tasks
+    plan = { tasks: response.tasks }
+    targetId = mission.supervision?.pendingRecovery?.taskId
   } else {
-    const targetId = response.taskId ?? mission.supervision?.pendingRecovery?.taskId
+    targetId = response.taskId ?? mission.supervision?.pendingRecovery?.taskId
     for (const task of mission.plan.tasks) {
       if (targetId && task.id !== targetId) continue
       if (response.action === "reassign") task.personaId = response.personaId
       task.instructions = `${task.instructions.split(/\n\nChief(?: Director)? recovery:\n/)[0]}\n\nChief Director recovery:\n${response.instructions}`
     }
-    mission.tasks = assignTaskStates(mission, mission.plan, true, previousPlan, preserveUnchangedWork)
+    plan = mission.plan
   }
-  // Recovery can affect other tasks; every approval is refreshed against actual files.
+  const resetTaskIds = recoveryResetTaskIds(previousPlan, plan, targetId)
+  const assigned = assignTaskStates(mission, plan, true, previousPlan, preserveUnchangedWork)
+  const preserved: string[] = []
+  mission.plan = plan
+  mission.tasks = assigned.map((state) => {
+    const previous = previousStates.find((entry) => entry.id === state.id)
+    // A completed approval survives a targeted decision while its recorded deliverable fingerprint stays intact.
+    if (
+      !resetTaskIds.has(state.id) &&
+      previous?.status === "completed" &&
+      previous.output !== undefined &&
+      previous.review?.passed &&
+      previous.fingerprint !== undefined
+    ) {
+      preserved.push(state.id)
+      return { ...previous, reviewerId: state.reviewerId }
+    }
+    return state
+  })
+  for (const taskId of preserved)
+    mission.history.push({
+      at: new Date().toISOString(),
+      stage: "task-preserved",
+      taskId,
+      message: `Kept ${taskId} completed with its passing review and deliverable fingerprint; the ${response.action} decision does not reset it.`,
+    })
+  // Mission-level approvals always refresh against actual files; preserved task approvals keep their recorded evidence.
   delete mission.finalReview
   delete mission.gateReviews
   delete mission.verification

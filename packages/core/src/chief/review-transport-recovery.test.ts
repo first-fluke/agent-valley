@@ -117,7 +117,7 @@ describe("native review failures preserve successful work", () => {
     expect(value.mission.tasks[0]?.repairRound ?? 0).toBe(0)
   })
 
-  it("re-reviews an unchanged approved sibling while fresh work runs only for the Chief's changed task", async () => {
+  it("keeps an approved sibling completed while fresh work runs only for the Chief's changed task", async () => {
     const value = fixture()
     value.mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 1, maxRetries: 0 })
     const task = plan.tasks[0]
@@ -138,7 +138,11 @@ describe("native review failures preserve successful work", () => {
     const work = value.runAgent.mock.calls.filter((call) => call[3] === "work")
     expect(work.filter((call) => call[4]?.taskId === "a")).toHaveLength(1)
     expect(work.filter((call) => call[4]?.taskId === "b")).toHaveLength(2)
-    expect(value.runAgent.mock.calls.filter((call) => call[3] === "review" && call[4]?.taskId === "a")).toHaveLength(2)
+    expect(value.runAgent.mock.calls.filter((call) => call[3] === "review" && call[4]?.taskId === "a")).toHaveLength(1)
+    expect(value.mission.tasks.find((state) => state.id === "a")).toMatchObject({
+      status: "completed",
+      review: { passed: true },
+    })
     expect(
       value.mission.operations?.runs.filter((run) => run.stage === "work").every((run) => run.outcome === "passed"),
     ).toBe(true)
@@ -327,12 +331,16 @@ describe("native review failures preserve successful work", () => {
       instructions: "Use an installed skill and complete the assignment.",
     })
     expect(value.mission.tasks[0]).toMatchObject({
-      status: "reviewing",
+      status: "completed",
       attempts: 1,
       output: "Approved integrated output",
+      review: { passed: true, summary: "Passed", findings: [] },
+      fingerprint: "verified-fingerprint",
     })
-    expect(value.mission.tasks[0]?.review).toBeUndefined()
     expect(value.mission.tasks[1]?.status).toBe("pending")
+    expect(
+      value.mission.history.filter((entry) => entry.stage === "task-preserved").map((entry) => entry.taskId),
+    ).toEqual(["a"])
   })
 
   it("does not rerun completed sibling work after a dispatch failure with no output", async () => {
