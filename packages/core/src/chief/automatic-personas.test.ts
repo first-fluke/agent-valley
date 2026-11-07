@@ -87,6 +87,15 @@ function planning(workerId = "api-engineer", role = "Implement authentication AP
 }
 
 describe("automatic Actor planning", () => {
+  it("accepts one valid Actor roster and plan fenced between Chief explanation and a closing note", () => {
+    const { mission } = fixture()
+    const response = planning()
+    const source = `The implementation plan follows.\n\`\`\`json\n${JSON.stringify(response)}\n\`\`\`\nThe assigned Actors can now begin.`
+    const parsed = parsePlanningResponse(source, mission)
+    expect(parsed.personas).toEqual(response.personas)
+    expect(parsed.plan.tasks).toEqual(response.tasks)
+  })
+
   it.each([
     ["Implement a login API", "api-engineer", "Implement authentication APIs and their regression tests"],
     [
