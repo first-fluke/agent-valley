@@ -143,6 +143,7 @@ describe("continuous verified source worktree integration", () => {
   it.each(["branch", "head"])("rejects source %s drift from the saved policy", async (kind) => {
     const { operation, previous } = await fixture()
     const next = await accepted(previous, (path) => writeFile(join(path, "product.txt"), "Verified product\n"))
+    // A rewritten HEAD is not a fast-forward of the pinned head, so it still needs reconciliation.
     if (kind === "branch") await git(["checkout", "-qb", "changed"])
     else
       await git([
@@ -153,13 +154,38 @@ describe("continuous verified source worktree integration", () => {
         "-c",
         "commit.gpgsign=false",
         "commit",
+        "--amend",
         "--allow-empty",
         "-qm",
-        "concurrent commit",
+        "rewritten history",
       ])
 
     await expect(integrateContinuousSource(operation, previous, next)).rejects.toThrow("branch or HEAD moved")
     expect(await readFile(join(root, "product.txt"), "utf8")).toBe("Initial product\n")
+  })
+
+  it("re-pins a clean fast-forward commit of the applied source and integrates", async () => {
+    const { operation, previous } = await fixture()
+    const next = await accepted(previous, (path) => writeFile(join(path, "product.txt"), "Verified product\n"))
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "operator committed the applied tree",
+    ])
+    const head = (await git(["rev-parse", "HEAD"])).trim()
+
+    const summary = await integrateContinuousSource(operation, previous, next)
+
+    expect(summary.phase).toBe("applied")
+    expect(operation.sourceIntegrationPolicy).toMatchObject({ mode: "worktree", head })
+    expect(await readFile(join(root, "product.txt"), "utf8")).toBe("Verified product\n")
   })
 
   it("recognizes a completed apply whose final receipt save was interrupted", async () => {

@@ -68,8 +68,21 @@ export async function runContinuousOperation(
   const rememberHealth = async (child: Mission): Promise<Mission> => {
     assertIdentity(child)
     const health = mergeProviderHealthSnapshots(operation.actorHealth ?? [], aggregateProviderHealth(child))
-    if (JSON.stringify(health) !== JSON.stringify(operation.actorHealth ?? [])) {
+    // A usage-exhausted provider stays exhausted across the next children; rediscovering it costs each
+    // child a failed probe, a cooldown wait and a handoff before the first review can run.
+    const exhausted = [...(operation.exhaustedProviders ?? [])]
+    for (const agentType of child.handoff?.exhaustedAgents ?? []) {
+      const index = exhausted.findIndex((entry) => entry.agentType === agentType)
+      const entry = { agentType, at: now() }
+      if (index === -1) exhausted.push(entry)
+      else exhausted[index] = entry
+    }
+    const changed =
+      JSON.stringify(health) !== JSON.stringify(operation.actorHealth ?? []) ||
+      JSON.stringify(exhausted) !== JSON.stringify(operation.exhaustedProviders ?? [])
+    if (changed) {
       operation.actorHealth = health
+      if (exhausted.length) operation.exhaustedProviders = exhausted
       await save()
     }
     return child

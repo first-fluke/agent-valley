@@ -134,6 +134,11 @@ export const operationSchema = z
     charterAmendments: charterAmendmentsSchema.optional(),
     settings: z.record(z.string().min(1).max(80), z.union([z.string().max(32_000), z.boolean()])),
     actorHealth: z.array(providerHealthEvidenceSchema).max(100).optional(),
+    /** Providers whose usage allowance a child found exhausted; seeded into later children for a bounded time. */
+    exhaustedProviders: z
+      .array(z.strictObject({ agentType: z.string().min(1).max(64), at: timestampSchema }))
+      .max(100)
+      .optional(),
     phase: z.enum(["deciding", "running", "accepting", "waiting", "paused", "completed"]),
     pauseKind: z.enum(["interrupted", "blocked", "service-shutdown"]).optional(),
     createdAt: timestampSchema,

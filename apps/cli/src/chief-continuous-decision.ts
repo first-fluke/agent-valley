@@ -4,6 +4,7 @@ import { activeCharterAmendments, parseContinuousDecision } from "@agent-valley/
 import { createContinuousMissionWorkspace } from "@agent-valley/core/chief/continuous-workspace"
 import { CheckpointError, createMissionRun, ReadOnlyViolation } from "@agent-valley/core/chief/coordinator-run"
 import { finalizeAbandonedRuns, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
+import { handoffStateSchema } from "@agent-valley/core/chief/handoff-contract"
 import { loadOrganizationContext } from "@agent-valley/core/chief/organization"
 import { captureParallelBaseline } from "@agent-valley/core/chief/parallel-git"
 import { CHIEF_DECISION_RESPONSIBILITY, CHIEF_DIRECTOR_ROLE } from "@agent-valley/core/chief/prompts"
@@ -63,6 +64,17 @@ export interface ContinuousDecisionDependencies {
 }
 
 /** Decision checkpoints retain native usage and spent budget separately from executable mission listings. */
+/** Providers a recent child found usage-exhausted start the next child already handed off (6-hour window). */
+export function seededExhaustion(operation: ContinuousOperation, now: string): Mission["handoff"] | undefined {
+  const horizon = Date.parse(now) - 6 * 60 * 60 * 1_000
+  const exhaustedAgents = (operation.exhaustedProviders ?? [])
+    .filter((entry) => Date.parse(entry.at) >= horizon)
+    .map((entry) => entry.agentType)
+  if (!exhaustedAgents.length) return undefined
+  const parsed = handoffStateSchema.safeParse({ exhaustedAgents, routes: {}, continuations: {} })
+  return parsed.success ? parsed.data : undefined
+}
+
 export async function decideContinuousGoal(
   operation: ContinuousOperation,
   decisionId: string,
@@ -185,6 +197,7 @@ export async function decideContinuousGoal(
         history: [],
         createdAt: now,
         updatedAt: now,
+        ...(seededExhaustion(operation, now) ? { handoff: seededExhaustion(operation, now) } : {}),
       }
       await store.save(mission)
     }
