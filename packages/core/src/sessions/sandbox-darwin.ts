@@ -10,12 +10,20 @@
  *     the narrow exception of secrets a prompt-injected issue body could
  *     otherwise exfiltrate.
  *   - Filesystem WRITE limited to the workspace, active agent CLI home,
- *     shared tool caches, and OS tmp dir.
+ *     shared tool caches, the OS tmp dir and the shared system tmp dirs
+ *     (`/tmp`, `/private/tmp`, `/var/tmp`, `/private/var/tmp`). Toolchains
+ *     create fixed scratch paths there (`/private/tmp/arc-uid-501` for
+ *     Cargo, npm/bun caches, shell helpers) regardless of `TMPDIR`, so
+ *     denying them fails otherwise healthy actor commands with EPERM.
+ *   - Pseudo-terminal allocation (`pseudo-tty` + `/dev/ptmx` ioctl), so an
+ *     actor CLI or review shell can open a pty instead of failing at
+ *     `grantpt` with EPERM.
  *   - Outbound network restricted to HTTP/HTTPS ports, plus local DNS
  *     resolution and local unix-domain sockets (ssh-agent and similar —
  *     these never leave the host).
- *   - Named Unix-domain listeners limited to the workspace and OS tmp
- *     directory; TCP listeners and other local socket paths stay denied.
+ *   - Named Unix-domain listeners limited to the workspace, the OS tmp
+ *     directory and the shared system tmp dirs; TCP listeners and other
+ *     local socket paths stay denied.
  *
  * Credential denylist (closes a HIGH-severity secret-exfiltration gap —
  * see docs/harness/SAFETY.md § 2 residual gaps and the sandbox result
@@ -70,6 +78,8 @@ import { linkedWorktreeGitPaths } from "./sandbox-git"
 import type { SandboxBuildRequest, SandboxCommand } from "./sandbox-types"
 
 const SANDBOX_EXEC_CANDIDATES = ["/usr/bin/sandbox-exec"]
+/** Both the symlink and the resolved `/private` form: Seatbelt checks the real path. */
+const SHARED_TMP_PATHS = ["/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp"]
 
 let cachedPath: string | null | undefined
 
@@ -118,6 +128,7 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   const writablePaths = [
     ...workspacePaths,
     ...tmpPaths,
+    ...SHARED_TMP_PATHS,
     ...agentPaths.active,
     `${home}/.cache`,
     `${home}/.npm`,
@@ -131,7 +142,7 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   const writeRules = writablePaths.map((p) => `(allow file-write* (subpath ${seatbeltString(p)}))`).join("\n")
   // Nest the path filter inside local unix-socket: sibling filters are ORed
   // by Seatbelt and would allow Unix listeners outside these directories.
-  const unixListenerRules = [...new Set([...workspacePaths, ...tmpPaths])]
+  const unixListenerRules = [...new Set([...workspacePaths, ...tmpPaths, ...SHARED_TMP_PATHS])]
     .flatMap((path) =>
       ["network-bind", "network-inbound"].map(
         (operation) => `(allow ${operation} (local unix-socket (subpath ${seatbeltString(path)})))`,
@@ -195,6 +206,9 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
 ; Seatbelt profiles propagate to child processes automatically.
 (allow process-fork)
 (allow process-exec)
+; Actor CLIs and their child shells allocate a pseudo-terminal; without this
+; grantpt/openpt fail with EPERM and the actor cannot start a shell at all.
+(allow pseudo-tty)
 (allow signal (target self))
 ; Tool cancellation must reach grandchildren; target children covers only direct children.
 (allow signal (target same-sandbox))
@@ -206,13 +220,15 @@ ${req.agentType === "codex" ? '(allow ipc-posix-shm-read* (ipc-posix-name-prefix
 
 ; Filesystem — broad read (minus the credential denylist below), write
 ; confined to the workspace + active agent CLI home + shared caches +
-; OS tmp dir.
+; OS tmp dir + the shared system tmp dirs toolchains hardcode.
 (allow file-read*)
 ${denyReadRules}
 (deny file-write*)
 ${writeRules}
 ${gitWriteRules}
 ${deviceWriteRules}
+; Pty allocation ioctls the master device; write-data alone is not enough.
+(allow file-ioctl (literal "/dev/ptmx"))
 ${denyWriteRules}
 
 ; Network — outbound denied by default. Local DNS + unix-domain sockets

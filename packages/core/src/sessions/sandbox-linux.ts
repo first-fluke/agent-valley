@@ -8,7 +8,12 @@
  *     overlay (see "Credential denylist" below).
  *   - Read-write access to the workspace, active agent CLI home, and
  *     shared tool caches under $HOME (bound AFTER the
- *     read-only $HOME mount so they override it) + the OS tmp dir.
+ *     read-only $HOME mount so they override it) + the OS tmp dir and the
+ *     shared system tmp dirs (`/tmp`, `/var/tmp`) when they are not the
+ *     same directory. Toolchains create fixed scratch paths there
+ *     regardless of `TMPDIR`, so binding only `tmpdir()` makes otherwise
+ *     healthy actor commands fail with EPERM. Pseudo-terminals come from
+ *     bwrap's own `--dev` mount, which already supplies `/dev/ptmx`.
  *
  * Credential denylist (closes a HIGH-severity secret-exfiltration gap —
  * see docs/harness/SAFETY.md § 2 residual gaps and the sandbox result
@@ -64,6 +69,16 @@ import { linkedWorktreeGitPaths } from "./sandbox-git"
 import type { SandboxBuildRequest, SandboxCommand } from "./sandbox-types"
 
 const READONLY_ROOTS = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/var"]
+const SHARED_TMP_PATHS = ["/tmp", "/var/tmp"]
+
+/** Bind destinations are compared by real path so a symlinked tmpdir is not bound twice. */
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
 
 let cachedPath: string | null | undefined
 
@@ -110,7 +125,17 @@ export function buildLinuxSandboxCommand(
     args.push("--ro-bind", home, home)
   }
 
-  const writablePaths = [req.workspacePath, tmp, ...agentPaths.active, `${home}/.cache`, `${home}/.npm`, `${home}/.bun`]
+  const resolvedTmp = canonicalPath(tmp)
+  const sharedTmp = SHARED_TMP_PATHS.filter((path) => path !== tmp && canonicalPath(path) !== resolvedTmp)
+  const writablePaths = [
+    req.workspacePath,
+    tmp,
+    ...sharedTmp,
+    ...agentPaths.active,
+    `${home}/.cache`,
+    `${home}/.npm`,
+    `${home}/.bun`,
+  ]
   // NOTE: deliberately no blanket `${home}/.config` entry here — see the
   // module docstring "Credential denylist" section. Agent CLIs this
   // project spawns get only their active vendor path.

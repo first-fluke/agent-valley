@@ -7,7 +7,7 @@
 
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { Issue } from "../domain/models"
@@ -186,6 +186,28 @@ describe("buildDarwinSandboxCommand", () => {
     },
   )
 
+  test("allows shared system tmp writes, Unix listeners and pseudo-terminal allocation", () => {
+    const result = buildDarwinSandboxCommand(
+      { ...BASE_REQUEST, networkAllowlist: [] },
+      "/usr/bin/sandbox-exec",
+      "/home/actor",
+    )
+    const profile = result.args[1] as string
+    // Cargo and friends create `/private/tmp/arc-uid-501` regardless of TMPDIR.
+    for (const path of ["/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp"]) {
+      expect(profile).toContain(`(allow file-write* (subpath "${path}"))`)
+      for (const operation of ["network-bind", "network-inbound"])
+        expect(profile).toContain(`(allow ${operation} (local unix-socket (subpath "${path}")))`)
+    }
+    expect(profile).toContain("(allow pseudo-tty)")
+    expect(profile).toContain('(allow file-ioctl (literal "/dev/ptmx"))')
+    expect(profile).toContain('(allow file-write-data (literal "/dev/ptmx"))')
+    // The added grants must not outrank the credential denies (last match wins).
+    expect(profile.indexOf('(allow file-write* (subpath "/tmp"))')).toBeLessThan(
+      profile.indexOf('(deny file-write* (subpath "/home/actor/.config/agent-valley"))'),
+    )
+  })
+
   test("does not grant write access to a blanket ~/.config directory", () => {
     const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
     const profile = result.args[1] as string
@@ -292,6 +314,34 @@ describe("buildDarwinSandboxCommand", () => {
 })
 
 describe("buildLinuxSandboxCommand", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  function bindTargets(args: string[]): (string | undefined)[] {
+    return args.flatMap((arg, i) => (arg === "--bind-try" ? [args[i + 1]] : []))
+  }
+
+  test("binds the shared system tmp dirs read-write in addition to the OS tmp dir", () => {
+    vi.stubEnv("TMPDIR", "/actor-tmp")
+    vi.stubEnv("TEMP", "/actor-tmp")
+    vi.stubEnv("TMP", "/actor-tmp")
+    const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
+    expect(tmpdir()).toBe("/actor-tmp")
+    expect(bindTargets(result.args)).toContain("/actor-tmp")
+    expect(bindTargets(result.args)).toContain("/tmp")
+    expect(bindTargets(result.args)).toContain("/var/tmp")
+  })
+
+  test("does not bind a shared tmp dir twice when it is already the OS tmp dir", () => {
+    vi.stubEnv("TMPDIR", "/tmp")
+    vi.stubEnv("TEMP", "/tmp")
+    vi.stubEnv("TMP", "/tmp")
+    const result = buildLinuxSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "bwrap")
+    expect(bindTargets(result.args).filter((target) => target === "/tmp")).toHaveLength(1)
+    expect(bindTargets(result.args)).toContain("/var/tmp")
+  })
+
   test("masks relay credentials after workspace binds", () => {
     const fixture = mkdtempSync(join(process.cwd(), ".sandbox-linux-mask-test-"))
     const fakeHome = join(fixture, "home")
