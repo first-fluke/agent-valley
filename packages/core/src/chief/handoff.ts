@@ -1,5 +1,7 @@
 import { classifyAgentExhaustion } from "../domain/agent-exhaustion"
 import { AgentRunError } from "../domain/ports/agent-runner"
+import { ActorCooldown } from "./actor-availability"
+import { actorRouteHealth } from "./actor-health"
 import { assertNoUncertainExecution, isUnavailableAgentModel, MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
 import { handoffRouteSchema as routeSchema, unavailableProviders } from "./handoff-contract"
@@ -252,20 +254,41 @@ export async function prepareHandoff(
     !(reviewing && policy?.reviewVendor === "require" && candidate === worker) &&
     !blocked.has(candidate) &&
     !retired.includes(candidate)
+  // A configured Actor's explicit model keeps precedence; routing candidates only fill the gap.
+  const routeFor = (vendor: string) => {
+    const routingModel = policy?.routing?.candidates.find((entry) => entry.actorType === vendor)?.model
+    const model = mission.personas.find((entry) => entry.agentType === vendor)?.model ?? routingModel
+    return { actorType: vendor, ...(model ? { model } : {}) }
+  }
   // Same-vendor roster candidates beat an out-of-roster vendor under "prefer".
-  const next =
-    ordered(readyRoster).find(selectable) ??
-    ordered(discovered.filter((vendor) => !roster.includes(vendor))).find(selectable)
-  if (!next)
+  const eligible = [
+    ...ordered(readyRoster).filter(selectable),
+    ...ordered(discovered.filter((vendor) => !roster.includes(vendor))).filter(selectable),
+  ]
+  if (!eligible.length)
     throw new MissionPause(
       `${unavailable ? "The selected native model is unavailable" : "Usage allowance exhausted"} and no other installed, authenticated provider is ready. Restore provider access or log in to another supported CLI, then resume the saved order with --retry; spent limits are retained.`,
       "handoff-unavailable",
     )
-  const routingModel = policy?.routing?.candidates.find((entry) => entry.actorType === next)?.model
-  const configured = mission.personas.find((entry) => entry.agentType === next)
-  // A configured Actor's explicit model keeps precedence; routing candidates only fill the gap.
-  const model = configured?.model ?? routingModel
-  const route = routeSchema.parse({ agentType: next, ...(model ? { model } : {}) })
+  // Saved native health decides the handoff target: a vendor in cooldown or mid-probe would only pause the
+  // mission until its own cooldown ends while a healthy vendor sits idle.
+  const inspected = eligible.map((vendor) => ({
+    route: routeFor(vendor),
+    health: actorRouteHealth(mission, routeFor(vendor)),
+  }))
+  const healthy = inspected.find((entry) => entry.health.state === "ready")
+  if (!healthy) {
+    const retryAt = inspected
+      .flatMap(({ health }) => (health.retryAt ? [health.retryAt] : []))
+      .sort((a, b) => Date.parse(a) - Date.parse(b))[0]
+    throw new ActorCooldown(
+      `${unavailable ? "The selected native model is unavailable" : "Usage allowance exhausted"} for ${actor.agentType} and every other eligible Actor route is cooling down or already probing. ${inspected.map(({ route, health }) => `${route.actorType}/${route.model ?? "native default"}: ${health.reason}`).join(" ")} The saved work and spent limits are retained.`,
+      retryAt,
+      inspected.map(({ route }) => route),
+    )
+  }
+  const next = healthy.route.actorType
+  const route = routeSchema.parse({ agentType: next, ...(healthy.route.model ? { model: healthy.route.model } : {}) })
   state.routes[actor.id] = route
   return {
     actor: { ...actor, ...route, model: route.model },

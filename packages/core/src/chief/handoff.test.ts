@@ -20,6 +20,44 @@ function setup(maxRuns?: number, reviewVendor?: "require" | "prefer") {
 }
 
 describe("automatic exhaustion handoff", () => {
+  it("hands off to the healthy vendor instead of one still cooling down, and waits on the cooldown when none is healthy", async () => {
+    const value = setup()
+    value.discover.mockResolvedValue(["codex", "claude", "qwen"])
+    const now = Date.now()
+    value.mission.operations = {
+      runs: [],
+      routingEvidence: [
+        {
+          actorType: "claude",
+          samples: 5,
+          successes: 0,
+          totalCostUsd: null,
+          successfulDeliverableCostUsd: null,
+          providerHealth: {
+            consecutiveFailures: 1,
+            lastOutcomeAt: new Date(now - 60_000).toISOString(),
+            cooldownUntil: new Date(now + 3_600_000).toISOString(),
+          },
+        },
+      ],
+      reviewDecisions: [],
+    }
+    value.runAgent.mockRejectedValueOnce(new Error("usage_limit_reached")).mockResolvedValue("ok")
+    await value.run(value.actor, "Plan", "plan")
+    expect(value.runAgent.mock.calls.map((call) => call[0].agentType)).toEqual(["codex", "qwen"])
+    expect(value.mission.handoff?.routes.chief?.agentType).toBe("qwen")
+
+    const cooling = setup()
+    cooling.discover.mockResolvedValue(["codex", "claude"])
+    cooling.mission.operations = structuredClone(value.mission.operations)
+    cooling.runAgent.mockRejectedValue(new Error("usage_limit_reached"))
+    await expect(cooling.run(cooling.actor, "Plan", "plan")).rejects.toMatchObject({
+      kind: "actor-cooldown",
+      nextRunAt: new Date(now + 3_600_000).toISOString(),
+    })
+    expect(cooling.runAgent.mock.calls.map((call) => call[0].agentType)).toEqual(["codex"])
+  })
+
   it("discovers an authenticated alternative for the Chief and preserves its original selection and contract", async () => {
     const value = setup()
     value.runAgent.mockRejectedValueOnce(new Error("usage_limit_reached")).mockResolvedValue("final JSON")
