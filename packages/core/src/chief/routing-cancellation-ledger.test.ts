@@ -93,35 +93,52 @@ describe("cancellation proof in organization routing evidence", () => {
     expect((await listOrganizationOutcomes(source))[0]?.runs[0]).toEqual(run)
   })
 
-  it.each([
-    "actual-rejection",
-    "nonlocal-failure",
-    "unknown-outcome",
-    "out-of-bounds-proof",
-    "native-failure-evidence",
-  ])("retains real failure samples despite an inapplicable cancellation annotation: %s", async (condition) => {
+  it.each(["actual-rejection", "nonlocal-failure", "unknown-outcome", "out-of-bounds-proof", "native-crash-evidence"])(
+    "retains real failure samples despite an inapplicable cancellation annotation: %s",
+    async (condition) => {
+      const { run } = routingCancellationFixture()
+      run.routingExclusion = {
+        reason: "coordinator-cancelled",
+        dispatchAt: "2026-11-08T05:00:27.694Z",
+        pauseAt: "2026-11-08T05:12:35.010Z",
+      }
+      if (condition === "actual-rejection") run.outcome = "rejected"
+      if (condition === "nonlocal-failure") run.executionRecovery = "reconcile"
+      if (condition === "unknown-outcome") run.executionState = "unknown"
+      if (condition === "out-of-bounds-proof") run.routingExclusion.pauseAt = "2026-11-08T05:00:00Z"
+      if (condition === "native-crash-evidence") run.evidence = "Native process exited with code 1"
+      await recordOrganizationOutcome(source, {
+        missionId: "real-failure",
+        missionVersion: condition,
+        fingerprint,
+        workspacePath: workspace,
+        goal: "Original goal",
+        status: "failed",
+        summary: "A real failed run",
+        evidence: [],
+        runs: [run],
+      })
+      expect(await getOrganizationRouteEvidence(source)).toMatchObject([{ samples: 1, successes: 0 }])
+    },
+  )
+
+  it("keeps confirmed native timeouts out of cross-cycle quality samples without erasing their cost", async () => {
     const { run } = routingCancellationFixture()
-    run.routingExclusion = {
-      reason: "coordinator-cancelled",
-      dispatchAt: "2026-11-08T05:00:27.694Z",
-      pauseAt: "2026-11-08T05:12:35.010Z",
-    }
-    if (condition === "actual-rejection") run.outcome = "rejected"
-    if (condition === "nonlocal-failure") run.executionRecovery = "reconcile"
-    if (condition === "unknown-outcome") run.executionState = "unknown"
-    if (condition === "out-of-bounds-proof") run.routingExclusion.pauseAt = "2026-11-08T05:00:00Z"
-    if (condition === "native-failure-evidence") run.evidence = "Agent timed out after 1800s"
+    run.evidence = "Agent timed out after 1800s"
+    run.costUsd = 0.25
     await recordOrganizationOutcome(source, {
-      missionId: "real-failure",
-      missionVersion: condition,
+      missionId: "timeout-mission",
+      missionVersion: "timeout",
       fingerprint,
       workspacePath: workspace,
       goal: "Original goal",
       status: "failed",
-      summary: "A real failed run",
+      summary: "The Actor hit its deadline",
       evidence: [],
       runs: [run],
     })
-    expect(await getOrganizationRouteEvidence(source)).toMatchObject([{ samples: 1, successes: 0 }])
+    expect(await getOrganizationRouteEvidence(source)).toMatchObject([
+      { samples: 0, successes: 0, totalCostUsd: 0.25, successfulDeliverableCostUsd: null },
+    ])
   })
 })

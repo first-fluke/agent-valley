@@ -296,6 +296,78 @@ describe("native review failures preserve successful work", () => {
     expect(value.mission.tasks[0]?.review).toBeUndefined()
   })
 
+  it("preserves completed sibling work when the interrupted task never produced output", () => {
+    const value = fixture()
+    const task = plan.tasks[0]
+    if (!task) throw new Error("Expected fixture task")
+    value.mission.plan = {
+      tasks: [
+        { ...task, id: "a" },
+        { ...task, id: "b" },
+      ],
+    }
+    value.mission.tasks = [
+      {
+        id: "a",
+        reviewerId: "reviewer",
+        status: "completed",
+        attempts: 1,
+        output: "Approved integrated output",
+        review: { passed: true, summary: "Passed", findings: [] },
+        fingerprint: "verified-fingerprint",
+      },
+      { id: "b", reviewerId: "reviewer", status: "pending", attempts: 1 },
+    ]
+    if (value.mission.supervision)
+      value.mission.supervision.pendingRecovery = { taskId: "b", reason: "Actor dispatch failed before any output" }
+    applyRecovery(value.mission, {
+      action: "repair",
+      reason: "Retry the failed dispatch",
+      taskId: "b",
+      instructions: "Use an installed skill and complete the assignment.",
+    })
+    expect(value.mission.tasks[0]).toMatchObject({
+      status: "reviewing",
+      attempts: 1,
+      output: "Approved integrated output",
+    })
+    expect(value.mission.tasks[0]?.review).toBeUndefined()
+    expect(value.mission.tasks[1]?.status).toBe("pending")
+  })
+
+  it("does not rerun completed sibling work after a dispatch failure with no output", async () => {
+    const value = fixture()
+    value.mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 1, maxRetries: 0 })
+    const task = plan.tasks[0]
+    if (!task) throw new Error("Expected fixture task")
+    const tasks = ["a", "b"].map((id) => ({ ...task, id, title: id, acceptance: [`Verified ${id}`] }))
+    const base = value.runAgent.getMockImplementation()
+    let failed = false
+    value.runAgent.mockImplementation(async (...args) => {
+      if (args[3] === "plan") return JSON.stringify({ tasks, goalBrief: brief })
+      if (args[3] === "work") {
+        if (args[4]?.taskId === "b" && !failed) {
+          failed = true
+          throw new Error("OMA skill oma-coordination is missing from the installed catalog")
+        }
+        recordRun(args[2], args[0], "work", args[4]?.taskId ?? "", "passed")
+      }
+      if (args[3] === "supervise")
+        return JSON.stringify({
+          action: "repair",
+          reason: "Retry the failed dispatch with an installed skill.",
+          taskId: "b",
+          instructions: "Complete the assignment with the installed skill.",
+        })
+      return (await base?.(...args)) ?? ""
+    })
+    expect((await coordinate(value.mission, value.ports)).status).toBe("completed")
+    const work = value.runAgent.mock.calls.filter((call) => call[3] === "work")
+    expect(work.filter((call) => call[4]?.taskId === "a")).toHaveLength(1)
+    expect(work.filter((call) => call[4]?.taskId === "b")).toHaveLength(2)
+    expect(value.mission.tasks.find((state) => state.id === "a")?.attempts).toBe(1)
+  })
+
   it.each([false, true])("integrates retained private output before serial review (conflict=%s)", async (conflict) => {
     const value = fixture()
     value.mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 1 })

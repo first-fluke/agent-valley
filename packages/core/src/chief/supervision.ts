@@ -19,11 +19,12 @@ export function assignTaskStates(
     const unchanged = previousPlan?.tasks.some(
       (entry) => entry.id === task.id && JSON.stringify(entry) === JSON.stringify(task),
     )
+    // Completed work survives an unrelated interruption: only its review refreshes against the current files.
     const preserveWork =
-      preserveUnchangedWork &&
       unchanged &&
       previous?.output !== undefined &&
-      (!previous.review || previous.review.passed)
+      (!previous.review || previous.review.passed) &&
+      (preserveUnchangedWork || previous?.status === "completed")
     return {
       id: task.id,
       reviewerId: reviewer.id,

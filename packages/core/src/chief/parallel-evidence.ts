@@ -19,10 +19,17 @@ async function validateCommit(root: string, workspace: ParallelTaskWorkspace, co
   const actual = (await git(root, ["rev-parse", "--verify", `${commit}^{commit}`])).trim()
   if (actual !== commit) throw new Error("Parallel evidence commit does not match its original object ID.")
   await git(root, ["merge-base", "--is-ancestor", workspace.baselineHead, commit])
+  if (workspace.snapshotTree !== undefined) {
+    const committed = (await git(root, ["rev-parse", `${workspace.baselineHead}^{tree}`])).trim()
+    if (workspace.baselineTree !== committed)
+      throw new Error("Parallel baseline tree does not match the product tree of its committed baseline head.")
+  }
   if (snapshot) {
     const parents = (await git(root, ["rev-list", "--parents", "-n", "1", commit])).trim().split(/\s+/)
     const tree = (await git(root, ["rev-parse", `${commit}^{tree}`])).trim()
-    if (parents.length !== 2 || parents[1] !== workspace.baselineHead || tree !== workspace.baselineTree)
+    // Legacy records without snapshotTree stored the snapshot input tree in baselineTree.
+    const productTree = workspace.snapshotTree ?? workspace.baselineTree
+    if (parents.length !== 2 || parents[1] !== workspace.baselineHead || tree !== productTree)
       throw new Error("Parallel snapshot evidence does not match its recorded parent and product tree.")
   }
 }

@@ -1,6 +1,7 @@
 import { availableActorRoutes } from "./actor-availability"
 import { aggregateProviderHealth } from "./actor-health"
 import { cancelledWorkRunProofs } from "./cancelled-work-run"
+import { isNativeAgentTimeout } from "./execution"
 import type { RouteEvidence, RoutingCandidate } from "./operations"
 import type { Mission, Persona } from "./types"
 
@@ -22,7 +23,9 @@ export function routeEvidence(mission: Mission): RouteEvidence[] {
       totalCostUsd: 0,
       successfulDeliverableCostUsd: null,
     }
-    if (!cancelled.has(run.runId) && run.nativeOutcome !== "cancelled") item.samples += 1
+    // A confirmed deadline cutoff is not a deliverable-quality verdict; spent cost still counts.
+    if (!cancelled.has(run.runId) && run.nativeOutcome !== "cancelled" && !isNativeAgentTimeout(run.evidence ?? ""))
+      item.samples += 1
     if (run.outcome === "passed") item.successes += 1
     item.totalCostUsd = item.totalCostUsd === null || run.costUsd === null ? null : item.totalCostUsd + run.costUsd
     item.successfulDeliverableCostUsd =

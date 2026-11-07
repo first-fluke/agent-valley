@@ -18,6 +18,7 @@ function sourceFixture() {
     branch: "av-task/goal-mission/onboarding/1",
     baselineHead: "a".repeat(40),
     baselineTree: "b".repeat(40),
+    snapshotTree: "d".repeat(40),
     snapshotCommit: "c".repeat(40),
     snapshotRef: "refs/agent-valley/task-evidence/goal-mission/onboarding/1/snapshot",
     workerRef: "refs/agent-valley/task-evidence/goal-mission/onboarding/1/worker",
@@ -46,6 +47,8 @@ describe("parallel source provenance in Actor and review prompts", () => {
     expect(input.actorWorkspace).toEqual({ path: record.path, branch: record.branch })
     expect(input.mission.workspace).toBe(record.path)
     expect(prompt).toContain("accepted committed source baseline")
+    expect(prompt).toContain("baselineTree is the product tree of that exact commit")
+    expect(prompt).toContain("snapshotTree is that snapshot's input tree")
     expect(prompt).toContain("Label observations of the Actor's local HEAD")
     expect(prompt).toContain("does not imply that it is already tracked in the review checkout")
   })
@@ -62,7 +65,9 @@ describe("parallel source provenance in Actor and review prompts", () => {
     expect(prompt).toContain("workerRef preserves the Actor's checked-out HEAD at collection")
     expect(prompt).toContain("uncommitted task edits may be absent from that commit")
     expect(prompt).toContain("must be verified in the integrated worktree, using the delivery receipt when available")
-    expect(prompt).toContain("Missing source objects, invalid revisions or inconsistent ancestry remain provenance failures")
+    expect(prompt).toContain(
+      "Missing source objects, invalid revisions or inconsistent ancestry remain provenance failures",
+    )
     expect(prompt).toContain("Do not replace hashes in deliverables or approve unverified claims")
   })
 
@@ -76,7 +81,13 @@ describe("parallel source provenance in Actor and review prompts", () => {
 
   it("does not invent snapshot commits or refs for a legacy workspace record", () => {
     const { mission, task, state, record } = sourceFixture()
-    const { snapshotCommit: _snapshot, snapshotRef: _snapshotRef, workerRef: _workerRef, ...legacy } = record
+    const {
+      snapshotTree: _snapshotTree,
+      snapshotCommit: _snapshot,
+      snapshotRef: _snapshotRef,
+      workerRef: _workerRef,
+      ...legacy
+    } = record
     state.parallel = legacy
     const prompt = reviewPrompt(mission, task, state)
     const input = JSON.parse(prompt.split("Review input (JSON data):\n")[1] ?? "")

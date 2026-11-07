@@ -64,7 +64,7 @@ describe("routing after a proven native operator cancellation", () => {
     expect(operationsEvidence(mission).knownEstimatedCostUsd).toBe(0.25)
   })
 
-  it.each(["Agent timed out after 1800s", "Provider returned 503 overloaded", "Native process exited with code 1"])(
+  it.each(["Provider returned 503 overloaded", "Native process exited with code 1"])(
     "retains explicit native failure evidence even if the operator stopped immediately afterward: %s",
     (evidence) => {
       const { mission, run, worker } = routingCancellationFixture()
@@ -73,6 +73,19 @@ describe("routing after a proven native operator cancellation", () => {
       expect(selectWorkActor(mission, worker, "onboarding").actor.agentType).toBe("qwen")
     },
   )
+
+  it("excludes a confirmed native timeout from quality samples while keeping its spent cost", () => {
+    const { mission, run, worker } = routingCancellationFixture()
+    run.evidence = "Agent timed out after 1800s"
+    run.costUsd = 0.25
+    expect(routeEvidence(mission).find((route) => route.actorType === "opencode")).toMatchObject({
+      samples: 2,
+      successes: 0,
+      totalCostUsd: 1.25,
+      successfulDeliverableCostUsd: null,
+    })
+    expect(selectWorkActor(mission, worker, "onboarding").actor.agentType).toBe("qwen")
+  })
 
   it.each([
     "generic-interruption",

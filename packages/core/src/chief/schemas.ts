@@ -190,6 +190,7 @@ export function parsePlanningResponse(
 } {
   if (!mission.availableAgents && !mission.supervision && !requiresOmaActor(mission)) {
     const plan = parsePlan(source, mission.personas)
+    validateCatalogSkills(mission.personas, mission)
     validateOmaAssignments(plan, mission.personas, mission)
     return { personas: mission.personas, plan }
   }
@@ -229,6 +230,7 @@ export function parsePlanningResponse(
     .parse(parseJson(source, "Planning"))
   const personas = response.actors ?? response.personas ?? assignFixedActorSkills(mission, response.actorSkills)
   if (mission.availableAgents) validateAutomaticPersonas(personas, mission, true)
+  validateCatalogSkills(personas, mission)
   const plan: ChiefPlan = { tasks: response.tasks }
   validatePlan(plan, personas)
   validateOmaAssignments(plan, personas, mission)
@@ -254,6 +256,18 @@ function validateOmaAssignments(plan: ChiefPlan, personas: Persona[], mission: M
         `Task ${task.id} requires an OMA-skilled Actor. Assign a relevant installed skill to Actor ${task.personaId} before dispatch.`,
       )
   }
+}
+
+/** Configured or retained skills must exist in the verified catalog before any dispatch can use them. */
+function validateCatalogSkills(personas: Persona[], mission: Mission): void {
+  if (!mission.availableSkills) return
+  const catalog = new Set(mission.availableSkills.map((skill) => skill.name))
+  for (const persona of personas)
+    for (const name of persona.skills)
+      if (!catalog.has(name))
+        throw new Error(
+          `Actor ${persona.id} skill ${name} is not in the installed skill catalog. Select an installed availableSkills name or remove the assignment.`,
+        )
 }
 
 function validateAutomaticPersonas(personas: Persona[], mission: Mission, planning = false): void {

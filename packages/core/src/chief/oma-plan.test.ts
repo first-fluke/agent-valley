@@ -92,4 +92,37 @@ describe("required OMA task assignments", () => {
     )
     expect(mission).toEqual(before)
   })
+
+  it("rejects a configured skill outside the installed catalog even without an actorSkills assignment", () => {
+    const { mission } = fixedMission()
+    const worker = mission.personas.find((entry) => entry.id === "worker")
+    if (!worker) throw new Error("Expected fixture worker")
+    worker.skills = ["oma-coordination"]
+    const before = structuredClone(mission)
+    expect(() => parsePlanningResponse(JSON.stringify({ ...plan, goalBrief: brief }), mission)).toThrow(
+      "Actor worker skill oma-coordination is not in the installed skill catalog",
+    )
+    expect(mission).toEqual(before)
+  })
+
+  it("rejects a retained uninstalled skill on an Actor the assignment does not cover", () => {
+    const { mission } = fixedMission()
+    const reviewer = mission.personas.find((entry) => entry.id === "reviewer")
+    if (!reviewer) throw new Error("Expected fixture reviewer")
+    reviewer.skills = ["oma-coordination"]
+    expect(() =>
+      parsePlanningResponse(
+        JSON.stringify({ ...plan, goalBrief: brief, actorSkills: { worker: ["oma-backend"] } }),
+        mission,
+      ),
+    ).toThrow("Actor reviewer skill oma-coordination is not in the installed skill catalog")
+  })
+
+  it("accepts configured skills that exist in the installed catalog", () => {
+    const { mission } = fixedMission()
+    const worker = mission.personas.find((entry) => entry.id === "worker")
+    if (!worker) throw new Error("Expected fixture worker")
+    worker.skills = ["oma-backend"]
+    expect(parsePlanningResponse(JSON.stringify({ ...plan, goalBrief: brief }), mission).plan).toEqual(plan)
+  })
 })

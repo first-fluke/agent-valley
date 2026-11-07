@@ -2,7 +2,6 @@ import { createHash } from "node:crypto"
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { dirname, join, sep } from "node:path"
 import { integrateContentTransaction } from "./content-transaction"
-import { retainTaskEvidence, taskEvidenceRefs } from "./parallel-evidence"
 import {
   type ParallelBaseline,
   type ParallelDelivery,
@@ -11,6 +10,7 @@ import {
   parallelDeliverySchema,
   parallelWorkspaceSchema,
 } from "./parallel-contract"
+import { retainTaskEvidence, taskEvidenceRefs } from "./parallel-evidence"
 import {
   assertParallelPath,
   captureParallelBaseline,
@@ -69,6 +69,25 @@ async function validateWorkspace(mission: Mission, workspace: ParallelTaskWorksp
   return location
 }
 
+/** Older records stored the snapshot input tree as baselineTree; relabel it without touching any product state. */
+async function repairBaselineTreeLabel(
+  source: string,
+  record: ParallelTaskWorkspace,
+): Promise<ParallelTaskWorkspace | undefined> {
+  if (record.snapshotTree !== undefined) return undefined
+  const committed = (await parallelGit(source, ["rev-parse", `${record.baselineHead}^{tree}`])).trim()
+  if (committed === record.baselineTree) return undefined
+  if (record.snapshotCommit) {
+    const snapshotTree = (await parallelGit(source, ["rev-parse", `${record.snapshotCommit}^{tree}`])).trim()
+    if (snapshotTree !== record.baselineTree)
+      throw new Error(
+        "Parallel baseline tree matches neither its committed baseline nor its recorded snapshot. Preserve the evidence and inspect it before resuming.",
+      )
+  }
+  // Re-parse so the relabeled record keeps the canonical key order used by identity comparisons.
+  return parallelWorkspaceSchema.parse({ ...record, snapshotTree: record.baselineTree, baselineTree: committed })
+}
+
 /** Every Actor receives the current product snapshot in its own repository, with no shared Git refs or index. */
 export async function prepareTaskWorktree(
   mission: Mission,
@@ -83,9 +102,25 @@ export async function prepareTaskWorktree(
     throw error
   })
   if (existing) {
-    const record = parallelWorkspaceSchema.parse(JSON.parse(existing))
-    await validateWorkspace(mission, record)
+    const previous = parallelWorkspaceSchema.parse(JSON.parse(existing))
+    await validateWorkspace(mission, previous)
+    const record = (await repairBaselineTreeLabel(mission.workspace.path, previous)) ?? previous
     if (record.snapshotCommit) await retainTaskEvidence(record, "snapshot", record.snapshotCommit)
+    if (record !== previous) {
+      await writeParallelJson(location.record, record)
+      const raw = await readFile(location.delivery, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined
+        throw error
+      })
+      if (raw) {
+        const delivery = parallelDeliverySchema.parse(JSON.parse(raw))
+        // The receipt embeds the workspace identity; keep it equal to the relabeled record.
+        if (same(delivery.workspace, previous)) {
+          delivery.workspace = record
+          await writeParallelJson(location.delivery, delivery)
+        }
+      }
+    }
     return record
   }
   const snapshot = baseline ?? (await captureParallelBaseline(mission.workspace.path))
@@ -122,6 +157,8 @@ export async function prepareTaskWorktree(
   ).trim()
   await parallelGit(location.path, ["checkout", "-q", "-b", location.branch, commit])
   await parallelGit(location.path, ["remote", "remove", "origin"])
+  // baselineTree must resolve from baselineHead for reviewers; the snapshot input may add an uncommitted overlay.
+  const baselineTree = (await parallelGit(mission.workspace.path, ["rev-parse", `${snapshot.head}^{tree}`])).trim()
   const record: ParallelTaskWorkspace = {
     version: 1,
     missionId: mission.id,
@@ -131,7 +168,8 @@ export async function prepareTaskWorktree(
     path: location.path,
     branch: location.branch,
     baselineHead: snapshot.head,
-    baselineTree: snapshot.tree,
+    baselineTree,
+    snapshotTree: snapshot.tree,
     snapshotCommit: commit,
     snapshotRef: taskEvidenceRefs({ missionId: mission.id, taskId, attempt }).snapshotRef,
     workerRef: taskEvidenceRefs({ missionId: mission.id, taskId, attempt }).workerRef,
@@ -164,8 +202,10 @@ export async function collectTaskDelivery(
   }
   await validateWorkspace(mission, workspace)
   const final = await captureParallelBaseline(workspace.path)
+  // Legacy records without snapshotTree stored the input tree in baselineTree.
+  const inputTree = workspace.snapshotTree ?? workspace.baselineTree
   const [before, after] = await Promise.all([
-    parallelTreeImages(workspace.path, workspace.baselineTree),
+    parallelTreeImages(workspace.path, inputTree),
     parallelTreeImages(workspace.path, final.tree),
   ])
   const changes = [...new Set([...before.keys(), ...after.keys()])].sort().flatMap((path) => {
@@ -180,7 +220,7 @@ export async function collectTaskDelivery(
     "--no-renames",
     "--src-prefix=a/",
     "--dst-prefix=b/",
-    workspace.baselineTree,
+    inputTree,
     final.tree,
     ...productPaths,
   ])

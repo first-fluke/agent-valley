@@ -14,6 +14,7 @@ export const parallelWorkspaceSchema = z.strictObject({
   branch: z.string().min(1),
   baselineHead: objectId,
   baselineTree: objectId,
+  snapshotTree: objectId.optional(),
   snapshotCommit: objectId.optional(),
   snapshotRef: z.string().min(1).optional(),
   workerRef: z.string().min(1).optional(),

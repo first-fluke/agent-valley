@@ -5,6 +5,7 @@ import { relative, resolve, sep } from "node:path"
 import { z } from "zod"
 import { runCommand } from "../workspace/worktree-lifecycle"
 import { archivedWorkCancellation, cancelledWorkRunProofs } from "./cancelled-work-run"
+import { isNativeAgentTimeout } from "./execution"
 import { fingerprintWorkspace } from "./fingerprint"
 import type { operatingRunSchema, RouteEvidence } from "./operations"
 import { appendOrganizationRecord, organizationRecordKey, readOrganizationRecords } from "./organization-store"
@@ -201,7 +202,7 @@ export async function getOrganizationRouteEvidence(sourceRepo: string): Promise<
       totalCostUsd: 0,
       successfulDeliverableCostUsd: null,
     }
-    if (!archivedWorkCancellation(run)) group.samples++
+    if (!archivedWorkCancellation(run) && !isNativeAgentTimeout(run.evidence ?? "")) group.samples++
     if (run.outcome === "passed") group.successes++
     group.totalCostUsd = group.totalCostUsd === null || run.costUsd === null ? null : group.totalCostUsd + run.costUsd
     group.successfulDeliverableCostUsd =

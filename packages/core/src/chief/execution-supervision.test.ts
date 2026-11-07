@@ -414,13 +414,15 @@ describe("Chief resumable execution without duplicate work", () => {
         }
       })
       const ports = { ...value.ports, observeMetrics }
+      // An unchanged replan refreshes the completed task's review instead of rerunning its work.
+      const expectedWork = recovery === "chief-replan" ? 1 : 2
       expect((await coordinate(value.mission, ports)).status).toBe("waiting")
       expect(originalStarts).toHaveLength(2)
       expect(originalStarts[1]).not.toBe(originalStarts[0])
-      expect(stages(value.runAgent, "work")).toHaveLength(2)
+      expect(stages(value.runAgent, "work")).toHaveLength(expectedWork)
       expect((await coordinate(value.mission, ports)).status).toBe("completed")
       expect(originalStarts[2]).toBe(originalStarts[1])
-      expect(stages(value.runAgent, "work")).toHaveLength(2)
+      expect(stages(value.runAgent, "work")).toHaveLength(expectedWork)
     },
   )
 

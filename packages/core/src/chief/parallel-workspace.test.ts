@@ -94,8 +94,15 @@ describe("isolated parallel Actor worktrees", () => {
     await writeFile(join(workspace.path, "proof.md"), `Inspected original snapshot ${snapshot}.\n`)
     await parallelGit(workspace.path, ["add", "a.txt", "proof.md"])
     await parallelGit(workspace.path, [
-      "-c", "user.name=AV Actor", "-c", "user.email=actor@example.test",
-      "-c", "commit.gpgsign=false", "commit", "-qm", "Actor implementation",
+      "-c",
+      "user.name=AV Actor",
+      "-c",
+      "user.email=actor@example.test",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "Actor implementation",
     ])
     const worker = (await parallelGit(workspace.path, ["rev-parse", "HEAD"])).trim()
     const delivery = await collectTaskDelivery(mission, workspace)
@@ -111,6 +118,60 @@ describe("isolated parallel Actor worktrees", () => {
     expect(await git(["rev-parse", "HEAD"])).toBe(head)
     expect(await readFile(join(root, ".git", "index"))).toEqual(index)
     expect(await readFile(join(root, "b.txt"), "utf8")).toBe("Unrelated staged operator change\n")
+  })
+
+  it("labels the committed baseline tree separately from the uncommitted snapshot input tree", async () => {
+    const root = mission.workspace.path
+    await mkdir(join(root, "docs"))
+    await writeFile(join(root, "docs", "contract.md"), "Uncommitted operator overlay\n")
+    await writeFile(join(root, "b.txt"), "Uncommitted overlay edit\n")
+    const head = (await git(["rev-parse", "HEAD"])).trim()
+    const committedTree = (await git(["rev-parse", `${head}^{tree}`])).trim()
+    const workspace = await prepareTaskWorktree(mission, "tree-labels", 1)
+    expect(workspace.baselineHead).toBe(head)
+    expect(workspace.baselineTree).toBe(committedTree)
+    expect(workspace.snapshotTree).toBeDefined()
+    expect(workspace.snapshotTree).not.toBe(committedTree)
+    expect((await git(["rev-parse", `${workspace.snapshotCommit}^{tree}`])).trim()).toBe(workspace.snapshotTree)
+    await writeFile(join(workspace.path, "a.txt"), "Actor product only\n")
+    const delivery = await collectTaskDelivery(mission, workspace)
+    expect(delivery.changes.map((change) => change.path)).toEqual(["a.txt"])
+    await integrateTaskDelivery(mission, delivery)
+    expect(await readFile(join(root, "a.txt"), "utf8")).toBe("Actor product only\n")
+    expect(await readFile(join(root, "b.txt"), "utf8")).toBe("Uncommitted overlay edit\n")
+    expect(await readFile(join(root, "docs", "contract.md"), "utf8")).toBe("Uncommitted operator overlay\n")
+  })
+
+  it("relabels a legacy workspace record and its saved receipt without rerunning the Actor", async () => {
+    await writeFile(join(mission.workspace.path, "overlay.txt"), "Uncommitted operator overlay\n")
+    const workspace = await prepareTaskWorktree(mission, "legacy-label", 1)
+    expect(workspace.snapshotTree).not.toBe(workspace.baselineTree)
+    await writeFile(join(workspace.path, "a.txt"), "Legacy labeled product\n")
+    const delivery = await collectTaskDelivery(mission, workspace)
+    const location = dirname(delivery.patchPath)
+    const legacy = { ...workspace, baselineTree: workspace.snapshotTree as string }
+    delete legacy.snapshotTree
+    await writeFile(join(location, "workspace.json"), JSON.stringify(legacy))
+    await writeFile(join(location, "delivery.json"), JSON.stringify({ ...delivery, workspace: legacy }))
+    const repaired = await prepareTaskWorktree(mission, "legacy-label", 1)
+    expect(repaired).toEqual(workspace)
+    expect(JSON.parse(await readFile(join(location, "workspace.json"), "utf8"))).toEqual(workspace)
+    expect(JSON.parse(await readFile(join(location, "delivery.json"), "utf8")).workspace).toEqual(workspace)
+    expect((await integrateTaskDelivery(mission, { ...delivery, workspace: repaired })).alreadyApplied).toBe(false)
+    expect(await readFile(join(mission.workspace.path, "a.txt"), "utf8")).toBe("Legacy labeled product\n")
+  })
+
+  it("refuses to relabel a legacy baseline tree that matches neither the baseline nor the snapshot", async () => {
+    const workspace = await prepareTaskWorktree(mission, "inconsistent-label", 1)
+    const delivery = await collectTaskDelivery(mission, workspace)
+    const location = dirname(delivery.patchPath)
+    const forged = { ...workspace, baselineTree: "f".repeat(40) }
+    delete forged.snapshotTree
+    await writeFile(join(location, "workspace.json"), JSON.stringify(forged))
+    await expect(prepareTaskWorktree(mission, "inconsistent-label", 1)).rejects.toThrow(
+      "matches neither its committed baseline nor its recorded snapshot",
+    )
+    expect(JSON.parse(await readFile(join(location, "workspace.json"), "utf8"))).toEqual(forged)
   })
 
   it("restores original evidence refs before an already applied receipt returns, even after Actor disposal", async () => {
@@ -142,6 +203,9 @@ describe("isolated parallel Actor worktrees", () => {
     ).rejects.toThrow("owned task path and private references")
     await expect(
       retainTaskEvidence({ ...workspace, baselineTree: "f".repeat(40) }, "snapshot", snapshot),
+    ).rejects.toThrow("baseline tree does not match the product tree of its committed baseline head")
+    await expect(
+      retainTaskEvidence({ ...workspace, snapshotTree: "f".repeat(40) }, "snapshot", snapshot),
     ).rejects.toThrow("recorded parent and product tree")
     await expect(retainTaskEvidence(workspace, "worker", "f".repeat(40))).rejects.toThrow()
     expect(await git(["rev-parse", "HEAD"])).toBe(head)
@@ -169,36 +233,41 @@ describe("isolated parallel Actor worktrees", () => {
     expect((await integrateTaskDelivery(mission, delivery)).alreadyApplied).toBe(true)
     expect(JSON.parse(await readFile(receipt, "utf8"))).toEqual(JSON.parse(saved))
     expect(delivery.workerHead).toBeUndefined()
-    expect(await git(["for-each-ref", "--format=%(objectname)", `refs/agent-valley/task-evidence/${refs.key}`])).toBe("")
+    expect(await git(["for-each-ref", "--format=%(objectname)", `refs/agent-valley/task-evidence/${refs.key}`])).toBe(
+      "",
+    )
     expect(await readFile(join(mission.workspace.path, "a.txt"), "utf8")).toBe("Already completed legacy product\n")
     expect(await git(["rev-parse", "HEAD"])).toBe(head)
     expect(await readFile(join(mission.workspace.path, ".git", "index"))).toEqual(index)
   })
 
-  it.each([false, true])("recovers legacy receipt provenance only with an unchanged delivered tree: changed=%s", async (changed) => {
-    const workspace = await prepareTaskWorktree(mission, "legacy-evidence", 1)
-    await writeFile(join(workspace.path, "a.txt"), "Legacy delivered product\n")
-    const delivery = await collectTaskDelivery(mission, workspace)
-    await integrateTaskDelivery(mission, delivery)
-    delete delivery.workerHead
-    delete delivery.workspace.snapshotCommit
-    delete delivery.workspace.snapshotRef
-    delete delivery.workspace.workerRef
-    const receipt = join(dirname(delivery.patchPath), "delivery.json")
-    await writeFile(join(dirname(delivery.patchPath), "workspace.json"), JSON.stringify(delivery.workspace))
-    await writeFile(receipt, JSON.stringify(delivery))
-    await git(["update-ref", "-d", taskEvidenceRefs(workspace).workerRef])
-    if (changed) await writeFile(join(workspace.path, "a.txt"), "Unproven later Actor change\n")
-    if (changed) {
-      await expect(integrateTaskDelivery(mission, delivery)).rejects.toThrow("Legacy parallel evidence")
-      expect(await git(["for-each-ref", "--format=%(objectname)", taskEvidenceRefs(workspace).workerRef])).toBe("")
-    } else {
-      expect((await integrateTaskDelivery(mission, delivery)).alreadyApplied).toBe(true)
-      const actual = (await parallelGit(workspace.path, ["rev-parse", "HEAD"])).trim()
-      expect((await git(["rev-parse", taskEvidenceRefs(workspace).workerRef])).trim()).toBe(actual)
-    }
-    expect(await readFile(join(mission.workspace.path, "a.txt"), "utf8")).toBe("Legacy delivered product\n")
-  })
+  it.each([false, true])(
+    "recovers legacy receipt provenance only with an unchanged delivered tree: changed=%s",
+    async (changed) => {
+      const workspace = await prepareTaskWorktree(mission, "legacy-evidence", 1)
+      await writeFile(join(workspace.path, "a.txt"), "Legacy delivered product\n")
+      const delivery = await collectTaskDelivery(mission, workspace)
+      await integrateTaskDelivery(mission, delivery)
+      delete delivery.workerHead
+      delete delivery.workspace.snapshotCommit
+      delete delivery.workspace.snapshotRef
+      delete delivery.workspace.workerRef
+      const receipt = join(dirname(delivery.patchPath), "delivery.json")
+      await writeFile(join(dirname(delivery.patchPath), "workspace.json"), JSON.stringify(delivery.workspace))
+      await writeFile(receipt, JSON.stringify(delivery))
+      await git(["update-ref", "-d", taskEvidenceRefs(workspace).workerRef])
+      if (changed) await writeFile(join(workspace.path, "a.txt"), "Unproven later Actor change\n")
+      if (changed) {
+        await expect(integrateTaskDelivery(mission, delivery)).rejects.toThrow("Legacy parallel evidence")
+        expect(await git(["for-each-ref", "--format=%(objectname)", taskEvidenceRefs(workspace).workerRef])).toBe("")
+      } else {
+        expect((await integrateTaskDelivery(mission, delivery)).alreadyApplied).toBe(true)
+        const actual = (await parallelGit(workspace.path, ["rev-parse", "HEAD"])).trim()
+        expect((await git(["rev-parse", taskEvidenceRefs(workspace).workerRef])).trim()).toBe(actual)
+      }
+      expect(await readFile(join(mission.workspace.path, "a.txt"), "utf8")).toBe("Legacy delivered product\n")
+    },
+  )
 
   it("ignores inherited Git repository/index routing and only uses the Actor's private repository", async () => {
     const root = mission.workspace.path
