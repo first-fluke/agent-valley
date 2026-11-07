@@ -220,9 +220,28 @@ describe("buildDarwinSandboxCommand", () => {
   test("grants only the active agent's vendor directory", () => {
     const result = buildDarwinSandboxCommand({ ...BASE_REQUEST, networkAllowlist: [] }, "/usr/bin/sandbox-exec")
     const profile = result.args[1] as string
-    for (const dir of [".claude", ".cache", ".npm", ".bun"]) {
+    for (const dir of [
+      ".claude",
+      ".cache",
+      ".npm",
+      ".bun",
+      ".cargo",
+      ".rustup",
+      ".local/state/mise",
+      ".local/share/mise",
+    ]) {
       expect(profile).toContain(`(allow file-write* (subpath "${homedir()}/${dir}"))`)
     }
+    // Cargo credentials sit inside the writable Cargo home; they stay unreadable like other secrets.
+    expect(profile).toContain(`(deny file-read* (literal "${homedir()}/.cargo/credentials.toml"))`)
+    const custom = buildDarwinSandboxCommand({
+      ...BASE_REQUEST,
+      networkAllowlist: [],
+      env: { CARGO_HOME: "/opt/cargo-home", RUSTUP_HOME: "/opt/rustup-home" },
+    }).args[1] as string
+    expect(custom).toContain(`(allow file-write* (subpath "/opt/cargo-home"))`)
+    expect(custom).toContain(`(allow file-write* (subpath "/opt/rustup-home"))`)
+    expect(custom).toContain(`(deny file-read* (literal "/opt/cargo-home/credentials.toml"))`)
     for (const dir of [".codex", ".cursor", ".grok", ".gemini", ".kimi-code"]) {
       expect(profile).toContain(`(deny file-read* (subpath "${homedir()}/${dir}"))`)
       expect(profile).not.toContain(`(allow file-write* (subpath "${homedir()}/${dir}"))`)

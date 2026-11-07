@@ -10,7 +10,9 @@
  *     the narrow exception of secrets a prompt-injected issue body could
  *     otherwise exfiltrate.
  *   - Filesystem WRITE limited to the workspace, active agent CLI home,
- *     shared tool caches, the OS tmp dir and the shared system tmp dirs
+ *     shared tool caches and toolchain homes (`~/.cache`, `~/.npm`, `~/.bun`,
+ *     Cargo and rustup homes, mise state and installs; Cargo credentials stay
+ *     read-only), the OS tmp dir and the shared system tmp dirs
  *     (`/tmp`, `/private/tmp`, `/var/tmp`, `/private/var/tmp`). Toolchains
  *     create fixed scratch paths there (`/private/tmp/arc-uid-501` for
  *     Cargo, npm/bun caches, shell helpers) regardless of `TMPDIR`, so
@@ -133,6 +135,19 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   // sandboxed tmp workspace succeed regardless of which form the kernel
   // checks against. Keep unresolved paths when they do not exist yet.
 
+  // Rust and mise toolchains write outside the workspace: Cargo downloads crates into its registry
+  // cache and `cargo install` writes `bin/`, rustup downloads components into its home, and mise
+  // records trusted configs under its state dir. Without these grants a `cargo fetch` of one new
+  // crate or a `rustup component add` fails with "Operation not permitted" inside the sandbox.
+  const env = req.env ?? process.env
+  const cargoHome = env.CARGO_HOME || `${home}/.cargo`
+  const rustupHome = env.RUSTUP_HOME || `${home}/.rustup`
+  const toolchainPaths = [
+    cargoHome,
+    rustupHome,
+    env.MISE_STATE_DIR || `${home}/.local/state/mise`,
+    env.MISE_DATA_DIR || `${home}/.local/share/mise`,
+  ]
   const writablePaths = [
     ...workspacePaths,
     ...tmpPaths,
@@ -141,7 +156,9 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
     `${home}/.cache`,
     `${home}/.npm`,
     `${home}/.bun`,
+    ...toolchainPaths,
   ]
+  const cargoCredentialFiles = [`${cargoHome}/credentials`, `${cargoHome}/credentials.toml`]
   // NOTE: deliberately no blanket `${home}/.config` entry here — that
   // used to make `~/.config/agent-valley/settings.yaml` (and every other
   // tool's config under `~/.config`, e.g. `gh`, `gcloud`) writable by the
@@ -186,6 +203,7 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
   ]
   const denyReadLiterals = [
     `${home}/.git-credentials`,
+    ...cargoCredentialFiles,
     ...new Set(
       [process.cwd(), req.workspacePath].flatMap((root) =>
         pathAliases(root).flatMap((path) => pathAliases(join(path, PROJECT_CONFIG_FILENAME))),
