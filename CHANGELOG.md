@@ -6,6 +6,44 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.0](https://github.com/first-fluke/agent-valley/compare/v4.8.8...v4.9.0) (2026-11-07)
+
+
+### Features
+
+* **agents:** add native provider sessions and runtime fixes ([882497e](https://github.com/first-fluke/agent-valley/commit/882497e47f382b4ad47efc2a6df159454fcb5faa))
+* **chief:** amend a saved operating charter on resume ([c03cc4c](https://github.com/first-fluke/agent-valley/commit/c03cc4c238c3d640e89dfb70b6712af03321024f))
+* **chief:** supply the integrated change set to independent reviews ([779f2bb](https://github.com/first-fluke/agent-valley/commit/779f2bbba5d321dfc3dd5607ee4fbd86710a88d4))
+
+
+### Bug Fixes
+
+* **chief:** accept supervision decisions above the former 8,000-character cutoff ([17e3080](https://github.com/first-fluke/agent-valley/commit/17e3080ad996b348167cbd0191591a573b44b620))
+* **chief:** keep completed tasks completed across targeted repairs ([92abb3e](https://github.com/first-fluke/agent-valley/commit/92abb3ecfa1ef942ceb8a8a18731b5fbeacc303c))
+* **chief:** observe newer mission records and ignore actor config migrations ([de607d5](https://github.com/first-fluke/agent-valley/commit/de607d5e0001c1753e7d7d05465c0fdbffad421e))
+* **chief:** parse json responses wrapped in prose ([1fb4f94](https://github.com/first-fluke/agent-valley/commit/1fb4f9462c3914b3b5b7cd017786381531be029e))
+* **chief:** preserve parallel actor revision evidence for review ([292b44a](https://github.com/first-fluke/agent-valley/commit/292b44ab5e8d7aa7a4ac78f2dc88869e88a2218f))
+* **chief:** re-pin worktree integration after a clean fast-forward ([42b5466](https://github.com/first-fluke/agent-valley/commit/42b5466d8c8f9dd4608abacb4e8db7de289368a9))
+* **chief:** repair complete json responses before schema validation ([92cfbc1](https://github.com/first-fluke/agent-valley/commit/92cfbc18c2317c599acd8320d017eb71bcfee53a))
+* **chief:** repair cycle blockers in provenance, recovery and routing ([84be5a0](https://github.com/first-fluke/agent-valley/commit/84be5a075fae243151038b10eff7172fcdf2aaef))
+* **chief:** repair on the only configured route without a Chief decision ([1587117](https://github.com/first-fluke/agent-valley/commit/1587117d850038a2a6b4b98874900f08a99ccd01))
+* **chief:** scope final-review repairs to the tasks the findings name ([285b1af](https://github.com/first-fluke/agent-valley/commit/285b1af1e7a548e290632c2f679d8597e47ede04))
+* **chief:** window route evidence and degrade instead of failing routing ([a9b0aa4](https://github.com/first-fluke/agent-valley/commit/a9b0aa4d37d5d9cb666b686738178ced37cd0c09))
+* **core:** preserve native responses and harden structured parsing ([dd31d18](https://github.com/first-fluke/agent-valley/commit/dd31d18ff3fc3ea380f883ef0589a0342eb45801))
+* **sessions:** allow shared tmp writes and pseudo-tty in actor sandbox ([9a88495](https://github.com/first-fluke/agent-valley/commit/9a884956cb1a9886e91acf4a2f72d25354e526c0))
+* **sessions:** grant pty slave devices so sandboxed actors can open a terminal ([a71bb4b](https://github.com/first-fluke/agent-valley/commit/a71bb4b1f1b477ed1171c9dda0420e3477a626cc))
+
+
+### Refactors
+
+* **core:** share bounded native result accumulation ([40918c9](https://github.com/first-fluke/agent-valley/commit/40918c9f7346ca98ff9a02910d6295ce13453a21))
+
+
+### Performance
+
+* **chief:** keep task review prompts within argv-delivered CLI limits ([9292ebe](https://github.com/first-fluke/agent-valley/commit/9292ebed0c4f0924389eca53b50abfb2cde219ed))
+* **chief:** review integrated tasks concurrently within maxParallel ([c234288](https://github.com/first-fluke/agent-valley/commit/c23428883e929b69b7276c173105841867175261))
+
 ## [4.8.8](https://github.com/first-fluke/agent-valley/compare/v4.8.7...v4.8.8) (2026-11-06)
 
 
