@@ -14,6 +14,9 @@ export const parallelWorkspaceSchema = z.strictObject({
   branch: z.string().min(1),
   baselineHead: objectId,
   baselineTree: objectId,
+  snapshotCommit: objectId.optional(),
+  snapshotRef: z.string().min(1).optional(),
+  workerRef: z.string().min(1).optional(),
 })
 export type ParallelTaskWorkspace = z.infer<typeof parallelWorkspaceSchema>
 export const taskWorktreeRecordSchema = parallelWorkspaceSchema
@@ -24,6 +27,7 @@ export const parallelDeliverySchema = z.strictObject({
   patchPath: z.string().min(1),
   patchSha256: z.string().regex(/^[a-f0-9]{64}$/),
   deliveryTree: objectId,
+  workerHead: objectId.optional(),
   changes: z
     .array(z.strictObject({ path: z.string().min(1), before: imageSchema.nullable(), after: imageSchema.nullable() }))
     .max(20_000),

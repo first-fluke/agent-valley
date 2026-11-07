@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { dirname, join, sep } from "node:path"
 import { integrateContentTransaction } from "./content-transaction"
+import { retainTaskEvidence, taskEvidenceRefs } from "./parallel-evidence"
 import {
   type ParallelBaseline,
   type ParallelDelivery,
@@ -84,6 +85,7 @@ export async function prepareTaskWorktree(
   if (existing) {
     const record = parallelWorkspaceSchema.parse(JSON.parse(existing))
     await validateWorkspace(mission, record)
+    if (record.snapshotCommit) await retainTaskEvidence(record, "snapshot", record.snapshotCommit)
     return record
   }
   const snapshot = baseline ?? (await captureParallelBaseline(mission.workspace.path))
@@ -130,7 +132,11 @@ export async function prepareTaskWorktree(
     branch: location.branch,
     baselineHead: snapshot.head,
     baselineTree: snapshot.tree,
+    snapshotCommit: commit,
+    snapshotRef: taskEvidenceRefs({ missionId: mission.id, taskId, attempt }).snapshotRef,
+    workerRef: taskEvidenceRefs({ missionId: mission.id, taskId, attempt }).workerRef,
   }
+  await retainTaskEvidence(record, "snapshot", commit)
   await writeParallelJson(location.record, record)
   return record
 }
@@ -153,6 +159,7 @@ export async function collectTaskDelivery(
   if (existing) {
     const delivery = parallelDeliverySchema.parse(JSON.parse(existing))
     if (!same(delivery.workspace, workspace)) throw new Error("Saved parallel delivery has a different task identity.")
+    await retainDeliveryEvidence(delivery, () => writeParallelJson(location.delivery, delivery))
     return delivery
   }
   await validateWorkspace(mission, workspace)
@@ -189,9 +196,11 @@ export async function collectTaskDelivery(
     patchPath: location.patch,
     patchSha256: hash(patch),
     deliveryTree: final.tree,
+    workerHead: final.head,
     changes,
     status: "prepared",
   }
+  await retainDeliveryEvidence(delivery, () => writeParallelJson(location.delivery, delivery))
   await writeParallelJson(location.delivery, delivery)
   return delivery
 }
@@ -214,12 +223,42 @@ export async function integrateTaskDelivery(
     throw new Error(
       "Parallel delivery does not match its persisted task identity and patch. Inspect the saved artifacts before recovery.",
     )
+  await retainDeliveryEvidence(delivery, () => writeParallelJson(location.delivery, delivery))
   const result = await integrateContentTransaction(mission.workspace.path, delivery, {
     save: () => writeParallelJson(location.delivery, delivery),
     conflict: (paths, detail) => new ParallelIntegrationConflict(delivery.workspace.taskId, paths, detail),
   })
   input.status = "applied"
+  input.workerHead = delivery.workerHead
   return result
+}
+
+async function retainDeliveryEvidence(delivery: ParallelDelivery, save: () => Promise<void>) {
+  if (delivery.workspace.snapshotCommit)
+    await retainTaskEvidence(delivery.workspace, "snapshot", delivery.workspace.snapshotCommit)
+  if (delivery.workerHead) {
+    await retainTaskEvidence(delivery.workspace, "worker", delivery.workerHead)
+    return
+  }
+  if (
+    delivery.status === "applied" &&
+    !delivery.workspace.snapshotCommit &&
+    !delivery.workspace.snapshotRef &&
+    !delivery.workspace.workerRef
+  ) {
+    const clone = await lstat(delivery.workspace.path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined
+      throw error
+    })
+    // Old AV versions disposed completed Actors without retaining revision metadata.
+    if (!clone) return
+  }
+  const current = await captureParallelBaseline(delivery.workspace.path)
+  if (current.tree !== delivery.deliveryTree)
+    throw new Error("Legacy parallel evidence no longer matches its delivered product tree. Preserve its workspace.")
+  await retainTaskEvidence(delivery.workspace, "worker", current.head)
+  delivery.workerHead = current.head
+  await save()
 }
 
 /** No failed or unmerged Actor edits are removed. Patch receipts remain for resume/audit. */
@@ -243,6 +282,7 @@ export async function disposeTaskWorktree(workspace: ParallelTaskWorkspace): Pro
     ])
     if (!same([...observed.entries()], [...delivered.entries()])) return false
   }
+  await retainDeliveryEvidence(delivery, () => writeParallelJson(location.delivery, delivery))
   await rm(workspace.path, { recursive: true, force: true })
   return true
 }

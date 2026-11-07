@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { runJoinedWave } from "./parallel"
+import { retainTaskEvidence, taskEvidenceRefs } from "./parallel-evidence"
 import { parallelGit } from "./parallel-git"
 import {
   captureParallelBaseline,
@@ -72,6 +73,133 @@ afterEach(async () => {
 })
 
 describe("isolated parallel Actor worktrees", () => {
+  it("retains the Actor's real snapshot and committed HEAD for independent Git provenance checks", async () => {
+    const root = mission.workspace.path
+    await mkdir(join(root, "docs"))
+    const contract = "The inspected instance-lock contract is real source material.\n"
+    await writeFile(join(root, "docs", "contract.md"), contract)
+    await writeFile(join(root, "b.txt"), "Unrelated staged operator change\n")
+    await git(["add", "b.txt"])
+    const head = await git(["rev-parse", "HEAD"])
+    const index = await readFile(join(root, ".git", "index"))
+    const workspace = await prepareTaskWorktree(mission, "provenance", 1)
+    const snapshot = (await parallelGit(workspace.path, ["rev-parse", "HEAD"])).trim()
+    expect(snapshot).not.toBe(head.trim())
+    expect(workspace.snapshotCommit).toBe(snapshot)
+    expect(await git(["show", `${snapshot}:docs/contract.md`])).toBe(contract)
+    expect(await readFile(join(root, ".git", "index"))).toEqual(index)
+    expect(await git(["rev-parse", "HEAD"])).toBe(head)
+    expect(await readFile(join(root, "a.txt"), "utf8")).toBe("A baseline\n")
+    await writeFile(join(workspace.path, "a.txt"), "Verified Actor implementation\n")
+    await writeFile(join(workspace.path, "proof.md"), `Inspected original snapshot ${snapshot}.\n`)
+    await parallelGit(workspace.path, ["add", "a.txt", "proof.md"])
+    await parallelGit(workspace.path, [
+      "-c", "user.name=AV Actor", "-c", "user.email=actor@example.test",
+      "-c", "commit.gpgsign=false", "commit", "-qm", "Actor implementation",
+    ])
+    const worker = (await parallelGit(workspace.path, ["rev-parse", "HEAD"])).trim()
+    const delivery = await collectTaskDelivery(mission, workspace)
+    expect(delivery.workerHead).toBe(worker)
+    expect(await git(["show", `${worker}:a.txt`])).toBe("Verified Actor implementation\n")
+    expect(await readFile(join(root, "a.txt"), "utf8")).toBe("A baseline\n")
+    expect(await readFile(join(root, ".git", "index"))).toEqual(index)
+    await integrateTaskDelivery(mission, delivery)
+    const review = await prepareTaskWorktree(mission, "independent-review", 1)
+    expect((await parallelGit(review.path, ["rev-parse", "HEAD"])).trim()).not.toBe(snapshot)
+    expect(await parallelGit(review.path, ["show", `${snapshot}:docs/contract.md`])).toBe(contract)
+    expect(await parallelGit(review.path, ["show", `${worker}:proof.md`])).toContain(snapshot)
+    expect(await git(["rev-parse", "HEAD"])).toBe(head)
+    expect(await readFile(join(root, ".git", "index"))).toEqual(index)
+    expect(await readFile(join(root, "b.txt"), "utf8")).toBe("Unrelated staged operator change\n")
+  })
+
+  it("restores original evidence refs before an already applied receipt returns, even after Actor disposal", async () => {
+    const workspace = await prepareTaskWorktree(mission, "restore-evidence", 1)
+    await writeFile(join(workspace.path, "a.txt"), "Delivered product\n")
+    const delivery = await collectTaskDelivery(mission, workspace)
+    await integrateTaskDelivery(mission, delivery)
+    expect(await disposeTaskWorktree(workspace)).toBe(true)
+    const refs = taskEvidenceRefs(workspace)
+    await git(["update-ref", "-d", refs.snapshotRef])
+    await git(["update-ref", "-d", refs.workerRef])
+    const head = await git(["rev-parse", "HEAD"])
+    const index = await readFile(join(mission.workspace.path, ".git", "index"))
+    expect((await integrateTaskDelivery(mission, delivery)).alreadyApplied).toBe(true)
+    expect((await git(["rev-parse", refs.snapshotRef])).trim()).toBe(workspace.snapshotCommit)
+    expect((await git(["rev-parse", refs.workerRef])).trim()).toBe(delivery.workerHead)
+    expect(await readFile(join(mission.workspace.path, "a.txt"), "utf8")).toBe("Delivered product\n")
+    expect(await git(["rev-parse", "HEAD"])).toBe(head)
+    expect(await readFile(join(mission.workspace.path, ".git", "index"))).toEqual(index)
+  })
+
+  it("rejects caller-controlled refs and a snapshot with a mismatched original tree", async () => {
+    const workspace = await prepareTaskWorktree(mission, "forged-evidence", 1)
+    const snapshot = workspace.snapshotCommit as string
+    const head = await git(["rev-parse", "HEAD"])
+    const index = await readFile(join(mission.workspace.path, ".git", "index"))
+    await expect(
+      retainTaskEvidence({ ...workspace, workerRef: "refs/heads/fixture" }, "worker", snapshot),
+    ).rejects.toThrow("owned task path and private references")
+    await expect(
+      retainTaskEvidence({ ...workspace, baselineTree: "f".repeat(40) }, "snapshot", snapshot),
+    ).rejects.toThrow("recorded parent and product tree")
+    await expect(retainTaskEvidence(workspace, "worker", "f".repeat(40))).rejects.toThrow()
+    expect(await git(["rev-parse", "HEAD"])).toBe(head)
+    expect(await readFile(join(mission.workspace.path, ".git", "index"))).toEqual(index)
+  })
+
+  it("keeps an already disposed legacy applied receipt idempotent without inventing revision evidence", async () => {
+    const workspace = await prepareTaskWorktree(mission, "disposed-legacy-evidence", 1)
+    await writeFile(join(workspace.path, "a.txt"), "Already completed legacy product\n")
+    const delivery = await collectTaskDelivery(mission, workspace)
+    await integrateTaskDelivery(mission, delivery)
+    expect(await disposeTaskWorktree(workspace)).toBe(true)
+    const refs = taskEvidenceRefs(workspace)
+    await git(["update-ref", "-d", refs.snapshotRef])
+    await git(["update-ref", "-d", refs.workerRef])
+    delete delivery.workerHead
+    delete delivery.workspace.snapshotCommit
+    delete delivery.workspace.snapshotRef
+    delete delivery.workspace.workerRef
+    const receipt = join(dirname(delivery.patchPath), "delivery.json")
+    await writeFile(receipt, JSON.stringify(delivery))
+    const saved = await readFile(receipt, "utf8")
+    const head = await git(["rev-parse", "HEAD"])
+    const index = await readFile(join(mission.workspace.path, ".git", "index"))
+    expect((await integrateTaskDelivery(mission, delivery)).alreadyApplied).toBe(true)
+    expect(JSON.parse(await readFile(receipt, "utf8"))).toEqual(JSON.parse(saved))
+    expect(delivery.workerHead).toBeUndefined()
+    expect(await git(["for-each-ref", "--format=%(objectname)", `refs/agent-valley/task-evidence/${refs.key}`])).toBe("")
+    expect(await readFile(join(mission.workspace.path, "a.txt"), "utf8")).toBe("Already completed legacy product\n")
+    expect(await git(["rev-parse", "HEAD"])).toBe(head)
+    expect(await readFile(join(mission.workspace.path, ".git", "index"))).toEqual(index)
+  })
+
+  it.each([false, true])("recovers legacy receipt provenance only with an unchanged delivered tree: changed=%s", async (changed) => {
+    const workspace = await prepareTaskWorktree(mission, "legacy-evidence", 1)
+    await writeFile(join(workspace.path, "a.txt"), "Legacy delivered product\n")
+    const delivery = await collectTaskDelivery(mission, workspace)
+    await integrateTaskDelivery(mission, delivery)
+    delete delivery.workerHead
+    delete delivery.workspace.snapshotCommit
+    delete delivery.workspace.snapshotRef
+    delete delivery.workspace.workerRef
+    const receipt = join(dirname(delivery.patchPath), "delivery.json")
+    await writeFile(join(dirname(delivery.patchPath), "workspace.json"), JSON.stringify(delivery.workspace))
+    await writeFile(receipt, JSON.stringify(delivery))
+    await git(["update-ref", "-d", taskEvidenceRefs(workspace).workerRef])
+    if (changed) await writeFile(join(workspace.path, "a.txt"), "Unproven later Actor change\n")
+    if (changed) {
+      await expect(integrateTaskDelivery(mission, delivery)).rejects.toThrow("Legacy parallel evidence")
+      expect(await git(["for-each-ref", "--format=%(objectname)", taskEvidenceRefs(workspace).workerRef])).toBe("")
+    } else {
+      expect((await integrateTaskDelivery(mission, delivery)).alreadyApplied).toBe(true)
+      const actual = (await parallelGit(workspace.path, ["rev-parse", "HEAD"])).trim()
+      expect((await git(["rev-parse", taskEvidenceRefs(workspace).workerRef])).trim()).toBe(actual)
+    }
+    expect(await readFile(join(mission.workspace.path, "a.txt"), "utf8")).toBe("Legacy delivered product\n")
+  })
+
   it("ignores inherited Git repository/index routing and only uses the Actor's private repository", async () => {
     const root = mission.workspace.path
     const originalHead = await git(["rev-parse", "HEAD"])
