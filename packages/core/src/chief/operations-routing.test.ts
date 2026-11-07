@@ -117,6 +117,25 @@ describe("measured work routing", () => {
       "Every configured routing candidate failed",
     )
   })
+  it("repairs a rejected single candidate in place while repair budget remains", () => {
+    const mission = setup()
+    if (!mission.operatingPolicy?.routing) throw new Error("Missing routing policy")
+    mission.operatingPolicy.routing.candidates = [
+      { actorType: "codex", model: "cheap", inputPerMillionUsd: 1, outputPerMillionUsd: 2 },
+    ]
+    mission.maxRepairs = 2
+    mission.tasks = [{ id: "onboarding", reviewerId: "reviewer", status: "pending", attempts: 1, repairRound: 1 }]
+    mission.operations.runs.push(run({ outcome: "rejected" }))
+    const selected = selectWorkActor(mission, fixtureActor(mission, "worker"), "onboarding")
+    expect(selected.actor).toMatchObject({ agentType: "codex", model: "cheap" })
+    expect(selected.reason).toBe("Repairing on the only configured route.")
+    const state = mission.tasks[0]
+    if (!state) throw new Error("Missing task state")
+    state.repairRound = 3
+    expect(() => selectWorkActor(mission, fixtureActor(mission, "worker"), "onboarding")).toThrow(
+      "Every configured routing candidate failed",
+    )
+  })
   it("never substitutes an explicit custom-roster work model or an unavailable candidate", () => {
     const mission = setup()
     delete mission.availableAgents

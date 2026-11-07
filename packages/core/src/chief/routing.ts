@@ -164,6 +164,22 @@ export function selectWorkActor(
         actor: { ...actor, agentType: probe.candidate.actorType, model: probe.candidate.model },
         reason: probe.reason,
       }
+    const only = compatiblePool.length === 1 ? compatiblePool[0] : undefined
+    const taskState = taskId === undefined ? undefined : mission.tasks.find((entry) => entry.id === taskId)
+    const repairRound = taskState?.repairRound ?? 0
+    // The coordinator increments repairRound before dispatching each authorized local repair.
+    if (
+      only &&
+      failed.has(routeKey(only)) &&
+      taskState &&
+      taskState.status !== "completed" &&
+      repairRound >= 1 &&
+      repairRound <= mission.maxRepairs
+    )
+      return {
+        actor: { ...actor, agentType: only.actorType, model: only.model },
+        reason: "Repairing on the only configured route.",
+      }
     const remaining = compatible.filter((candidate) => !failed.has(routeKey(candidate)))
     const degraded = degradedWorkRoute(mission, taskId, remaining, evidence, taskRuns, window, routeKey)
     if (degraded)

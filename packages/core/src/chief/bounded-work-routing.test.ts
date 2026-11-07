@@ -251,9 +251,9 @@ describe("bounded routing in a closed measured pool", () => {
       "no ready work candidate",
     )
     if (value.mission.operatingPolicy) value.mission.operatingPolicy.readyActors = ["opencode"]
-    expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
-      "Every configured routing candidate failed this task",
-    )
+    const repaired = selectWorkActor(value.mission, value.worker, "onboarding")
+    expect(repaired.actor.agentType).toBe("opencode")
+    expect(repaired.reason).toBe("Repairing on the only configured route.")
     delete value.mission.availableAgents
     value.worker.model = "explicit-model"
     expect(selectWorkActor(value.mission, value.worker, "onboarding").actor).toBe(value.worker)
@@ -268,6 +268,91 @@ function spentPool() {
   value.mission.operations?.runs.push({ ...value.rejection, runId: "later-failure", actorType: "codex" })
   return value
 }
+
+/** One ready, skill-compatible route whose rejection would otherwise demand a Chief decision. */
+function singleRoutePool() {
+  const value = closedPool()
+  const routing = value.mission.operatingPolicy?.routing
+  if (!routing || !value.mission.operatingPolicy) throw new Error("Expected the saved routing policy")
+  value.mission.operatingPolicy.readyActors = ["qwen"]
+  routing.candidates = [{ actorType: "qwen", inputPerMillionUsd: 2, outputPerMillionUsd: 2 }]
+  value.rejection.actorType = "qwen"
+  return value
+}
+
+describe("repair on the only configured route", () => {
+  it("dispatches the same route without a Chief decision while local repair budget remains", () => {
+    const value = singleRoutePool()
+    const before = structuredClone(value.mission)
+    const evidence = routeEvidence(value.mission)
+    const selected = selectWorkActor(value.mission, value.worker, "onboarding")
+    expect(selected.actor).toMatchObject({ id: "worker", agentType: "qwen" })
+    expect(selected.reason).toBe("Repairing on the only configured route.")
+    expect(routeEvidence(value.mission)).toEqual(evidence)
+    expect(value.mission).toEqual(before)
+  })
+
+  it("dispatches the final authorized repair round at the budget limit", () => {
+    const value = singleRoutePool()
+    value.state.repairRound = value.mission.maxRepairs
+    const selected = selectWorkActor(value.mission, value.worker, "onboarding")
+    expect(selected.actor.agentType).toBe("qwen")
+    expect(selected.reason).toBe("Repairing on the only configured route.")
+  })
+
+  it("keeps the Chief decision path once repairs are exhausted", () => {
+    const value = singleRoutePool()
+    value.state.repairRound = value.mission.maxRepairs + 1
+    expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
+      "Every configured routing candidate failed this task",
+    )
+  })
+
+  it("keeps the Chief decision path before any local repair round", () => {
+    const value = singleRoutePool()
+    value.state.repairRound = 0
+    expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
+      "Every configured routing candidate failed this task",
+    )
+  })
+
+  it("keeps the Chief decision path when the task record is missing or completed", () => {
+    const missing = singleRoutePool()
+    missing.mission.tasks = []
+    expect(() => selectWorkActor(missing.mission, missing.worker, "onboarding")).toThrow(
+      "Every configured routing candidate failed this task",
+    )
+    const completed = singleRoutePool()
+    completed.state.status = "completed"
+    expect(() => selectWorkActor(completed.mission, completed.worker, "onboarding")).toThrow(
+      "Every configured routing candidate failed this task",
+    )
+  })
+
+  it("repairs on the only skill-compatible candidate without expanding the ready pool", () => {
+    const value = closedPool()
+    value.rejection.actorType = "qwen"
+    const compatible = new Set([routeKey({ actorType: "qwen" })])
+    const selected = selectWorkActor(value.mission, value.worker, "onboarding", compatible)
+    expect(selected.actor.agentType).toBe("qwen")
+    expect(selected.reason).toBe("Repairing on the only configured route.")
+  })
+
+  it("keeps the Chief decision path when several ready candidates failed this task", () => {
+    const value = singleRoutePool()
+    const routing = value.mission.operatingPolicy?.routing
+    if (!routing || !value.mission.operatingPolicy) throw new Error("Expected the saved routing policy")
+    value.mission.operatingPolicy.readyActors = ["codex", "qwen"]
+    routing.candidates = [
+      { actorType: "codex", inputPerMillionUsd: 1, outputPerMillionUsd: 1 },
+      { actorType: "qwen", inputPerMillionUsd: 2, outputPerMillionUsd: 2 },
+    ]
+    value.mission.operations?.runs.push({ ...value.rejection, runId: "codex-failed", actorType: "codex" })
+    expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
+      "Every configured routing candidate failed this task",
+    )
+  })
+})
 
 describe("degraded routing below the measured minimum", () => {
   it("keeps working on the best measured ready route instead of failing the whole mission", () => {
