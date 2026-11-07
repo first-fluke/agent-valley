@@ -8,10 +8,13 @@ import {
 import { ContinuousOperationStore } from "@agent-valley/core/chief/continuous-store"
 import { validateContinuousBaseline } from "@agent-valley/core/chief/continuous-workspace"
 import { assertNoUncertainExecution } from "@agent-valley/core/chief/execution"
+import { parallelGit } from "@agent-valley/core/chief/parallel-git"
 import type { SourceIntegrationPolicy } from "@agent-valley/core/chief/source-integration-contract"
 import { MissionStore } from "@agent-valley/core/chief/store"
 
 export type SourceIntegrationMode = SourceIntegrationPolicy["mode"]
+
+type WorktreePolicy = Extract<SourceIntegrationPolicy, { mode: "worktree" }>
 
 export function sourceIntegrationCheckpoint(operation: ContinuousOperation) {
   const accepted = operation.baseline
@@ -62,6 +65,44 @@ async function assertChildSettled(operation: ContinuousOperation, storageRoot: s
     throw new Error("Resolve the current child's external-effect outcome before enabling source integration.")
 }
 
+/** Only a clean same-branch fast-forward proves the operator committed the already-applied worktree. */
+async function cleanSourceFastForward(
+  repositoryRoot: string,
+  saved: WorktreePolicy,
+  current: WorktreePolicy,
+): Promise<boolean> {
+  if (current.branch !== saved.branch) return false
+  if ((await parallelGit(repositoryRoot, ["status", "--porcelain"])).trim()) return false
+  try {
+    await parallelGit(repositoryRoot, ["merge-base", "--is-ancestor", saved.head, current.head])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Record the automatic re-pin against its accepted cycle without changing the cycle's acceptance proof. */
+function recordSourceRepin(operation: ContinuousOperation, previous: WorktreePolicy, current: WorktreePolicy): void {
+  const accepted = operation.baseline
+  if (!accepted?.missionId) return
+  const entry = operation.history.at(-1)
+  operation.history = [
+    ...operation.history,
+    {
+      missionId: accepted.missionId,
+      goal: "Re-pin worktree source integration",
+      reason: `The operator committed the clean source worktree; ${current.branch} fast-forwarded from ${previous.head} to ${current.head}.`,
+      evidence: [`previous source HEAD ${previous.head}`, `current source HEAD ${current.head}`],
+      // The acceptance journal binds this cycle's completedAt; a re-pin must not rewrite that proof.
+      completedAt:
+        entry && entry.missionId === accepted.missionId && entry.baselinePath === accepted.path
+          ? entry.completedAt
+          : new Date().toISOString(),
+      baselinePath: accepted.path,
+    },
+  ].slice(-20)
+}
+
 /** Save activation before source writes; ordinary resume finishes the same retained catch-up transaction. */
 export async function resumeSourceIntegration(
   operation: ContinuousOperation,
@@ -101,7 +142,8 @@ export async function resumeSourceIntegration(
     if (policy?.mode === "worktree") {
       const current = await prepareSourceIntegration(operation.repositoryRoot, operation.id)
       if (current.branch !== policy.branch || current.head !== policy.head) {
-        if (selected !== "worktree")
+        const automatic = selected !== "worktree"
+        if (automatic && !(await cleanSourceFastForward(operation.repositoryRoot, policy, current)))
           throw new Error(
             "Source branch or HEAD moved from the saved integration target. Preserve local changes and explicitly reconcile source mode before resuming.",
           )
@@ -113,6 +155,7 @@ export async function resumeSourceIntegration(
         await assertChildSettled(operation, storageRoot)
         operation.sourceIntegrationPolicy = current
         operation.updatedAt = new Date().toISOString()
+        if (automatic) recordSourceRepin(operation, policy, current)
         await persist(operation)
         policy = current
       }

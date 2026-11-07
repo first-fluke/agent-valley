@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { recordContinuousAcceptance } from "@agent-valley/core/chief/continuous-acceptance-record"
 import type { ContinuousBaseline, ContinuousOperation } from "@agent-valley/core/chief/continuous-contract"
 import {
   mission as missionFixture,
@@ -30,6 +31,8 @@ beforeEach(async () => {
   root = join(directory, "repository")
   await mkdir(root)
   await git(["init", "-q", "-b", "main"])
+  // Keep host line-ending conversion out of the fixture; target runtimes apply LF patches verbatim.
+  await git(["config", "core.autocrlf", "false"])
   await writeFile(join(root, ".gitignore"), ".agent-valley/\n")
   await writeFile(join(root, "product.txt"), "Initial product\n")
   await writeFile(join(root, "other.txt"), "Other product\n")
@@ -215,7 +218,7 @@ describe("continuous source integration policy and resume", () => {
     expect(operation.decisionId).toBe("saved-decision")
   })
 
-  it("never re-pins source HEAD on ordinary resume", async () => {
+  it("keeps the pause on ordinary resume when HEAD moved with a dirty worktree", async () => {
     const { operation } = await fixture()
     await resumeSourceIntegration(operation, "worktree", root)
     const policy = structuredClone(operation.sourceIntegrationPolicy)
@@ -271,6 +274,183 @@ describe("continuous source integration policy and resume", () => {
     expect(operation.decisionId).toBe("saved-decision")
     expect(operation.settings).toEqual(settings)
     expect(operation.recovery).toEqual(recovery)
+  })
+
+  it("automatically re-pins worktree mode after a clean fast-forward and records it in history", async () => {
+    const { operation, accepted } = await fixture()
+    await resumeSourceIntegration(operation, "worktree", root)
+    if (operation.sourceIntegrationPolicy?.mode !== "worktree") throw new Error("Expected the worktree pin")
+    const originalHead = operation.sourceIntegrationPolicy.head
+    const settings = structuredClone(operation.settings)
+    const recovery = structuredClone(operation.recovery)
+    const completedAt = "2026-10-05T00:00:00.000Z"
+    operation.history = [
+      {
+        missionId: "child-one",
+        goal: "First verified cycle",
+        reason: "Verified",
+        evidence: [],
+        completedAt,
+        baselinePath: accepted.path,
+      },
+    ]
+    await storage.save(operation)
+    await git(["add", "product.txt"])
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "operator accepted source",
+    ])
+    const head = (await git(["rev-parse", "HEAD"])).trim()
+
+    await resumeSourceIntegration(operation, undefined, root)
+
+    expect(operation.sourceIntegrationPolicy).toEqual({ mode: "worktree", branch: "main", head })
+    expect(operation.sourceIntegration?.missionId).toBe("child-one")
+    expect(operation.completedCycles).toBe(1)
+    expect(operation.decisionId).toBe("saved-decision")
+    expect(operation.settings).toEqual(settings)
+    expect(operation.recovery).toEqual(recovery)
+    expect(operation.phase).not.toBe("paused")
+    expect(operation.history).toHaveLength(2)
+    const entry = operation.history.at(-1)
+    expect(entry).toMatchObject({ missionId: "child-one", baselinePath: accepted.path, completedAt })
+    expect(entry?.goal).toBe("Re-pin worktree source integration")
+    expect(entry?.reason).toContain(head)
+    expect(entry?.evidence.join(" ")).toContain(originalHead)
+    expect((await storage.load(operation.id)).sourceIntegrationPolicy).toEqual({
+      mode: "worktree",
+      branch: "main",
+      head,
+    })
+    await expect(recordContinuousAcceptance(operation)).resolves.toBeUndefined()
+    await expect(recordContinuousAcceptance(operation)).resolves.toBeUndefined()
+    const proof = JSON.parse(
+      await readFile(
+        join(root, ".agent-valley", "operations", "operation", "baselines", "child-one", "acceptance.json"),
+        "utf8",
+      ),
+    )
+    expect(proof.completedAt).toBe(completedAt)
+  })
+
+  it("keeps the pause on ordinary resume for a clean non-fast-forward move", async () => {
+    const { operation } = await fixture()
+    await resumeSourceIntegration(operation, "worktree", root)
+    await git(["add", "product.txt"])
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "operator accepted source",
+    ])
+    await resumeSourceIntegration(operation, "worktree", root)
+    const policy = structuredClone(operation.sourceIntegrationPolicy)
+    await git(["reset", "--hard", "HEAD~1"])
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "divergent operator commit",
+    ])
+
+    await expect(resumeSourceIntegration(operation, undefined, root)).rejects.toThrow("HEAD moved")
+
+    expect(operation.sourceIntegrationPolicy).toEqual(policy)
+    expect(operation.phase).toBe("paused")
+    expect(operation.history).toHaveLength(0)
+  })
+
+  it("keeps the pause on ordinary resume when the operator switched branches", async () => {
+    const { operation } = await fixture()
+    await resumeSourceIntegration(operation, "worktree", root)
+    const policy = structuredClone(operation.sourceIntegrationPolicy)
+    await git(["add", "product.txt"])
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "operator accepted source",
+    ])
+    await git(["checkout", "-q", "-b", "operator-side"])
+
+    await expect(resumeSourceIntegration(operation, undefined, root)).rejects.toThrow("HEAD moved")
+
+    expect(operation.sourceIntegrationPolicy).toEqual(policy)
+    expect(operation.phase).toBe("paused")
+  })
+
+  it("keeps the pause when a clean fast-forward still owes the original catch-up", async () => {
+    const { operation } = await fixture()
+    operation.sourceIntegrationPolicy = await initialSourceIntegration(root, operation.id)
+    await storage.save(operation)
+    const policy = structuredClone(operation.sourceIntegrationPolicy)
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "operator move before catch-up",
+    ])
+
+    await expect(resumeSourceIntegration(operation, undefined, root)).rejects.toThrow("catch-up is still pending")
+
+    expect(operation.sourceIntegrationPolicy).toEqual(policy)
+    expect(operation.phase).toBe("paused")
+    expect(await readFile(join(root, "product.txt"), "utf8")).toBe("Initial product\n")
+  })
+
+  it("automatically re-pins a clean fast-forward before any accepted cycle without inventing history", async () => {
+    const initial = await prepareContinuousBaseline(root, "operation", root)
+    const operation = operationFixture({ repositoryRoot: root, baseline: initial })
+    operation.sourceIntegrationPolicy = await initialSourceIntegration(root, operation.id)
+    await storage.save(operation)
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "operator move before the first cycle",
+    ])
+    const head = (await git(["rev-parse", "HEAD"])).trim()
+
+    await resumeSourceIntegration(operation, undefined, root)
+
+    expect(operation.sourceIntegrationPolicy).toEqual({ mode: "worktree", branch: "main", head })
+    expect(operation.history).toHaveLength(0)
+    expect(operation.phase).not.toBe("paused")
   })
 
   it("switches a prepared but unapplied catch-up to snapshot-only without touching source files", async () => {
