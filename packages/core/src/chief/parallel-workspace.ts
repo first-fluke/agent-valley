@@ -9,11 +9,14 @@ import {
   type ParallelTaskWorkspace,
   parallelDeliverySchema,
   parallelWorkspaceSchema,
+  type TaskChangeSet,
+  taskChangeSetSchema,
 } from "./parallel-contract"
 import { retainTaskEvidence, taskEvidenceRefs } from "./parallel-evidence"
 import {
   assertParallelPath,
   captureParallelBaseline,
+  parallelBlob,
   parallelGit,
   parallelRoot,
   parallelTreeImages,
@@ -327,6 +330,83 @@ export async function disposeTaskWorktree(workspace: ParallelTaskWorkspace): Pro
   return true
 }
 
+const CHANGE_SET_DIFF_LIMIT = 60 * 1024
+
+async function computeTaskChangeSet(
+  repository: string,
+  workspace: ParallelTaskWorkspace,
+  delivery: ParallelDelivery,
+): Promise<TaskChangeSet> {
+  const inputTree = workspace.snapshotTree ?? workspace.baselineTree
+  const details = new Map<string, { size: number; sha256: string }>()
+  const files: TaskChangeSet["files"] = []
+  for (const change of delivery.changes) {
+    const image = change.after ?? change.before
+    if (!image) continue
+    let detail = details.get(image.oid)
+    if (!detail) {
+      const content = await parallelBlob(repository, image.oid)
+      detail = { size: content.length, sha256: hash(content) }
+      details.set(image.oid, detail)
+    }
+    files.push({
+      path: change.path,
+      status: change.before === null ? "added" : change.after === null ? "deleted" : "modified",
+      size: detail.size,
+      sha256: detail.sha256,
+    })
+  }
+  const full = await parallelGit(repository, [
+    "diff",
+    "--no-ext-diff",
+    "--no-renames",
+    "--no-color",
+    "--unified=3",
+    inputTree,
+    delivery.deliveryTree,
+    ...productPaths,
+  ])
+  let diff = full
+  let diffTruncated = false
+  if (Buffer.byteLength(diff, "utf8") > CHANGE_SET_DIFF_LIMIT) {
+    diff = `${Buffer.from(diff, "utf8").subarray(0, CHANGE_SET_DIFF_LIMIT).toString("utf8")}\n[AV truncated this unified diff at 60 KB; the file list above remains complete.]`
+    diffTruncated = true
+  }
+  return taskChangeSetSchema.parse({
+    version: 1,
+    inputTree,
+    deliveryTree: delivery.deliveryTree,
+    files,
+    diff,
+    diffTruncated,
+  })
+}
+
+/**
+ * Compute the integrated delta from retained git objects so reviews start from authoritative evidence.
+ * The input and delivery trees and their blobs live in the Actor clone while it exists; after disposal
+ * only the retained snapshot/worker commits in the mission workspace can answer. The change set is
+ * advisory review input, so an unanswerable lookup yields undefined instead of failing integration.
+ */
+export async function collectTaskChangeSet(
+  mission: Mission,
+  workspace: ParallelTaskWorkspace,
+  delivery: ParallelDelivery,
+): Promise<TaskChangeSet | undefined> {
+  const clone = await lstat(workspace.path).catch(() => undefined)
+  const repositories = clone ? [workspace.path, mission.workspace.path] : [mission.workspace.path]
+  for (const repository of repositories) {
+    try {
+      return await computeTaskChangeSet(repository, workspace, delivery)
+    } catch {
+      // Try the next repository that may hold the retained objects.
+    }
+  }
+  return undefined
+}
+
 export async function integrateTaskWorktree(mission: Mission, workspace: ParallelTaskWorkspace) {
-  return integrateTaskDelivery(mission, await collectTaskDelivery(mission, workspace))
+  const delivery = await collectTaskDelivery(mission, workspace)
+  const result = await integrateTaskDelivery(mission, delivery)
+  return { ...result, changeSet: await collectTaskChangeSet(mission, workspace, delivery) }
 }

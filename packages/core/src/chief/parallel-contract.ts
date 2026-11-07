@@ -35,6 +35,25 @@ export const parallelDeliverySchema = z.strictObject({
   status: z.enum(["prepared", "applying", "applied"]),
 })
 export type ParallelDelivery = z.infer<typeof parallelDeliverySchema>
+/** AV-computed integrated delta (Actor snapshot versus baseline) handed to independent reviews. */
+export const taskChangeSetSchema = z.strictObject({
+  version: z.literal(1),
+  inputTree: objectId,
+  deliveryTree: objectId,
+  files: z
+    .array(
+      z.strictObject({
+        path: z.string().min(1),
+        status: z.enum(["added", "modified", "deleted"]),
+        size: z.number().int().nonnegative(),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      }),
+    )
+    .max(20_000),
+  diff: z.string().max(70_000),
+  diffTruncated: z.boolean(),
+})
+export type TaskChangeSet = z.infer<typeof taskChangeSetSchema>
 export class ParallelIntegrationConflict extends Error {
   constructor(
     readonly taskId: string,

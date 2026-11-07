@@ -1,6 +1,6 @@
 import { z } from "zod"
 import type { ExecutionState, MissionSupervision } from "./contracts"
-import { taskWorktreeRecordSchema } from "./parallel-contract"
+import { taskChangeSetSchema, taskWorktreeRecordSchema } from "./parallel-contract"
 
 const id = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/)
 const text = z.string().trim().min(1).max(32_000)
@@ -37,6 +37,7 @@ export const taskStateSchema = z.strictObject({
   fingerprint: text.optional(),
   effectState: z.enum(["not-started", "running", "unknown", "completed"]).optional(),
   parallel: taskWorktreeRecordSchema.optional(),
+  changeSet: taskChangeSetSchema.optional(),
 })
 
 export const verificationSchema = z.strictObject({

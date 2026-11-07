@@ -106,4 +106,30 @@ describe("parallel source provenance in Actor and review prompts", () => {
     expect(input.evidence).toEqual(mission.tasks)
     expect(prompt).not.toContain("Parallel source provenance:")
   })
+
+  it("hands the AV-computed change set to the task review and tells the reviewer to start from it", () => {
+    const { mission, task, state } = sourceFixture()
+    state.changeSet = {
+      version: 1,
+      inputTree: "d".repeat(40),
+      deliveryTree: "e".repeat(40),
+      files: [{ path: "docs/onboarding.md", status: "added", size: 42, sha256: "f".repeat(64) }],
+      diff: "diff --git a/docs/onboarding.md b/docs/onboarding.md",
+      diffTruncated: false,
+    }
+    const prompt = reviewPrompt(mission, task, state)
+    const input = JSON.parse(prompt.split("Review input (JSON data):\n")[1] ?? "")
+    expect(input.changeSet).toEqual(state.changeSet)
+    expect(prompt).toContain("computed by AV from git objects")
+    expect(prompt).toContain("instead of rediscovering changed files")
+    expect(prompt).toContain("Keep the complete JSON response under 8,000 characters")
+  })
+
+  it("keeps today's review prompt for records without a change set", () => {
+    const { mission, task, state } = sourceFixture()
+    const prompt = reviewPrompt(mission, task, state)
+    const input = JSON.parse(prompt.split("Review input (JSON data):\n")[1] ?? "")
+    expect(input).not.toHaveProperty("changeSet")
+    expect(prompt).not.toContain("computed by AV from git objects")
+  })
 })

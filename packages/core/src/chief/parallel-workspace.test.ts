@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto"
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { taskStateSchema } from "./mission-state-schema"
 import { runJoinedWave } from "./parallel"
+import { taskChangeSetSchema } from "./parallel-contract"
 import { retainTaskEvidence, taskEvidenceRefs } from "./parallel-evidence"
 import { parallelGit } from "./parallel-git"
 import {
@@ -493,7 +496,87 @@ describe("durable patch integration", () => {
 
   it("can integrate and clean an empty product delivery", async () => {
     const workspace = await prepareTaskWorktree(mission, "empty", 1)
-    expect(await integrateTaskWorktree(mission, workspace)).toEqual({ alreadyApplied: false, changedPaths: [] })
+    const receipt = await integrateTaskWorktree(mission, workspace)
+    expect(receipt).toMatchObject({ alreadyApplied: false, changedPaths: [] })
+    if (!receipt.changeSet) throw new Error("Expected a change set")
+    expect(receipt.changeSet.files).toEqual([])
+    expect(receipt.changeSet.diff).toBe("")
     expect(await disposeTaskWorktree(workspace)).toBe(true)
+  })
+})
+
+describe("integrated change set for independent reviews", () => {
+  it("computes statuses, sizes, sha256 and a unified diff from git objects, not Actor claims", async () => {
+    const workspace = await prepareTaskWorktree(mission, "changeset", 1)
+    await writeFile(join(workspace.path, "a.txt"), "Modified deliverable\n")
+    await writeFile(join(workspace.path, "added.md"), "# New deliverable\n")
+    await rm(join(workspace.path, "remove.txt"))
+    const { changeSet } = await integrateTaskWorktree(mission, workspace)
+    if (!changeSet) throw new Error("Expected a change set")
+    expect(taskChangeSetSchema.parse(changeSet)).toEqual(changeSet)
+    expect(changeSet.inputTree).toBe(workspace.snapshotTree ?? workspace.baselineTree)
+    expect(changeSet.files.map((file) => file.path)).toEqual(["a.txt", "added.md", "remove.txt"])
+    const byPath = new Map(changeSet.files.map((file) => [file.path, file]))
+    expect(byPath.get("a.txt")?.status).toBe("modified")
+    expect(byPath.get("added.md")?.status).toBe("added")
+    expect(byPath.get("remove.txt")?.status).toBe("deleted")
+    const delivered = await git(["show", `${changeSet.deliveryTree}:a.txt`])
+    expect(byPath.get("a.txt")?.sha256).toBe(createHash("sha256").update(delivered).digest("hex"))
+    expect(byPath.get("a.txt")?.size).toBe(Buffer.byteLength(delivered))
+    expect(changeSet.diff).toContain("Modified deliverable")
+    expect(changeSet.diff).toContain("# New deliverable")
+    expect(changeSet.diffTruncated).toBe(false)
+  })
+
+  it("still computes the change set after the Actor workspace was disposed", async () => {
+    const workspace = await prepareTaskWorktree(mission, "disposed-changeset", 1)
+    await writeFile(join(workspace.path, "a.txt"), "Retained evidence output\n")
+    await integrateTaskWorktree(mission, workspace)
+    expect(await disposeTaskWorktree(workspace)).toBe(true)
+    const { changeSet } = await integrateTaskWorktree(mission, workspace)
+    if (!changeSet) throw new Error("Expected a change set")
+    expect(changeSet.files.map((file) => file.path)).toEqual(["a.txt"])
+    expect(changeSet.diff).toContain("Retained evidence output")
+  })
+
+  it("truncates a large unified diff at 60 KB while keeping the complete file list", async () => {
+    const workspace = await prepareTaskWorktree(mission, "large", 1)
+    const lines = Array.from({ length: 4_000 }, (_, index) => `line ${index} ${"x".repeat(40)}`).join("\n")
+    await writeFile(join(workspace.path, "large.txt"), `${lines}\n`)
+    const { changeSet } = await integrateTaskWorktree(mission, workspace)
+    if (!changeSet) throw new Error("Expected a change set")
+    expect(changeSet.diffTruncated).toBe(true)
+    expect(Buffer.byteLength(changeSet.diff, "utf8")).toBeLessThanOrEqual(60 * 1024 + 200)
+    expect(changeSet.diff).toContain("[AV truncated this unified diff at 60 KB")
+    expect(changeSet.files.map((file) => file.path)).toEqual(["large.txt"])
+    expect(changeSet.files[0]?.status).toBe("added")
+  })
+})
+
+describe("task change set schema", () => {
+  const changeSet = {
+    version: 1 as const,
+    inputTree: "a".repeat(40),
+    deliveryTree: "b".repeat(40),
+    files: [{ path: "a.txt", status: "modified" as const, size: 3, sha256: "c".repeat(64) }],
+    diff: "diff --git a/a.txt b/a.txt",
+    diffTruncated: false,
+  }
+
+  it("accepts a valid change set and rejects malformed entries", () => {
+    expect(taskChangeSetSchema.parse(changeSet)).toEqual(changeSet)
+    expect(() => taskChangeSetSchema.parse({ ...changeSet, version: 2 })).toThrow()
+    expect(() =>
+      taskChangeSetSchema.parse({ ...changeSet, files: [{ ...changeSet.files[0], status: "renamed" }] }),
+    ).toThrow()
+    expect(() =>
+      taskChangeSetSchema.parse({ ...changeSet, files: [{ ...changeSet.files[0], sha256: "too-short" }] }),
+    ).toThrow()
+  })
+
+  it("keeps legacy task states valid and accepts a persisted change set", () => {
+    const legacy = { id: "task-1", reviewerId: "reviewer", status: "completed" as const, attempts: 1 }
+    expect(taskStateSchema.parse(legacy)).toEqual(legacy)
+    expect(taskStateSchema.parse({ ...legacy, changeSet })).toEqual({ ...legacy, changeSet })
   })
 })

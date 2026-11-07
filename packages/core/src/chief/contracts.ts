@@ -7,7 +7,7 @@
  * and removes the former `types.ts` import cycle.
  */
 import { z } from "zod"
-import type { TaskWorktreeRecord } from "./parallel-contract"
+import type { TaskChangeSet, TaskWorktreeRecord } from "./parallel-contract"
 
 // ── Roster / plan / review ───────────────────────────────────────────────────
 
@@ -55,6 +55,7 @@ export interface ChiefTaskState {
   fingerprint?: string
   effectState?: "not-started" | "running" | "unknown" | "completed"
   parallel?: TaskWorktreeRecord
+  changeSet?: TaskChangeSet
 }
 
 export interface MissionEvent {

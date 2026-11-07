@@ -197,6 +197,11 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           "Verify cited source objects using the supplied snapshotCommit, snapshotRef and workerRef when present, including git show <revision>:<path>, and inspect the integrated deliverables separately. A different current HEAD alone is not source fabrication. Missing source objects, invalid revisions or inconsistent ancestry remain provenance failures: return the exact missing or inconsistent evidence to the Chief Director. Do not replace hashes in deliverables or approve unverified claims.",
         ]
       : []),
+    ...(state?.changeSet
+      ? [
+          "The supplied changeSet was computed by AV from git objects (the Actor's integrated snapshot versus its baseline), not claimed by the Actor. Start provenance verification from its file list, sizes, sha256 hashes and unified diff instead of rediscovering changed files; still inspect the integrated deliverables and verify the cited revisions.",
+        ]
+      : []),
     "Reject incomplete requirements, missing deliverables, weakened tests, correctness defects, or missing evidence.",
     ...(mission.technicalLeadId
       ? [
@@ -228,6 +233,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
             sourceEvidence,
           }
         : {}),
+      ...(state?.changeSet ? { changeSet: state.changeSet } : {}),
       previousReview: task ? state?.review : mission.finalReview,
       verification: mission.verification,
       goalVerification: mission.goalVerification,

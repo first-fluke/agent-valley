@@ -73,7 +73,9 @@ export class ChiefRuntime {
           return record
         },
         integrate: async (mission, record) => {
-          await integrateTaskWorktree(mission, record)
+          const { changeSet } = await integrateTaskWorktree(mission, record)
+          const state = mission.tasks.find((entry) => entry.id === record.taskId)
+          if (state && changeSet) state.changeSet = changeSet
         },
         dispose: async (record) => {
           await disposeTaskWorktree(record)

@@ -31,6 +31,28 @@ export async function parallelGit(
     )
   }
 }
+/** Read a blob's original bytes so binary content keeps an authoritative size and SHA-256. */
+export async function parallelBlob(workspace: string, oid: string): Promise<Buffer> {
+  try {
+    const result = await exec(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "-c", "core.fileMode=true", "cat-file", "blob", oid],
+      {
+        cwd: workspace,
+        env: { ...process.env, ...clearedGitEnvironment },
+        maxBuffer: 64 * 1024 * 1024,
+        encoding: "buffer",
+      },
+    )
+    return result.stdout
+  } catch (error) {
+    // With encoding "buffer" the captured stderr is a Buffer, not a string.
+    const failure = error as { stderr?: string | Buffer; message?: string }
+    throw new Error(
+      `Parallel Git operation failed: ${String(failure.stderr ?? "").trim() || failure.message}. Preserve task worktrees and repair Git before resuming.`,
+    )
+  }
+}
 export async function parallelRoot(workspace: string): Promise<string> {
   const root = await realpath(workspace)
   const directory = join(root, ".agent-valley", "parallel")
