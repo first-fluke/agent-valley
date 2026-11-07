@@ -1,14 +1,16 @@
 import { refreshActorCooldown } from "./actor-availability"
+import { actorRouteHealth } from "./actor-health"
 import { ParallelTaskReviewRejected, performParallelWave } from "./coordinator-parallel"
 import { applyTaskReviewResult, applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
 import { classifyFailure, MissionPause, pauseForFailure } from "./execution"
+import { clearReviewerNoVerdict, handoffActor, noteReviewerNoVerdict } from "./handoff"
 import { readyTaskWave } from "./parallel"
 import { ParallelIntegrationConflict } from "./parallel-workspace"
 import { reviewPrompt, workPrompt } from "./prompts"
 import { selectTaskReviewer } from "./review-routing"
 import { parseReview } from "./schemas"
-import type { ChiefTask, ChiefTaskState } from "./types"
+import type { ChiefTask, ChiefTaskState, Persona } from "./types"
 
 export async function runTaskStage(context: CoordinatorContext): Promise<StageTransition> {
   const { mission, ports, checkpoint, run, persona, save, checkAbort, requestRecovery, protectedFailure } = context
@@ -20,32 +22,73 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
     mutationQueue = next.catch(() => {})
     return next
   }
-  const taskReview = async (task: ChiefTask, state: ChiefTaskState) => {
-    const { reviewer, prompt } = await serialize(async () => {
-      const reviewer = selectTaskReviewer(mission, task, state)
-      state.status = "reviewing"
-      await checkpoint.transition("reviewing", "review", `Reviewing ${task.id} with ${state.reviewerId}.`, task.id)
-      return { reviewer, prompt: reviewPrompt(mission, task, state) }
-    })
-    let review: ReturnType<typeof parseReview>
+  const MAX_REVIEW_ATTEMPTS = 4
+  // Re-select a healthy reviewer after a route is retired; never spend a Chief recovery round here.
+  const selectNextReviewer = (task: ChiefTask, state: ChiefTaskState, failed: string): Persona | undefined => {
+    let candidate: Persona
     try {
-      review = parseReview(await run(reviewer, prompt, "review", task.id))
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      await serialize(async () => {
-        recordTaskReviewFailure(mission, task.id, reason)
-        await save(
-          "review-pending",
-          `Review for ${task.id} returned no verdict; successful work remains pending review. ${reason}`,
-          task.id,
-        )
-      })
-      throw error
+      candidate = selectTaskReviewer(mission, task, state)
+    } catch {
+      return undefined
     }
-    await serialize(async () => {
-      applyTaskReviewResult(mission, state, review)
-      await save("review", state.review.summary, task.id)
-    })
+    const effective = handoffActor(mission, candidate).agentType
+    if (effective === failed) return undefined
+    if (actorRouteHealth(mission, { actorType: effective }).state !== "ready") return undefined
+    return candidate
+  }
+  const taskReview = async (task: ChiefTask, state: ChiefTaskState) => {
+    for (let attempt = 0; attempt < MAX_REVIEW_ATTEMPTS; attempt += 1) {
+      const { reviewer, prompt } = await serialize(async () => {
+        const reviewer = selectTaskReviewer(mission, task, state)
+        state.status = "reviewing"
+        await checkpoint.transition("reviewing", "review", `Reviewing ${task.id} with ${state.reviewerId}.`, task.id)
+        return { reviewer, prompt: reviewPrompt(mission, task, state) }
+      })
+      let review: ReturnType<typeof parseReview>
+      try {
+        review = parseReview(await run(reviewer, prompt, "review", task.id))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        const decision = await serialize(async () => {
+          recordTaskReviewFailure(mission, task.id, reason)
+          await save(
+            "review-pending",
+            `Review for ${task.id} returned no verdict; successful work remains pending review. ${reason}`,
+            task.id,
+          )
+          // Only transport/no-verdict failures count against a review route's health.
+          if (error instanceof MissionPause || protectedFailure(error)) return { kind: "throw" as const }
+          const activeRoute = mission.handoff?.routes[reviewer.id]
+          // Preserve recovery semantics for a configured reviewer that has no active handoff route.
+          if (!activeRoute) return { kind: "throw" as const }
+          const failed = activeRoute.agentType
+          const { retired } = noteReviewerNoVerdict(mission, failed)
+          const retryable = attempt + 1 < MAX_REVIEW_ATTEMPTS
+          if (!retired) return retryable ? { kind: "retry" as const } : { kind: "throw" as const }
+          if (!retryable) return { kind: "throw" as const }
+          // Two no-verdict failures retired this route; route the review to the next eligible reviewer.
+          const replacement = selectNextReviewer(task, state, failed)
+          if (!replacement) return { kind: "throw" as const }
+          mission.history.push({
+            at: new Date().toISOString(),
+            stage: "reviewer-fallback",
+            taskId: task.id,
+            message: `Review route ${failed} produced no verdict twice; next review uses ${handoffActor(mission, replacement).agentType} (${replacement.id}).`,
+          })
+          return { kind: "retry" as const }
+        })
+        if (decision.kind === "retry") continue
+        throw error
+      }
+      await serialize(async () => {
+        const route = mission.handoff?.routes[reviewer.id]?.agentType ?? reviewer.agentType
+        clearReviewerNoVerdict(mission, route)
+        applyTaskReviewResult(mission, state, review)
+        await save("review", state.review.summary, task.id)
+      })
+      return
+    }
+    throw new Error(`Review for ${task.id} produced no verdict on every available reviewer route.`)
   }
   const performTask = async (task: ChiefTask, state: ChiefTaskState) => {
     while (state.status !== "completed") {

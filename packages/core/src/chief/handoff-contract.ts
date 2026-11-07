@@ -15,6 +15,10 @@ export const handoffStateSchema = z.strictObject({
   freeRoutes: z.record(z.string().min(1).max(64), z.string().min(1).max(2_000)).optional(),
   routes: z.record(z.string().min(1).max(64), handoffRouteSchema),
   continuations: z.record(z.string().min(1).max(256), z.number().int().min(0).max(1)),
+  /** Consecutive no-verdict review failures per provider route; retires a fallback after two. */
+  reviewerFailures: z.record(z.string().min(1).max(64), z.number().int().min(0).max(128)).optional(),
+  /** Provider routes retired from review for this mission after repeated no-verdict failures. */
+  retiredReviewRoutes: z.array(z.string().min(1).max(128)).max(AGENT_IDS.length).optional(),
 })
 
 export type HandoffState = z.infer<typeof handoffStateSchema>

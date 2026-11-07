@@ -141,6 +141,28 @@ async function freeModelHandoff(
   }
 }
 
+/** Retire a review route after two consecutive no-verdict failures so selection stops reusing it. */
+export function noteReviewerNoVerdict(mission: Mission, agentType: string): { retired: boolean; failures: number } {
+  mission.handoff ??= { exhaustedAgents: [], routes: {}, continuations: {} }
+  const state = mission.handoff
+  state.reviewerFailures ??= {}
+  const failures = Math.min(128, (state.reviewerFailures[agentType] ?? 0) + 1)
+  state.reviewerFailures[agentType] = failures
+  if (failures < 2) return { retired: false, failures }
+  state.retiredReviewRoutes ??= []
+  if (!state.retiredReviewRoutes.includes(agentType)) state.retiredReviewRoutes.push(agentType)
+  for (const [id, route] of Object.entries(state.routes)) if (route.agentType === agentType) delete state.routes[id]
+  return { retired: true, failures }
+}
+
+export function clearReviewerNoVerdict(mission: Mission, agentType: string): void {
+  if (mission.handoff?.reviewerFailures) delete mission.handoff.reviewerFailures[agentType]
+}
+
+export function reviewRouteRetired(mission: Mission, agentType: string): boolean {
+  return mission.handoff?.retiredReviewRoutes?.includes(agentType) ?? false
+}
+
 export async function prepareHandoff(
   mission: Mission,
   ports: ChiefPorts,
@@ -204,30 +226,46 @@ export async function prepareHandoff(
     }
     if (!blocked.includes(vendor.data)) blocked.push(vendor.data)
   }
-  // Discovery excludes unconfirmed authentication. The planning pool can include an unready selected Chief.
-  const ready = ports.discoverReadyAgents
-    ? await ports.discoverReadyAgents()
-    : (mission.operatingPolicy?.readyActors ?? [])
+  // Prefer the mission's recorded roster; only fall back to other authenticated CLIs when none of it fits.
+  const policy = mission.operatingPolicy
+  const roster = [
+    ...new Set([
+      ...(policy?.readyActors ?? []),
+      ...(policy?.routing?.candidates ?? []).map((entry) => entry.actorType),
+    ]),
+  ]
+  const discovered = ports.discoverReadyAgents ? await ports.discoverReadyAgents() : (policy?.readyActors ?? [])
   ports.signal?.throwIfAborted()
-  const candidates =
-    reviewing && mission.operatingPolicy?.reviewVendor === "prefer"
-      ? [...ready.filter((vendor) => vendor !== worker), ...ready.filter((vendor) => vendor === worker)]
-      : ready
+  // Live discovery still decides readiness; the roster only orders the ready vendors.
+  const readyRoster = roster.filter((vendor) => discovered.includes(vendor))
+  const ordered = (vendors: string[]) => {
+    const unique = [...new Set(vendors)]
+    return reviewing && policy?.reviewVendor === "prefer"
+      ? [...unique.filter((vendor) => vendor !== worker), ...unique.filter((vendor) => vendor === worker)]
+      : unique
+  }
   const blocked = unavailableProviders(state)
-  const next = candidates.find(
-    (candidate) =>
-      routeSchema.shape.agentType.safeParse(candidate).success &&
-      candidate !== actor.agentType &&
-      !(reviewing && mission.operatingPolicy?.reviewVendor === "require" && candidate === worker) &&
-      !blocked.has(candidate),
-  )
+  const retired = reviewing ? (mission.handoff?.retiredReviewRoutes ?? []) : []
+  const selectable = (candidate: string) =>
+    routeSchema.shape.agentType.safeParse(candidate).success &&
+    candidate !== actor.agentType &&
+    !(reviewing && policy?.reviewVendor === "require" && candidate === worker) &&
+    !blocked.has(candidate) &&
+    !retired.includes(candidate)
+  // Same-vendor roster candidates beat an out-of-roster vendor under "prefer".
+  const next =
+    ordered(readyRoster).find(selectable) ??
+    ordered(discovered.filter((vendor) => !roster.includes(vendor))).find(selectable)
   if (!next)
     throw new MissionPause(
       `${unavailable ? "The selected native model is unavailable" : "Usage allowance exhausted"} and no other installed, authenticated provider is ready. Restore provider access or log in to another supported CLI, then resume the saved order with --retry; spent limits are retained.`,
       "handoff-unavailable",
     )
-  const configured = mission.personas.find((candidate) => candidate.agentType === next)
-  const route = routeSchema.parse({ agentType: next, ...(configured?.model ? { model: configured.model } : {}) })
+  const routingModel = policy?.routing?.candidates.find((entry) => entry.actorType === next)?.model
+  const configured = mission.personas.find((entry) => entry.agentType === next)
+  // A configured Actor's explicit model keeps precedence; routing candidates only fill the gap.
+  const model = configured?.model ?? routingModel
+  const route = routeSchema.parse({ agentType: next, ...(model ? { model } : {}) })
   state.routes[actor.id] = route
   return {
     actor: { ...actor, ...route, model: route.model },

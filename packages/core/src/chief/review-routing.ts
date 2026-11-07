@@ -36,8 +36,9 @@ export function selectTaskReviewer(mission: Mission, task: ChiefTask, state: Chi
   const worker = run?.actorType ?? mission.personas.find((actor) => actor.id === task.personaId)?.agentType
   if (!worker) throw new Error("Restore this task's actual work Actor before reviewing it.")
   const blocked = unavailableProviders(mission.handoff)
+  const retired = new Set(mission.handoff?.retiredReviewRoutes ?? [])
   const recordedReady = policy.readyActors ?? mission.availableAgents ?? []
-  const ready = recordedReady.filter((vendor) => !blocked.has(vendor))
+  const ready = recordedReady.filter((vendor) => !blocked.has(vendor) && !retired.has(vendor))
   if (recordedReady.length && !ready.length)
     throw new MissionPause(
       "No recorded ready reviewer remains after saved provider availability exclusions. Restore access to an eligible Actor before continuing; the completed work remains pending review.",
