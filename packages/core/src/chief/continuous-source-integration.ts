@@ -10,14 +10,11 @@ import { gitignoreProjectionSchema, projectContinuousGitignore } from "./continu
 import { validateContinuousBaseline } from "./continuous-workspace"
 import { parallelDeliverySchema } from "./parallel-contract"
 import { captureParallelBaseline, parallelGit, parallelTreeImages, writeParallelJson } from "./parallel-git"
-import type { SourceIntegrationPolicy, SourceIntegrationSummary } from "./source-integration-contract"
-
-/**
- * Per-cycle product path ceiling. Evidence directories legitimately grow with every repair attempt
- * (one verified cycle shipped 1,039 files under .arc-verify/), so this guards against runaway
- * integration rather than a normal verified cycle.
- */
-const MAX_SOURCE_PRODUCT_PATHS = 5_000
+import {
+  MAX_SOURCE_PRODUCT_PATHS,
+  type SourceIntegrationPolicy,
+  type SourceIntegrationSummary,
+} from "./source-integration-contract"
 
 const receiptSchema = z.strictObject({
   version: z.literal(1),

@@ -1,6 +1,12 @@
 import { z } from "zod"
 import { codeDeliveryPath } from "./code-delivery-contract"
 
+/**
+ * Per-cycle product path ceiling shared by the integration receipt and the integration step.
+ * Evidence directories grow with every repair attempt, so this guards runaway integration only.
+ */
+export const MAX_SOURCE_PRODUCT_PATHS = 5_000
+
 const objectId = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)
 const branch = z.string().min(1).max(200)
 
@@ -20,7 +26,7 @@ export const sourceIntegrationSummarySchema = z.strictObject({
     .string()
     .regex(/^[a-f0-9]{64}$/)
     .optional(),
-  paths: z.array(z.string().refine(codeDeliveryPath)).max(1000),
+  paths: z.array(z.string().refine(codeDeliveryPath)).max(MAX_SOURCE_PRODUCT_PATHS),
   at: z.iso.datetime(),
 })
 
