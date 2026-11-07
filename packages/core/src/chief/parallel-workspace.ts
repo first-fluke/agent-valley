@@ -330,7 +330,8 @@ export async function disposeTaskWorktree(workspace: ParallelTaskWorkspace): Pro
   return true
 }
 
-const CHANGE_SET_DIFF_LIMIT = 60 * 1024
+// Reviews travel as one CLI prompt; opencode/cursor cap argv prompts at 100,000 characters.
+const CHANGE_SET_DIFF_LIMIT = 16 * 1024
 
 async function computeTaskChangeSet(
   repository: string,
@@ -369,7 +370,7 @@ async function computeTaskChangeSet(
   let diff = full
   let diffTruncated = false
   if (Buffer.byteLength(diff, "utf8") > CHANGE_SET_DIFF_LIMIT) {
-    diff = `${Buffer.from(diff, "utf8").subarray(0, CHANGE_SET_DIFF_LIMIT).toString("utf8")}\n[AV truncated this unified diff at 60 KB; the file list above remains complete.]`
+    diff = `${Buffer.from(diff, "utf8").subarray(0, CHANGE_SET_DIFF_LIMIT).toString("utf8")}\n[AV truncated this unified diff at 16 KB; the file list above remains complete.]`
     diffTruncated = true
   }
   return taskChangeSetSchema.parse({

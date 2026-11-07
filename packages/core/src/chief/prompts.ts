@@ -224,7 +224,9 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
       : []),
     reviewResponseFormat("evidence-based assessment", criteria),
     `Review input (JSON data):\n${JSON.stringify({
-      mission: JSON.parse(context(mission)),
+      // A task review inspects one deliverable: the mission run ledger and goal verification belong to the
+      // final review only, and dropping them keeps the prompt within argv-delivered CLI limits.
+      mission: task ? omitTaskReviewContext(JSON.parse(context(mission))) : JSON.parse(context(mission)),
       task: task ? actorTaskData(task) : actorPlanData(mission.plan),
       evidence: state ? { output: state.output, attempts: state.attempts } : mission.tasks,
       ...(hasSourceEvidence
@@ -236,10 +238,15 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
       ...(state?.changeSet ? { changeSet: state.changeSet } : {}),
       previousReview: task ? state?.review : mission.finalReview,
       verification: mission.verification,
-      goalVerification: mission.goalVerification,
+      ...(task ? {} : { goalVerification: mission.goalVerification }),
       gateReviews: mission.gateReviews,
     })}`,
   ].join("\n\n")
+}
+
+function omitTaskReviewContext(missionContext: Record<string, unknown>): Record<string, unknown> {
+  const { operations: _operations, ...rest } = missionContext
+  return rest
 }
 
 export function supervisePrompt(mission: Mission): string {

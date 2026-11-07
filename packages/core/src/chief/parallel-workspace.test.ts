@@ -539,15 +539,15 @@ describe("integrated change set for independent reviews", () => {
     expect(changeSet.diff).toContain("Retained evidence output")
   })
 
-  it("truncates a large unified diff at 60 KB while keeping the complete file list", async () => {
+  it("truncates a large unified diff at 16 KB while keeping the complete file list", async () => {
     const workspace = await prepareTaskWorktree(mission, "large", 1)
     const lines = Array.from({ length: 4_000 }, (_, index) => `line ${index} ${"x".repeat(40)}`).join("\n")
     await writeFile(join(workspace.path, "large.txt"), `${lines}\n`)
     const { changeSet } = await integrateTaskWorktree(mission, workspace)
     if (!changeSet) throw new Error("Expected a change set")
     expect(changeSet.diffTruncated).toBe(true)
-    expect(Buffer.byteLength(changeSet.diff, "utf8")).toBeLessThanOrEqual(60 * 1024 + 200)
-    expect(changeSet.diff).toContain("[AV truncated this unified diff at 60 KB")
+    expect(Buffer.byteLength(changeSet.diff, "utf8")).toBeLessThanOrEqual(16 * 1024 + 200)
+    expect(changeSet.diff).toContain("[AV truncated this unified diff at 16 KB")
     expect(changeSet.files.map((file) => file.path)).toEqual(["large.txt"])
     expect(changeSet.files[0]?.status).toBe("added")
   })
