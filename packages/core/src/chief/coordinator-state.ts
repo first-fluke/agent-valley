@@ -165,7 +165,10 @@ export function resetTaskApprovals(
           message: `Previous Actor workspace record retained in history: ${state.parallel.path}.`,
         })
       delete state.parallel
-      if (state.effectState !== "completed") delete state.output
+      if (state.effectState !== "completed") {
+        delete state.output
+        delete state.changeSet
+      }
     }
   }
 }

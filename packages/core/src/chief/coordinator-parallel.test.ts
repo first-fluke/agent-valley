@@ -162,6 +162,18 @@ describe("parallel Chief task coordination", () => {
     const first = mission.tasks[0]
     if (!first) throw new Error("Missing fixture task")
     first.repairRound = 1
+    parallel.integrate = vi.fn(async (_mission, workspace) => {
+      const state = mission.tasks.find((entry) => entry.id === workspace.taskId)
+      if (state)
+        state.changeSet = {
+          version: 1,
+          inputTree: "b".repeat(40),
+          deliveryTree: "c".repeat(40),
+          files: [{ path: "contract.json", status: "added", size: 3, sha256: "d".repeat(64) }],
+          diff: "",
+          diffTruncated: false,
+        }
+    })
     hooks.review = vi.fn(async (task, state) => {
       state.review =
         task.id === "a"
@@ -173,6 +185,9 @@ describe("parallel Chief task coordination", () => {
     expect(first).toMatchObject({ status: "pending", repairRound: 1 })
     expect(first.parallel).toBeUndefined()
     expect(first.output).toBeUndefined()
+    // A later direct repair in the mission worktree must not be reviewed against this stale delivery.
+    expect(first.changeSet).toBeUndefined()
+    expect(mission.tasks[1]?.changeSet).toBeDefined()
     expect(
       mission.history.some(
         (event) => event.stage === "parallel-review-rejected" && event.message.includes("/private/actor-a"),

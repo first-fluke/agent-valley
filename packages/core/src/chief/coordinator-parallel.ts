@@ -209,6 +209,7 @@ export async function performParallelWave(
             const reason = `Task ${task.id} failed independent review: ${state.review?.findings.join("; ") ?? "No passing review"}. Actor edits retained at ${record.path}.`
             await rawSave("parallel-review-rejected", reason, task.id)
             delete state.parallel
+            delete state.changeSet
             delete state.output
             await rawSave(
               "parallel-repair-pending",

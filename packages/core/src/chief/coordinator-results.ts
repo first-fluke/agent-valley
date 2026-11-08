@@ -27,6 +27,9 @@ export function applyPlanningResult(
 export function applyWorkResult(task: ChiefTask, state: ChiefTaskState, output: string): void {
   state.output = output.slice(-32_000)
   delete state.review
+  // The AV-computed delta described an earlier integrated delivery; a new Actor attempt replaces it.
+  // Parallel integration recomputes it after this call. A direct attempt has none.
+  delete state.changeSet
   if (task.effectScope === "external") state.effectState = "completed"
 }
 
