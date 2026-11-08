@@ -86,7 +86,6 @@ export async function captureParallelBaseline(workspace: string): Promise<Parall
   const directory = await parallelRoot(workspace)
   const index = join(directory, `index-${randomUUID()}`)
   const pathsFile = `${index}.paths`
-  const removedFile = `${index}.removed`
   const env = { GIT_INDEX_FILE: index }
   try {
     const head = (await parallelGit(workspace, ["rev-parse", "HEAD"])).trim()
@@ -94,13 +93,18 @@ export async function captureParallelBaseline(workspace: string): Promise<Parall
     const cached = await parallelGit(workspace, ["ls-files", "--cached", "-z"])
     const visible = await parallelGit(workspace, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"])
     const indexed = new Set(cached.split("\0").filter(Boolean))
+    const headTracked = new Set(tracked.split("\0").filter(Boolean))
     // A file tracked at HEAD but removed from the mission index (`git rm --cached`) is an intentional
     // untrack even when it still exists on disk; force-adding it back silently resurrected ignored
     // evidence in every accepted snapshot.
-    const untracked = tracked.split("\0").filter((path) => path && !indexed.has(path) && !excludedParallelPath(path))
+    const untracked = [...headTracked].filter((path) => !indexed.has(path) && !excludedParallelPath(path))
     const untrackedSet = new Set(untracked)
+    // A path staged as new and then deleted from disk (status AD) exists only in the mission index. The
+    // temporary index starts from HEAD, so an explicit `add -A` pathspec for it matches nothing and fails.
+    const deleted = await parallelGit(workspace, ["ls-files", "--deleted", "-z"])
+    const vanished = new Set(deleted.split("\0").filter((path) => path && !headTracked.has(path)))
     const paths = [...new Set(`${cached}${visible}`.split("\0"))].filter(
-      (path) => path && !untrackedSet.has(path) && !excludedParallelPath(path),
+      (path) => path && !untrackedSet.has(path) && !vanished.has(path) && !excludedParallelPath(path),
     )
     await parallelGit(workspace, ["read-tree", head], env)
     if (untracked.length) {

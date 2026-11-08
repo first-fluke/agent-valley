@@ -349,6 +349,17 @@ describe("isolated parallel Actor worktrees", () => {
     expect(names).toContain("a.txt")
   })
 
+  it("skips a staged new file that vanished from disk instead of failing the baseline pathspec", async () => {
+    const root = mission.workspace.path
+    await writeFile(join(root, "staged-then-gone.txt"), "Staged by a direct Actor attempt\n")
+    await parallelGit(root, ["add", "--", "staged-then-gone.txt"])
+    await rm(join(root, "staged-then-gone.txt"))
+    const snapshot = await captureParallelBaseline(root)
+    const names = (await parallelGit(root, ["ls-tree", "-r", "--name-only", snapshot.tree])).split("\n")
+    expect(names).not.toContain("staged-then-gone.txt")
+    expect(names).toContain("a.txt")
+  })
+
   it("overlaps isolated children, then integrates disjoint results in deterministic order", async () => {
     const snapshot = await captureParallelBaseline(mission.workspace.path)
     const workspaces = await Promise.all([
