@@ -105,7 +105,7 @@ export async function approveMission(context: CoordinatorContext): Promise<Stage
   await save("final-review", mission.finalReview.summary)
   if (!mission.finalReview.passed) {
     const reason = mission.finalReview.findings.join("; ")
-    await requestRepair(reason, finalReviewRepairScope(mission, mission.finalReview) ?? selectRepairTaskId(mission, reason))
+    await requestRepair(reason, finalReviewRepairScope(mission, mission.finalReview))
     return { kind: "next", stage: "tasks" }
   }
   if ((await ports.fingerprint(mission)) !== mission.verification?.fingerprint) {

@@ -108,10 +108,13 @@ export function resetTaskApprovals(
       })
       continue
     }
+    // Every explicitly scoped task (named by the findings or downstream of one) re-executes; other delivered
+    // work keeps its output and is only re-reviewed against the repaired files (same rule as Chief recovery).
     if (
       options.keepReviews &&
       targetTaskId &&
       state.id !== targetTaskId &&
+      !options.resetTaskIds?.has(state.id) &&
       state.output !== undefined &&
       (!state.review || state.review.passed)
     ) {

@@ -51,12 +51,9 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
   const requestRecovery = createChiefRecovery(mission, ports, { run, persona, save, checkAbort })
   const requestRepair = async (reason: string, scope?: string | ReadonlySet<string> | null) => {
     const targetTaskId = typeof scope === "string" ? scope : selectRepairTaskId(mission, reason)
+    // A final review that names no task (null scope) repairs the selected target alone; approved siblings stay.
     const resetTaskIds =
-      typeof scope === "string"
-        ? new Set([scope])
-        : scope === null
-          ? null
-          : scope
+      typeof scope === "string" || scope === null ? (targetTaskId ? new Set([targetTaskId]) : undefined) : scope
     if ((mission.repairRound ?? 0) >= mission.maxRepairs) {
       if (mission.supervision) {
         await requestRecovery(reason, targetTaskId)
@@ -67,11 +64,14 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
       )
     }
     mission.repairRound = (mission.repairRound ?? 0) + 1
-    if (resetTaskIds === null)
+    if (scope === null)
       mission.history.push({
         at: new Date().toISOString(),
         stage: "repair-scope",
-        message: "The final review named no specific task; every task approval is reset for repair.",
+        ...(targetTaskId ? { taskId: targetTaskId } : {}),
+        message: targetTaskId
+          ? `The final review named no specific task; ${targetTaskId} is repaired and other approved tasks keep their delivered work.`
+          : "The final review named no specific task; every task approval is reset for repair.",
       })
     // Preserve rejection evidence in prompts; a scoped final-review repair resets only the named tasks and dependents.
     resetTaskApprovals(mission, { keepReviews: true, ...(resetTaskIds ? { resetTaskIds } : {}), targetTaskId })

@@ -108,13 +108,33 @@ describe("scoped task approval reset", () => {
     expect(mission.history.some((event) => event.stage === "task-preserved" && event.taskId === "task-2")).toBe(false)
   })
 
-  it("resets every task when no scope is supplied", () => {
+  it("re-executes the selected target and re-reviews delivered siblings when no scope is supplied", () => {
     const { mission } = fixture()
     mission.plan = { tasks: [task("task-1"), task("task-2")] }
     mission.tasks = [completed("task-1", 1), completed("task-2", 2)]
     resetTaskApprovals(mission, { keepReviews: true })
-    expect(mission.tasks.every((state) => state.status === "pending" && state.output === undefined)).toBe(true)
+    expect(mission.tasks[0]).toMatchObject({ status: "reviewing", output: "output 1" })
+    expect(mission.tasks[0]?.review).toBeUndefined()
+    expect(mission.tasks[0]?.fingerprint).toBeUndefined()
+    expect(mission.tasks[1]).toMatchObject({ status: "pending" })
+    expect(mission.tasks[1]?.output).toBeUndefined()
     expect(mission.history.some((event) => event.stage === "task-preserved")).toBe(false)
+  })
+
+  it("re-executes every explicitly scoped task even when it is not the selected target", () => {
+    const { mission } = fixture()
+    mission.plan = { tasks: [task("task-1"), task("task-2"), task("task-3")] }
+    mission.tasks = [completed("task-1", 1), completed("task-2", 2), completed("task-3", 3)]
+    resetTaskApprovals(mission, {
+      keepReviews: true,
+      resetTaskIds: new Set(["task-1", "task-2"]),
+      targetTaskId: "task-2",
+    })
+    expect(mission.tasks[0]).toMatchObject({ status: "pending" })
+    expect(mission.tasks[0]?.output).toBeUndefined()
+    expect(mission.tasks[1]).toMatchObject({ status: "pending" })
+    expect(mission.tasks[1]?.output).toBeUndefined()
+    expect(mission.tasks[2]).toMatchObject({ status: "completed", output: "output 3", review: { passed: true } })
   })
 })
 
@@ -147,7 +167,7 @@ describe("final-review repair through the coordinator", () => {
     expect(result.verification?.ok).toBe(true)
   })
 
-  it("resets every task and records why when the final review names no task", async () => {
+  it("repairs the selected task, keeps the others and records why when the final review names no task", async () => {
     const value = fixture()
     const tasks = Array.from({ length: 3 }, (_, index) => task(`task-${index + 1}`))
     const finished = await completeMission(value, tasks)
@@ -156,12 +176,21 @@ describe("final-review repair through the coordinator", () => {
     const result = await coordinate(finished, value.ports)
 
     expect(result.status).toBe("completed")
-    expect(result.tasks.every((state) => state.attempts === 2 && state.status === "completed")).toBe(true)
-    expect(result.tasks.map((state) => state.output)).toEqual(["Repaired task-1", "Repaired task-2", "Repaired task-3"])
-    expect(result.history.some((event) => event.stage === "task-preserved")).toBe(false)
+    const byId = new Map(result.tasks.map((state) => [state.id, state]))
+    for (const id of ["task-1", "task-2"]) {
+      expect(byId.get(id)).toMatchObject({ status: "completed", attempts: 1, review: { passed: true } })
+      expect(byId.get(id)?.output).toContain("Changed onboarding.ts")
+    }
+    expect(byId.get("task-3")).toMatchObject({ status: "completed", attempts: 2, output: "Repaired task-3" })
+    const preserved = result.history.filter((event) => event.stage === "task-preserved").map((event) => event.taskId)
+    expect(preserved.sort()).toEqual(["task-1", "task-2"])
     expect(
       result.history.some(
-        (event) => event.stage === "repair-scope" && event.message.includes("named no specific task"),
+        (event) =>
+          event.stage === "repair-scope" &&
+          event.taskId === "task-3" &&
+          event.message.includes("named no specific task") &&
+          event.message.includes("task-3"),
       ),
     ).toBe(true)
   })

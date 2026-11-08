@@ -131,15 +131,21 @@ describe("targeted recovery keeps completed tasks completed", () => {
     expect(value.mission.history.some((entry) => entry.stage === "task-preserved")).toBe(false)
   })
 
-  it("resets every task when a repair names no target", () => {
+  it("repairs the last delivered task and keeps its completed siblings when a repair names no target", () => {
     const value = completedMission(["task-1", "task-2"])
     applyRecovery(value.mission, {
       action: "repair",
       reason: "Mission-wide repair",
       instructions: "Resolve the recorded finding everywhere.",
     })
-    expect(value.mission.tasks.every((state) => state.status === "pending")).toBe(true)
-    expect(value.mission.history.some((entry) => entry.stage === "task-preserved")).toBe(false)
+    expect(stateOf(value.mission.tasks, "task-2").status).toBe("pending")
+    expect(stateOf(value.mission.tasks, "task-1").status).toBe("completed")
+    const instructions = (id: string) => value.mission.plan?.tasks.find((task) => task.id === id)?.instructions ?? ""
+    expect(instructions("task-2")).toContain("Chief Director recovery:")
+    expect(instructions("task-1")).not.toContain("Chief Director recovery:")
+    expect(
+      value.mission.history.filter((entry) => entry.stage === "task-preserved").map((entry) => entry.taskId),
+    ).toEqual(["task-1"])
   })
 
   it("does not re-review passed siblings after a Chief repair names the failed task", async () => {
