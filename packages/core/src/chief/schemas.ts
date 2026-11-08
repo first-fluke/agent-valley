@@ -71,6 +71,10 @@ const skillDescriptorSchema = z.strictObject({
   name: z.string().regex(/^oma-[a-z0-9][a-z0-9-]{0,123}$/),
   description: z.string().trim().min(1).max(1_000),
   path: text.refine(isAbsolute, "Skill paths must be absolute verified SKILL.md paths."),
+  agents: z
+    .array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/))
+    .max(100)
+    .optional(),
 })
 
 export const planSchema = z.strictObject({
@@ -279,6 +283,20 @@ function validateCatalogSkills(personas: Persona[], mission: Mission): void {
         throw new Error(
           `Actor ${persona.id} skill ${name} is not in the installed skill catalog. Select an installed availableSkills name or remove the assignment.`,
         )
+  // Dispatch binds an Actor to the installed agent profile that declares one of its skills; a roster whose
+  // skills no profile declares would fail at its first work run and cost a Chief recovery round.
+  if (!mission.availableSkills.some((skill) => skill.agents !== undefined)) return
+  const declared = new Map(mission.availableSkills.map((skill) => [skill.name, skill.agents ?? []]))
+  const summary = mission.availableSkills
+    .filter((skill) => skill.agents?.length)
+    .map((skill) => `${skill.name} (${(skill.agents ?? []).join("/")})`)
+    .join(", ")
+  for (const persona of personas) {
+    if (!persona.skills.length || persona.skills.some((name) => (declared.get(name) ?? []).length)) continue
+    throw new Error(
+      `Actor ${persona.id} skills ${persona.skills.join(", ")} match no installed OMA agent profile, so dispatch would fail. Include at least one skill declared by a profile: ${summary || "none installed"}.`,
+    )
+  }
 }
 
 function validateAutomaticPersonas(personas: Persona[], mission: Mission, planning = false): void {

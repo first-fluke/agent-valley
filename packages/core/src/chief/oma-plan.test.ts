@@ -93,6 +93,33 @@ describe("required OMA task assignments", () => {
     expect(mission).toEqual(before)
   })
 
+  it("rejects an Actor whose skills no installed agent profile declares", () => {
+    const { mission } = fixedMission()
+    mission.availableSkills = [
+      {
+        name: "oma-backend",
+        description: "Backend",
+        path: "/workspace/.agents/skills/oma-backend/SKILL.md",
+        agents: ["backend-engineer"],
+      },
+      {
+        name: "oma-dev-workflow",
+        description: "Workflow",
+        path: "/workspace/.agents/skills/oma-dev-workflow/SKILL.md",
+        agents: [],
+      },
+    ]
+    const worker = mission.personas.find((entry) => entry.id === "worker")
+    if (!worker) throw new Error("Expected fixture worker")
+    worker.skills = ["oma-dev-workflow"]
+    expect(() => parsePlanningResponse(JSON.stringify({ ...plan, goalBrief: brief }), mission)).toThrow(
+      "Actor worker skills oma-dev-workflow match no installed OMA agent profile",
+    )
+    worker.skills = ["oma-backend", "oma-dev-workflow"]
+    expect(parsePlanningResponse(JSON.stringify({ ...plan, goalBrief: brief }), mission).plan).toEqual(plan)
+    expect(planPrompt(mission)).toContain('"agents":["backend-engineer"]')
+  })
+
   it("rejects a configured skill outside the installed catalog even without an actorSkills assignment", () => {
     const { mission } = fixedMission()
     const worker = mission.personas.find((entry) => entry.id === "worker")

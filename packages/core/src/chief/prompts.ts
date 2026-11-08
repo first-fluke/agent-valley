@@ -108,8 +108,8 @@ export function planPrompt(mission: Mission): string {
       : []),
     ...(mission.availableSkills?.length
       ? [
-          `Verified installed OMA skill catalog (JSON data): ${JSON.stringify(mission.availableSkills.map(({ name, description }) => ({ name, description: description.slice(0, 300) })))}`,
-          "Select only needed catalog skill names for each generated Actor. No invented names or paths; the runtime supplies selected skill files. Skill access does not extend publication, spending or file-change authorization.",
+          `Verified installed OMA skill catalog (JSON data): ${JSON.stringify(mission.availableSkills.map(({ name, description, agents }) => ({ name, description: description.slice(0, 300), ...(agents !== undefined ? { agents } : {}) })))}`,
+          "Select only needed catalog skill names for each generated Actor. No invented names or paths; the runtime supplies selected skill files. Skill access does not extend publication, spending or file-change authorization. Every Actor with skills needs at least one skill whose agents list is non-empty: the runtime binds the Actor to that installed agent profile, and a skill nobody declares (empty agents) can only accompany such a skill.",
         ]
       : []),
     `Allowed top-level response keys for this mode: ${JSON.stringify(responseKeys)}. Return no other root keys.`,

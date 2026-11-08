@@ -396,6 +396,7 @@ describe("chief CLI mission lifecycle with real sessions and Git", () => {
     expect(mission.availableSkills).toEqual([
       {
         name: "oma-fixture-helper",
+        agents: ["file-writer"],
         description: "Write a checked file deliverable",
         path: join(await realpath(mission.workspace.path), ".agents/skills/oma-fixture-helper/SKILL.md"),
       },

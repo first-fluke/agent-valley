@@ -8,6 +8,8 @@ export interface SkillDescriptor {
   description: string
   /** Canonical path to an installed SKILL.md in this mission's worktree. */
   path: string
+  /** Installed OMA agent profiles (.agents/agents/<id>.md) that declare this skill; absent on legacy records. */
+  agents?: string[]
 }
 
 const MAX_SKILL_BYTES = 256_000
@@ -214,15 +216,45 @@ async function descriptor(root: string, name: string): Promise<SkillDescriptor |
   return metadata(await readSkill(path, true), name, path)
 }
 
+/** Skills declared by each installed agent profile; invalid or unreadable profiles are skipped. */
+async function profileSkillIndex(workspacePath: string): Promise<Map<string, string[]>> {
+  const index = new Map<string, string[]>()
+  const root = await harnessResourceRoot(workspacePath, "agents").catch(() => undefined)
+  if (!root) return index
+  const entries = (await readdir(root).catch(() => [])).filter((entry) => entry.endsWith(".md")).sort()
+  for (const filename of entries.slice(0, 100)) {
+    const agentId = filename.slice(0, -3)
+    if (!SKILL_NAME.test(agentId)) continue
+    const path = await realpath(join(root, filename)).catch(() => undefined)
+    if (!path || !inside(root, path)) continue
+    const source = await readSkill(path, true).catch(() => undefined)
+    const match = source ? /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source) : null
+    if (!match?.[1]) continue
+    try {
+      const document = parseDocument(match[1], { strict: true, uniqueKeys: true, prettyErrors: false })
+      if (document.errors.length) continue
+      const fields = document.toJS({ maxAliasCount: 0 }) as Record<string, unknown> | null
+      if (!fields || fields.name !== agentId || !Array.isArray(fields.skills)) continue
+      for (const skill of fields.skills)
+        if (typeof skill === "string" && SKILL_NAME.test(skill))
+          index.set(skill, [...(index.get(skill) ?? []), agentId])
+    } catch {
+      // A malformed profile cannot declare skills; dispatch validation reports it when selected.
+    }
+  }
+  return index
+}
+
 /** Discover installed OMA metadata only. Broken, unreadable, or malformed entries are omitted. */
 export async function discoverMissionSkills(workspacePath: string): Promise<SkillDescriptor[]> {
   const root = await skillRoot(workspacePath).catch(() => undefined)
   if (!root) return []
   const entries = await readdir(root).catch(() => [])
+  const profiles = await profileSkillIndex(workspacePath)
   const catalog: SkillDescriptor[] = []
   for (const name of entries.sort()) {
     const skill = await descriptor(root, name).catch(() => undefined)
-    if (skill) catalog.push(skill)
+    if (skill) catalog.push({ ...skill, agents: [...new Set(profiles.get(name) ?? [])].sort() })
     if (catalog.length > MAX_CATALOG_SIZE)
       throw new Error("The worktree has more than 100 OMA skills. Remove unused skills before creating this order.")
   }
