@@ -32,6 +32,9 @@ export function availableActorRoutes<T extends ActorRoute>(mission: Mission, can
 /** Other joined work may already have completed the probe which produced this earlier wait. */
 export function refreshActorCooldown(mission: Mission, error: unknown): unknown | undefined {
   if (!(error instanceof ActorCooldown)) return error
+  // An exhausted provider is already re-routed by handoff; never hold the mission for its cooldown.
+  const exhausted = new Set<string>(mission.handoff?.exhaustedAgents ?? [])
+  if (error.routes.length && error.routes.every((route) => exhausted.has(route.actorType))) return undefined
   try {
     availableActorRoutes(mission, error.routes)
     return undefined
