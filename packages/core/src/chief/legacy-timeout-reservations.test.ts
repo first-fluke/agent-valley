@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { executionPolicySchema } from "./execution"
 import { fixture } from "./goal-supervision.fixture"
 import type { OperatingRun } from "./operations"
@@ -58,7 +58,12 @@ function legacy() {
   return { mission, failed, run, save, invoke }
 }
 
-beforeEach(() => vi.useRealTimers())
+// Fixture timestamps are offsets from `now`; a real clock would walk the mission past its one-hour deadline.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] })
+  vi.setSystemTime(now)
+})
+afterEach(() => vi.useRealTimers())
 
 describe("evidence-backed legacy planning timeout reservations", () => {
   it("releases only the confirmed pre-fix timeout while retaining a later malformed response and all spent budgets", async () => {
