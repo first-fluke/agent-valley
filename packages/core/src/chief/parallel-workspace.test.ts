@@ -337,6 +337,18 @@ describe("isolated parallel Actor worktrees", () => {
     expect(await git(["rev-parse", "HEAD"])).toBe(head)
   })
 
+  it("drops files the mission untracked and ignored with git rm --cached from the baseline snapshot", async () => {
+    const root = mission.workspace.path
+    // The evidence-compaction pattern: keep the file locally, stop tracking it, and ignore it going forward.
+    await writeFile(join(root, ".gitignore"), "remove.txt\n")
+    await parallelGit(root, ["rm", "--cached", "-q", "remove.txt"])
+    expect(await readFile(join(root, "remove.txt"), "utf8")).toBeTruthy()
+    const snapshot = await captureParallelBaseline(root)
+    const names = (await parallelGit(root, ["ls-tree", "-r", "--name-only", snapshot.tree])).split("\n")
+    expect(names).not.toContain("remove.txt")
+    expect(names).toContain("a.txt")
+  })
+
   it("overlaps isolated children, then integrates disjoint results in deterministic order", async () => {
     const snapshot = await captureParallelBaseline(mission.workspace.path)
     const workspaces = await Promise.all([

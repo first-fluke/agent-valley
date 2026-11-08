@@ -86,12 +86,34 @@ export async function captureParallelBaseline(workspace: string): Promise<Parall
   try {
     const head = (await parallelGit(workspace, ["rev-parse", "HEAD"])).trim()
     const tracked = await parallelGit(workspace, ["ls-tree", "-r", "--name-only", "-z", head])
+    const cached = await parallelGit(workspace, ["ls-files", "--cached", "-z"])
     const visible = await parallelGit(workspace, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"])
-    const paths = [...new Set(`${tracked}${visible}`.split("\0"))].filter((path) => path && !excludedParallelPath(path))
+    const indexed = new Set(cached.split("\0").filter(Boolean))
+    // A file tracked at HEAD but removed from the mission index (`git rm --cached`) is an intentional
+    // untrack even when it still exists on disk; force-adding it back silently resurrected ignored
+    // evidence in every accepted snapshot.
+    const untracked = tracked.split("\0").filter((path) => path && !indexed.has(path) && !excludedParallelPath(path))
+    const paths = [...new Set(`${cached}${visible}`.split("\0"))].filter((path) => path && !excludedParallelPath(path))
     await parallelGit(workspace, ["read-tree", head], env)
+    if (untracked.length) {
+      await writeFile(`${pathsFile}.rm`, `${untracked.join("\0")}\0`, { flag: "wx", mode: 0o600 })
+      await parallelGit(
+        workspace,
+        [
+          "rm",
+          "--cached",
+          "-r",
+          "-q",
+          "--ignore-unmatch",
+          `--pathspec-from-file=${pathsFile}.rm`,
+          "--pathspec-file-nul",
+        ],
+        { ...env, GIT_LITERAL_PATHSPECS: "1" },
+      )
+    }
     if (paths.length) {
       await writeFile(pathsFile, `${paths.join("\0")}\0`, { flag: "wx", mode: 0o600 })
-      // Force applies only to enumerated tracked/nonignored files, including files tracked despite ignore rules.
+      // Force applies only to enumerated indexed/nonignored files, including files tracked despite ignore rules.
       await parallelGit(workspace, ["add", "-A", "-f", `--pathspec-from-file=${pathsFile}`, "--pathspec-file-nul"], {
         ...env,
         GIT_LITERAL_PATHSPECS: "1",
@@ -103,6 +125,7 @@ export async function captureParallelBaseline(workspace: string): Promise<Parall
     return { head, tree }
   } finally {
     await rm(pathsFile, { force: true })
+    await rm(`${pathsFile}.rm`, { force: true })
     await rm(index, { force: true })
     await rm(`${index}.lock`, { force: true })
   }
