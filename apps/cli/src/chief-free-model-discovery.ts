@@ -8,7 +8,7 @@ import { type AuthProbeOptions, type AuthProbeResult, probeNativeCli } from "./a
 
 const MAX_OUTPUT_BYTES = 2_097_152
 const PROBE_TIMEOUT_MS = 15_000
-const MODEL_ID = /^[\w.:-]+\/[\w./:-]+$/
+const MODEL_ID = /^[\w.:-]+\/[\w./:~-]+$/
 type JsonRecord = Record<string, unknown>
 
 interface CatalogModel {
@@ -55,9 +55,9 @@ function zeroPrice(value: unknown): boolean {
   return price.input === 0 && price.output === 0 && cache.read === 0 && cache.write === 0
 }
 
-function isFreeActorModel({ metadata }: CatalogModel): boolean {
+function isFreeActorModel(providerID: string, { metadata }: CatalogModel): boolean {
   // OpenCode Go zero-price entries may be included in a paid subscription.
-  if (metadata.providerID !== "opencode" || metadata.status !== "active") return false
+  if (metadata.providerID !== providerID || metadata.status !== "active") return false
   const capabilities = record(metadata.capabilities)
   if (
     capabilities.toolcall !== true ||
@@ -110,7 +110,7 @@ export async function discoverFreeModels(
   overrides: Partial<FreeModelDiscoveryDeps> = {},
 ): Promise<{ models: string[]; defaultModel?: string }> {
   signal?.throwIfAborted()
-  if (agentType !== "opencode") return { models: [] }
+  if (agentType !== "opencode" && agentType !== "kilo") return { models: [] }
   const deps: FreeModelDiscoveryDeps = {
     env: process.env,
     resolveBinary: resolveBinaryPath,
@@ -119,9 +119,13 @@ export async function discoverFreeModels(
     ...overrides,
   }
   const env = buildAgentEnv(agentType, {}, deps.env)
-  if (["1", "true"].includes(env.OPENCODE_DISABLE_FREE_MODELS ?? "")) return { models: [] }
+  const disableFree =
+    agentType === "kilo"
+      ? (env.KILO_DISABLE_FREE_MODELS ?? env.OPENCODE_DISABLE_FREE_MODELS ?? "")
+      : (env.OPENCODE_DISABLE_FREE_MODELS ?? "")
+  if (["1", "true"].includes(disableFree)) return { models: [] }
   try {
-    const binary = deps.resolveBinary("opencode")
+    const binary = deps.resolveBinary(agentType)
     if (!binary) return { models: [] }
     const probe = async (args: readonly string[]): Promise<string> => {
       const controller = new AbortController()
@@ -149,7 +153,7 @@ export async function discoverFreeModels(
     let state: unknown
     try {
       const home = env.XDG_STATE_HOME || join(env.HOME || homedir(), ".local", "state")
-      const content = deps.readState(join(home, "opencode", "model.json"))
+      const content = deps.readState(join(home, agentType, "model.json"))
       state = content && Buffer.byteLength(content) <= MAX_OUTPUT_BYTES ? JSON.parse(content) : undefined
     } catch {
       state = undefined
@@ -165,7 +169,11 @@ export async function discoverFreeModels(
         // Do not attribute an uncertain native default to a particular failed model.
       }
     }
-    const refresh = !["1", "true"].includes(env.OPENCODE_DISABLE_MODELS_FETCH ?? "")
+    const disableFetch =
+      agentType === "kilo"
+        ? (env.KILO_DISABLE_MODELS_FETCH ?? env.OPENCODE_DISABLE_MODELS_FETCH ?? "")
+        : (env.OPENCODE_DISABLE_MODELS_FETCH ?? "")
+    const refresh = !["1", "true"].includes(disableFetch)
     const catalog = refresh
       ? parseOpenCodeCatalog(await probe(["models", "--verbose", "--refresh"]))
       : before.status === "fulfilled"
@@ -173,7 +181,7 @@ export async function discoverFreeModels(
         : []
     signal?.throwIfAborted()
     return {
-      models: [...new Set(catalog.filter(isFreeActorModel).map((model) => model.id))],
+      models: [...new Set(catalog.filter((model) => isFreeActorModel(agentType, model)).map((model) => model.id))],
       ...(defaultModel && { defaultModel }),
     }
   } catch {

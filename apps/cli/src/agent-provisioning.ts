@@ -96,6 +96,21 @@ export const AGENT_PROVISIONING: Readonly<Record<AgentType, AgentProvisioningPla
     loginArgs: ["auth", "login"],
     loginInstructions: "Choose and authenticate an OpenCode provider, then return to this wizard.",
   },
+  kilo: {
+    label: "Kilo Code",
+    documentation: "https://kilo.ai/docs/cli",
+    npmPackage: "@kilocode/cli",
+    loginArgs: ["auth", "login"],
+    loginInstructions: "Choose and authenticate a Kilo Code provider, then return to this wizard.",
+  },
+  freellm: {
+    label: "FreeLLMAPI",
+    documentation: "https://github.com/first-fluke/agent-valley",
+    npmPackage: "@openai/codex",
+    loginArgs: [],
+    loginInstructions:
+      "Export FREELLM_API_KEY (or FREELLMAPI_API_KEY) and optional FREELLM_BASE_URL (default http://127.0.0.1:31415/v1) in your environment, then choose Recheck.",
+  },
 }
 
 export interface TerminalCommand {
@@ -320,7 +335,7 @@ export async function loginChiefAgent(
   const deps = { ...defaults(), ...overrides }
   const plan = AGENT_PROVISIONING[agent]
   try {
-    if (agent === "dsh") return { success: false, message: plan.loginInstructions }
+    if (agent === "dsh" || agent === "freellm") return { success: false, message: plan.loginInstructions }
     const state = await inspectChiefAgent(agent, deps)
     if (!state.binaryPath || state.readiness === "unavailable") {
       return { success: false, message: `Install ${plan.label} first, then retry login. ${plan.documentation}` }

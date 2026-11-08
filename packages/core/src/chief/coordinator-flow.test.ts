@@ -156,4 +156,61 @@ describe("Chief execution boundary characterization", () => {
       report: resumed.report,
     })
   })
+
+  it("preserves completed sibling task output during verification failure repair", async () => {
+    const { mission, ports, runAgent, verify, mutate } = fixture()
+    mission.maxRepairs = 1
+    const multiPlan = {
+      tasks: [
+        {
+          id: "task-1",
+          title: "Step 1",
+          personaId: "worker",
+          instructions: "First step",
+          acceptance: ["First step works"],
+          dependencies: [],
+        },
+        {
+          id: "task-2",
+          title: "Step 2",
+          personaId: "worker",
+          instructions: "Second step",
+          acceptance: ["Second step works"],
+          dependencies: ["task-1"],
+        },
+      ],
+    }
+    const originalRun = runAgent.getMockImplementation()
+    let verifications = 0
+    const executedWorkTaskIds: string[] = []
+    runAgent.mockImplementation(async (...args) => {
+      const stage = args[3]
+      const taskId = args[4]?.taskId
+      if (stage === "plan") {
+        return JSON.stringify({
+          ...multiPlan,
+          goalBrief: brief,
+        })
+      }
+      if (stage === "work") {
+        executedWorkTaskIds.push(taskId!)
+        mutate(`change-${executedWorkTaskIds.length}`)
+        return `Work output for ${taskId}`
+      }
+      return (await originalRun?.(...args)) ?? ""
+    })
+    verify.mockImplementation(async () => {
+      return ++verifications === 1
+        ? { ok: false, output: "Verification failed on task-2" }
+        : { ok: true, output: "Verification passed" }
+    })
+
+    await coordinate(mission, ports)
+
+    expect(verifications).toBe(2)
+    expect(executedWorkTaskIds).toEqual(["task-1", "task-2", "task-2"])
+    const task1 = mission.tasks.find((t) => t.id === "task-1")
+    expect(task1?.output).toBe("Work output for task-1")
+    expect(mission.status).toBe("completed")
+  })
 })

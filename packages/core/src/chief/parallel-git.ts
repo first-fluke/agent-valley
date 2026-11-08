@@ -24,12 +24,16 @@ export async function parallelGit(
   env: Record<string, string | undefined> = {},
 ): Promise<string> {
   try {
-    const result = await exec("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fileMode=true", ...args], {
-      cwd,
-      env: { ...process.env, ...clearedGitEnvironment, ...env },
-      maxBuffer: PARALLEL_GIT_MAX_BUFFER,
-      encoding: "utf8",
-    })
+    const result = await exec(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "-c", "core.fileMode=true", "-c", "core.autocrlf=false", ...args],
+      {
+        cwd,
+        env: { ...process.env, ...clearedGitEnvironment, ...env },
+        maxBuffer: PARALLEL_GIT_MAX_BUFFER,
+        encoding: "utf8",
+      },
+    )
     return result.stdout
   } catch (error) {
     const failure = error as { stderr?: string; message?: string }
@@ -82,6 +86,7 @@ export async function captureParallelBaseline(workspace: string): Promise<Parall
   const directory = await parallelRoot(workspace)
   const index = join(directory, `index-${randomUUID()}`)
   const pathsFile = `${index}.paths`
+  const removedFile = `${index}.removed`
   const env = { GIT_INDEX_FILE: index }
   try {
     const head = (await parallelGit(workspace, ["rev-parse", "HEAD"])).trim()
@@ -93,7 +98,10 @@ export async function captureParallelBaseline(workspace: string): Promise<Parall
     // untrack even when it still exists on disk; force-adding it back silently resurrected ignored
     // evidence in every accepted snapshot.
     const untracked = tracked.split("\0").filter((path) => path && !indexed.has(path) && !excludedParallelPath(path))
-    const paths = [...new Set(`${cached}${visible}`.split("\0"))].filter((path) => path && !excludedParallelPath(path))
+    const untrackedSet = new Set(untracked)
+    const paths = [...new Set(`${cached}${visible}`.split("\0"))].filter(
+      (path) => path && !untrackedSet.has(path) && !excludedParallelPath(path),
+    )
     await parallelGit(workspace, ["read-tree", head], env)
     if (untracked.length) {
       await writeFile(`${pathsFile}.rm`, `${untracked.join("\0")}\0`, { flag: "wx", mode: 0o600 })

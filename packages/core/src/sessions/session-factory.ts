@@ -64,6 +64,8 @@ export class SessionRegistry {
     const { GrokSession } = await import("./grok-session")
     const { KimiSession } = await import("./kimi-session")
     const { OpencodeSession } = await import("./opencode-session")
+    const { KiloSession } = await import("./kilo-session")
+    const { FreellmSession } = await import("./freellm-session")
 
     const builtins: Record<AgentType, () => AgentSession> = {
       codex: () => new CodexSession(),
@@ -76,6 +78,8 @@ export class SessionRegistry {
       grok: () => new GrokSession(),
       kimi: () => new KimiSession(),
       opencode: () => new OpencodeSession(),
+      kilo: () => new KiloSession(),
+      freellm: () => new FreellmSession(),
     }
     for (const id of AGENT_IDS) this.register(id, builtins[id])
   }

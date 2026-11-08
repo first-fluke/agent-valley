@@ -71,7 +71,7 @@ beforeEach(async () => {
   ])
 })
 afterEach(async () => {
-  vi.unstubAllEnvs()
+  vi.unstubAllEnvs?.()
   await rm(directory, { recursive: true, force: true })
 })
 
@@ -445,6 +445,22 @@ describe("isolated parallel Actor worktrees", () => {
     await integrateTaskDelivery(mission, delivery)
     expect(await readFile(join(mission.workspace.path, ".agents", "managed.txt"), "utf8")).toBe("Harness baseline\n")
     await expect(lstat(join(mission.workspace.path, ".agents", "results", "receipt.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    })
+  })
+
+  it("reflects untracking a tracked file in a task worktree as a deletion in the integration delta", async () => {
+    const workspace = await prepareTaskWorktree(mission, "untrack", 1)
+    // Untrack remove.txt using git rm --cached (file remains on disk)
+    await parallelGit(workspace.path, ["rm", "--cached", "remove.txt"])
+    expect(await readFile(join(workspace.path, "remove.txt"), "utf8")).toBe("Delete me\n")
+    const delivery = await collectTaskDelivery(mission, workspace)
+    const removeChange = delivery.changes.find((c) => c.path === "remove.txt")
+    expect(removeChange).toBeDefined()
+    expect(removeChange?.before).toBeDefined()
+    expect(removeChange?.after).toBeNull()
+    await integrateTaskDelivery(mission, delivery)
+    await expect(lstat(join(mission.workspace.path, "remove.txt"))).rejects.toMatchObject({
       code: "ENOENT",
     })
   })

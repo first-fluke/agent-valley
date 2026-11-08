@@ -16,6 +16,8 @@ export const AGENT_IDS = [
   "grok",
   "kimi",
   "opencode",
+  "kilo",
+  "freellm",
 ] as const
 
 export type AgentType = (typeof AGENT_IDS)[number]

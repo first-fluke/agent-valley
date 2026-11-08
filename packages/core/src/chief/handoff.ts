@@ -35,11 +35,21 @@ function failedActor(mission: Mission, actor: Persona, error: unknown): Persona 
   return run ? { ...actor, agentType: run.actorType, model: run.model } : actor
 }
 
-async function freeCatalog(mission: Mission, ports: ChiefPorts, workspace: string) {
+type FreeCatalogVendor = "opencode" | "kilo"
+
+function isFreeCatalogVendor(agentType: string): agentType is FreeCatalogVendor {
+  return agentType === "opencode" || agentType === "kilo"
+}
+
+function freeCatalogVendorLabel(vendor: FreeCatalogVendor): string {
+  return vendor === "kilo" ? "Kilo" : "OpenCode"
+}
+
+async function freeCatalog(mission: Mission, ports: ChiefPorts, vendor: FreeCatalogVendor, workspace: string) {
   try {
     const result = await withMissionDeadline(mission, ports.signal, (signal) => {
       signal?.throwIfAborted()
-      return ports.discoverFreeModels?.("opencode", workspace, signal) ?? Promise.resolve(undefined)
+      return ports.discoverFreeModels?.(vendor, workspace, signal) ?? Promise.resolve(undefined)
     })
     ports.signal?.throwIfAborted()
     return result
@@ -49,9 +59,10 @@ async function freeCatalog(mission: Mission, ports: ChiefPorts, workspace: strin
   }
 }
 
-function freeModelIds(models: string[] = []): string[] {
+function freeModelIds(vendor: FreeCatalogVendor, models: string[] = []): string[] {
+  const prefix = `${vendor}/`
   return [...new Set(models)]
-    .filter((model) => model.startsWith("opencode/") && routeSchema.shape.model.safeParse(model).success)
+    .filter((model) => model.startsWith(prefix) && routeSchema.shape.model.safeParse(model).success)
     .slice(0, 128)
 }
 
@@ -67,37 +78,38 @@ export async function refreshFreeModelRoute(
   validated: Set<string>,
 ): Promise<{ actor: Persona; reason: string } | undefined> {
   const state = mission.handoff
-  if (!state || original.id === mission.chiefId || selected.agentType !== "opencode" || !selected.model)
-    return undefined
+  const vendor = selected.agentType
+  if (!state || original.id === mission.chiefId || !isFreeCatalogVendor(vendor) || !selected.model) return undefined
   const freeOnly =
     state.freeRoutes?.[original.id] === selected.model ||
-    (selected.model !== original.model && state.freeModels?.opencode?.includes(selected.model))
+    (selected.model !== original.model && state.freeModels?.[vendor]?.includes(selected.model))
   if (!freeOnly) return undefined
   const key = `${workspace}\0${selected.model}`
   if (validated.has(key)) return undefined
-  const catalog = await freeCatalog(mission, ports, workspace)
+  const catalog = await freeCatalog(mission, ports, vendor, workspace)
   ports.signal?.throwIfAborted()
-  const models = freeModelIds(catalog?.models)
-  const failed = state.unavailableModels?.opencode ?? []
+  const models = freeModelIds(vendor, catalog?.models)
+  const failed = state.unavailableModels?.[vendor] ?? []
   const model =
     models.includes(selected.model) && !failed.includes(selected.model)
       ? selected.model
       : models.find((candidate) => !failed.includes(candidate))
   state.freeModels ??= {}
-  state.freeModels.opencode = models
+  state.freeModels[vendor] = models
+  const label = freeCatalogVendorLabel(vendor)
   if (!model)
     throw new FreeModelRouteUnavailable(
-      "The saved OpenCode free-model route has no fresh zero-price, active, tool-capable alternative; another authenticated provider is required.",
+      `The saved ${label} free-model route has no fresh zero-price, active, tool-capable alternative; another authenticated provider is required.`,
     )
   state.freeRoutes ??= {}
   state.freeRoutes[original.id] = model
-  state.routes[original.id] = { agentType: "opencode", model }
+  state.routes[original.id] = { agentType: vendor, model }
   validated.add(`${workspace}\0${model}`)
   return model === selected.model
     ? undefined
     : {
         actor: { ...selected, model },
-        reason: `Saved OpenCode free route ${selected.model} is no longer eligible; continue with fresh free catalog model ${model}.`,
+        reason: `Saved ${label} free route ${selected.model} is no longer eligible; continue with fresh free catalog model ${model}.`,
       }
 }
 
@@ -109,12 +121,13 @@ async function freeModelHandoff(
   permitted: boolean,
 ): Promise<{ actor: Persona; reason: string } | undefined> {
   const state = mission.handoff
-  if (actor.agentType !== "opencode" || !state) return undefined
-  const catalog = await freeCatalog(mission, ports, workspace)
+  const vendor = actor.agentType
+  if (!isFreeCatalogVendor(vendor) || !state) return undefined
+  const catalog = await freeCatalog(mission, ports, vendor, workspace)
   ports.signal?.throwIfAborted()
   state.unavailableModels ??= {}
-  state.unavailableModels.opencode ??= []
-  const failed = state.unavailableModels.opencode
+  state.unavailableModels[vendor] ??= []
+  const failed = state.unavailableModels[vendor]
   const failedModel = actor.model ?? catalog?.defaultModel
   const failure = failedModel ?? "<native-default>"
   for (const id of new Set([...(actor.model ? [] : ["<native-default>"]), failure])) {
@@ -126,20 +139,20 @@ async function freeModelHandoff(
       )
     failed.push(id)
   }
-  const models = freeModelIds(catalog?.models)
+  const models = freeModelIds(vendor, catalog?.models)
   state.freeModels ??= {}
-  state.freeModels.opencode = models
-  if (!permitted || state.exhaustedAgents.includes("opencode")) return undefined
+  state.freeModels[vendor] = models
+  if (!permitted || state.exhaustedAgents.includes(vendor)) return undefined
   const next = models.find((model) => !failed.includes(model))
   if (!next) return undefined
-  const route = routeSchema.parse({ agentType: "opencode", model: next })
+  const route = routeSchema.parse({ agentType: vendor, model: next })
   state.routes[actor.id] = route
   state.freeRoutes ??= {}
   state.freeRoutes[actor.id] = next
-  state.unavailableAgents = state.unavailableAgents?.filter((vendor) => vendor !== "opencode")
+  state.unavailableAgents = state.unavailableAgents?.filter((candidate) => candidate !== vendor)
   return {
     actor: { ...actor, ...route },
-    reason: `OpenCode model ${failure} is unavailable; continue ${actor.id} with unused free catalog model ${next}.`,
+    reason: `${freeCatalogVendorLabel(vendor)} model ${failure} is unavailable; continue ${actor.id} with unused free catalog model ${next}.`,
   }
 }
 

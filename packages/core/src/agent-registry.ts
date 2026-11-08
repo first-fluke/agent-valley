@@ -140,6 +140,48 @@ export const AGENT_REGISTRY: Record<AgentType, AgentDescriptor> = Object.freeze(
     capabilities: ["append_prompt", "abort"],
     genAiSystem: "opencode",
   },
+  // kilo uses the OpenCode CLI protocol + Kilo Gateway free/paid catalog.
+  kilo: {
+    id: "kilo",
+    binary: "kilo",
+    envKeys: [
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENROUTER_API_KEY",
+      "KILO_API_KEY",
+      "KILO_DISABLE_FREE_MODELS",
+      "KILO_DISABLE_MODELS_FETCH",
+      "KILO_CONFIG",
+      "KILO_CONFIG_CONTENT",
+      "KILO_CONFIG_DIR",
+      "OPENCODE_API_KEY",
+      "OPENCODE_DISABLE_FREE_MODELS",
+      "OPENCODE_DISABLE_MODELS_FETCH",
+      "OPENCODE_CONFIG",
+      "OPENCODE_CONFIG_CONTENT",
+      "OPENCODE_CONFIG_DIR",
+      "XDG_CONFIG_HOME",
+      "XDG_DATA_HOME",
+      "XDG_STATE_HOME",
+      "XDG_CACHE_HOME",
+    ],
+    capabilities: ["append_prompt", "abort"],
+    genAiSystem: "kilo",
+  },
+  // freellm uses the FreeLLMAPI router via Codex CLI JSON-RPC app-server.
+  freellm: {
+    id: "freellm",
+    binary: "codex",
+    envKeys: [
+      "FREELLM_API_KEY",
+      "FREELLMAPI_API_KEY",
+      "FREELLM_BASE_URL",
+      "FREELLM_MODEL",
+      "CODEX_HOME",
+    ],
+    capabilities: ["pause", "resume", "append_prompt", "abort"],
+    genAiSystem: "freellm",
+  },
 })
 
 export const AGENT_TYPES = AGENT_IDS

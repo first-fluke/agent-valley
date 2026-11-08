@@ -110,6 +110,9 @@ export const AGENT_INSTALL_HINT: Record<AgentType, string> = {
   grok: "Install: see xAI Grok CLI docs for the `grok` binary (https://docs.x.ai)",
   kimi: "Install: see Kimi CLI docs for the `kimi` binary (https://kimi.moonshot.cn)",
   opencode: "Install: curl -fsSL https://opencode.ai/install | bash (see https://opencode.ai/docs)",
+  kilo: "Install: npm install -g @kilocode/cli (see https://kilo.ai/docs/cli)",
+  freellm:
+    "Install: npm install -g @openai/codex (FreeLLMAPI uses the Codex CLI binary; see https://github.com/openai/codex)",
 }
 
 export const AGENT_LOGIN_HINT: Record<AgentType, string> = {
@@ -124,6 +127,9 @@ export const AGENT_LOGIN_HINT: Record<AgentType, string> = {
   grok: "Run `grok login` (see xAI docs).",
   kimi: "Run `kimi`, then `/login` to complete the device-code flow.",
   opencode: "Run `opencode auth login`.",
+  kilo: "Run `kilo auth login`.",
+  freellm:
+    "Export FREELLM_API_KEY (or FREELLMAPI_API_KEY) and optional FREELLM_BASE_URL (default http://127.0.0.1:31415/v1).",
 }
 
 /**
@@ -175,6 +181,18 @@ function probeAgentAuth(agent: AgentType, deps: DoctorDeps): { status: CheckStat
     case "opencode": {
       const p = join(home, ".local", "share", "opencode", "auth.json")
       return exists(p) ? { status: "pass", message: `${p} present` } : { status: "fail", message: `${p} not found` }
+    }
+    case "kilo": {
+      const p = join(home, ".local", "share", "kilo", "auth.json")
+      const cfg = join(home, ".config", "kilo", "kilo.jsonc")
+      if (exists(p)) return { status: "pass", message: `${p} present` }
+      if (exists(cfg)) return { status: "pass", message: `${cfg} present` }
+      return { status: "fail", message: `${p} not found` }
+    }
+    case "freellm": {
+      const key = deps.env.FREELLM_API_KEY?.trim() || deps.env.FREELLMAPI_API_KEY?.trim()
+      if (key) return { status: "pass", message: "FREELLM_API_KEY present in environment" }
+      return { status: "fail", message: "FREELLM_API_KEY not found in environment" }
     }
     case "antigravity":
     case "cursor":

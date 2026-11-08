@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { appendRuntimeGitignoreRule } from "../workspace/runtime-ignore"
 import type { ContinuousBaseline } from "./continuous-contract"
 import { operation as operationFixture } from "./continuous-operation.fixture"
-import { integrateContinuousSource, prepareSourceIntegration } from "./continuous-source-integration"
+import {
+  integrateContinuousSource,
+  prepareSourceIntegration,
+  synchronizeContinuousBaselineWithSource,
+} from "./continuous-source-integration"
 import { createContinuousMissionWorkspace, prepareContinuousBaseline } from "./continuous-workspace"
 import { fingerprintWorkspace } from "./fingerprint"
 import { parallelGit } from "./parallel-git"
@@ -421,5 +425,34 @@ describe("continuous verified source worktree integration", () => {
       integrateContinuousSource(operation, previous, { ...next, verifiedFingerprint: undefined }),
     ).rejects.toThrow("verified snapshot")
     expect(await readFile(join(root, "product.txt"), "utf8")).toBe("Initial product\n")
+  })
+
+  it("back-propagates operator direct commits on source branch to the accepted operation baseline", async () => {
+    const { operation, previous } = await fixture()
+    const next = await accepted(previous, (path) => writeFile(join(path, "product.txt"), "Verified product\n"))
+    await integrateContinuousSource(operation, previous, next)
+    operation.baseline = next
+
+    // Operator makes direct commits to root (main)
+    await writeFile(join(root, "direct.txt"), "Operator direct commit\n")
+    await git(["add", "direct.txt"])
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "operator direct work",
+    ])
+    const newHead = (await git(["rev-parse", "HEAD"])).trim()
+    operation.sourceIntegrationPolicy = { mode: "worktree", branch: "main", head: newHead }
+
+    const synced = await synchronizeContinuousBaselineWithSource(operation, next)
+    expect(synced).toBeDefined()
+    expect(await readFile(join(synced!.path, "direct.txt"), "utf8")).toBe("Operator direct commit\n")
+    expect(await readFile(join(synced!.path, "product.txt"), "utf8")).toBe("Verified product\n")
   })
 })

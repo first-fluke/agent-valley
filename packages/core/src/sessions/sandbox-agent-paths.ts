@@ -16,6 +16,8 @@ const AGENT_HOME_PATHS: Record<string, string[]> = {
   antigravity: [".gemini"],
   gemini: [".gemini"],
   opencode: [".local/share/opencode", ".config/opencode"],
+  kilo: [".local/share/kilo", ".config/kilo", ".local/state/kilo", ".cache/kilo"],
+  freellm: [".codex"],
 }
 
 /** Unknown/custom agents receive no vendor credential directory by default. */
@@ -33,7 +35,7 @@ export function agentHomeAccess(
           ? nativeProfilePath(home, env, "ZCODE_DATA_BASE_DIR", ".zcode", ".zcode")
           : null
   const active =
-    agentType === "codex"
+    agentType === "codex" || agentType === "freellm"
       ? [codexProfilePath(home, env)]
       : agentType === "qwen" || agentType === "dsh" || agentType === "zcode"
         ? profile

@@ -360,4 +360,27 @@ describe("unavailable native model recovery", () => {
     expect(value.runAgent).toHaveBeenCalledOnce()
     expect(value.snapshots.at(-1)?.handoff?.unavailableAgents).toEqual(["opencode"])
   })
+
+  it("rotates across Kilo free catalog models before falling back to another vendor", async () => {
+    const value = setup()
+    value.reviewer.agentType = "kilo"
+    const catalog = vi.fn(async () => ({
+      defaultModel: "kilo/kilo-auto/free",
+      models: ["kilo/kilo-auto/free", "kilo/stealth/glyph-cluster"],
+    }))
+    value.ports.discoverFreeModels = catalog
+    value.runAgent
+      .mockRejectedValueOnce(new Error("Upstream request failed: Model is unavailable."))
+      .mockResolvedValue(passed)
+
+    await value.run(value.reviewer, "Review with Kilo", "review", value.state.id)
+
+    expect(catalog).toHaveBeenCalledWith("kilo", value.mission.workspace.path, expect.any(AbortSignal))
+    expect(value.runAgent.mock.calls.map(([actor]) => [actor.agentType, actor.model])).toEqual([
+      ["kilo", undefined],
+      ["kilo", "kilo/stealth/glyph-cluster"],
+    ])
+    expect(value.mission.handoff?.unavailableModels?.kilo).toEqual(["<native-default>", "kilo/kilo-auto/free"])
+    expect(value.mission.handoff?.freeRoutes?.[value.reviewer.id]).toBe("kilo/stealth/glyph-cluster")
+  })
 })

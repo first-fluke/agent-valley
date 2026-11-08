@@ -58,16 +58,38 @@ export function createMissionContract(mission: Mission) {
   }
 }
 
+export function selectRepairTaskId(mission: Mission, reason?: string, taskId?: string): string | undefined {
+  if (!mission.plan?.tasks.length) return taskId
+  const candidates = mission.plan.tasks.filter((task) => task.effectScope !== "external")
+  const pool = candidates.length ? candidates : mission.plan.tasks
+  if (taskId && pool.some((task) => task.id === taskId)) return taskId
+  const rejectedGate = mission.gateReviews?.findLast(
+    (entry) => !entry.review.passed && pool.some((task) => task.id === entry.taskId),
+  )
+  if (rejectedGate) return rejectedGate.taskId
+  if (reason) {
+    const matched = [...pool].reverse().find((task) => reason.includes(task.id))
+    if (matched) return matched.id
+  }
+  return pool.at(-1)?.id
+}
+
 /** Partial deliveries survive drift; repair deliberately creates a new Actor attempt. */
 export function resetTaskApprovals(
   mission: Mission,
-  options: { keepReviews?: boolean; preserveUnfinished?: boolean; resetTaskIds?: ReadonlySet<string> } = {},
+  options: {
+    keepReviews?: boolean
+    preserveUnfinished?: boolean
+    resetTaskIds?: ReadonlySet<string>
+    targetTaskId?: string
+  } = {},
 ): void {
   delete mission.observationStartedAt
   delete mission.containerObservationVerifiedFingerprint
   if (options.keepReviews && mission.gateReviews) {
     mission.gateReviews = mission.gateReviews.filter((entry) => !entry.review.passed)
   } else delete mission.gateReviews
+  const targetTaskId = options.keepReviews ? (options.targetTaskId ?? selectRepairTaskId(mission)) : undefined
   for (const state of mission.tasks) {
     // A scoped final-review repair keeps approved tasks the findings do not name (same rule as Chief recovery).
     if (
@@ -84,6 +106,27 @@ export function resetTaskApprovals(
         taskId: state.id,
         message: `Kept ${state.id} completed with its passing review and deliverable fingerprint; the final-review repair does not reset it.`,
       })
+      continue
+    }
+    if (
+      options.keepReviews &&
+      targetTaskId &&
+      state.id !== targetTaskId &&
+      state.output !== undefined &&
+      (!state.review || state.review.passed)
+    ) {
+      state.status = "reviewing"
+      delete state.review
+      delete state.fingerprint
+      if (state.parallel) {
+        mission.history.push({
+          at: new Date().toISOString(),
+          stage: "parallel-retained",
+          taskId: state.id,
+          message: `Previous Actor workspace record retained in history: ${state.parallel.path}.`,
+        })
+        delete state.parallel
+      }
       continue
     }
     const preserve = options.preserveUnfinished && state.parallel && state.status !== "completed"

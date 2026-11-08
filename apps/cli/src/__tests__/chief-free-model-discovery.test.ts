@@ -259,4 +259,20 @@ describe("OpenCode default attribution", () => {
     const deps = depsFor("malformed pre-refresh catalog", catalog(model("new-free")), {}, state)
     await expect(discoverFreeModels("opencode", "/workspace", deps)).resolves.toEqual({ models: ["opencode/new-free"] })
   })
+
+  it("discovers Kilo free models including tilde-aliased catalog entries", async () => {
+    const kiloPaidAlias = model("~anthropic/claude-fable-latest", {
+      providerID: "kilo",
+      cost: { input: 10, output: 50, cache: { read: 0, write: 0 } },
+    })
+    const kiloFreeAuto = model("kilo-auto/free", { providerID: "kilo" })
+    const kiloFreeNemotron = model("nvidia/nemotron-3.5-lightning:free", { providerID: "kilo" })
+    const deps = {
+      ...depsFor(catalog(kiloPaidAlias, kiloFreeAuto, kiloFreeNemotron)),
+      resolveBinary: vi.fn<FreeModelDiscoveryDeps["resolveBinary"]>((bin) => (bin === "kilo" ? "/bin/kilo" : null)),
+    }
+    await expect(discoverFreeModels("kilo", "/workspace", deps)).resolves.toEqual({
+      models: ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3.5-lightning:free"],
+    })
+  })
 })

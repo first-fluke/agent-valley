@@ -15,6 +15,8 @@ const AGENT_COLORS: Record<AgentType, { primary: string; secondary: string }> = 
   grok: { primary: "#5C6670", secondary: "#15191D" },
   kimi: { primary: "#4E9AA8", secondary: "#153038" },
   opencode: { primary: "#CE8A46", secondary: "#382313" },
+  kilo: { primary: "#F5C518", secondary: "#2C2406" },
+  freellm: { primary: "#00A67E", secondary: "#1C3F35" },
 }
 
 function createCanvas(): OffscreenCanvas {

@@ -4,7 +4,7 @@ import { createChiefRecovery } from "./coordinator-recovery"
 import { createMissionReporter } from "./coordinator-report"
 import { CheckpointError, createMissionRun, ReadOnlyViolation } from "./coordinator-run"
 import type { CoordinatorContext } from "./coordinator-stages"
-import { ContractViolation, createMissionContract, resetTaskApprovals } from "./coordinator-state"
+import { ContractViolation, createMissionContract, resetTaskApprovals, selectRepairTaskId } from "./coordinator-state"
 import { executionState, MissionPause, pauseForFailure, recordPause } from "./execution"
 import { fallbackReport } from "./reports"
 import { validateMission } from "./schemas"
@@ -49,10 +49,17 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
   const run = createMissionRun(mission, ports, assertContract, checkAbort, checkpoint.persist)
   const generateReport = createMissionReporter(mission, ports, run, persona, fatal)
   const requestRecovery = createChiefRecovery(mission, ports, { run, persona, save, checkAbort })
-  const requestRepair = async (reason: string, resetTaskIds?: ReadonlySet<string> | null) => {
+  const requestRepair = async (reason: string, scope?: string | ReadonlySet<string> | null) => {
+    const targetTaskId = typeof scope === "string" ? scope : selectRepairTaskId(mission, reason)
+    const resetTaskIds =
+      typeof scope === "string"
+        ? new Set([scope])
+        : scope === null
+          ? null
+          : scope
     if ((mission.repairRound ?? 0) >= mission.maxRepairs) {
       if (mission.supervision) {
-        await requestRecovery(reason)
+        await requestRecovery(reason, targetTaskId)
         return
       }
       throw new Error(
@@ -67,8 +74,8 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         message: "The final review named no specific task; every task approval is reset for repair.",
       })
     // Preserve rejection evidence in prompts; a scoped final-review repair resets only the named tasks and dependents.
-    resetTaskApprovals(mission, { keepReviews: true, ...(resetTaskIds ? { resetTaskIds } : {}) })
-    await save("repair", reason)
+    resetTaskApprovals(mission, { keepReviews: true, ...(resetTaskIds ? { resetTaskIds } : {}), targetTaskId })
+    await save("repair", reason, targetTaskId)
   }
 
   const context: CoordinatorContext = {

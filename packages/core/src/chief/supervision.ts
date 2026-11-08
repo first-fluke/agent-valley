@@ -1,3 +1,4 @@
+import { selectRepairTaskId } from "./coordinator-state"
 import type { SupervisionResponse } from "./schemas"
 import type { ChiefPlan, ChiefTask, ChiefTaskState, Mission, SupervisionDecision } from "./types"
 
@@ -24,7 +25,7 @@ export function assignTaskStates(
       unchanged &&
       previous?.output !== undefined &&
       (!previous.review || previous.review.passed) &&
-      (preserveUnchangedWork || previous?.status === "completed")
+      (preserveUnchangedWork || previous?.status === "completed" || previous?.review === undefined)
     return {
       id: task.id,
       reviewerId: reviewer.id,
@@ -83,7 +84,10 @@ export function applyRecovery(mission: Mission, response: SupervisionResponse): 
     plan = { tasks: response.tasks }
     targetId = mission.supervision?.pendingRecovery?.taskId
   } else {
-    targetId = response.taskId ?? mission.supervision?.pendingRecovery?.taskId
+    targetId =
+      response.taskId ??
+      mission.supervision?.pendingRecovery?.taskId ??
+      selectRepairTaskId(mission, mission.supervision?.pendingRecovery?.reason ?? response.reason)
     for (const task of mission.plan.tasks) {
       if (targetId && task.id !== targetId) continue
       if (response.action === "reassign") task.personaId = response.personaId

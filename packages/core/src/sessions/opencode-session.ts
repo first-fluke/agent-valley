@@ -135,9 +135,14 @@ const EDIT_TOOL_HINTS = ["edit", "str_replace", "patch"]
 
 /** Best-effort, UNVERIFIED unauthenticated / no-provider error phrasing. */
 const AUTH_FAILURE_PATTERN =
-  /not authenticated|no provider|unauthorized|missing.*api.?key|no credentials|run\s+`?opencode auth`?/i
+  /not authenticated|no provider|unauthorized|missing.*api.?key|no credentials|paid_model_auth_required|need to sign in to use this model|run\s+`?(?:opencode|kilo) auth`?/i
 
 export class OpencodeSession extends BaseSession {
+  protected readonly vendorType: "opencode" | "kilo" = "opencode"
+  protected readonly vendorCommand: string = OPENCODE_COMMAND
+  protected readonly vendorLabel: string = "OpenCode"
+  protected readonly authCommandHint: string = "opencode auth"
+  protected readonly authLocationHint: string = "~/.local/share/opencode/auth.json"
   private filesChanged: string[] = []
   private started = false
   /** Bounded diagnostic tail of streamed text chunks. */
@@ -163,7 +168,7 @@ export class OpencodeSession extends BaseSession {
     if (prompt.length > MAX_PROMPT_ARG_LENGTH) {
       this.emitError(
         "CRASH",
-        `OpencodeSession.execute: prompt is ${prompt.length} chars, exceeds MAX_PROMPT_ARG_LENGTH (${MAX_PROMPT_ARG_LENGTH}).\n` +
+        `${this.constructor.name}.execute: prompt is ${prompt.length} chars, exceeds MAX_PROMPT_ARG_LENGTH (${MAX_PROMPT_ARG_LENGTH}).\n` +
           "  Fix: shorten the issue/prompt template before calling execute().",
         false,
       )
@@ -196,8 +201,8 @@ export class OpencodeSession extends BaseSession {
     // spawn, not from trusting the flag itself. spawnSandboxed() fails closed
     // when no sandbox is available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set.
     const spawned = await this.spawnSandboxed({
-      agentType: "opencode",
-      command: OPENCODE_COMMAND,
+      agentType: this.vendorType,
+      command: this.vendorCommand,
       args,
       stdio: ["ignore", "pipe", "pipe"],
     })
@@ -232,22 +237,22 @@ export class OpencodeSession extends BaseSession {
       if (AUTH_FAILURE_PATTERN.test(this.rawTail)) {
         this.emitError(
           "AUTH_FAILED",
-          "opencode is not authenticated (no configured provider/credentials detected).\n" +
-            "  Fix: run `opencode auth` to configure a provider, or set the provider API key before starting Agent Valley.\n" +
-            "  Location: ~/.local/share/opencode/auth.json, or the orchestrator process environment.",
+          `${this.vendorCommand} is not authenticated (no configured provider/credentials detected).\n` +
+            `  Fix: run \`${this.authCommandHint}\` to configure a provider, or set the provider API key before starting Agent Valley.\n` +
+            `  Location: ${this.authLocationHint}, or the orchestrator process environment.`,
           false,
         )
         return
       }
       this.emitError(
         exitCode === -1 ? "TIMEOUT" : "CRASH",
-        stderrExhaustion() ?? exhaustionMessage(this.rawTail) ?? `opencode exited with code ${exitCode}`,
+        stderrExhaustion() ?? exhaustionMessage(this.rawTail) ?? `${this.vendorCommand} exited with code ${exitCode}`,
         exitCode !== 1,
       )
       return
     }
     if (this.explicitResult === undefined && this.fullOutput.exceeded) {
-      this.emitError("CRASH", nativeResultLimitMessage("OpenCode"), false)
+      this.emitError("CRASH", nativeResultLimitMessage(this.vendorLabel), false)
       return
     }
     this.emit({
@@ -289,7 +294,7 @@ export class OpencodeSession extends BaseSession {
     if (type === "error" || e.is_error === true || e.isError === true) {
       this.emitError(
         "CRASH",
-        nativeErrorMessage(e, "OpenCode reported an error. Check the provider credentials and retry."),
+        nativeErrorMessage(e, `${this.vendorLabel} reported an error. Check the provider credentials and retry.`),
         true,
       )
       return
@@ -316,13 +321,26 @@ export class OpencodeSession extends BaseSession {
   }
 
   private handleToolUse(e: Record<string, unknown>): void {
+    const part = typeof e.part === "object" && e.part !== null ? (e.part as Record<string, unknown>) : undefined
+    const partState =
+      typeof part?.state === "object" && part.state !== null ? (part.state as Record<string, unknown>) : undefined
     const toolName =
       (e.name as string | undefined) ??
       (e.tool as string | undefined) ??
+      (part?.name as string | undefined) ??
+      (part?.tool as string | undefined) ??
       ((e.function as Record<string, unknown> | undefined)?.name as string | undefined) ??
       "unknown"
 
-    const rawInput = e.input ?? e.arguments ?? e.args ?? (e.function as Record<string, unknown> | undefined)?.arguments
+    const rawInput =
+      e.input ??
+      e.arguments ??
+      e.args ??
+      part?.input ??
+      part?.arguments ??
+      part?.args ??
+      partState?.input ??
+      (e.function as Record<string, unknown> | undefined)?.arguments
 
     const input = normalizeToolInput(rawInput)
 
@@ -351,11 +369,15 @@ export class OpencodeSession extends BaseSession {
 
   /** `tool` (tool-result) event — confirmed to occur, payload shape unconfirmed. */
   private handleToolResult(e: Record<string, unknown>): void {
-    const state = e.state as Record<string, unknown> | undefined
+    const part = typeof e.part === "object" && e.part !== null ? (e.part as Record<string, unknown>) : undefined
+    const state =
+      (e.state as Record<string, unknown> | undefined) ?? (part?.state as Record<string, unknown> | undefined)
     const text =
       (e.output as string | undefined) ??
       (e.result as string | undefined) ??
       (e.text as string | undefined) ??
+      (part?.output as string | undefined) ??
+      (part?.result as string | undefined) ??
       (state?.output as string | undefined)
 
     if (typeof text === "string" && text.length > 0) {
@@ -368,12 +390,11 @@ export class OpencodeSession extends BaseSession {
   }
 
   /**
-   * Flat-shape fallback for unconfirmed event types — mirrors
-   * kimi/cursor-session.ts's tolerant fallback: a string text/content/delta/
-   * data field directly on the event is streamed as output.
+   * Flat-shape and nested `part.text` fallback for streamed text events.
    */
   private handleFlatTextFallback(e: Record<string, unknown>): void {
-    const text = e.text ?? e.content ?? e.delta ?? e.data
+    const part = typeof e.part === "object" && e.part !== null ? (e.part as Record<string, unknown>) : undefined
+    const text = e.text ?? e.content ?? e.delta ?? e.data ?? part?.text ?? part?.content ?? part?.delta
     if (typeof text === "string" && text.length > 0) {
       this.emit({ type: "output", chunk: text })
       this.appendOutputTail(text)
@@ -389,13 +410,21 @@ export class OpencodeSession extends BaseSession {
    * absent tokenUsage in the `complete` event built at process exit.
    */
   private handlePossibleTerminalEvent(e: Record<string, unknown>): void {
-    const type = typeof e.type === "string" ? e.type : undefined
+    const part = typeof e.part === "object" && e.part !== null ? (e.part as Record<string, unknown>) : undefined
+    const type =
+      (typeof e.type === "string" ? e.type : undefined) ?? (typeof part?.type === "string" ? part.type : undefined)
     if (!type || !TERMINAL_TYPE_HINTS.has(type)) return
 
-    const text = (e.result as string | undefined) ?? (e.text as string | undefined) ?? (e.output as string | undefined)
+    const text =
+      (e.result as string | undefined) ??
+      (e.text as string | undefined) ??
+      (e.output as string | undefined) ??
+      (part?.result as string | undefined) ??
+      (part?.text as string | undefined) ??
+      (part?.output as string | undefined)
     if (typeof text === "string" && text.length > 0) {
       if (text.length > MAX_NATIVE_RESULT_LENGTH) {
-        this.emitError("CRASH", nativeResultLimitMessage("OpenCode"), false)
+        this.emitError("CRASH", nativeResultLimitMessage(this.vendorLabel), false)
         return
       }
       this.explicitResult = text
@@ -404,22 +433,36 @@ export class OpencodeSession extends BaseSession {
     const usage =
       (e.usage as Record<string, unknown> | undefined) ??
       (e.tokens as Record<string, unknown> | undefined) ??
-      (e.cost as Record<string, unknown> | undefined)
+      (typeof e.cost === "object" && e.cost !== null ? (e.cost as Record<string, unknown>) : undefined) ??
+      (part?.usage as Record<string, unknown> | undefined) ??
+      (part?.tokens as Record<string, unknown> | undefined)
     if (!usage) return
 
     const input =
       (usage.input_tokens as number | undefined) ??
       (usage.inputTokens as number | undefined) ??
-      (usage.promptTokens as number | undefined)
+      (usage.promptTokens as number | undefined) ??
+      (usage.input as number | undefined)
     const output =
       (usage.output_tokens as number | undefined) ??
       (usage.outputTokens as number | undefined) ??
-      (usage.completionTokens as number | undefined)
+      (usage.completionTokens as number | undefined) ??
+      (usage.output as number | undefined)
 
     if (input === undefined && output === undefined) return
 
+    const partModel =
+      typeof part?.model === "object" && part.model !== null ? (part.model as Record<string, unknown>) : undefined
+    const nestedModel =
+      typeof partModel?.providerID === "string" && typeof partModel?.modelID === "string"
+        ? `${partModel.providerID}/${partModel.modelID}`
+        : undefined
     const model =
-      (e.model as string | undefined) ?? (usage.model as string | undefined) ?? this.config?.model ?? "opencode"
+      (e.model as string | undefined) ??
+      (usage.model as string | undefined) ??
+      nestedModel ??
+      this.config?.model ??
+      this.vendorType
 
     this.explicitTokenUsage = { input: input ?? 0, output: output ?? 0, model }
   }

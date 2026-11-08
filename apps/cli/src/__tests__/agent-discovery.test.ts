@@ -112,12 +112,19 @@ describe("agent discovery", () => {
     ["cursor", "CURSOR_API_KEY"],
     ["grok", "XAI_API_KEY"],
     ["opencode", "OPENROUTER_API_KEY"],
+    ["kilo", "KILO_API_KEY"],
   ] as const)("recognizes %s credential environment without spawning a CLI", async (agent, key) => {
     const probe = vi.fn()
     const result = await availability(agent, {}, { env: { [key]: SECRET }, probe })
     expect(result.readiness).toBe("ready")
     expect(result.reason).toContain(key)
     expect(probe).not.toHaveBeenCalled()
+  })
+
+  it("recognizes FreeLLMAPI credentials in environment and reports missing otherwise", async () => {
+    expect((await availability("freellm", {}, { env: { FREELLM_API_KEY: SECRET } })).readiness).toBe("ready")
+    expect((await availability("freellm", {}, { env: { FREELLMAPI_API_KEY: SECRET } })).readiness).toBe("ready")
+    expect((await availability("freellm", {})).readiness).toBe("unauthenticated")
   })
 
   it("does not treat blank keys, endpoint URLs, flags, model names, or configuration paths as credentials", async () => {
@@ -242,7 +249,7 @@ describe("agent discovery", () => {
     }
   })
 
-  it.each(["claude", "codex", "opencode", "kimi"] as const)(
+  it.each(["claude", "codex", "opencode", "kilo", "kimi"] as const)(
     "reports unreadable %s native state without raw errors",
     async (agent) => {
       const result = await availability(

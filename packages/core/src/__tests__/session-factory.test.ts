@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, test } from "vitest"
 import { AGENT_IDS } from "../domain/agent.ts"
 import type { AgentSession } from "../sessions/agent-session.ts"
 import { DshSession } from "../sessions/dsh-session.ts"
+import { FreellmSession } from "../sessions/freellm-session.ts"
+import { KiloSession } from "../sessions/kilo-session.ts"
 import { KimiSession } from "../sessions/kimi-session.ts"
 import { OpencodeSession } from "../sessions/opencode-session.ts"
 import { QwenSession } from "../sessions/qwen-session.ts"
@@ -119,5 +121,17 @@ describe("SessionRegistry", () => {
     await registry.registerBuiltins()
     const session = registry.create("opencode")
     expect(session).toBeInstanceOf(OpencodeSession)
+  })
+
+  test('"kilo" resolves to a KiloSession instance', async () => {
+    await registry.registerBuiltins()
+    const session = registry.create("kilo")
+    expect(session).toBeInstanceOf(KiloSession)
+  })
+
+  test('"freellm" resolves to a FreellmSession instance', async () => {
+    await registry.registerBuiltins()
+    const session = registry.create("freellm")
+    expect(session).toBeInstanceOf(FreellmSession)
   })
 })

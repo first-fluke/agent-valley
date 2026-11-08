@@ -4,6 +4,7 @@ import {
   assertSettledSourceIntegrations,
   integrateContinuousSource,
   prepareSourceIntegration,
+  synchronizeContinuousBaselineWithSource,
 } from "@agent-valley/core/chief/continuous-source-integration"
 import { ContinuousOperationStore } from "@agent-valley/core/chief/continuous-store"
 import { validateContinuousBaseline } from "@agent-valley/core/chief/continuous-workspace"
@@ -189,6 +190,18 @@ export async function resumeSourceIntegration(
       operation.sourceIntegration = await integrateContinuousSource(operation, previous, accepted, signal)
       operation.updatedAt = new Date().toISOString()
       await persist(operation)
+    }
+    if (policy?.mode === "worktree" && operation.baseline && !operation.currentMissionId) {
+      const beforeBaseline = JSON.stringify(operation.baseline)
+      const beforeIntegration = JSON.stringify(operation.sourceIntegration)
+      await synchronizeContinuousBaselineWithSource(operation, operation.baseline, signal)
+      if (
+        JSON.stringify(operation.baseline) !== beforeBaseline ||
+        JSON.stringify(operation.sourceIntegration) !== beforeIntegration
+      ) {
+        operation.updatedAt = new Date().toISOString()
+        await persist(operation)
+      }
     }
   } catch (error) {
     if (operation.phase !== "paused" && operation.phase !== "completed") operation.resumePhase = operation.phase

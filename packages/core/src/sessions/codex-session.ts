@@ -50,6 +50,26 @@ export class CodexSession extends BaseSession {
     }
   >()
 
+  protected get vendorAgentType(): string {
+    return "codex"
+  }
+
+  protected get vendorCommand(): string {
+    return "codex"
+  }
+
+  protected buildAppServerArgs(config: AgentConfig): string[] {
+    const args = ["app-server", "--listen", "stdio://"]
+    if (config.model) {
+      args.push("-c", `model=${JSON.stringify(config.model)}`)
+    }
+    return args
+  }
+
+  protected buildAppServerEnv(_config: AgentConfig): Record<string, string> {
+    return {}
+  }
+
   async start(config: AgentConfig): Promise<void> {
     this.config = config
     this.startedAt = Date.now()
@@ -58,10 +78,8 @@ export class CodexSession extends BaseSession {
     this.shutdownFailure = undefined
     this.executionPrepared = false
 
-    const args = ["app-server", "--listen", "stdio://"]
-    if (config.model) {
-      args.push("-c", `model=${JSON.stringify(config.model)}`)
-    }
+    const args = this.buildAppServerArgs(config)
+    const extraEnv = this.buildAppServerEnv(config)
 
     // Containment for the per-turn `approvalPolicy: "never"` (set in
     // execute()) comes from the OS sandbox wrapping this process, not
@@ -69,9 +87,10 @@ export class CodexSession extends BaseSession {
     // sandbox is available unless SYMPHONY_ALLOW_UNSANDBOXED=1 is set —
     // let that rejection propagate so callers see a clear start() failure.
     const spawned = await this.spawnSandboxed({
-      agentType: "codex",
-      command: "codex",
+      agentType: this.vendorAgentType,
+      command: this.vendorCommand,
       args,
+      extraEnv,
       stdio: ["pipe", "pipe", "pipe"],
       rethrowSandboxError: true,
     })

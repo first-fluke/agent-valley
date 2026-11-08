@@ -91,7 +91,7 @@ export async function reviewMissionGates(context: CoordinatorContext): Promise<S
             `${reason}. Preserve the completed external effect; any corrective external action requires a separate authorized task.`,
             task.id,
           )
-        else await requestRepair(reason)
+        else await requestRepair(reason, task.id)
         return { kind: "next", stage: "tasks" }
       }
     }

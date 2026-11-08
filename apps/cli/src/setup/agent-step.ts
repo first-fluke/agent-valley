@@ -19,6 +19,8 @@ export async function stepAgentType(ctx: SetupContext, step: number, total: numb
       { value: "grok", label: "Grok", hint: "xAI Grok Build" },
       { value: "kimi", label: "Kimi", hint: "Moonshot AI Kimi Code" },
       { value: "opencode", label: "opencode", hint: "Multi-provider (75+ backends)" },
+      { value: "kilo", label: "Kilo Code", hint: "Kilo Gateway + multi-provider CLI" },
+      { value: "freellm", label: "FreeLLMAPI", hint: "FreeLLMAPI router via Codex CLI" },
     ],
   })
   if (p.isCancel(agentType)) return CANCEL

@@ -260,22 +260,38 @@ function localAuth(agent: AgentType, deps: DiscoveryDeps): AuthEvidence | null {
     }
     return missing(agent, "Claude authentication file has no complete credentials")
   }
-  if (agent === "opencode") {
+  if (agent === "opencode" || agent === "kilo") {
+    const label = agent === "kilo" ? "Kilo" : "OpenCode"
     const home = nonempty(deps.env.XDG_DATA_HOME) ? deps.env.XDG_DATA_HOME : join(deps.home, ".local", "share")
-    const auth = record(readState(join(home, "opencode", "auth.json"), deps))
+    const auth = record(readState(join(home, agent, "auth.json"), deps))
     // https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/auth/index.ts
     for (const value of Object.values(auth)) {
       const credential = record(value)
       if (credential.type === "api" && nonempty(credential.key)) {
-        return { readiness: "ready", reason: "OpenCode native API credentials found" }
+        return { readiness: "ready", reason: `${label} native API credentials found` }
       }
       if (credential.type === "oauth" && nonempty(credential.access) && nonempty(credential.refresh)) {
         if (typeof credential.expires === "number" && !expired(credential.access, credential.expires, deps.now())) {
-          return { readiness: "ready", reason: "OpenCode native OAuth credentials found" }
+          return { readiness: "ready", reason: `${label} native OAuth credentials found` }
         }
       }
     }
-    return missing(agent, "OpenCode has no usable native provider credentials")
+    if (agent === "kilo") {
+      const configHome = nonempty(deps.env.XDG_CONFIG_HOME) ? deps.env.XDG_CONFIG_HOME : join(deps.home, ".config")
+      const config = record(
+        readState(join(configHome, "kilo", "kilo.json"), deps) ??
+          readState(join(configHome, "kilo", "kilo.jsonc"), deps),
+      )
+      if (typeof config.model === "string" && /^kilo\/.+(:free|\/free|-free)$/i.test(config.model.trim())) {
+        return { readiness: "ready", reason: "Kilo native free model route is configured" }
+      }
+    }
+    return missing(agent, `${label} has no usable native provider credentials`)
+  }
+  if (agent === "freellm") {
+    const key = deps.env.FREELLM_API_KEY?.trim() || deps.env.FREELLMAPI_API_KEY?.trim()
+    if (key) return { readiness: "ready", reason: "FreeLLMAPI credentials found in environment" }
+    return missing(agent, "Set FREELLM_API_KEY (or FREELLMAPI_API_KEY) for the FreeLLMAPI router")
   }
   return null
 }
@@ -356,11 +372,11 @@ export async function supportsNativeLoginCommand(
   path: string,
   overrides: Partial<DiscoveryDeps> = {},
 ): Promise<boolean> {
-  if (!["claude", "codex", "cursor", "grok", "opencode", "zcode"].includes(agent)) return false
+  if (!["claude", "codex", "cursor", "grok", "opencode", "kilo", "zcode"].includes(agent)) return false
   const deps: DiscoveryDeps = { ...defaultDeps(), ...overrides }
   deps.env = buildAgentEnv(agent, {}, deps.env)
   try {
-    const command = agent === "claude" || agent === "opencode" ? "auth" : "login"
+    const command = agent === "claude" || agent === "opencode" || agent === "kilo" ? "auth" : "login"
     const help = await boundedProbe(path, ["--help"], deps)
     if (help.exitCode !== 0 || !new RegExp(`^\\s*${command}\\b`, "m").test(help.stdout)) return false
     if (command === "auth") {

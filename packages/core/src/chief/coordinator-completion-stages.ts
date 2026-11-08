@@ -3,7 +3,7 @@ import { applyVerificationResult } from "./coordinator-results"
 import { assertCurrentReviewGates } from "./coordinator-review-gates"
 import { ReadOnlyViolation } from "./coordinator-run"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
-import { finalReviewRepairScope } from "./coordinator-state"
+import { finalReviewRepairScope, selectRepairTaskId } from "./coordinator-state"
 import { MissionPause, pauseForFailure, recordPause } from "./execution"
 import { reviewPrompt } from "./prompts"
 import { fallbackReport } from "./reports"
@@ -30,21 +30,23 @@ export async function verifyMission(context: CoordinatorContext): Promise<StageT
     assertContract()
   } catch (error) {
     if (!mission.supervision || protectedFailure(error)) throw error
-    await requestRecovery(`Verification process failed: ${error instanceof Error ? error.message : String(error)}`)
+    const reason = `Verification process failed: ${error instanceof Error ? error.message : String(error)}`
+    await requestRecovery(reason, selectRepairTaskId(mission, reason))
     return { kind: "next", stage: "tasks" }
   }
   checkAbort()
   applyVerificationResult(mission, result, await ports.fingerprint(mission))
   await save("verify", mission.verification.ok ? "Verification passed." : "Verification failed.")
   if (!mission.verification.ok) {
-    await requestRepair(mission.verification.output ?? "The operator's verification command failed")
+    const reason = mission.verification.output ?? "The operator's verification command failed"
+    await requestRepair(reason, selectRepairTaskId(mission, reason))
     return { kind: "next", stage: "tasks" }
   }
   if (!reviewGatesAreCurrent(mission, mission.verification.fingerprint)) {
     if ((mission.gateReviewRefreshes ?? 0) >= mission.maxRepairs + 1) {
-      await requestRecovery(
-        "Verification repeatedly changes files already inspected by review gates. Make verification stable before retrying; the saved gate refresh allowance is exhausted.",
-      )
+      const reason =
+        "Verification repeatedly changes files already inspected by review gates. Make verification stable before retrying; the saved gate refresh allowance is exhausted."
+      await requestRecovery(reason, selectRepairTaskId(mission, reason))
       return { kind: "next", stage: "tasks" }
     }
     mission.gateReviewRefreshes = (mission.gateReviewRefreshes ?? 0) + 1
@@ -60,7 +62,8 @@ export async function approveMission(context: CoordinatorContext): Promise<Stage
   assertCurrentReviewGates(mission)
   const recovery = await verifyMissionContainers(mission, ports, save, checkAbort)
   if (!recovery.healthy) {
-    await requestRecovery(`Configured service recovery remains unresolved after code checks: ${recovery.reason}`)
+    const reason = `Configured service recovery remains unresolved after code checks: ${recovery.reason}`
+    await requestRecovery(reason, selectRepairTaskId(mission, reason))
     return { kind: "next", stage: "tasks" }
   }
   if (ports.refreshOrganization) {
@@ -81,7 +84,8 @@ export async function approveMission(context: CoordinatorContext): Promise<Stage
     }
     if (observation.status === "failed") {
       delete mission.observationStartedAt
-      await requestRecovery(`Business measurement did not meet the original target: ${observation.reason}`)
+      const reason = `Business measurement did not meet the original target: ${observation.reason}`
+      await requestRecovery(reason, selectRepairTaskId(mission, reason))
       return { kind: "next", stage: "tasks" }
     }
   }
@@ -94,12 +98,14 @@ export async function approveMission(context: CoordinatorContext): Promise<Stage
   } catch (error) {
     if (!mission.supervision || protectedFailure(error)) throw error
     pauseForFailure(mission, error instanceof Error ? error.message : String(error))
-    await requestRecovery(`Final review could not complete: ${error instanceof Error ? error.message : String(error)}`)
+    const reason = `Final review could not complete: ${error instanceof Error ? error.message : String(error)}`
+    await requestRecovery(reason, selectRepairTaskId(mission, reason))
     return { kind: "next", stage: "tasks" }
   }
   await save("final-review", mission.finalReview.summary)
   if (!mission.finalReview.passed) {
-    await requestRepair(mission.finalReview.findings.join("; "), finalReviewRepairScope(mission, mission.finalReview))
+    const reason = mission.finalReview.findings.join("; ")
+    await requestRepair(reason, finalReviewRepairScope(mission, mission.finalReview) ?? selectRepairTaskId(mission, reason))
     return { kind: "next", stage: "tasks" }
   }
   if ((await ports.fingerprint(mission)) !== mission.verification?.fingerprint) {

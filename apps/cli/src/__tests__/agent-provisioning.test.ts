@@ -45,6 +45,8 @@ describe("Chief Director provisioning", () => {
     ["grok", "@xai-official/grok"],
     ["kimi", "@moonshot-ai/kimi-code"],
     ["opencode", "opencode-ai"],
+    ["kilo", "@kilocode/cli"],
+    ["freellm", "@openai/codex"],
   ] as const)("installs %s using the fixed official package argv", async (agent, packageName) => {
     const injected = deps(agent)
     expect((await installChiefAgent(agent, injected)).success).toBe(true)
@@ -126,6 +128,7 @@ describe("Chief Director provisioning", () => {
     ["cursor", ["login"]],
     ["grok", ["login"]],
     ["opencode", ["auth", "login"]],
+    ["kilo", ["auth", "login"]],
     ["kimi", []],
     ["qwen", []],
     ["zcode", ["login"]],
@@ -166,13 +169,21 @@ describe("Chief Director provisioning", () => {
     expect(injected.runCommand).not.toHaveBeenCalled()
   })
 
+  it("guides FreeLLMAPI environment credentials without inventing login commands", async () => {
+    const injected = deps("freellm")
+    const result = await loginChiefAgent("freellm", injected)
+    expect(result.success).toBe(false)
+    expect(result.message).toContain("FREELLM_API_KEY")
+    expect(injected.runCommand).not.toHaveBeenCalled()
+  })
+
   it("reports a missing discovery result as unknown", async () => {
     expect((await inspectChiefAgent("claude", deps("claude", { discover: async () => [] }))).readiness).toBe("unknown")
   })
 })
 
 describe("login command verification", () => {
-  it.each(["claude", "codex", "cursor", "grok", "opencode", "zcode"] as const)(
+  it.each(["claude", "codex", "cursor", "grok", "opencode", "kilo", "zcode"] as const)(
     "verifies advertised %s login without running it",
     async (agent) => {
       const probe = vi.fn(async (_path: string, args: readonly string[]) => ({
@@ -180,7 +191,7 @@ describe("login command verification", () => {
         stdout:
           args.length > 1
             ? "Commands:\n  login Sign in"
-            : `Commands:\n  ${agent === "claude" || agent === "opencode" ? "auth" : "login"} Auth`,
+            : `Commands:\n  ${agent === "claude" || agent === "opencode" || agent === "kilo" ? "auth" : "login"} Auth`,
         stderr: "",
       }))
       expect(await supportsNativeLoginCommand(agent, "/fixture/cli", { env: {}, probe })).toBe(true)

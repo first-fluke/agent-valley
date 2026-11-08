@@ -147,6 +147,18 @@ describe("checkAgentAuthenticated", () => {
     expect(checkAgentAuthenticated("opencode", deps).status).toBe("pass")
   })
 
+  it("kilo: passes when auth.json or kilo.jsonc exists", () => {
+    const deps = makeDeps({ existsSync: (p) => p === join("/home/user", ".config", "kilo", "kilo.jsonc") })
+    expect(checkAgentAuthenticated("kilo", deps).status).toBe("pass")
+  })
+
+  it("freellm: passes when FREELLM_API_KEY is present in env, fails when missing", () => {
+    const withKey = makeDeps({ env: { FREELLM_API_KEY: "test-key" } as NodeJS.ProcessEnv })
+    expect(checkAgentAuthenticated("freellm", withKey).status).toBe("pass")
+    const withoutKey = makeDeps({ env: {} as NodeJS.ProcessEnv })
+    expect(checkAgentAuthenticated("freellm", withoutKey).status).toBe("fail")
+  })
+
   it("antigravity and cursor: report unknown rather than guessing", () => {
     const deps = makeDeps()
     expect(checkAgentAuthenticated("antigravity", deps).status).toBe("unknown")
