@@ -142,6 +142,9 @@ export function planPrompt(mission: Mission): string {
 const VERIFICATION_TIMEOUT_RULE =
   "mission.verificationCheckTimeoutMs is the per-check timeout the framework applies when it runs verification-contract commands; the contract's timeoutMs values are planning estimates and never terminate a check. Replays or wrappers of those commands must allow at least that long."
 
+const DIRECT_DELIVERY_RULE =
+  "No changeSet or isolated workspace record accompanies this delivery: the Actor edited the mission worktree directly, so the worktree and index are the deliverable. AV captures changeSets and deliveryTrees only for isolated Actor workspaces; their absence here is expected, is not a provenance failure, and must not be a finding or a reason to demand framework-generated capture."
+
 const OPERATOR_NOTES_RULE =
   "mission.operatorNotes are operator instructions recorded after earlier attempts. When a note reports an environment or prerequisite change, re-run the affected check in the current environment instead of relying on evidence that predates the note; a note never changes the goal, acceptance criteria or verification command."
 
@@ -213,7 +216,9 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
       ? [
           "The supplied changeSet was computed by AV from git objects (the Actor's integrated snapshot versus its baseline), not claimed by the Actor. Start provenance verification from its file list, sizes, sha256 hashes and unified diff instead of rediscovering changed files; still inspect the integrated deliverables and verify the cited revisions.",
         ]
-      : []),
+      : task && !state?.parallel
+        ? [DIRECT_DELIVERY_RULE]
+        : []),
     ...(hasSourceEvidence
       ? [
           "Provenance is sufficient when the supplied snapshotRef/workerRef revisions resolve and the integrated deliverable bytes match the receipt or changeSet hashes. Object ids cited only inside Actor-authored manifests (intermediate trees or local commits of a disposed Actor workspace) are not required to resolve; note them as unavailable without treating them as a blocker.",

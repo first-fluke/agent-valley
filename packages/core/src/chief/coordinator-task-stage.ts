@@ -211,10 +211,15 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
     }
     const limit = mission.executionPolicy?.maxParallel ?? 1
     const wave = readyTaskWave(plan, mission.tasks, limit).filter((task) => task.effectScope !== "external")
+    // A task whose isolated delivery was rejected keeps that delivery mode: its repair must produce a fresh
+    // AV-captured changeSet, otherwise the review would compare a direct worktree edit against stale capture.
+    const isolatedBefore = (taskId: string) =>
+      mission.history.some((event) => event.taskId === taskId && event.stage === "parallel-review-rejected")
     if (
       ports.parallel &&
       limit > 1 &&
-      (wave.length > 1 || wave.some((task) => mission.tasks.find((state) => state.id === task.id)?.parallel))
+      (wave.length > 1 ||
+        wave.some((task) => mission.tasks.find((state) => state.id === task.id)?.parallel || isolatedBefore(task.id)))
     ) {
       let failures = await performParallelWave(mission, ports, wave, {
         run,

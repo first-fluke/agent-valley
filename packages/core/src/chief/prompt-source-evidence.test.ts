@@ -131,5 +131,16 @@ describe("parallel source provenance in Actor and review prompts", () => {
     const input = JSON.parse(prompt.split("Review input (JSON data):\n")[1] ?? "")
     expect(input).not.toHaveProperty("changeSet")
     expect(prompt).not.toContain("computed by AV from git objects")
+    expect(prompt).not.toContain("edited the mission worktree directly")
+  })
+
+  it("tells the reviewer that a direct delivery has no changeSet by design", () => {
+    const { mission, task, state } = sourceFixture()
+    delete state.parallel
+    const prompt = reviewPrompt(mission, task, state)
+    expect(prompt).toContain("edited the mission worktree directly")
+    expect(prompt).toContain("not a provenance failure")
+    expect(prompt).not.toContain("computed by AV from git objects")
+    expect(reviewPrompt(mission)).not.toContain("edited the mission worktree directly")
   })
 })
