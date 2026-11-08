@@ -17,6 +17,7 @@ export function validateResumeOptions(goal: string | undefined, options: OrderOp
     "service",
     "retry",
     "note",
+    "timeout",
     "runs",
     "duration",
     "cost",
@@ -56,6 +57,10 @@ export function applyResumeOptions(mission: Mission, goal: string | undefined, o
       throw new Error("Use --account-run <id> with --account-cost <usd> after inspecting billing.")
     if (!options.accountCost.trim()) throw new Error("--account-cost must be an explicit nonnegative USD amount.")
     reconcileRunCost(mission, options.accountRun, Number(options.accountCost))
+    changed = true
+  }
+  if (options.timeout) {
+    mission.timeoutSec = integer(options.timeout, mission.timeoutSec, 86_400, "--timeout")
     changed = true
   }
   if (options.runs || options.duration || options.cost || options.rounds) {

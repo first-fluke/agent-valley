@@ -46,6 +46,15 @@ function unknownCostRun(): OperatingRun {
 }
 
 describe("operator resume without weakening acceptance or resetting spend", () => {
+  it("raises the per-attempt timeout on resume without lowering it", () => {
+    const current = mission()
+    current.timeoutSec = 1_800
+    applyResumeOptions(current, undefined, { resume: current.id, timeout: "3600" })
+    expect(current.timeoutSec).toBe(3_600)
+    expect(current.status).toBe("pending")
+    expect(() => applyResumeOptions(current, undefined, { resume: current.id, timeout: "600" })).toThrow("--timeout")
+  })
+
   it("records an operator note for Actors and the Chief without touching the goal or spent budget", () => {
     const current = mission()
     const original = structuredClone(current)

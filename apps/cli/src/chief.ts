@@ -472,7 +472,7 @@ export function registerChiefCommands(program: Command): void {
     .addOption(new Option("--chief <id>", "Legacy alias for --director").hideHelp())
     .addOption(new Option("--personas <file>", "Legacy alias for --actors").hideHelp())
     .option("--oma", "Require OMA completion receipts for workers (installed skill selection is automatic)")
-    .option("--timeout <seconds>", "Timeout per actor/check (default 600 or actor.timeout)")
+    .option("--timeout <seconds>", "Timeout per actor/check (default 600 or actor.timeout); may be increased on resume")
     .option("--repairs <count>", "Repair limit per task/final review (default 2)")
     .option("--rounds <count>", "Chief Director recovery decision limit, preserved on resume (default 8, maximum 50)")
     .option("--parallel <count>", "Independent Actor concurrency (default 3, maximum 8)")
