@@ -11,6 +11,13 @@ const exec = promisify(execFile)
 export const productPaths = ["--", ".", ":(exclude,glob).agent-valley/**", ":(exclude,glob).agents/**"]
 export const excludedParallelPath = (path: string) => /^(?:\.agent-valley|\.agents)(?:\/|$)/.test(path)
 export { clearedGitEnvironment } from "../util/git-environment"
+
+/**
+ * A verified cycle can carry hundreds of megabytes of evidence (coverage runs, profiles); its diff
+ * must fit in memory or source integration pauses with "stdout maxBuffer length exceeded".
+ */
+const PARALLEL_GIT_MAX_BUFFER = 1024 * 1024 * 1024
+
 export async function parallelGit(
   cwd: string,
   args: string[],
@@ -20,7 +27,7 @@ export async function parallelGit(
     const result = await exec("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fileMode=true", ...args], {
       cwd,
       env: { ...process.env, ...clearedGitEnvironment, ...env },
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer: PARALLEL_GIT_MAX_BUFFER,
       encoding: "utf8",
     })
     return result.stdout
@@ -40,7 +47,7 @@ export async function parallelBlob(workspace: string, oid: string): Promise<Buff
       {
         cwd: workspace,
         env: { ...process.env, ...clearedGitEnvironment },
-        maxBuffer: 64 * 1024 * 1024,
+        maxBuffer: PARALLEL_GIT_MAX_BUFFER,
         encoding: "buffer",
       },
     )
