@@ -45,8 +45,10 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
         return { reviewer, prompt: reviewPrompt(mission, task, state) }
       })
       let review: ReturnType<typeof parseReview>
+      let response: string | undefined
       try {
-        review = parseReview(await run(reviewer, prompt, "review", task.id))
+        response = await run(reviewer, prompt, "review", task.id)
+        review = parseReview(response)
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
         const decision = await serialize(async () => {
@@ -59,9 +61,12 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
           // Only transport/no-verdict failures count against a review route's health.
           if (error instanceof MissionPause || protectedFailure(error)) return { kind: "throw" as const }
           const activeRoute = mission.handoff?.routes[reviewer.id]
-          // Preserve recovery semantics for a configured reviewer that has no active handoff route.
-          if (!activeRoute) return { kind: "throw" as const }
-          const failed = activeRoute.agentType
+          // A configured reviewer's transport failure keeps the recovery semantics (automatic retry or
+          // Chief wait). A response that parses to no verdict is different: the reviewer ran and answered
+          // with prose, so retry once, then retire that route and use the next eligible reviewer instead
+          // of spending a Chief recovery round that re-runs accepted work and reselects the same route.
+          if (!activeRoute && response === undefined) return { kind: "throw" as const }
+          const failed = activeRoute?.agentType ?? reviewer.agentType
           const { retired } = noteReviewerNoVerdict(mission, failed)
           const retryable = attempt + 1 < MAX_REVIEW_ATTEMPTS
           if (!retired) return retryable ? { kind: "retry" as const } : { kind: "throw" as const }
