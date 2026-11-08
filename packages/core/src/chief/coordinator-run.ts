@@ -1,4 +1,6 @@
 import { classifyAgentExhaustion } from "../domain/agent-exhaustion"
+import { ActorCooldown } from "./actor-availability"
+import { actorRouteHealth } from "./actor-health"
 import { createMissionCheckpoint } from "./coordinator-checkpoint"
 import { assertNoUncertainExecution, classifyFailure, MissionPause, reserveExecutionRun } from "./execution"
 import {
@@ -22,6 +24,8 @@ export function createMissionRun(
   persist = createMissionCheckpoint(mission, ports, assertContract).persist,
 ) {
   const validatedFreeRoutes = new Set<string>()
+  /** Per provider route, the run currently probing it; siblings await and reuse its resulting handoff. */
+  const probes = new Map<string, Promise<void>>()
   const runOnce = async (
     actor: Persona,
     prompt: string,
@@ -197,18 +201,79 @@ export function createMissionRun(
     } catch (error) {
       if (!(error instanceof FreeModelRouteUnavailable) || !(await redirect(error))) throw error
     }
+    // A sibling that waited on an in-flight probe reuses the resulting handoff route.
+    const shareProbe = async (probedType: string): Promise<boolean> => {
+      const shared = handoffActor(mission, actor)
+      if (shared.agentType === selected.agentType && shared.model === selected.model) return false
+      selected = shared
+      rememberFreeRoute()
+      reason = `Reused the in-flight ${probedType} provider handoff; ${actor.id} continues on ${shared.agentType}.`
+      currentPrompt = handoffPrompt(mission, prompt, stage, taskId)
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "handoff-shared",
+        message: reason,
+        ...(taskId ? { taskId } : {}),
+      })
+      await persist("Handoff-shared checkpoint could not be saved. Restore writable mission storage before resuming.")
+      return true
+    }
     for (;;) {
-      if (
-        actor.id !== mission.chiefId &&
-        mission.handoff?.unavailableAgents?.some((vendor) => vendor === selected.agentType)
-      )
-        await redirect(new Error("Model is unavailable"))
-      if (mission.handoff?.exhaustedAgents.some((vendor) => vendor === selected.agentType))
-        await redirect(new Error("usage_limit_reached"))
+      const probedType = selected.agentType
+      const probeKey = JSON.stringify([selected.agentType, selected.model ?? null])
+      const pending = probes.get(probeKey)
+      if (pending) {
+        await pending
+        if (await shareProbe(probedType)) continue
+      }
+      const health = actorRouteHealth(mission, { actorType: selected.agentType, model: selected.model })
+      const exhausted = mission.handoff?.exhaustedAgents?.some((vendor) => vendor === selected.agentType) ?? false
+      // The first run to reach a probe route owns it; siblings await its terminal result above.
+      const owner = (health.consecutiveFailures > 0 || exhausted) && !probes.has(probeKey)
+      let release: (() => void) | undefined
+      let owned: Promise<void> | undefined
+      if (owner) {
+        let resolve!: () => void
+        const promise = new Promise<void>((done) => {
+          resolve = done
+        })
+        owned = promise
+        probes.set(probeKey, promise)
+        release = () => {
+          if (probes.get(probeKey) === promise) probes.delete(probeKey)
+          resolve()
+        }
+      }
       try {
+        if (
+          actor.id !== mission.chiefId &&
+          mission.handoff?.unavailableAgents?.some((vendor) => vendor === selected.agentType)
+        ) {
+          if (!(await redirect(new Error("Model is unavailable"))))
+            throw new Error(`No handoff route remains for the unavailable model ${selected.agentType}.`)
+          continue
+        }
+        // An exhausted provider never waits on its cooldown; use the handoff route immediately.
+        if (mission.handoff?.exhaustedAgents.some((vendor) => vendor === selected.agentType)) {
+          if (!(await redirect(new Error("usage_limit_reached"))))
+            throw new Error(`No handoff route remains for the exhausted provider ${selected.agentType}.`)
+          continue
+        }
         return await runOnce(selected, currentPrompt, stage, taskId, reason ? { ...context, handoff: reason } : context)
       } catch (error) {
+        if (error instanceof ActorCooldown) {
+          const probe = probes.get(probeKey)
+          // Only a sibling waits on another run's probe; the owner must never await its own promise.
+          if (probe && probe !== owned) await probe
+          if (await shareProbe(probedType)) continue
+          if (mission.handoff?.exhaustedAgents?.some((vendor) => vendor === selected.agentType)) {
+            if (!(await redirect(new Error("usage_limit_reached")))) throw error
+            continue
+          }
+        }
         if (error instanceof ReadOnlyViolation || !(await redirect(error))) throw error
+      } finally {
+        release?.()
       }
     }
   }
