@@ -238,7 +238,6 @@ describe("Cargo verification spawn boundary", () => {
           CARGO_TERM_COLOR: "never",
           GIT_OPTIONAL_LOCKS: "0",
           GIT_NO_LAZY_FETCH: "1",
-          GIT_LITERAL_PATHSPECS: "1",
         }),
       }),
     )

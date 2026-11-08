@@ -104,7 +104,10 @@ export const executeVerificationCommand: VerificationCommandExecutor = async (pr
       "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     ])
       delete env[key]
-    Object.assign(env, { GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1", GIT_LITERAL_PATHSPECS: "1" })
+    Object.assign(env, { GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1" })
+    // Literal pathspecs protect only the framework's own read-only Git checks. Exporting the variable to a
+    // test runner breaks Git commands the tests spawn themselves (check-ignore rejects "literal" magic).
+    if (program === "git") env.GIT_LITERAL_PATHSPECS = "1"
     if (program === "cargo") Object.assign(env, { CARGO_NET_OFFLINE: "true", CARGO_TERM_COLOR: "never" })
     const argv =
       program === "git"
