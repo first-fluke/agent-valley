@@ -230,14 +230,17 @@ describe("chief coordinator", () => {
     expect(runAgent.mock.calls.filter((call) => call[3] === "plan")).toHaveLength(1)
   })
 
-  it("invalidates saved approvals when the worktree changes between runs", async () => {
-    const { mission, ports, mutate, verify } = fixture()
+  it("re-reviews delivered tasks without re-running them when the worktree changes between runs", async () => {
+    const { mission, ports, mutate, verify, runAgent } = fixture()
     await coordinate(mission, ports)
+    const reviewsBefore = runAgent.mock.calls.filter((call) => call[3] === "review").length
     mutate("external-edit")
     await coordinate(mission, ports)
-    expect(mission.tasks[0]?.attempts).toBe(2)
+    expect(mission.status).toBe("completed")
+    expect(mission.tasks[0]?.attempts).toBe(1)
+    expect(runAgent.mock.calls.filter((call) => call[3] === "review").length).toBeGreaterThan(reviewsBefore)
     expect(verify).toHaveBeenCalledTimes(2)
-    expect(mission.history.some((event) => event.message.includes("all task reviews will run again"))).toBe(true)
+    expect(mission.history.some((event) => event.message.includes("will be re-reviewed"))).toBe(true)
   })
 
   it("reruns deterministic verification on a completed mission without rerunning unchanged tasks", async () => {

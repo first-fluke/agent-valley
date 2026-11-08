@@ -90,6 +90,16 @@ describe("final-review repair scope derivation", () => {
 })
 
 describe("scoped task approval reset", () => {
+  it("re-reviews delivered tasks without re-executing them when only approvals are stale", () => {
+    const { mission } = fixture()
+    mission.tasks = [completed("task-1", 1), completed("task-2", 2)]
+    const outputs = mission.tasks.map((state) => state.output)
+    resetTaskApprovals(mission, { preserveUnfinished: true, reviewOnly: true })
+    expect(mission.tasks.map((state) => state.status)).toEqual(["reviewing", "reviewing"])
+    expect(mission.tasks.map((state) => state.output)).toEqual(outputs)
+    expect(mission.tasks.every((state) => state.review === undefined && state.fingerprint === undefined)).toBe(true)
+  })
+
   it("resets only the named tasks and preserves approved tasks with a recorded fingerprint", () => {
     const { mission } = fixture()
     mission.plan = { tasks: [task("task-1"), task("task-2")] }

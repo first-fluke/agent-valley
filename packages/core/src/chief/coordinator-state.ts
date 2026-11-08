@@ -82,6 +82,8 @@ export function resetTaskApprovals(
     preserveUnfinished?: boolean
     resetTaskIds?: ReadonlySet<string>
     targetTaskId?: string
+    /** Only stale approvals are reset: delivered work keeps its output and is re-reviewed, never re-executed. */
+    reviewOnly?: boolean
   } = {},
 ): void {
   delete mission.observationStartedAt
@@ -118,6 +120,24 @@ export function resetTaskApprovals(
       state.output !== undefined &&
       (!state.review || state.review.passed)
     ) {
+      state.status = "reviewing"
+      delete state.review
+      delete state.fingerprint
+      if (state.parallel) {
+        mission.history.push({
+          at: new Date().toISOString(),
+          stage: "parallel-retained",
+          taskId: state.id,
+          message: `Previous Actor workspace record retained in history: ${state.parallel.path}.`,
+        })
+        delete state.parallel
+      }
+      continue
+    }
+    // A worktree that drifted after the checkpoint (an interrupted verification, a crash while collecting
+    // evidence) invalidates approvals, not deliverables: re-review what was delivered instead of re-running
+    // every task from scratch.
+    if (options.reviewOnly && state.output !== undefined && (!state.review || state.review.passed)) {
       state.status = "reviewing"
       delete state.review
       delete state.fingerprint

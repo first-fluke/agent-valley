@@ -2,6 +2,7 @@ import { consultDirectors } from "./advisor-coordination"
 import { refreshMissionContainers } from "./coordinator-container"
 import { applyPlanningResult } from "./coordinator-results"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
+import { resetTaskApprovals } from "./coordinator-state"
 import {
   assertExecutionDeadline,
   assertNoUncertainExecution,
@@ -14,7 +15,7 @@ import { parsePlanningResponse } from "./schemas"
 import { runStructuredStage } from "./structured-stage"
 
 export async function resumeMission(context: CoordinatorContext): Promise<StageTransition> {
-  const { mission, ports, operatorGoal, operatorVerify, checkAbort, invalidate, save } = context
+  const { mission, ports, operatorGoal, operatorVerify, checkAbort, save } = context
   finalizeAbandonedRuns(mission)
   assertNoUncertainExecution(mission)
   checkAbort()
@@ -41,8 +42,15 @@ export async function resumeMission(context: CoordinatorContext): Promise<StageT
     mission.supervision.lastFingerprint ??= current
   }
   if (mission.fingerprint && mission.fingerprint !== current) {
-    invalidate()
-    await save("resume", "Worktree changed since the checkpoint; all task reviews will run again.")
+    // Delivered work survives drift; only its approvals are stale. Re-executing every task here cost whole
+    // hours of accepted work after an interrupted verification.
+    resetTaskApprovals(mission, { preserveUnfinished: true, reviewOnly: true })
+    delete mission.finalReview
+    delete mission.verification
+    await save(
+      "resume",
+      "Worktree changed since the checkpoint; delivered tasks keep their output and will be re-reviewed.",
+    )
   }
   mission.fingerprint = current
   delete mission.error
