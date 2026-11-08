@@ -67,7 +67,10 @@ export interface GoalVerificationOptions {
   successCriteria: string[]
   expectedContractSha256?: string
   signal?: AbortSignal
-  /** Upper bound applied to each contract command timeout. */
+  /**
+   * Operator per-check timeout. When present it governs every contract command: the contract's
+   * own timeoutMs is a planning-time estimate made before any check was measured.
+   */
   timeoutMs?: number
   executeCommand?: VerificationCommandExecutor
   onSpawned?: (pid: number, detached: boolean) => void
@@ -141,7 +144,7 @@ async function inspectCheck(
     const inputs = await verificationCommandInputs(root, check.program, check.args, budget)
     const result = await (options.executeCommand ?? executeVerificationCommand)(check.program, check.args, {
       cwd: root,
-      timeoutMs: Math.min(check.timeoutMs, options.timeoutMs ?? check.timeoutMs),
+      timeoutMs: options.timeoutMs ?? check.timeoutMs,
       maxOutputBytes: MAX_VERIFICATION_OUTPUT_BYTES,
       signal: options.signal,
       onSpawned: options.onSpawned,

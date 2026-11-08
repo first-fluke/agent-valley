@@ -86,7 +86,8 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
       kind: z.literal("command"),
       program: z.enum(["git", "node", "bun", "cargo"]),
       args: z.array(z.string().min(1).max(1_024)).min(1).max(30),
-      timeoutMs: z.number().int().min(100).max(300_000).default(120_000),
+      /** Planning-time estimate; the operator's per-check timeout governs when the mission runs. */
+      timeoutMs: z.number().int().min(100).max(3_600_000).default(120_000),
       stdoutIncludes: z.array(text).min(1).max(10).optional(),
     })
     .refine((check) => safeVerificationCommand(check.program, check.args), {

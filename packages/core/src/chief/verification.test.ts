@@ -205,6 +205,37 @@ describe("Chief Director executable verification contracts", () => {
     await expect(verificationRoot(join(root, "dir-link"))).rejects.toThrow("real directory")
   })
 
+  it("runs contract commands under the operator per-check timeout rather than the planning estimate", async () => {
+    const root = await directory()
+    await writeFile(join(root, "harness.test.js"), "test fixture")
+    const executeCommand = vi.fn(async () => ({ exitCode: 0, stdout: "ok", stderr: "" }))
+    const input = {
+      version: 1,
+      criteria: [
+        {
+          criterion: "Harness passes",
+          checks: [{ kind: "command", program: "node", args: ["--test", "harness.test.js"], timeoutMs: 120_000 }],
+        },
+      ],
+    }
+    await executeGoalVerification(input, root, {
+      successCriteria: ["Harness passes"],
+      executeCommand,
+      timeoutMs: 1_800_000,
+    })
+    expect(executeCommand).toHaveBeenLastCalledWith(
+      "node",
+      ["--test", "harness.test.js"],
+      expect.objectContaining({ timeoutMs: 1_800_000 }),
+    )
+    await executeGoalVerification(input, root, { successCriteria: ["Harness passes"], executeCommand })
+    expect(executeCommand).toHaveBeenLastCalledWith(
+      "node",
+      ["--test", "harness.test.js"],
+      expect.objectContaining({ timeoutMs: 120_000 }),
+    )
+  })
+
   it("checks actual exit/output and binds existing test inputs before invoking the executor", async () => {
     const root = await directory()
     await writeFile(join(root, "login.test.js"), "test fixture")
