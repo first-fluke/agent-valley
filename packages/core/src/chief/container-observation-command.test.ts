@@ -1,28 +1,91 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { execFileSync } from "node:child_process"
+import { existsSync } from "node:fs"
+import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 import { type ContainerObservationCommand, executeContainerCommand } from "./container-observation-command"
 
 const directories: string[] = []
 const command: ContainerObservationCommand = { binary: "docker", args: [], timeoutMs: 2_000, maxOutputBytes: 1_024 }
+let shimDirectory: Promise<string> | undefined
+
+async function prepareWindowsShim(): Promise<string> {
+  shimDirectory ??= (async () => {
+    const directory = await mkdtemp(join(tmpdir(), "av-container-shim-"))
+    let located: string[] = []
+    try {
+      located = execFileSync("where", ["node"], { encoding: "utf8" }).split(/\r?\n/)
+    } catch {
+      located = []
+    }
+    const candidates = [process.env.NODE, "C:\\Program Files\\nodejs\\node.exe", ...located].filter(
+      (path): path is string => typeof path === "string" && existsSync(path),
+    )
+    const node = candidates.find((path) => !path.toLowerCase().includes("mise")) ?? candidates[0]
+    if (!node) throw new Error("Windows container tests require a Node executable on PATH.")
+    await copyFile(node, join(directory, "docker.exe"))
+    await writeFile(
+      join(directory, "shim.cjs"),
+      `const Module = require("node:module")
+const path = require("node:path")
+process.env.AV_DOCKER_ORIGINAL_ARGV = JSON.stringify(process.argv.slice(1))
+const main = path.join(__dirname, "main.cjs")
+if (process.argv.length < 2) require(main)
+const original = Module._resolveFilename
+Module._resolveFilename = function (request, ...args) {
+  try {
+    return original.call(this, request, ...args)
+  } catch (error) {
+    if (request === process.argv[1]) return main
+    throw error
+  }
+}
+`,
+    )
+    await writeFile(
+      join(directory, "main.cjs"),
+      `const fs = require("node:fs")
+const path = require("node:path")
+const vm = require("node:vm")
+const args = JSON.parse(process.env.AV_DOCKER_ORIGINAL_ARGV).map((arg) => {
+  if (!path.isAbsolute(arg) || fs.existsSync(arg)) return arg
+  const relative = path.relative(process.cwd(), arg)
+  return relative && !relative.startsWith("..") ? relative : arg
+})
+process.argv = [process.execPath, "docker", ...args]
+vm.runInThisContext(fs.readFileSync(process.env.AV_DOCKER_SOURCE, "utf8"), { filename: "docker-source.js" })
+`,
+    )
+    return directory
+  })()
+  return shimDirectory
+}
+
 async function fixture(source: string): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "av-container-command-"))
   directories.push(directory)
   if (process.platform === "win32") {
-    await writeFile(join(directory, "docker.js"), source)
-    await writeFile(join(directory, "docker.cmd"), `@echo off\r\n"${process.execPath}" "%~dp0docker.js" %*\r\n`)
+    const shim = await prepareWindowsShim()
+    const sourcePath = join(directory, "source.js")
+    await writeFile(sourcePath, source)
+    vi.stubEnv("PATH", `${shim}${delimiter}${process.env.PATH ?? ""}`)
+    vi.stubEnv("NODE_OPTIONS", `--require=${join(shim, "shim.cjs")}`)
+    vi.stubEnv("AV_DOCKER_SOURCE", sourcePath)
   } else {
     await writeFile(join(directory, "docker"), `#!${process.execPath}\n${source}\n`, { mode: 0o755 })
+    vi.stubEnv("PATH", `${directory}${delimiter}${process.env.PATH ?? ""}`)
   }
-  vi.stubEnv("PATH", `${directory}${delimiter}${process.env.PATH ?? ""}`)
 }
 afterEach(async () => {
   vi.unstubAllEnvs()
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
+afterAll(async () => {
+  if (shimDirectory) await rm(await shimDirectory, { recursive: true, force: true })
+})
 
-describe.skipIf(process.platform === "win32")("bounded native container observation subprocess", () => {
+describe("bounded native container observation subprocess", () => {
   it("uses argv literally without shell expansion and closes stdin", async () => {
     await fixture(
       'process.stdin.on("end",()=>process.stdout.write(JSON.stringify(process.argv.slice(2))));process.stdin.resume()',

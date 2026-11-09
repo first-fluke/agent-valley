@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto"
-import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { supportsFileSymlinks } from "../__tests__/test-platform"
+import { makeSymlink as symlink } from "../__tests__/test-platform"
 import { recordContinuousAcceptance } from "./continuous-acceptance-record"
 import type { ContinuousBaseline } from "./continuous-contract"
 import { mission, operation, timestamp } from "./continuous-operation.fixture"
@@ -201,7 +201,7 @@ describe("explicit frozen continuous baseline pruning", () => {
     expect(await outcome(true)).toMatchObject({ status: "kept", reason: expect.stringContaining("referenced") })
   })
 
-  it.skipIf(!supportsFileSymlinks)("does not follow a substituted workspace symlink", async () => {
+  it("does not follow a substituted workspace symlink", async () => {
     const outside = join(directory, "outside")
     await mkdir(outside)
     await writeFile(join(outside, "keep.txt"), "user data")
@@ -320,7 +320,7 @@ describe("explicit frozen continuous baseline pruning", () => {
     }
   })
 
-  it.skipIf(!supportsFileSymlinks)("preserves nested ignored evidence and symlinked Git metadata", async () => {
+  it("preserves nested ignored evidence and symlinked Git metadata", async () => {
     const evidence = join(target().path, ".agent-valley", "parallel", "retained.txt")
     await writeFile(evidence, "failed Actor evidence")
     expect(await outcome(true)).toMatchObject({ status: "kept", reason: expect.stringContaining("changes") })

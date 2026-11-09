@@ -66,7 +66,7 @@ export async function verificationCommandInputs(
     const launcher = await realpath(join(root, args[0]))
     if (!launcher.startsWith(`${join(root, "node_modules")}${sep}`))
       throw new Error("Installed Vitest launcher escapes this worktree. Install its dependency inside node_modules.")
-    names.unshift(relative(root, launcher))
+    names.unshift(relative(root, launcher).split(sep).join("/"))
   }
   const inputs: { path: string; sha256: string }[] = []
   for (const path of names) {

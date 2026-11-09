@@ -1,23 +1,24 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { copyFile, lstat, mkdtemp, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 export const isWindows = process.platform === "win32"
 
-/** Windows requires Developer Mode or elevation to create file symlinks. */
-export const supportsFileSymlinks = (() => {
-  if (!isWindows) return true
-  const root = mkdtempSync(join(tmpdir(), "av-symlink-probe-"))
-  try {
-    writeFileSync(join(root, "target"), "")
-    symlinkSync(join(root, "target"), join(root, "link"), "file")
-    return true
-  } catch {
-    return false
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})()
+/**
+ * Creates a reparse point without requiring Windows Developer Mode. Junctions report
+ * `isSymbolicLink()` on Windows and preserve the escape semantics these tests exercise.
+ */
+export async function makeSymlink(target: string, path: string): Promise<void> {
+  if (!isWindows) return symlink(target, path)
+  const absolute = isAbsolute(target) ? target : resolve(dirname(path), target)
+  const existing = await lstat(absolute).catch(() => undefined)
+  if (existing?.isDirectory()) return symlink(absolute, path, "junction")
+  const directory = await mkdtemp(join(tmpdir(), "av-link-target-"))
+  const copy = join(directory, basename(absolute))
+  if (existing) await copyFile(absolute, copy)
+  else await writeFile(copy, "")
+  await symlink(directory, path, "junction")
+}
 
 /** POSIX permission bits and the executable bit are not enforced on Windows filesystems. */
 export const supportsPosixModes = !isWindows

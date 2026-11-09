@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { supportsFileSymlinks } from "../__tests__/test-platform"
+import { makeSymlink as symlink } from "../__tests__/test-platform"
 import type { SkillMatrixDeps } from "../oma/skill-matrix-adapter"
 import { planSandboxedSpawn } from "../sessions/sandbox"
 import { ChiefRuntime } from "./runtime"
@@ -245,7 +245,7 @@ describe("chief runtime boundaries", () => {
     expect(planSandboxedSpawn).not.toHaveBeenCalled()
   })
 
-  it.skipIf(!supportsFileSymlinks)("rejects skills that escape the repository skill directory", async () => {
+  it("rejects skills that escape the repository skill directory", async () => {
     const directory = join(root, ".agents/skills/test-skill")
     await mkdir(directory, { recursive: true })
     await writeFile(join(root, "outside.md"), "Outside instructions")

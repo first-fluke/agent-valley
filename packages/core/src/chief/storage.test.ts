@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process"
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
+import { supportsPosixModes, makeSymlink as symlink } from "../__tests__/test-platform"
 import { fingerprintWorkspace } from "./fingerprint"
 import { MissionStore } from "./store"
 import type { Mission } from "./types"
@@ -201,32 +201,42 @@ describe("workspace fingerprint", () => {
     expect(await fingerprintWorkspace(root)).not.toBe(original)
   })
 
-  it.skipIf(!supportsFileSymlinks)("hashes a symlink target without reading outside the worktree", async () => {
+  it("hashes a symlink target without reading outside the worktree", async () => {
     const target = join(root, "link")
-    await symlink("/missing/private-target", target)
-    const original = await fingerprintWorkspace(root)
-    await unlink(target)
-    await symlink("/different/private-target", target)
-    expect(await fingerprintWorkspace(root)).not.toBe(original)
+    const missing = await mkdtemp(join(tmpdir(), "chief-missing-"))
+    const different = await mkdtemp(join(tmpdir(), "chief-different-"))
+    await writeFile(join(missing, "marker.txt"), "missing")
+    await writeFile(join(different, "marker.txt"), "different")
+    try {
+      await symlink(missing, target)
+      if (!supportsPosixModes) {
+        await expect(fingerprintWorkspace(root)).rejects.toThrow(/escapes/)
+        return
+      }
+      const original = await fingerprintWorkspace(root)
+      await unlink(target)
+      await symlink(different, target)
+      expect(await fingerprintWorkspace(root)).not.toBe(original)
+    } finally {
+      await rm(missing, { recursive: true, force: true })
+      await rm(different, { recursive: true, force: true })
+    }
   })
 
-  it.skipIf(!supportsFileSymlinks)(
-    "rejects tracked paths whose parent directory escapes through a symlink",
-    async () => {
-      const outside = await mkdtemp(join(tmpdir(), "chief-outside-"))
-      try {
-        await mkdir(join(root, "src"))
-        await writeFile(join(root, "src", "product.txt"), "original")
-        await exec("git", ["add", "src/product.txt"], { cwd: root })
-        await rm(join(root, "src"), { recursive: true })
-        await writeFile(join(outside, "product.txt"), "outside content")
-        await symlink(outside, join(root, "src"))
-        await expect(fingerprintWorkspace(root)).rejects.toThrow(/symlink|outside|escape/i)
-      } finally {
-        await rm(outside, { recursive: true, force: true })
-      }
-    },
-  )
+  it("rejects tracked paths whose parent directory escapes through a symlink", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "chief-outside-"))
+    try {
+      await mkdir(join(root, "src"))
+      await writeFile(join(root, "src", "product.txt"), "original")
+      await exec("git", ["add", "src/product.txt"], { cwd: root })
+      await rm(join(root, "src"), { recursive: true })
+      await writeFile(join(outside, "product.txt"), "outside content")
+      await symlink(outside, join(root, "src"))
+      await expect(fingerprintWorkspace(root)).rejects.toThrow(/symlink|outside|escape/i)
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
 
   it("fails closed for submodules whose nested product changes are not tracked", async () => {
     await mkdir(join(root, "nested"))

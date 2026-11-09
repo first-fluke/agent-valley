@@ -1,8 +1,8 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { supportsFileSymlinks, supportsLiteralGlobNames, supportsPosixModes } from "../__tests__/test-platform"
+import { supportsLiteralGlobNames, supportsPosixModes, makeSymlink as symlink } from "../__tests__/test-platform"
 import {
   createContinuousMissionWorkspace,
   prepareContinuousBaseline,
@@ -116,7 +116,7 @@ describe("accepted continuous operation baselines", () => {
     await expect(validateContinuousBaseline(root, "operation", snapshot.path)).rejects.toThrow("does not belong")
   })
 
-  it.skipIf(!supportsFileSymlinks)("rejects symlinked storage and redirected Git metadata", async () => {
+  it("rejects symlinked storage and redirected Git metadata", async () => {
     await mkdir(join(root, ".agent-valley"))
     await mkdir(join(directory, "outside"))
     await symlink(join(directory, "outside"), join(root, ".agent-valley", "operations"))

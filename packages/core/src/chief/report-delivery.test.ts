@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
+import { supportsPosixModes, makeSymlink as symlink } from "../__tests__/test-platform"
 import {
   dispatchMissionReport,
   listReportDeliveries,
@@ -364,16 +364,14 @@ describe("durable real attachments", () => {
       registry: { webhook: { send } },
     })
     expect(result[0]?.status).toBe("pending")
-    if (supportsFileSymlinks) {
-      const link = join(directory, "captures", "link.png")
-      await symlink(file.path, link)
-      const linked = await dispatchMissionReport(mission(), "report 2", "/report.md", policy, directory, {
-        env,
-        attachments: [{ ...file, path: link }],
-        registry: { webhook: { send } },
-      })
-      expect(linked[0]?.status).toBe("pending")
-      expect(send).not.toHaveBeenCalled()
-    }
+    const link = join(directory, "captures", "link.png")
+    await symlink(file.path, link)
+    const linked = await dispatchMissionReport(mission(), "report 2", "/report.md", policy, directory, {
+      env,
+      attachments: [{ ...file, path: link }],
+      registry: { webhook: { send } },
+    })
+    expect(linked[0]?.status).toBe("pending")
+    expect(send).not.toHaveBeenCalled()
   })
 })

@@ -1,8 +1,8 @@
-import { lstat, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
+import { supportsPosixModes, makeSymlink as symlink } from "../__tests__/test-platform"
 import type { Operation } from "./continuous-contract"
 import { ContinuousOperationStore } from "./continuous-store"
 
@@ -73,21 +73,16 @@ describe("durable continuous operation storage", () => {
     await expect(store.load("../outside")).rejects.toThrow()
   })
 
-  it.skipIf(!supportsFileSymlinks)(
-    "rejects redirected storage and symbolic record files without exposing their contents",
-    async () => {
-      const store = new ContinuousOperationStore(join(directory, "operations"))
-      await store.save(record())
-      const source = join(directory, "operations", "operation.json")
-      const copy = join(directory, "outside.json")
-      await writeFile(copy, await readFile(source))
-      await rm(source)
-      await symlink(copy, source)
-      await expect(store.load("operation")).rejects.toThrow("regular file")
-      await symlink(join(directory, "operations"), join(directory, "redirected"))
-      await expect(new ContinuousOperationStore(join(directory, "redirected")).save(record())).rejects.toThrow(
-        "symlink",
-      )
-    },
-  )
+  it("rejects redirected storage and symbolic record files without exposing their contents", async () => {
+    const store = new ContinuousOperationStore(join(directory, "operations"))
+    await store.save(record())
+    const source = join(directory, "operations", "operation.json")
+    const copy = join(directory, "outside.json")
+    await writeFile(copy, await readFile(source))
+    await rm(source)
+    await symlink(copy, source)
+    await expect(store.load("operation")).rejects.toThrow("regular file")
+    await symlink(join(directory, "operations"), join(directory, "redirected"))
+    await expect(new ContinuousOperationStore(join(directory, "redirected")).save(record())).rejects.toThrow("symlink")
+  })
 })

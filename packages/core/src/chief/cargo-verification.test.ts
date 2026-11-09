@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { supportsFileSymlinks } from "../__tests__/test-platform"
+import { makeSymlink as symlink } from "../__tests__/test-platform"
 import { fixture } from "./goal-supervision.fixture"
 import { planPrompt } from "./prompts"
 import { executeGoalVerification, safeVerificationCommand, validateGoalVerificationContract } from "./verification"
@@ -100,7 +100,7 @@ describe("generated native Cargo verification", () => {
     const root = await workspace()
     await mkdir(join(root, "target/debug"), { recursive: true })
     await mkdir(join(root, ".claude"))
-    if (supportsFileSymlinks) await symlink(join(root, "crates"), join(root, ".claude/skills"))
+    await symlink(join(root, "crates"), join(root, ".claude/skills"))
     const result = await executeGoalVerification(contract, root, {
       successCriteria: [criterion],
       executeCommand: async () => {
@@ -116,13 +116,11 @@ describe("generated native Cargo verification", () => {
     ).toContain("Cargo.toml")
     expect(executeCommand).not.toHaveBeenCalled()
     await writeFile(join(root, "Cargo.toml"), "[workspace]")
-    if (supportsFileSymlinks) {
-      await symlink(join(root, "Cargo.lock"), join(root, "linked.rs"))
-      expect(
-        (await executeGoalVerification(contract, root, { successCriteria: [criterion], executeCommand })).output,
-      ).toContain("symlink")
-      expect(executeCommand).not.toHaveBeenCalled()
-    }
+    await symlink(join(root, "Cargo.lock"), join(root, "linked.rs"))
+    expect(
+      (await executeGoalVerification(contract, root, { successCriteria: [criterion], executeCommand })).output,
+    ).toContain("symlink")
+    expect(executeCommand).not.toHaveBeenCalled()
   })
 
   it("gives the planner exact Rust check shapes without requiring harness-source discovery", () => {

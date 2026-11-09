@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { supportsFileSymlinks } from "../__tests__/test-platform"
+import { makeSymlink as symlink } from "../__tests__/test-platform"
 import {
   executeGoalVerification,
   goalVerificationContractDigest,
@@ -188,13 +188,10 @@ describe("Chief Director executable verification contracts", () => {
     const root = await directory()
     const outside = await directory()
     await writeFile(join(outside, "result.txt"), "actual result")
-    if (supportsFileSymlinks) {
-      await symlink(join(outside, "result.txt"), join(root, "file-link.txt"))
-      await symlink(outside, join(root, "dir-link"))
-    }
+    await symlink(join(outside, "result.txt"), join(root, "file-link.txt"))
+    await symlink(outside, join(root, "dir-link"))
     await mkdir(join(root, "directory"))
-    const names = ["missing.txt", "directory"]
-    if (supportsFileSymlinks) names.push("file-link.txt", "dir-link/result.txt")
+    const names = ["missing.txt", "file-link.txt", "dir-link/result.txt", "directory"]
     for (const name of names) {
       const result = await executeGoalVerification(fileContract(name), root, { successCriteria })
       expect(result.ok).toBe(false)
@@ -207,7 +204,7 @@ describe("Chief Director executable verification contracts", () => {
     await expect(readVerificationFile(await verificationRoot(root), "small.txt", { remaining: 1 })).rejects.toThrow(
       "budget",
     )
-    if (supportsFileSymlinks) await expect(verificationRoot(join(root, "dir-link"))).rejects.toThrow("real directory")
+    await expect(verificationRoot(join(root, "dir-link"))).rejects.toThrow("real directory")
   })
 
   it("runs contract commands under the operator per-check timeout rather than the planning estimate", async () => {
@@ -296,52 +293,47 @@ describe("Chief Director executable verification contracts", () => {
     })
     expect(result.ok).toBe(false)
     expect(result.output).toContain("inputs changed")
-    if (supportsFileSymlinks) {
-      await mkdir(join(root, "node_modules"))
-      await mkdir(join(outside, "vitest"))
-      await writeFile(join(outside, "vitest/vitest.mjs"), "export {}")
-      await symlink(join(outside, "vitest"), join(root, "node_modules/vitest"))
-      first(first(input.criteria).checks).args = ["node_modules/vitest/vitest.mjs", "run", "login.test.js"]
-      expect(
-        (await executeGoalVerification(input, root, { successCriteria: ["Login works"], executeCommand: vi.fn() }))
-          .output,
-      ).toContain("launcher escapes")
-    }
+    await mkdir(join(root, "node_modules"))
+    await mkdir(join(outside, "vitest"))
+    await writeFile(join(outside, "vitest/vitest.mjs"), "export {}")
+    await symlink(join(outside, "vitest"), join(root, "node_modules/vitest"))
+    first(first(input.criteria).checks).args = ["node_modules/vitest/vitest.mjs", "run", "login.test.js"]
+    expect(
+      (await executeGoalVerification(input, root, { successCriteria: ["Login works"], executeCommand: vi.fn() }))
+        .output,
+    ).toContain("launcher escapes")
   })
 
-  it.skipIf(!supportsFileSymlinks)(
-    "accepts a package-manager Vitest link contained in node_modules and hashes its launcher",
-    async () => {
-      const root = await directory()
-      await mkdir(join(root, "node_modules/.cache/vitest"), { recursive: true })
-      await writeFile(join(root, "node_modules/.cache/vitest/vitest.mjs"), "export {}")
-      await symlink(".cache/vitest", join(root, "node_modules/vitest"))
-      await writeFile(join(root, "proof.test.ts"), "test fixture")
-      const result = await executeGoalVerification(
-        {
-          version: 1,
-          criteria: [
-            {
-              criterion: "Test passes",
-              checks: [
-                { kind: "command", program: "node", args: ["node_modules/vitest/vitest.mjs", "run", "proof.test.ts"] },
-              ],
-            },
-          ],
-        },
-        root,
-        {
-          successCriteria: ["Test passes"],
-          executeCommand: async () => ({ exitCode: 0, stdout: "passed", stderr: "" }),
-        },
-      )
-      expect(result.ok).toBe(true)
-      expect(result.evidence[0]?.checks[0]?.inputs?.map((input) => input.path)).toEqual([
-        "node_modules/.cache/vitest/vitest.mjs",
-        "proof.test.ts",
-      ])
-    },
-  )
+  it("accepts a package-manager Vitest link contained in node_modules and hashes its launcher", async () => {
+    const root = await directory()
+    await mkdir(join(root, "node_modules/.cache/vitest"), { recursive: true })
+    await writeFile(join(root, "node_modules/.cache/vitest/vitest.mjs"), "export {}")
+    await symlink(".cache/vitest", join(root, "node_modules/vitest"))
+    await writeFile(join(root, "proof.test.ts"), "test fixture")
+    const result = await executeGoalVerification(
+      {
+        version: 1,
+        criteria: [
+          {
+            criterion: "Test passes",
+            checks: [
+              { kind: "command", program: "node", args: ["node_modules/vitest/vitest.mjs", "run", "proof.test.ts"] },
+            ],
+          },
+        ],
+      },
+      root,
+      {
+        successCriteria: ["Test passes"],
+        executeCommand: async () => ({ exitCode: 0, stdout: "passed", stderr: "" }),
+      },
+    )
+    expect(result.ok).toBe(true)
+    expect(result.evidence[0]?.checks[0]?.inputs?.map((input) => input.path)).toEqual([
+      "node_modules/.cache/vitest/vitest.mjs",
+      "proof.test.ts",
+    ])
+  })
 
   it("rejects malformed and oversized injected process output instead of fabricating a passing check", async () => {
     const root = await directory()
