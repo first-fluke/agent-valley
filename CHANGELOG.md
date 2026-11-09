@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.8](https://github.com/first-fluke/agent-valley/compare/v4.9.7...v4.9.8) (2026-11-09)
+
+
+### Bug Fixes
+
+* **chief:** allow up to 48 tasks in long supervised missions ([de44345](https://github.com/first-fluke/agent-valley/commit/de4434560fb1630617c5f36ca9a066b40c4ac1eb))
+
 ## [4.9.7](https://github.com/first-fluke/agent-valley/compare/v4.9.6...v4.9.7) (2026-11-09)
 
 

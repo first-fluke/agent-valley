@@ -1,6 +1,6 @@
 {
   "name": "agent-valley",
-  "version": "4.9.7",
+  "version": "4.9.8",
   "type": "module",
   "engines": {
     "node": ">=26.10.0",
