@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.3](https://github.com/first-fluke/agent-valley/compare/v4.9.2...v4.9.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* **chief:** allow up to 24 tasks in plans and replans ([4959a63](https://github.com/first-fluke/agent-valley/commit/4959a6322798d452b0319f34311867114da505de))
+
 ## [4.9.2](https://github.com/first-fluke/agent-valley/compare/v4.9.1...v4.9.2) (2026-11-09)
 
 
