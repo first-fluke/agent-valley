@@ -43,7 +43,7 @@ describe("Actor route cooldown", () => {
     const minutes = [15, 30, 60, 120, 240, 360, 360]
     for (const [index, duration] of minutes.entries()) {
       const offset = index * 1_000
-      mission.operations.runs.push(run(`failed-${index}`, offset, { evidence: "Agent timed out after 1800s" }))
+      mission.operations.runs.push(run(`failed-${index}`, offset, { evidence: "Agent exited with code 1: ECONNRESET" }))
       const health = actorRouteHealth(mission, route, start + offset + 1_000)
       expect(health).toMatchObject({
         state: "cooling",
@@ -54,6 +54,35 @@ describe("Actor route cooldown", () => {
     expect(mission.execution).toEqual(originalExecution)
     expect(mission.operations.runs).toHaveLength(7)
     expect(ACTOR_COOLDOWN_MAX_MS).toBe(6 * 60 * 60_000)
+  })
+
+  it("does not cool a route when a framework attempt deadline settles as a native failure", () => {
+    const mission = setup([run("timeout", 0, { evidence: "Agent timed out after 1800s" })])
+    expect(actorRouteHealth(mission, route, start + 2_000)).toMatchObject({
+      state: "ready",
+      consecutiveFailures: 0,
+    })
+  })
+
+  it("still cools a route after a genuine provider transport failure", () => {
+    const mission = setup([run("crash", 0, { evidence: "Agent exited with code 1: ECONNRESET" })])
+    expect(actorRouteHealth(mission, route, start + 2_000)).toMatchObject({
+      state: "cooling",
+      consecutiveFailures: 1,
+      retryAt: at(1_000 + 15 * 60_000),
+    })
+  })
+
+  it("does not reset or extend a prior failure streak when a later attempt hits the framework deadline", () => {
+    const mission = setup([
+      run("crash", 0, { evidence: "Agent exited with code 1: ECONNRESET" }),
+      run("timeout", 2_000, { evidence: "Agent timed out after 1800s" }),
+    ])
+    expect(actorRouteHealth(mission, route, start + 4_000)).toMatchObject({
+      state: "cooling",
+      consecutiveFailures: 1,
+      retryAt: at(1_000 + 15 * 60_000),
+    })
   })
 
   it("retains cooldown through new tasks, replans, retries and changed reported native defaults", () => {

@@ -55,7 +55,7 @@ function failure(actorType: string, age = 1_000, model?: string): OperatingRun {
     nativeOutcome: "failed",
     executionState: "settled",
     executionRecovery: "local-process",
-    evidence: "Agent timed out after 1800s",
+    evidence: "Agent exited with code 1: ECONNRESET",
   }
 }
 beforeEach(async () => {
@@ -415,7 +415,7 @@ describe("native cooldown admission and routing", () => {
           await probe
           if (outcome !== "passed")
             throw new AgentRunError(
-              outcome === "provider" ? "Agent timed out after 1800s" : "Unknown provider outcome",
+              outcome === "provider" ? "Agent exited with code 1: ECONNRESET" : "Unknown provider outcome",
               completed(input, 2),
               { outcomeUnknown: outcome === "unknown" },
             )
