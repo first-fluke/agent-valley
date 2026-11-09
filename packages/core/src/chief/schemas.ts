@@ -78,7 +78,7 @@ const skillDescriptorSchema = z.strictObject({
 })
 
 export const planSchema = z.strictObject({
-  tasks: z.array(actorTaskSchema).min(1).max(12),
+  tasks: z.array(actorTaskSchema).min(1).max(24),
 })
 
 export const missionSchema = z
@@ -131,7 +131,7 @@ export const missionSchema = z
     updatedAt: text,
     oma: z.boolean().optional(),
     plan: planSchema.optional(),
-    tasks: z.array(taskStateSchema).max(12),
+    tasks: z.array(taskStateSchema).max(24),
     gateReviews: z.array(gateReviewSchema).max(96).optional(),
     gateReviewRefreshes: z.number().int().min(0).max(11).optional(),
     finalReview: reviewSchema.optional(),

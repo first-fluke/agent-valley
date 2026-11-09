@@ -75,7 +75,7 @@ export const supervisionSchema = z.strictObject({
           taskId: id.optional(),
           personaId: id.optional(),
           instructions: text.optional(),
-          previousTasks: z.array(taskStateSchema).max(12).optional(),
+          previousTasks: z.array(taskStateSchema).max(24).optional(),
           evidence: z
             .strictObject({ finalReview: reviewSchema.optional(), verification: verificationSchema.optional() })
             .optional(),
