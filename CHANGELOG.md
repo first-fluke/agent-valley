@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.6](https://github.com/first-fluke/agent-valley/compare/v4.9.5...v4.9.6) (2026-11-09)
+
+
+### Bug Fixes
+
+* **chief:** allow up to 40 acceptance criteria per task ([131b299](https://github.com/first-fluke/agent-valley/commit/131b299304a231a8b523a2b4dd663de555cf6dbc))
+
 ## [4.9.5](https://github.com/first-fluke/agent-valley/compare/v4.9.4...v4.9.5) (2026-11-09)
 
 
