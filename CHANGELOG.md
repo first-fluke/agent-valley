@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.7](https://github.com/first-fluke/agent-valley/compare/v4.9.6...v4.9.7) (2026-11-09)
+
+
+### Bug Fixes
+
+* **cli:** honor --duration before pinning an expired mission deadline ([a91291c](https://github.com/first-fluke/agent-valley/commit/a91291c9ff722113674795461f9375be349ea3b7))
+
 ## [4.9.6](https://github.com/first-fluke/agent-valley/compare/v4.9.5...v4.9.6) (2026-11-09)
 
 
