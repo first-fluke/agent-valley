@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
 import { fingerprintWorkspace } from "./fingerprint"
 import { MissionStore } from "./store"
 import type { Mission } from "./types"
@@ -55,7 +56,7 @@ describe("MissionStore", () => {
     expect(await store.load(value.id)).toEqual(value)
     const path = join(root, "missions", "order-1.json")
     expect(JSON.parse(await readFile(path, "utf8")).version).toBe(1)
-    expect((await stat(path)).mode & 0o777).toBe(0o600)
+    if (supportsPosixModes) expect((await stat(path)).mode & 0o777).toBe(0o600)
     value.status = "failed"
     value.error = "A check failed. Correct the report."
     await store.save(value)
@@ -155,9 +156,11 @@ describe("workspace fingerprint", () => {
     expect(await fingerprintWorkspace(root)).not.toBe(original)
     await writeFile(join(root, "product.txt"), "original")
     expect(await fingerprintWorkspace(root)).toBe(original)
-    await chmod(join(root, "product.txt"), 0o755)
-    expect(await fingerprintWorkspace(root)).not.toBe(original)
-    await chmod(join(root, "product.txt"), 0o644)
+    if (supportsPosixModes) {
+      await chmod(join(root, "product.txt"), 0o755)
+      expect(await fingerprintWorkspace(root)).not.toBe(original)
+      await chmod(join(root, "product.txt"), 0o644)
+    }
     await unlink(join(root, "product.txt"))
     expect(await fingerprintWorkspace(root)).not.toBe(original)
     await writeFile(join(root, "product.txt"), "original")
@@ -198,7 +201,7 @@ describe("workspace fingerprint", () => {
     expect(await fingerprintWorkspace(root)).not.toBe(original)
   })
 
-  it("hashes a symlink target without reading outside the worktree", async () => {
+  it.skipIf(!supportsFileSymlinks)("hashes a symlink target without reading outside the worktree", async () => {
     const target = join(root, "link")
     await symlink("/missing/private-target", target)
     const original = await fingerprintWorkspace(root)
@@ -207,20 +210,23 @@ describe("workspace fingerprint", () => {
     expect(await fingerprintWorkspace(root)).not.toBe(original)
   })
 
-  it("rejects tracked paths whose parent directory escapes through a symlink", async () => {
-    const outside = await mkdtemp(join(tmpdir(), "chief-outside-"))
-    try {
-      await mkdir(join(root, "src"))
-      await writeFile(join(root, "src", "product.txt"), "original")
-      await exec("git", ["add", "src/product.txt"], { cwd: root })
-      await rm(join(root, "src"), { recursive: true })
-      await writeFile(join(outside, "product.txt"), "outside content")
-      await symlink(outside, join(root, "src"))
-      await expect(fingerprintWorkspace(root)).rejects.toThrow(/symlink|outside|escape/i)
-    } finally {
-      await rm(outside, { recursive: true, force: true })
-    }
-  })
+  it.skipIf(!supportsFileSymlinks)(
+    "rejects tracked paths whose parent directory escapes through a symlink",
+    async () => {
+      const outside = await mkdtemp(join(tmpdir(), "chief-outside-"))
+      try {
+        await mkdir(join(root, "src"))
+        await writeFile(join(root, "src", "product.txt"), "original")
+        await exec("git", ["add", "src/product.txt"], { cwd: root })
+        await rm(join(root, "src"), { recursive: true })
+        await writeFile(join(outside, "product.txt"), "outside content")
+        await symlink(outside, join(root, "src"))
+        await expect(fingerprintWorkspace(root)).rejects.toThrow(/symlink|outside|escape/i)
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    },
+  )
 
   it("fails closed for submodules whose nested product changes are not tracked", async () => {
     await mkdir(join(root, "nested"))

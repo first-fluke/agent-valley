@@ -2,6 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFil
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
 import { appendRuntimeGitignoreRule } from "../workspace/runtime-ignore"
 import type { ContinuousBaseline } from "./continuous-contract"
 import { operation as operationFixture } from "./continuous-operation.fixture"
@@ -111,7 +112,7 @@ describe("continuous verified source worktree integration", () => {
 
     expect(result.paths).toEqual(["new.txt"])
     expect(await readFile(join(root, "binary.bin"))).toEqual(Buffer.from([0, 255, 9, 0]))
-    expect((await lstat(join(root, "script.sh"))).mode & 0o111).toBe(0o111)
+    if (supportsPosixModes) expect((await lstat(join(root, "script.sh"))).mode & 0o111).toBe(0o111)
     await expect(lstat(join(root, "delete.txt"))).rejects.toMatchObject({ code: "ENOENT" })
     expect(await readFile(join(root, "new.txt"), "utf8")).toBe("Second cycle\n")
   })
@@ -294,15 +295,18 @@ describe("continuous verified source worktree integration", () => {
     expect(await integrateContinuousSource(operation, previous, next)).toEqual(result)
   })
 
-  it("does not skip a mode-only change unless both the blob and executable mode already match", async () => {
-    const { operation, previous } = await fixture()
-    const next = await accepted(previous, (path) => chmod(join(path, "script.sh"), 0o755))
+  it.skipIf(!supportsPosixModes)(
+    "does not skip a mode-only change unless both the blob and executable mode already match",
+    async () => {
+      const { operation, previous } = await fixture()
+      const next = await accepted(previous, (path) => chmod(join(path, "script.sh"), 0o755))
 
-    await integrateContinuousSource(operation, previous, next)
+      await integrateContinuousSource(operation, previous, next)
 
-    expect(JSON.parse(await readFile(recordPath(), "utf8")).alreadySatisfied).toEqual([])
-    expect((await lstat(join(root, "script.sh"))).mode & 0o111).toBe(0o111)
-  })
+      expect(JSON.parse(await readFile(recordPath(), "utf8")).alreadySatisfied).toEqual([])
+      expect((await lstat(join(root, "script.sh"))).mode & 0o111).toBe(0o111)
+    },
+  )
 
   it.each(["existing/\n", "existing/", "existing/\r\n"])(
     "projects only AV's canonical runtime append while applying the verified target rule: %j",
@@ -378,7 +382,7 @@ describe("continuous verified source worktree integration", () => {
     expect(await readFile(join(next.path, ".gitignore"), "utf8")).toBe("existing/\n/target/\n")
   })
 
-  it("rejects symlinked product paths and private receipt storage", async () => {
+  it.skipIf(!supportsFileSymlinks)("rejects symlinked product paths and private receipt storage", async () => {
     const { operation, previous } = await fixture()
     const linked = await accepted(previous, (path) => symlink("product.txt", join(path, "linked.txt")))
     await expect(integrateContinuousSource(operation, previous, linked)).rejects.toThrow("symbolic link")
@@ -397,7 +401,7 @@ describe("continuous verified source worktree integration", () => {
     expect(await readFile(join(root, "product.txt"), "utf8")).toBe("Initial product\n")
   })
 
-  it("rejects a symlinked source target and a tampered immutable patch", async () => {
+  it.skipIf(!supportsFileSymlinks)("rejects a symlinked source target and a tampered immutable patch", async () => {
     const { operation, previous } = await fixture()
     const next = await accepted(previous, (path) => writeFile(join(path, "product.txt"), "Verified product\n"))
     const outside = join(directory, "outside.txt")

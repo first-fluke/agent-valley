@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, truncate, write
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 
 let workspace: string
@@ -55,7 +56,7 @@ describe("mission OMA skill discovery", () => {
     expect(await discoverMissionSkills(workspace)).toEqual([])
   })
 
-  it("does not borrow a harness from outside the current target worktree", async () => {
+  it.skipIf(!supportsFileSymlinks)("does not borrow a harness from outside the current target worktree", async () => {
     await mkdir(join(workspace, ".agents"))
     await mkdir(join(outside, "oma-outside"))
     await writeFile(
@@ -67,22 +68,28 @@ describe("mission OMA skill discovery", () => {
     await expect(loadMissionSkillBodies(workspace, ["oma-outside"])).rejects.toThrow("escapes the mission worktree")
   })
 
-  it("rejects external directory and leaf symlinks while retaining valid installed entries", async () => {
-    await install("oma-safe")
-    await mkdir(join(outside, "oma-external-dir"))
-    await writeFile(
-      join(outside, "oma-external-dir/SKILL.md"),
-      "---\nname: oma-external-dir\ndescription: Outside.\n---\nOutside body.",
-    )
-    await symlink(join(outside, "oma-external-dir"), join(workspace, ".agents/skills/oma-external-dir"))
-    await mkdir(join(workspace, ".agents/skills/oma-external-leaf"))
-    await writeFile(join(outside, "leaf.md"), "---\nname: oma-external-leaf\ndescription: Outside.\n---\nOutside body.")
-    await symlink(join(outside, "leaf.md"), join(workspace, ".agents/skills/oma-external-leaf/SKILL.md"))
-    expect((await discoverMissionSkills(workspace)).map((skill) => skill.name)).toEqual(["oma-safe"])
-    await expect(loadMissionSkillBodies(workspace, ["oma-external-leaf"])).rejects.toThrow(
-      "escapes the skill directory",
-    )
-  })
+  it.skipIf(!supportsFileSymlinks)(
+    "rejects external directory and leaf symlinks while retaining valid installed entries",
+    async () => {
+      await install("oma-safe")
+      await mkdir(join(outside, "oma-external-dir"))
+      await writeFile(
+        join(outside, "oma-external-dir/SKILL.md"),
+        "---\nname: oma-external-dir\ndescription: Outside.\n---\nOutside body.",
+      )
+      await symlink(join(outside, "oma-external-dir"), join(workspace, ".agents/skills/oma-external-dir"))
+      await mkdir(join(workspace, ".agents/skills/oma-external-leaf"))
+      await writeFile(
+        join(outside, "leaf.md"),
+        "---\nname: oma-external-leaf\ndescription: Outside.\n---\nOutside body.",
+      )
+      await symlink(join(outside, "leaf.md"), join(workspace, ".agents/skills/oma-external-leaf/SKILL.md"))
+      expect((await discoverMissionSkills(workspace)).map((skill) => skill.name)).toEqual(["oma-safe"])
+      await expect(loadMissionSkillBodies(workspace, ["oma-external-leaf"])).rejects.toThrow(
+        "escapes the skill directory",
+      )
+    },
+  )
 
   it("normalizes bounded YAML descriptions and supports CRLF frontmatter", async () => {
     await install(
@@ -120,7 +127,8 @@ describe("mission OMA skill discovery", () => {
     try {
       const catalog = await discoverMissionSkills(workspace)
       expect(catalog.some((skill) => skill.name === "oma-directory")).toBe(false)
-      if (process.getuid?.() !== 0) expect(catalog.some((skill) => skill.name === "oma-unreadable")).toBe(false)
+      if (process.getuid?.() !== 0 && supportsPosixModes)
+        expect(catalog.some((skill) => skill.name === "oma-unreadable")).toBe(false)
     } finally {
       await chmod(unreadable, 0o600)
     }
@@ -187,16 +195,19 @@ describe("mission skill bodies and persisted catalog boundaries", () => {
     await expect(validateMissionSkills(workspace, catalog)).rejects.toThrow("Install its OMA harness")
   })
 
-  it("rechecks a symlink that was swapped after discovery before reading any selected body", async () => {
-    const path = await install("oma-selected")
-    const catalog = await discoverMissionSkills(workspace)
-    await rm(path)
-    await writeFile(join(outside, "replacement.md"), "External replacement body.")
-    await symlink(join(outside, "replacement.md"), path)
-    await expect(loadMissionSkillBodies(workspace, ["oma-selected"], catalog)).rejects.toThrow(
-      "no longer matches this worktree",
-    )
-  })
+  it.skipIf(!supportsFileSymlinks)(
+    "rechecks a symlink that was swapped after discovery before reading any selected body",
+    async () => {
+      const path = await install("oma-selected")
+      const catalog = await discoverMissionSkills(workspace)
+      await rm(path)
+      await writeFile(join(outside, "replacement.md"), "External replacement body.")
+      await symlink(join(outside, "replacement.md"), path)
+      await expect(loadMissionSkillBodies(workspace, ["oma-selected"], catalog)).rejects.toThrow(
+        "no longer matches this worktree",
+      )
+    },
+  )
 
   it("bounds the combined selected body size by bytes and deduplicates repeated selection", async () => {
     await install("first", "한".repeat(50_000))
@@ -238,28 +249,31 @@ describe("installed harness preparation", () => {
     expect(await discoverMissionSkills(outside)).toEqual([])
   })
 
-  it("omits agent secrets and escaping source links and rejects an escaping target agent directory", async () => {
-    const agents = join(workspace, ".agents/agents")
-    await mkdir(agents, { recursive: true })
-    await writeFile(join(agents, "backend.md"), "Backend definition.\n")
-    await writeFile(join(agents, ".env.local"), "Synthetic private configuration.")
-    await mkdir(join(agents, "results"))
-    await writeFile(join(agents, "results/generated.md"), "Generated output.")
-    await writeFile(join(workspace, "external.md"), "Outside agent tree.")
-    await mkdir(join(workspace, "external-agents"))
-    await writeFile(join(workspace, "external-agents/qa.md"), "Outside agent tree.")
-    await symlink(join(workspace, "external.md"), join(agents, "external.md"))
-    await symlink(join(workspace, "external-agents"), join(agents, "external-agents"))
-    await prepareMissionSkills(workspace, outside)
-    expect(await readFile(join(outside, ".agents/agents/backend.md"), "utf8")).toBe("Backend definition.\n")
-    for (const name of [".env.local", "results/generated.md", "external.md", "external-agents/qa.md"])
-      await expect(readFile(join(outside, ".agents/agents", name))).rejects.toThrow()
+  it.skipIf(!supportsFileSymlinks)(
+    "omits agent secrets and escaping source links and rejects an escaping target agent directory",
+    async () => {
+      const agents = join(workspace, ".agents/agents")
+      await mkdir(agents, { recursive: true })
+      await writeFile(join(agents, "backend.md"), "Backend definition.\n")
+      await writeFile(join(agents, ".env.local"), "Synthetic private configuration.")
+      await mkdir(join(agents, "results"))
+      await writeFile(join(agents, "results/generated.md"), "Generated output.")
+      await writeFile(join(workspace, "external.md"), "Outside agent tree.")
+      await mkdir(join(workspace, "external-agents"))
+      await writeFile(join(workspace, "external-agents/qa.md"), "Outside agent tree.")
+      await symlink(join(workspace, "external.md"), join(agents, "external.md"))
+      await symlink(join(workspace, "external-agents"), join(agents, "external-agents"))
+      await prepareMissionSkills(workspace, outside)
+      expect(await readFile(join(outside, ".agents/agents/backend.md"), "utf8")).toBe("Backend definition.\n")
+      for (const name of [".env.local", "results/generated.md", "external.md", "external-agents/qa.md"])
+        await expect(readFile(join(outside, ".agents/agents", name))).rejects.toThrow()
 
-    await rm(join(outside, ".agents/agents"), { recursive: true })
-    await symlink(agents, join(outside, ".agents/agents"))
-    await expect(prepareMissionSkills(workspace, outside)).rejects.toThrow("agent directory escapes")
-    expect(await readFile(join(agents, "backend.md"), "utf8")).toBe("Backend definition.\n")
-  })
+      await rm(join(outside, ".agents/agents"), { recursive: true })
+      await symlink(agents, join(outside, ".agents/agents"))
+      await expect(prepareMissionSkills(workspace, outside)).rejects.toThrow("agent directory escapes")
+      expect(await readFile(join(agents, "backend.md"), "utf8")).toBe("Backend definition.\n")
+    },
+  )
 
   it("shares the resource byte limit between skills and agent definitions", async () => {
     const skill = await install("oma-safe")
@@ -297,51 +311,57 @@ describe("installed harness preparation", () => {
     expect(await readFile(existing, "utf8")).toBe("Committed target guide.\n")
   })
 
-  it("omits local secrets, generated outputs, external symlinks, and nonregular resources", async () => {
-    await install("oma-safe")
-    for (const name of [
-      ".env",
-      ".env.local",
-      "credentials.json",
-      "auth.json",
-      "settings.yaml",
-      "av.yaml",
-      "secret.key",
-      "oma-config.local.yaml",
-    ])
-      await writeFile(join(workspace, ".agents/skills", name), "Synthetic private configuration.")
-    for (const name of ["state", "results", "node_modules"]) {
-      await mkdir(join(workspace, ".agents/skills", name))
-      await writeFile(join(workspace, ".agents/skills", name, "artifact.md"), "Generated output.")
-    }
-    await writeFile(join(workspace, "external.md"), "External body.")
-    await symlink(join(workspace, "external.md"), join(workspace, ".agents/skills/external.md"))
-    await prepareMissionSkills(workspace, outside)
-    expect(await discoverMissionSkills(outside)).toHaveLength(1)
-    for (const name of [
-      ".env",
-      ".env.local",
-      "credentials.json",
-      "auth.json",
-      "settings.yaml",
-      "av.yaml",
-      "secret.key",
-      "oma-config.local.yaml",
-      "state",
-      "results",
-      "node_modules",
-      "external.md",
-    ])
-      await expect(readFile(join(outside, ".agents/skills", name))).rejects.toThrow()
-  })
+  it.skipIf(!supportsFileSymlinks)(
+    "omits local secrets, generated outputs, external symlinks, and nonregular resources",
+    async () => {
+      await install("oma-safe")
+      for (const name of [
+        ".env",
+        ".env.local",
+        "credentials.json",
+        "auth.json",
+        "settings.yaml",
+        "av.yaml",
+        "secret.key",
+        "oma-config.local.yaml",
+      ])
+        await writeFile(join(workspace, ".agents/skills", name), "Synthetic private configuration.")
+      for (const name of ["state", "results", "node_modules"]) {
+        await mkdir(join(workspace, ".agents/skills", name))
+        await writeFile(join(workspace, ".agents/skills", name, "artifact.md"), "Generated output.")
+      }
+      await writeFile(join(workspace, "external.md"), "External body.")
+      await symlink(join(workspace, "external.md"), join(workspace, ".agents/skills/external.md"))
+      await prepareMissionSkills(workspace, outside)
+      expect(await discoverMissionSkills(outside)).toHaveLength(1)
+      for (const name of [
+        ".env",
+        ".env.local",
+        "credentials.json",
+        "auth.json",
+        "settings.yaml",
+        "av.yaml",
+        "secret.key",
+        "oma-config.local.yaml",
+        "state",
+        "results",
+        "node_modules",
+        "external.md",
+      ])
+        await expect(readFile(join(outside, ".agents/skills", name))).rejects.toThrow()
+    },
+  )
 
-  it("does nothing without an installed harness and rejects a target directory escaping its worktree", async () => {
-    await prepareMissionSkills(workspace, outside)
-    await expect(readFile(join(outside, ".agents/skills"))).rejects.toThrow()
-    await install("oma-safe")
-    await symlink(join(workspace, ".agents"), join(outside, ".agents"))
-    await expect(prepareMissionSkills(workspace, outside)).rejects.toThrow("escapes the mission worktree")
-  })
+  it.skipIf(!supportsFileSymlinks)(
+    "does nothing without an installed harness and rejects a target directory escaping its worktree",
+    async () => {
+      await prepareMissionSkills(workspace, outside)
+      await expect(readFile(join(outside, ".agents/skills"))).rejects.toThrow()
+      await install("oma-safe")
+      await symlink(join(workspace, ".agents"), join(outside, ".agents"))
+      await expect(prepareMissionSkills(workspace, outside)).rejects.toThrow("escapes the mission worktree")
+    },
+  )
 
   it("bounds resource copying before reading an oversized file into memory", async () => {
     await install("oma-safe")

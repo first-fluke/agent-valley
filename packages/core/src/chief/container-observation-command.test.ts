@@ -9,7 +9,12 @@ const command: ContainerObservationCommand = { binary: "docker", args: [], timeo
 async function fixture(source: string): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "av-container-command-"))
   directories.push(directory)
-  await writeFile(join(directory, "docker"), `#!${process.execPath}\n${source}\n`, { mode: 0o755 })
+  if (process.platform === "win32") {
+    await writeFile(join(directory, "docker.js"), source)
+    await writeFile(join(directory, "docker.cmd"), `@echo off\r\n"${process.execPath}" "%~dp0docker.js" %*\r\n`)
+  } else {
+    await writeFile(join(directory, "docker"), `#!${process.execPath}\n${source}\n`, { mode: 0o755 })
+  }
   vi.stubEnv("PATH", `${directory}${delimiter}${process.env.PATH ?? ""}`)
 }
 afterEach(async () => {
@@ -17,7 +22,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
-describe("bounded native container observation subprocess", () => {
+describe.skipIf(process.platform === "win32")("bounded native container observation subprocess", () => {
   it("uses argv literally without shell expansion and closes stdin", async () => {
     await fixture(
       'process.stdin.on("end",()=>process.stdout.write(JSON.stringify(process.argv.slice(2))));process.stdin.resume()',

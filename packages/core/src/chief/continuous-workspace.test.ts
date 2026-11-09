@@ -2,6 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFil
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { supportsFileSymlinks, supportsLiteralGlobNames, supportsPosixModes } from "../__tests__/test-platform"
 import {
   createContinuousMissionWorkspace,
   prepareContinuousBaseline,
@@ -46,7 +47,8 @@ describe("accepted continuous operation baselines", () => {
     await writeFile(join(root, "product.txt"), "Staged product\n")
     await parallelGit(root, ["add", "product.txt"])
     await writeFile(join(root, "product.txt"), "Latest unstaged product\n")
-    await writeFile(join(root, "new[1]*?.txt"), "Untracked product\n")
+    const unusualName = supportsLiteralGlobNames ? "new[1]*?.txt" : "new[1].txt"
+    await writeFile(join(root, unusualName), "Untracked product\n")
     await writeFile(join(root, "ignored.txt"), "Excluded untracked\n")
     await writeFile(join(root, ".agents", "managed.txt"), "Do not snapshot managed edits\n")
     await rm(join(root, "delete.txt"))
@@ -55,9 +57,9 @@ describe("accepted continuous operation baselines", () => {
     const refs = await parallelGit(root, ["show-ref"])
     const snapshot = await prepareContinuousBaseline(root, "operation", root)
     expect(await readFile(join(snapshot.path, "product.txt"), "utf8")).toBe("Latest unstaged product\n")
-    expect(await readFile(join(snapshot.path, "new[1]*?.txt"), "utf8")).toBe("Untracked product\n")
+    expect(await readFile(join(snapshot.path, unusualName), "utf8")).toBe("Untracked product\n")
     expect(await readFile(join(snapshot.path, ".agents", "managed.txt"), "utf8")).toBe("Tracked harness\n")
-    expect((await lstat(join(snapshot.path, "script.sh"))).mode & 0o111).toBe(0o111)
+    if (supportsPosixModes) expect((await lstat(join(snapshot.path, "script.sh"))).mode & 0o111).toBe(0o111)
     await expect(lstat(join(snapshot.path, "delete.txt"))).rejects.toMatchObject({ code: "ENOENT" })
     await expect(lstat(join(snapshot.path, "ignored.txt"))).rejects.toMatchObject({ code: "ENOENT" })
     expect(await readFile(join(root, ".git", "index"))).toEqual(index)
@@ -114,7 +116,7 @@ describe("accepted continuous operation baselines", () => {
     await expect(validateContinuousBaseline(root, "operation", snapshot.path)).rejects.toThrow("does not belong")
   })
 
-  it("rejects symlinked storage and redirected Git metadata", async () => {
+  it.skipIf(!supportsFileSymlinks)("rejects symlinked storage and redirected Git metadata", async () => {
     await mkdir(join(root, ".agent-valley"))
     await mkdir(join(directory, "outside"))
     await symlink(join(directory, "outside"), join(root, ".agent-valley", "operations"))

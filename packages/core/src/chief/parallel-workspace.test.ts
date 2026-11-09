@@ -3,6 +3,12 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFil
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  supportsFileSymlinks,
+  supportsLiteralGlobNames,
+  supportsNewlineFilenames,
+  supportsPosixModes,
+} from "../__tests__/test-platform"
 import { taskStateSchema } from "./mission-state-schema"
 import { runJoinedWave } from "./parallel"
 import { taskChangeSetSchema } from "./parallel-contract"
@@ -310,32 +316,35 @@ describe("isolated parallel Actor worktrees", () => {
     expect(await readFile(join(workspace.path, "child.txt"), "utf8")).toContain("Preserved")
   })
 
-  it("snapshots literal glob-like names, explicitly staged ignored products and staged deletions without broad ignored inclusion", async () => {
-    const root = mission.workspace.path
-    await writeFile(join(root, ".gitignore"), ".agents/\n.agent-valley/\nignored-*.txt\n")
-    await git(["add", ".gitignore"])
-    await writeFile(join(root, "ignored-product.txt"), "Explicitly staged product\n")
-    await git(["add", "-f", "ignored-product.txt"])
-    await writeFile(join(root, "ignored-untracked.txt"), "Must remain excluded\n")
-    await rm(join(root, "remove.txt"))
-    await git(["add", "-u", "--", "remove.txt"])
-    const names = ["literal[1]*?.txt", ":(glob)unusual*.txt", "literal1ordinary.txt"]
-    for (const name of names) await writeFile(join(root, name), `Literal filename ${name}\n`)
-    const head = await git(["rev-parse", "HEAD"])
-    const index = await readFile(join(root, ".git", "index"))
-    vi.stubEnv("GIT_LITERAL_PATHSPECS", "1")
-    vi.stubEnv("GIT_GLOB_PATHSPECS", "1")
-    vi.stubEnv("GIT_NOGLOB_PATHSPECS", "1")
-    vi.stubEnv("GIT_ICASE_PATHSPECS", "1")
-    const workspace = await prepareTaskWorktree(mission, "literal-snapshot", 1)
-    for (const name of names)
-      expect(await readFile(join(workspace.path, name), "utf8")).toBe(`Literal filename ${name}\n`)
-    expect(await readFile(join(workspace.path, "ignored-product.txt"), "utf8")).toBe("Explicitly staged product\n")
-    await expect(lstat(join(workspace.path, "ignored-untracked.txt"))).rejects.toMatchObject({ code: "ENOENT" })
-    await expect(lstat(join(workspace.path, "remove.txt"))).rejects.toMatchObject({ code: "ENOENT" })
-    expect(await readFile(join(root, ".git", "index"))).toEqual(index)
-    expect(await git(["rev-parse", "HEAD"])).toBe(head)
-  })
+  it.skipIf(!supportsLiteralGlobNames)(
+    "snapshots literal glob-like names, explicitly staged ignored products and staged deletions without broad ignored inclusion",
+    async () => {
+      const root = mission.workspace.path
+      await writeFile(join(root, ".gitignore"), ".agents/\n.agent-valley/\nignored-*.txt\n")
+      await git(["add", ".gitignore"])
+      await writeFile(join(root, "ignored-product.txt"), "Explicitly staged product\n")
+      await git(["add", "-f", "ignored-product.txt"])
+      await writeFile(join(root, "ignored-untracked.txt"), "Must remain excluded\n")
+      await rm(join(root, "remove.txt"))
+      await git(["add", "-u", "--", "remove.txt"])
+      const names = ["literal[1]*?.txt", ":(glob)unusual*.txt", "literal1ordinary.txt"]
+      for (const name of names) await writeFile(join(root, name), `Literal filename ${name}\n`)
+      const head = await git(["rev-parse", "HEAD"])
+      const index = await readFile(join(root, ".git", "index"))
+      vi.stubEnv("GIT_LITERAL_PATHSPECS", "1")
+      vi.stubEnv("GIT_GLOB_PATHSPECS", "1")
+      vi.stubEnv("GIT_NOGLOB_PATHSPECS", "1")
+      vi.stubEnv("GIT_ICASE_PATHSPECS", "1")
+      const workspace = await prepareTaskWorktree(mission, "literal-snapshot", 1)
+      for (const name of names)
+        expect(await readFile(join(workspace.path, name), "utf8")).toBe(`Literal filename ${name}\n`)
+      expect(await readFile(join(workspace.path, "ignored-product.txt"), "utf8")).toBe("Explicitly staged product\n")
+      await expect(lstat(join(workspace.path, "ignored-untracked.txt"))).rejects.toMatchObject({ code: "ENOENT" })
+      await expect(lstat(join(workspace.path, "remove.txt"))).rejects.toMatchObject({ code: "ENOENT" })
+      expect(await readFile(join(root, ".git", "index"))).toEqual(index)
+      expect(await git(["rev-parse", "HEAD"])).toBe(head)
+    },
+  )
 
   it("drops files the mission untracked and ignored with git rm --cached from the baseline snapshot", async () => {
     const root = mission.workspace.path
@@ -400,14 +409,17 @@ describe("isolated parallel Actor worktrees", () => {
     await writeFile(join(workspace.path, "binary.bin"), Buffer.from([0, 9, 8, 255, 0]))
     await chmod(join(workspace.path, "script.sh"), 0o755)
     await rm(join(workspace.path, "remove.txt"))
-    await symlink("a.txt", join(workspace.path, "link"))
-    const name = "space and\nnewline.txt"
+    if (supportsFileSymlinks) await symlink("a.txt", join(workspace.path, "link"))
+    const name = supportsNewlineFilenames ? "space and\nnewline.txt" : "space and newline.txt"
     await writeFile(join(workspace.path, name), "New real deliverable\n")
     const receipt = await integrateTaskWorktree(mission, workspace)
-    expect(receipt.changedPaths).toEqual(["binary.bin", "link", "remove.txt", "script.sh", name].sort())
+    const expected = ["binary.bin", "remove.txt", name]
+    if (supportsPosixModes) expected.push("script.sh")
+    if (supportsFileSymlinks) expected.push("link")
+    expect(receipt.changedPaths).toEqual(expected.sort())
     expect(await readFile(join(root, "binary.bin"))).toEqual(Buffer.from([0, 9, 8, 255, 0]))
-    expect((await lstat(join(root, "script.sh"))).mode & 0o111).toBe(0o111)
-    expect(await readlink(join(root, "link"))).toBe("a.txt")
+    if (supportsPosixModes) expect((await lstat(join(root, "script.sh"))).mode & 0o111).toBe(0o111)
+    if (supportsFileSymlinks) expect(await readlink(join(root, "link"))).toBe("a.txt")
     expect(await readFile(join(root, name), "utf8")).toBe("New real deliverable\n")
     await expect(lstat(join(root, "remove.txt"))).rejects.toMatchObject({ code: "ENOENT" })
     expect(await readFile(join(root, "a.txt"), "utf8")).toBe("Operator baseline retained\n")

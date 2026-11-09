@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { constants } from "node:fs"
 import { lstat, open, readdir, realpath, rename, rm } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { dirname, join, resolve, sep } from "node:path"
 import { z } from "zod"
 import { continuousAcceptanceSchema } from "./continuous-acceptance-record"
 import { type ContinuousBaseline, continuousBaselineSchema, operationIdSchema } from "./continuous-contract"
@@ -23,8 +23,9 @@ const preparedSchema = z.strictObject({
   tree: sha,
   recoveryCommit: sha,
   baselineDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  device: z.number().int(),
-  inode: z.number().int(),
+  // NTFS file IDs exceed Number.MAX_SAFE_INTEGER; JSON round-trips the same double on both sides.
+  device: z.number(),
+  inode: z.number(),
   at: z.iso.datetime(),
 })
 const completedSchema = z.strictObject({
@@ -126,7 +127,7 @@ async function inspectClone(path: string, baseline: ContinuousBaseline): Promise
     git(path, ["worktree", "list", "--porcelain"]),
     git(path, ["remote"]),
   ])
-  if (top.trim() !== path || branch.trim() !== baseline.branch || head.trim() !== baseline.commit)
+  if (resolve(top.trim()) !== resolve(path) || branch.trim() !== baseline.branch || head.trim() !== baseline.commit)
     throw new Error("Frozen baseline repository identity changed.")
   const expectedRefs = [
     `refs/heads/${baseline.branch} ${baseline.commit}`,
@@ -140,7 +141,8 @@ async function inspectClone(path: string, baseline: ContinuousBaseline): Promise
     worktrees
       .split("\n")
       .filter((line) => line.startsWith("worktree "))
-      .join("\n") !== `worktree ${path}`
+      .map((line) => `worktree ${resolve(line.slice("worktree ".length))}`)
+      .join("\n") !== `worktree ${resolve(path)}`
   )
     throw new Error("Frozen baseline has linked worktrees.")
   for (const entry of status.split("\0").filter(Boolean)) {
@@ -193,7 +195,7 @@ async function protectMissionBaseline(mission: Mission, protectedPaths: Set<stri
   protectedPaths.add(mission.workspace.path)
   const workspace = mission.workspace.path
   const prefix = join(mission.repositoryRoot, ".agent-valley", "operations")
-  if (!workspace.startsWith(`${prefix}/`)) return
+  if (!workspace.startsWith(`${prefix}${sep}`)) return
   await localDirectory(dirname(workspace))
   const raw = await readLocal(join(dirname(workspace), "workspace.json"))
   if (!raw) throw new Error("An unresolved mission is missing its workspace receipt; preserve all baselines.")
@@ -281,7 +283,7 @@ export async function pruneContinuousBaselines(
     const operation = await store.load(operationId)
     const root = operation.repositoryRoot
     await localDirectory(root)
-    if ((await git(root, ["rev-parse", "--show-toplevel"])).trim() !== root)
+    if (resolve((await git(root, ["rev-parse", "--show-toplevel"])).trim()) !== resolve(root))
       throw new Error("Restore the original Git repository before pruning.")
     const artifacts = join(root, ".agent-valley", "operations", operationId)
     const baselines = join(artifacts, "baselines")

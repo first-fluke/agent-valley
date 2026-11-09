@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { supportsPosixModes } from "../__tests__/test-platform"
 import { capturePolicySchema, MissionCapture } from "./capture"
 import { screenshotCode } from "./capture-mcp"
 
@@ -51,7 +52,7 @@ describe("Aside mission capture artifacts", () => {
       const bytes = await readFile(file.path)
       expect(file.sizeBytes).toBe(bytes.length)
       expect(file.sha256).toBe(createHash("sha256").update(bytes).digest("hex"))
-      expect((await stat(file.path)).mode & 0o777).toBe(0o600)
+      if (supportsPosixModes) expect((await stat(file.path)).mode & 0o777).toBe(0o600)
     }
     const manifest = JSON.parse(await readFile(join(capture.directory, "capture.json"), "utf8"))
     expect(manifest.frames[1].stage).toBe("work:task")

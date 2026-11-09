@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } fro
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
 import { prepareOmaActor } from "./oma-actor"
 
 let workspace: string
@@ -107,7 +108,7 @@ describe("installed OMA Actor preparation", () => {
     await expect(prepareOmaActor(workspace, ["oma-backend"])).rejects.toThrow("Restore YAML frontmatter")
   })
 
-  it("rejects escaping profile roots and leaf symlinks", async () => {
+  it.skipIf(!supportsFileSymlinks)("rejects escaping profile roots and leaf symlinks", async () => {
     await skill("oma-backend")
     await symlink(outside, join(workspace, ".agents/agents"))
     await expect(prepareOmaActor(workspace, ["oma-backend"])).rejects.toThrow("escapes the mission worktree")
@@ -124,7 +125,7 @@ describe("installed OMA Actor preparation", () => {
     const path = await profile("backend-engineer", ["oma-backend"])
     await chmod(path, 0)
     try {
-      if (process.getuid?.() !== 0)
+      if (process.getuid?.() !== 0 && supportsPosixModes)
         await expect(prepareOmaActor(workspace, ["oma-backend"])).rejects.toThrow("unreadable")
     } finally {
       await chmod(path, 0o600)

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
 import { runCommand } from "../workspace/worktree-lifecycle"
 import { fingerprintWorkspace } from "./fingerprint"
 import type { OperatingRun } from "./operations"
@@ -83,8 +84,10 @@ describe("repository organization store", () => {
     const directory = join(organizationStorePath(source), "memories")
     const files = await readdir(directory)
     expect(files).toHaveLength(1)
-    expect((await stat(directory)).mode & 0o777).toBe(0o700)
-    expect((await stat(join(directory, files[0] as string))).mode & 0o777).toBe(0o600)
+    if (supportsPosixModes) {
+      expect((await stat(directory)).mode & 0o777).toBe(0o700)
+      expect((await stat(join(directory, files[0] as string))).mode & 0o777).toBe(0o600)
+    }
     expect(await readFile(join(workspace, "output.md"), "utf8")).toBe("Delivered evidence")
     expect(await readdir(workspace)).toEqual(["output.md"])
     expect(await listOrganizationMemories(workspace)).toEqual([])
@@ -121,7 +124,7 @@ describe("repository organization store", () => {
     await expect(listOrganizationMemories(source)).rejects.toThrow("repository identity")
   })
 
-  it("rejects symlink storage and does not read or mutate external files", async () => {
+  it.skipIf(!supportsFileSymlinks)("rejects symlink storage and does not read or mutate external files", async () => {
     const outside = join(root, "outside")
     await mkdir(outside)
     await symlink(outside, join(source, ".agent-valley"))
@@ -145,12 +148,14 @@ describe("repository organization store", () => {
     const directory = join(organizationStorePath(source), "memories")
     const [name] = await readdir(directory)
     const path = join(directory, name as string)
-    const outside = join(root, "external.json")
-    await writeFile(outside, await readFile(path))
-    await rm(path)
-    await symlink(outside, path)
-    await expect(listOrganizationMemories(source)).rejects.toThrow()
-    await rm(path)
+    if (supportsFileSymlinks) {
+      const outside = join(root, "external.json")
+      await writeFile(outside, await readFile(path))
+      await rm(path)
+      await symlink(outside, path)
+      await expect(listOrganizationMemories(source)).rejects.toThrow()
+      await rm(path)
+    }
     await writeFile(path, "x".repeat(16_000_001))
     await expect(listOrganizationMemories(source)).rejects.toThrow("bounded regular JSON")
   })
@@ -202,10 +207,12 @@ describe("evidence-bound mission outcomes", () => {
     await expect(
       recordOrganizationOutcome(source, outcome({ evidence: [{ path: "../external.md" }] })),
     ).rejects.toThrow("escapes")
-    await symlink(join(root, "external.md"), join(workspace, "link.md"))
-    await expect(recordOrganizationOutcome(source, outcome({ evidence: [{ path: "link.md" }] }))).rejects.toThrow(
-      "escapes",
-    )
+    if (supportsFileSymlinks) {
+      await symlink(join(root, "external.md"), join(workspace, "link.md"))
+      await expect(recordOrganizationOutcome(source, outcome({ evidence: [{ path: "link.md" }] }))).rejects.toThrow(
+        "escapes",
+      )
+    }
   })
 
   it("does not approve an AI stack claim merely because an outcome passed", async () => {

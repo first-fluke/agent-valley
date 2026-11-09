@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { supportsFileSymlinks } from "../__tests__/test-platform"
 import type { SkillMatrixDeps } from "../oma/skill-matrix-adapter"
 import { planSandboxedSpawn } from "../sessions/sandbox"
 import { ChiefRuntime } from "./runtime"
@@ -244,7 +245,7 @@ describe("chief runtime boundaries", () => {
     expect(planSandboxedSpawn).not.toHaveBeenCalled()
   })
 
-  it("rejects skills that escape the repository skill directory", async () => {
+  it.skipIf(!supportsFileSymlinks)("rejects skills that escape the repository skill directory", async () => {
     const directory = join(root, ".agents/skills/test-skill")
     await mkdir(directory, { recursive: true })
     await writeFile(join(root, "outside.md"), "Outside instructions")
@@ -285,7 +286,9 @@ describe("chief runtime boundaries", () => {
   it("passes cancellation to a real running verification command", async () => {
     const controller = new AbortController()
     runtime = new ChiefRuntime(new MissionStore(join(root, "records")), controller.signal)
-    mission.verifyCommand = `'${process.execPath.replaceAll("'", "'\\''")}' -e 'setInterval(() => {}, 1000)'`
+    const script = join(root, "wait.mjs")
+    await writeFile(script, "setInterval(() => {}, 1000)")
+    mission.verifyCommand = `"${process.execPath}" "${script}"`
     const timer = setTimeout(() => controller.abort(), 100)
     try {
       const result = await runtime.ports().verify(mission)

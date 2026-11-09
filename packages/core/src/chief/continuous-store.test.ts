@@ -2,6 +2,7 @@ import { lstat, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
 import type { Operation } from "./continuous-contract"
 import { ContinuousOperationStore } from "./continuous-store"
 
@@ -33,8 +34,10 @@ describe("durable continuous operation storage", () => {
     value.charter = "Later mutation"
     await saving
     expect((await store.load(value.id)).charter).toBe("Improve the service")
-    expect((await lstat(join(directory, "operations", "operation.json"))).mode & 0o777).toBe(0o600)
-    expect((await lstat(join(directory, "operations"))).mode & 0o777).toBe(0o700)
+    if (supportsPosixModes) {
+      expect((await lstat(join(directory, "operations", "operation.json"))).mode & 0o777).toBe(0o600)
+      expect((await lstat(join(directory, "operations"))).mode & 0o777).toBe(0o700)
+    }
     expect(await store.list()).toHaveLength(1)
   })
 
@@ -70,16 +73,21 @@ describe("durable continuous operation storage", () => {
     await expect(store.load("../outside")).rejects.toThrow()
   })
 
-  it("rejects redirected storage and symbolic record files without exposing their contents", async () => {
-    const store = new ContinuousOperationStore(join(directory, "operations"))
-    await store.save(record())
-    const source = join(directory, "operations", "operation.json")
-    const copy = join(directory, "outside.json")
-    await writeFile(copy, await readFile(source))
-    await rm(source)
-    await symlink(copy, source)
-    await expect(store.load("operation")).rejects.toThrow("regular file")
-    await symlink(join(directory, "operations"), join(directory, "redirected"))
-    await expect(new ContinuousOperationStore(join(directory, "redirected")).save(record())).rejects.toThrow("symlink")
-  })
+  it.skipIf(!supportsFileSymlinks)(
+    "rejects redirected storage and symbolic record files without exposing their contents",
+    async () => {
+      const store = new ContinuousOperationStore(join(directory, "operations"))
+      await store.save(record())
+      const source = join(directory, "operations", "operation.json")
+      const copy = join(directory, "outside.json")
+      await writeFile(copy, await readFile(source))
+      await rm(source)
+      await symlink(copy, source)
+      await expect(store.load("operation")).rejects.toThrow("regular file")
+      await symlink(join(directory, "operations"), join(directory, "redirected"))
+      await expect(new ContinuousOperationStore(join(directory, "redirected")).save(record())).rejects.toThrow(
+        "symlink",
+      )
+    },
+  )
 })

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { supportsFileSymlinks, supportsPosixModes } from "../__tests__/test-platform"
 import {
   dispatchMissionReport,
   listReportDeliveries,
@@ -83,8 +84,10 @@ describe("durable report delivery", () => {
     await dispatchMissionReport(mission(), "완료 보고서", "/reports/report.md", policy, directory, { fetch, env })
     await retryPendingReports(policy, directory, { fetch, env })
     expect(fetch).toHaveBeenCalledTimes(1)
-    expect((await stat(join(directory, "report-outbox", `${result[0]?.id}.json`))).mode & 0o777).toBe(0o600)
-    expect((await stat(join(directory, "report-outbox"))).mode & 0o777).toBe(0o700)
+    if (supportsPosixModes) {
+      expect((await stat(join(directory, "report-outbox", `${result[0]?.id}.json`))).mode & 0o777).toBe(0o600)
+      expect((await stat(join(directory, "report-outbox"))).mode & 0o777).toBe(0o700)
+    }
     expect(await listReportDeliveries(directory)).toEqual(result)
   })
 
@@ -361,14 +364,16 @@ describe("durable real attachments", () => {
       registry: { webhook: { send } },
     })
     expect(result[0]?.status).toBe("pending")
-    const link = join(directory, "captures", "link.png")
-    await symlink(file.path, link)
-    const linked = await dispatchMissionReport(mission(), "report 2", "/report.md", policy, directory, {
-      env,
-      attachments: [{ ...file, path: link }],
-      registry: { webhook: { send } },
-    })
-    expect(linked[0]?.status).toBe("pending")
-    expect(send).not.toHaveBeenCalled()
+    if (supportsFileSymlinks) {
+      const link = join(directory, "captures", "link.png")
+      await symlink(file.path, link)
+      const linked = await dispatchMissionReport(mission(), "report 2", "/report.md", policy, directory, {
+        env,
+        attachments: [{ ...file, path: link }],
+        registry: { webhook: { send } },
+      })
+      expect(linked[0]?.status).toBe("pending")
+      expect(send).not.toHaveBeenCalled()
+    }
   })
 })

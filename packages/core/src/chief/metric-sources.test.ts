@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { supportsFileSymlinks } from "../__tests__/test-platform"
 import {
   collectBusinessMetricSources,
   type MetricSourceAdapter,
@@ -214,9 +215,13 @@ describe("swappable local and custom metric sources", () => {
     expect((await collectBusinessMetricSources(repository, policy, { now: () => now })).results[0]?.status).toBe(
       "collected",
     )
-    await symlink(join(repository, "analytics", "metrics.json"), join(repository, "linked.json"))
-    await symlink(join(repository, "analytics"), join(repository, "linked-dir"))
-    for (const file of ["linked.json", "linked-dir/metrics.json", "../outside.json", "/tmp/outside.json"]) {
+    if (supportsFileSymlinks) {
+      await symlink(join(repository, "analytics", "metrics.json"), join(repository, "linked.json"))
+      await symlink(join(repository, "analytics"), join(repository, "linked-dir"))
+    }
+    const files = ["../outside.json", "/tmp/outside.json"]
+    if (supportsFileSymlinks) files.unshift("linked.json", "linked-dir/metrics.json")
+    for (const file of files) {
       const result = await collectBusinessMetricSources(repository, configuration({ adapter: "json-file", file }), {
         now: () => now,
       })

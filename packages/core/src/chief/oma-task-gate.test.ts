@@ -101,62 +101,65 @@ afterEach(() => {
 })
 
 /** Native receipt and Git commands only: no model calls or skill execution. */
-describe.skipIf(!available && !required)(`chief intermediate OMA v${OMA_RECEIPT_SCHEMA_VERSION} gate`, () => {
-  beforeAll(() => {
-    if (!available)
-      throw new Error(
-        "CI requires the installed OMA CLI for native Chief task-gate tests. Run npm install -g oh-my-agent@latest and confirm oma --version is available on PATH.",
+describe.skipIf((!available && !required) || process.platform === "win32")(
+  `chief intermediate OMA v${OMA_RECEIPT_SCHEMA_VERSION} gate`,
+  () => {
+    beforeAll(() => {
+      if (!available)
+        throw new Error(
+          "CI requires the installed OMA CLI for native Chief task-gate tests. Run npm install -g oh-my-agent@latest and confirm oma --version is available on PATH.",
+        )
+    })
+    test("accepts a committed partial task before a downstream goal artifact exists", async () => {
+      const { root, base, request, begin, env, io } = await fixture()
+      expect(request.verifyCommand).toBe(`git diff --check ${base} --`)
+      writeFileSync(join(root, "input.txt"), "First stage implemented\n")
+      commit(root, "Deliver first stage")
+      expect(() => readFileSync(join(root, "downstream.txt"))).toThrow()
+      const checks = JSON.parse(
+        run("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root, env),
       )
-  })
-  test("accepts a committed partial task before a downstream goal artifact exists", async () => {
-    const { root, base, request, begin, env, io } = await fixture()
-    expect(request.verifyCommand).toBe(`git diff --check ${base} --`)
-    writeFileSync(join(root, "input.txt"), "First stage implemented\n")
-    commit(root, "Deliver first stage")
-    expect(execute("sh", ["-c", "test -s downstream.txt"], root).status).toBe(1)
-    const checks = JSON.parse(
-      run("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root, env),
-    )
-    expect(checks).toMatchObject([{ checkId: "valley-verify", exitCode: 0 }])
-    writeFileSync(
-      begin.claimPath,
-      JSON.stringify({ status: "completed", changedFiles: ["input.txt"], unresolved: [], artifacts: [] }),
-    )
-    const receipt = JSON.parse(
-      run("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root, env),
-    )
-    expect(receipt).toMatchObject({ status: "completed", exitCode: 0 })
-    request.attempt.finishedAt = new Date().toISOString()
-    expect(validateOmaEvidence(request, io)).toEqual({ ok: true, runId: begin.runId })
-    expect(execute("sh", ["-c", "test -s downstream.txt"], root).status).toBe(1)
-  }, 25_000)
-
-  test.each([
-    ["trailing whitespace", "First stage implemented   \n"],
-    ["conflict markers", "<<<<<<< first\nleft\n=======\nright\n>>>>>>> second\n"],
-  ])(
-    "rejects committed %s using the saved task baseline",
-    async (_name, content) => {
-      const { root, request, begin, env, io } = await fixture()
-      writeFileSync(join(root, "input.txt"), content)
-      commit(root, "Commit broken first stage")
-      // An unbounded check would inspect an empty working diff after the required commit.
-      expect(execute("git", ["diff", "--check"], root).status).toBe(0)
-      expect(execute("sh", ["-c", request.verifyCommand], root).status).not.toBe(0)
-      execute("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root, env)
-      const { checks } = JSON.parse(readFileSync(begin.claimPath.replace(/\.claim\.json$/, ".json"), "utf8")) as {
-        checks: { checkId: string; exitCode: number }[]
-      }
-      expect(checks[0]?.checkId).toBe("valley-verify")
-      expect(checks[0]?.exitCode).not.toBe(0)
+      expect(checks).toMatchObject([{ checkId: "valley-verify", exitCode: 0 }])
       writeFileSync(
         begin.claimPath,
         JSON.stringify({ status: "completed", changedFiles: ["input.txt"], unresolved: [], artifacts: [] }),
       )
-      execute("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root, env)
+      const receipt = JSON.parse(
+        run("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root, env),
+      )
+      expect(receipt).toMatchObject({ status: "completed", exitCode: 0 })
       request.attempt.finishedAt = new Date().toISOString()
-      expect(validateOmaEvidence(request, io).ok).toBe(false)
-    },
-    25_000,
-  )
-})
+      expect(validateOmaEvidence(request, io)).toEqual({ ok: true, runId: begin.runId })
+      expect(() => readFileSync(join(root, "downstream.txt"))).toThrow()
+    }, 25_000)
+
+    test.each([
+      ["trailing whitespace", "First stage implemented   \n"],
+      ["conflict markers", "<<<<<<< first\nleft\n=======\nright\n>>>>>>> second\n"],
+    ])(
+      "rejects committed %s using the saved task baseline",
+      async (_name, content) => {
+        const { root, base, request, begin, env, io } = await fixture()
+        writeFileSync(join(root, "input.txt"), content)
+        commit(root, "Commit broken first stage")
+        // An unbounded check would inspect an empty working diff after the required commit.
+        expect(execute("git", ["diff", "--check"], root).status).toBe(0)
+        expect(execute("git", ["diff", "--check", base, "--"], root).status).not.toBe(0)
+        execute("oma", ["agent", "verify", begin.runId, "--required", "--project-root", root], root, env)
+        const { checks } = JSON.parse(readFileSync(begin.claimPath.replace(/\.claim\.json$/, ".json"), "utf8")) as {
+          checks: { checkId: string; exitCode: number }[]
+        }
+        expect(checks[0]?.checkId).toBe("valley-verify")
+        expect(checks[0]?.exitCode).not.toBe(0)
+        writeFileSync(
+          begin.claimPath,
+          JSON.stringify({ status: "completed", changedFiles: ["input.txt"], unresolved: [], artifacts: [] }),
+        )
+        execute("oma", ["agent", "finish", begin.runId, begin.claimPath, "--project-root", root], root, env)
+        request.attempt.finishedAt = new Date().toISOString()
+        expect(validateOmaEvidence(request, io).ok).toBe(false)
+      },
+      25_000,
+    )
+  },
+)
