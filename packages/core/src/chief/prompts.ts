@@ -88,7 +88,7 @@ export function planPrompt(mission: Mission): string {
     "Independent workspace tasks execute concurrently in isolated worktrees, then integrate in plan order before review. Declare dependencies when a task needs another task's delivered changes. Declare effectScope: external for actions that affect external systems (publishing, messages, purchases); these execute sequentially and uncertain effects require reconciliation before repetition. Other tasks use effectScope: workspace.",
     taskDecompositionGuidance(mission, "plan"),
     "Use recorded organization evidence and explicitly approved standards when relevant; historical outcomes are not approval of current files. Routing quality/cost evidence is measured only where reported, not a claim of universal model superiority. Explicit metric targets require actual recorded measurements and are additional completion gates; advisory ROI text is not measurement.",
-    "Use 1-24 tasks with unique ids, concrete instructions, nonempty acceptance criteria, and acyclic dependencies.",
+    "Use 1-48 tasks with unique ids, concrete instructions, nonempty acceptance criteria, and acyclic dependencies.",
     `Keep the complete JSON response within ${MAX_JSON_RESPONSE_LENGTH} characters; use concise Actors and tasks.`,
     "Every Actor must produce or update a material file deliverable, including research reports. Plan intermediate checks.",
     ...(requiresOmaActor(mission)
