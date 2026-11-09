@@ -147,7 +147,7 @@ export async function resolveOrderConfig(
     throw new Error(`Actor file ${profilePath} is missing or empty. Add an actors array or omit --actors.`)
   const timeoutSec = integer(
     options.timeout,
-    project?.agent?.timeout ?? global?.agent?.timeout ?? 600,
+    project?.agent?.timeout ?? global?.agent?.timeout ?? 3_600,
     "--timeout",
     86_400,
   )

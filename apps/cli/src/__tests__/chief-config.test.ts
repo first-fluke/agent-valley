@@ -126,7 +126,7 @@ describe("chief order configuration", () => {
       workspace: root,
       verifyCommand: "test -s report.md",
       chiefId: "chief-director",
-      timeoutSec: 600,
+      timeoutSec: 3_600,
       maxRepairs: 2,
       maxRounds: 8,
       oma: false,
