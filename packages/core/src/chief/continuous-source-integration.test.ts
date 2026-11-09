@@ -452,7 +452,8 @@ describe("continuous verified source worktree integration", () => {
 
     const synced = await synchronizeContinuousBaselineWithSource(operation, next)
     expect(synced).toBeDefined()
-    expect(await readFile(join(synced!.path, "direct.txt"), "utf8")).toBe("Operator direct commit\n")
-    expect(await readFile(join(synced!.path, "product.txt"), "utf8")).toBe("Verified product\n")
+    if (!synced) throw new Error("expected synced to be defined")
+    expect(await readFile(join(synced.path, "direct.txt"), "utf8")).toBe("Operator direct commit\n")
+    expect(await readFile(join(synced.path, "product.txt"), "utf8")).toBe("Verified product\n")
   })
 })

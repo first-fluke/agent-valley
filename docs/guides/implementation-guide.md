@@ -50,6 +50,7 @@ Read `docs/architecture/CONSTRAINTS.md` for complete examples. Summary:
 ## Implementing Symphony Components
 
 Before implementing any component:
+
 1. Read `docs/specs/{component}.md` — the interface contract
 2. Read `docs/specs/domain-models.md` — shared domain models
 3. Read `docs/architecture/LAYERS.md` — which layer the component belongs in
@@ -182,6 +183,7 @@ npx tsc --init
 ```
 
 **Required `tsconfig.json` settings:**
+
 ```json
 {
   "compilerOptions": {
@@ -193,6 +195,7 @@ npx tsc --init
 ```
 
 Config validation with Zod:
+
 ```typescript
 import { z } from "zod"
 const envSchema = z.object({
@@ -226,6 +229,7 @@ uv sync
 ```
 
 Config validation with Pydantic:
+
 ```python
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -266,6 +270,7 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 Config validation:
+
 ```go
 import (
     "fmt"

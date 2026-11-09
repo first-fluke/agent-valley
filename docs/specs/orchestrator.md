@@ -190,6 +190,7 @@ On failure:
 ```
 
 Retry queue is processed:
+
 - After startup sync completes
 - After each webhook event is handled
 - On a periodic timer (every `retryCheckIntervalSec`, default: 30s)

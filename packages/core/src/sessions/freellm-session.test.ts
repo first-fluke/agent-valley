@@ -45,7 +45,9 @@ describe("FreellmSession settings resolution", () => {
   })
 
   it("rejects API keys with control characters", () => {
-    expect(() => resolveFreellmSettings(undefined, { FREELLM_API_KEY: "key\nwith\rnewline" })).toThrow("invalid characters")
+    expect(() => resolveFreellmSettings(undefined, { FREELLM_API_KEY: "key\nwith\rnewline" })).toThrow(
+      "invalid characters",
+    )
   })
 
   it("prioritizes config.model over FREELLM_MODEL env", () => {

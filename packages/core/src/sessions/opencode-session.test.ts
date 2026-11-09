@@ -306,21 +306,26 @@ describe("OpencodeSession", () => {
     expect(result.tokenUsage).toBeUndefined()
   })
 
-  test.each(["result", "text"])("preserves complete large %s responses, including the first character", async (kind) => {
-    const output = `BEGIN${"x".repeat(255_992)}END`
-    writeMockOpencode([
-      JSON.stringify(kind === "result" ? { type: "result", result: output } : { type: "assistant-text", text: output }),
-    ])
-    const { OpencodeSession } = await import("./opencode-session")
-    const session = new OpencodeSession()
-    let completed: string | undefined
-    session.on("complete", (event) => {
-      completed = event.result.output
-    })
-    await session.start({ type: "opencode", timeout: 30, workspacePath: WORKSPACE_DIR })
-    await session.execute("test")
-    expect(completed).toBe(output)
-  })
+  test.each(["result", "text"])(
+    "preserves complete large %s responses, including the first character",
+    async (kind) => {
+      const output = `BEGIN${"x".repeat(255_992)}END`
+      writeMockOpencode([
+        JSON.stringify(
+          kind === "result" ? { type: "result", result: output } : { type: "assistant-text", text: output },
+        ),
+      ])
+      const { OpencodeSession } = await import("./opencode-session")
+      const session = new OpencodeSession()
+      let completed: string | undefined
+      session.on("complete", (event) => {
+        completed = event.result.output
+      })
+      await session.start({ type: "opencode", timeout: 30, workspacePath: WORKSPACE_DIR })
+      await session.execute("test")
+      expect(completed).toBe(output)
+    },
+  )
 
   test("rejects an oversized explicit result without emitting truncated success", async () => {
     writeMockOpencode([JSON.stringify({ type: "result", result: "x".repeat(256_001) })])

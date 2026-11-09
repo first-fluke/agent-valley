@@ -506,6 +506,7 @@ curl -fsSL https://raw.githubusercontent.com/first-fluke/agent-valley/main/scrip
 이 저장소를 읽고 있는 AI Actor라면, 자세한 설정 지침, 규칙, 구현 가이드는 **[AGENTS.md](./AGENTS.md)**를 참고하세요.
 
 Claude Code 하위 Actor는 `.claude/agents/`에서 사용 가능합니다:
+
 - `symphony-architect.md` — 아키텍처 결정, SPEC 해석
 - `symphony-implementer.md` — 프리플라이트 체크를 포함한 기능 구현
 - `symphony-reviewer.md` — PR 템플릿 프레임워크를 활용한 코드 리뷰

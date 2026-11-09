@@ -27,12 +27,12 @@ describe("Chief Director outcome report contract", () => {
     expect(() => parseReport(invalid)).toThrow()
   })
 
-  it.each([
-    (json: string) => `${json}\n${json}`,
-    (json: string) => `${json}\n{"unfinished":`,
-  ])("rejects ambiguous or incomplete reports instead of choosing an answer", (wrap) => {
-    expect(() => parseReport(wrap(JSON.stringify(report())))).toThrow(/not valid JSON/)
-  })
+  it.each([(json: string) => `${json}\n${json}`, (json: string) => `${json}\n{"unfinished":`])(
+    "rejects ambiguous or incomplete reports instead of choosing an answer",
+    (wrap) => {
+      expect(() => parseReport(wrap(JSON.stringify(report())))).toThrow(/not valid JSON/)
+    },
+  )
 
   it("retains the strict report shape when extracting narrated JSON", () => {
     expect(() => parseReport(`Report follows.\n${JSON.stringify({ ...report(), completed: true })}`)).toThrow()

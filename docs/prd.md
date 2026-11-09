@@ -274,6 +274,7 @@ Linear webhook POST
 ### v0.2 (릴리스됨, 2026-04)
 
 PR 단위 기준:
+
 - **PR0**: Characterization 테스트 50건으로 기존 동작 잠금.
 - **PR1**: `IssueTracker / WebhookReceiver / WorkspaceGateway` 도메인 포트 + DI seam + Linear 어댑터 + contract 스위트.
 - **PR2**: WorkspaceManager 분할 (`worktree-lifecycle` / `delivery-strategy` / `safety-net`).

@@ -13,8 +13,8 @@ import type {
   AgentSession,
   RunResult,
 } from "./agent-session"
-import { rootAndGroupAbsent, signalProcessTree } from "./process-tree"
 import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
+import { rootAndGroupAbsent, signalProcessTree } from "./process-tree"
 import { planSandboxedSpawn } from "./sandbox"
 
 /** Env vars safe to pass to agent subprocesses */

@@ -101,7 +101,7 @@ describe("structured JSON response boundaries", () => {
     '{"value":,"next":1}',
     '{"value":undefined}',
     '{"value":}\n{"valid":1}',
-    '{first:1}\n{second:2}',
+    "{first:1}\n{second:2}",
   ])("does not repair incomplete, mismatched, omitted or ambiguous content: %s", (source) => {
     expect(() => parseJson(source, "Planning")).toThrow()
     expect(() => parseJson(`\`\`\`json\n${source}\n\`\`\``, "Planning")).toThrow()

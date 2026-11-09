@@ -102,6 +102,7 @@ Refuse to start if any of the following are missing or empty.
 Validate the entire config at startup. Reject on any failure.
 
 **Validation checks:**
+
 - Required key existence
 - Type matching (string/number)
 - Range: `concurrency.maxParallel` >= 1, `agent.timeout` >= 30

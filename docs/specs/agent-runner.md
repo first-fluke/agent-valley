@@ -367,6 +367,7 @@ When config.agent.timeout seconds elapse:
 ## Heartbeat
 
 Each session emits `heartbeat` events based on its native protocol activity:
+
 - **CodexSession**: any JSON-RPC server notification counts as heartbeat
 - **ClaudeSession**: any stream-json output activity counts as heartbeat
 - **AgySession / CursorSession / GrokSession / KimiSession / OpencodeSession**: any stdout activity or process PID check

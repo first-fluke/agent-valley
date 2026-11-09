@@ -1,6 +1,6 @@
 import { type Command, Option } from "commander"
 import { dispatchOrder } from "./chief"
-import { type ContinuousOptions } from "./chief-continuous"
+import type { ContinuousOptions } from "./chief-continuous"
 import { registerContinuousCommands } from "./chief-continuous-commands"
 import { registerMissionCommands } from "./chief-missions"
 import { orderExitCode, printOrderOutcome } from "./chief-outcome"

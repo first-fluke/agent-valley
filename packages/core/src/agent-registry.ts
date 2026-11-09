@@ -1,5 +1,5 @@
 /**
- * Agent vendor registry — the single table for per-agent facts.
+ * Agent vendor registry ??the single table for per-agent facts.
  *
  * Consumers derive from this module instead of keeping parallel lists:
  * SessionFactory registration, config enum, intervention capabilities,
@@ -172,13 +172,7 @@ export const AGENT_REGISTRY: Record<AgentType, AgentDescriptor> = Object.freeze(
   freellm: {
     id: "freellm",
     binary: "codex",
-    envKeys: [
-      "FREELLM_API_KEY",
-      "FREELLMAPI_API_KEY",
-      "FREELLM_BASE_URL",
-      "FREELLM_MODEL",
-      "CODEX_HOME",
-    ],
+    envKeys: ["FREELLM_API_KEY", "FREELLMAPI_API_KEY", "FREELLM_BASE_URL", "FREELLM_MODEL", "CODEX_HOME"],
     capabilities: ["pause", "resume", "append_prompt", "abort"],
     genAiSystem: "freellm",
   },

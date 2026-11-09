@@ -153,6 +153,7 @@ query GetIssuesByState($teamId: String!, $stateIds: [ID!]!) {
 ```
 
 **Variables:**
+
 ```json
 {
   "teamId": "{LINEAR_TEAM_UUID}",

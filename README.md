@@ -521,6 +521,7 @@ Full list with examples: `docs/architecture/CONSTRAINTS.md`
 If you are an AI actor reading this repository, see **[AGENTS.md](./AGENTS.md)** for detailed setup instructions, conventions, and implementation guidance.
 
 Claude Code sub-agents are available in `.claude/agents/`:
+
 - `symphony-architect.md` — Architecture decisions, SPEC interpretation
 - `symphony-implementer.md` — Feature implementation with preflight checks
 - `symphony-reviewer.md` — Code review using PR template framework

@@ -38,6 +38,7 @@ If conventions exist only as documentation, agents will miss them. Mechanize the
 ```
 
 Examples of what lint catches:
+
 - Duplicate imports
 - Unused symbols (unused exports)
 - Dependency layer violations (per `docs/architecture/LAYERS.md`)
@@ -65,6 +66,7 @@ When these accumulate, new agents may reference stale context, causing contamina
 Runs automatically once per week (`.github/workflows/harness-gc.yml`)
 
 Manual execution:
+
 ```bash
 ./scripts/harness/gc.sh
 ```

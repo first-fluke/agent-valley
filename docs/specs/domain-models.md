@@ -29,6 +29,7 @@ Issue {
 ```
 
 **Trust level:**
+
 - `Issue.title`, `Issue.description` — always suspect. Validate at the boundary before inserting into prompts.
 - `Issue.id`, `Issue.identifier`, `Issue.status`, `Issue.team` — Linear API response values. Trusted internally.
 
@@ -131,6 +132,7 @@ OrchestratorRuntimeState {
 ```
 
 **Restart recovery strategy:**
+
 1. On restart, `activeWorkspaces` and `retryQueue` are initialized empty.
 2. Startup sync: one-time query to Linear for current `IN_PROGRESS` issues.
 3. Reconstruct `activeWorkspaces` based on the retrieved issues.

@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Claude Code Sub-agents
 
 When working on this project, use these specialized sub-agents:
+
 - @.claude/agents/symphony-architect.md — for architecture decisions, SPEC design
 - @.claude/agents/symphony-implementer.md — for feature implementation
 - @.claude/agents/symphony-reviewer.md — for code review
@@ -107,6 +108,7 @@ Startup sync: on boot, Orchestrator fetches all Todo + In Progress issues from L
 ## Architecture Constraints
 
 Defined in `docs/architecture/CONSTRAINTS.md`. Key rules:
+
 - Domain layer must have zero imports from other layers
 - No business logic in routers or infrastructure
 - Max 500 lines per file
@@ -116,6 +118,7 @@ Defined in `docs/architecture/CONSTRAINTS.md`. Key rules:
 ## Issue Creation Rules
 
 When auditing a target repo or creating issues via `bun av issue`:
+
 1. **Use domain-specialist skills** for audits — `/oma-frontend` for web, `/oma-backend` for API, `/oma-mobile` for mobile. Never use generic Explore agents for framework convention checks.
 2. **Verify framework versions** before reporting convention issues — read `package.json`, `pubspec.yaml`, or `pyproject.toml` first. Conventions change between major versions (e.g. Next.js 16 renamed `middleware.ts` to `proxy.ts`).
 3. **`--raw` issues** bypass Claude expansion — the issuer is responsible for accuracy.

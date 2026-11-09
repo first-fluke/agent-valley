@@ -12,6 +12,7 @@
 **Rule:** Domain layer files must not import frameworks, ORMs, HTTP clients, or external SDKs.
 
 **Violation example:**
+
 ```python
 # domain/issue.py
 from sqlalchemy import Column, String  # Forbidden: ORM penetrating Domain
@@ -19,6 +20,7 @@ from linear_sdk import LinearClient    # Forbidden: external SDK penetrating Dom
 ```
 
 **Correct approach:**
+
 ```python
 # domain/issue.py
 from dataclasses import dataclass
@@ -39,6 +41,7 @@ class Issue:
 **Rule:** The Presentation layer (Router, Handler, CLI) is responsible only for input parsing and response formatting. It must not make business decisions via conditional branching.
 
 **Violation example:**
+
 ```typescript
 // presentation/issueRouter.ts
 router.post("/issues/:id/run", async (req, res) => {
@@ -52,6 +55,7 @@ router.post("/issues/:id/run", async (req, res) => {
 ```
 
 **Correct approach:**
+
 ```typescript
 // presentation/issueRouter.ts
 router.post("/issues/:id/run", async (req, res) => {
@@ -67,6 +71,7 @@ router.post("/issues/:id/run", async (req, res) => {
 **Rule:** Do not write API keys, passwords, tokens, URLs, or IDs directly in code. Write them only in `.env`, and ensure `.env` is listed in `.gitignore`.
 
 **Violation example:**
+
 ```go
 // Forbidden
 client := linear.NewClient("lin_api_abc123xyz")
@@ -74,6 +79,7 @@ teamID := "ACR"
 ```
 
 **Correct approach:**
+
 ```go
 apiKey := os.Getenv("LINEAR_API_KEY")
 if apiKey == "" {
@@ -89,6 +95,7 @@ client := linear.NewClient(apiKey)
 **Rule:** Linear issue body is external input. It must be validated and sanitized at the boundary before inserting into prompts. Only `WORKFLOW.md` is trusted.
 
 **Violation example:**
+
 ```typescript
 // Forbidden: inserting issue body directly into prompt without validation
 const prompt = `${workflowTemplate}\n\n${issue.description}`
@@ -96,6 +103,7 @@ await agentRunner.run(prompt)
 ```
 
 **Correct approach:**
+
 ```typescript
 // Validate at Presentation layer boundary, then pass to Application
 const sanitizedDescription = sanitizeIssueBody(issue.description) // Length limit, injection pattern removal
@@ -109,11 +117,13 @@ await orchestrator.runIssue({ ...issue, description: sanitizedDescription })
 **Rule:** If a single file exceeds 500 lines, responsibility is overly concentrated. Split by layer or concern.
 
 **Violation example:**
+
 ```
 orchestrator.ts  1,200 lines  // Forbidden: event handling, retry, state management, workspace management mixed together
 ```
 
 **Correct approach:**
+
 ```
 orchestrator/
 ├── webhookHandler.ts ← Webhook event handling
@@ -129,6 +139,7 @@ orchestrator/
 **Rule:** Do not use global variables or module-level mutable state outside the Orchestrator. The Orchestrator is the single authority owning in-memory state.
 
 **Violation example:**
+
 ```python
 # Forbidden: module-level global state
 _active_workspaces: dict[str, Workspace] = {}  # Can be modified from anywhere
@@ -138,6 +149,7 @@ def get_workspace(issue_id: str) -> Workspace:
 ```
 
 **Correct approach:**
+
 ```python
 class Orchestrator:
     def __init__(self):
@@ -154,6 +166,7 @@ class Orchestrator:
 **Rule:** Error messages must enable agents to self-correct by reading the message alone. Warnings that only describe symptoms are useless to agents.
 
 **Violation example:**
+
 ```
 Error: Missing environment variable
 Error: Invalid configuration
@@ -161,6 +174,7 @@ Warning: Connection failed
 ```
 
 **Correct approach:**
+
 ```
 Error: LINEAR_API_KEY is not set.
   → Add it to .env file (copy from .env.example)

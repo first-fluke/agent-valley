@@ -87,6 +87,7 @@ Branch name: `issue/{IDENTIFIER}` where `{IDENTIFIER}` is the Linear issue key.
 ```
 
 This checks:
+
 - Secret patterns (API keys, tokens)
 - Dangerous shell commands
 - Architecture layer violations (domain importing from infrastructure)
