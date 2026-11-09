@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.2](https://github.com/first-fluke/agent-valley/compare/v4.9.1...v4.9.2) (2026-11-09)
+
+
+### Bug Fixes
+
+* **chief:** cover windows capability gaps in retention and tests ([50fc7f0](https://github.com/first-fluke/agent-valley/commit/50fc7f0e05e831f2c001315fa0525da8f6ca88b6))
+
 ## [4.9.1](https://github.com/first-fluke/agent-valley/compare/v4.9.0...v4.9.1) (2026-11-09)
 
 
