@@ -46,12 +46,19 @@ describe("buildWindowsSandboxCommand", () => {
 })
 
 describe("isWindowsSandboxAvailable & resolveWindowsSandboxPath", () => {
-  test("resolves a path when available and caches the result", async () => {
+  test.runIf(process.platform === "win32")("resolves a path on win32 and caches the result", async () => {
     resetWindowsSandboxCache()
     const path = await resolveWindowsSandboxPath()
     expect(path).toBeTruthy()
     const available = await isWindowsSandboxAvailable()
     expect(available).toBe(true)
+  })
+
+  test("returns consistent availability matching resolved path", async () => {
+    resetWindowsSandboxCache()
+    const path = await resolveWindowsSandboxPath()
+    const available = await isWindowsSandboxAvailable()
+    expect(available).toBe(path !== null)
   })
 })
 
