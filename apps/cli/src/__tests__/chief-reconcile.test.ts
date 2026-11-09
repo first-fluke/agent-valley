@@ -15,7 +15,7 @@ import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { registerChiefCommands } from "../chief"
+import { registerChiefCommands } from "../chief-commands"
 import { reconcileMissionExecution, registerMissionReconciliation } from "../chief-reconcile"
 
 let root: string

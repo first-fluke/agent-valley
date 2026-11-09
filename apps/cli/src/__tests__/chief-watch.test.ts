@@ -6,7 +6,7 @@ import { mission as missionFixture } from "@agent-valley/core/chief/reports.fixt
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { Command } from "commander"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { registerChiefCommands } from "../chief"
+import { registerChiefCommands } from "../chief-commands"
 import { abortableDelay, superviseOrder } from "../chief-supervisor"
 
 vi.mock("../chief-supervisor", () => ({ superviseOrder: vi.fn(), abortableDelay: vi.fn() }))

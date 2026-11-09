@@ -8,16 +8,21 @@
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import {
+  buildCodexAppServerArgs,
   closeInputAndJoin,
   codexExitError,
   extractCodexErrorMessage,
+  extractCodexFileChanges,
   extractTokenUsage,
   type JsonRpcRequest,
   type JsonRpcResponse,
+  parseCodexAgentMessageItem,
+  pauseCodexProcess,
+  resumeCodexProcess,
 } from "./codex-protocol"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion } from "./native-failure"
-import { BoundedResultText, MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
+import { BoundedResultText, nativeResultLimitMessage } from "./native-result"
 
 export class CodexSession extends BaseSession {
   private rpcId = 0
@@ -59,11 +64,7 @@ export class CodexSession extends BaseSession {
   }
 
   protected buildAppServerArgs(config: AgentConfig): string[] {
-    const args = ["app-server", "--listen", "stdio://"]
-    if (config.model) {
-      args.push("-c", `model=${JSON.stringify(config.model)}`)
-    }
-    return args
+    return buildCodexAppServerArgs(config)
   }
 
   protected buildAppServerEnv(_config: AgentConfig): Record<string, string> {
@@ -198,59 +199,16 @@ export class CodexSession extends BaseSession {
 
   // ── Live intervention (C) ──────────────────────────────────────────────
 
-  /**
-   * Pause the Codex process via SIGSTOP. Unix-only — Windows has no
-   * equivalent signal, so we throw with an actionable hint.
-   */
+  /** Pause the Codex process via SIGSTOP. Unix-only. */
   async pause(): Promise<void> {
-    if (!this.process || !this.isAlive() || this.process.pid == null) {
-      throw new Error(
-        "CodexSession.pause: no live process to pause.\n" +
-          "  Fix: check session.isAlive() before dispatching a pause intervention.\n" +
-          "  Source: InterventionBus should gate on RunHandle.isAlive().",
-      )
-    }
-    if (process.platform === "win32") {
-      throw new Error(
-        "CodexSession.pause: SIGSTOP is not supported on Windows.\n" +
-          "  Fix: pause/resume interventions require a POSIX platform. Use `abort` instead.\n" +
-          "  Tracking: docs/plans/v0-2-bigbang-design.md § 6.3 (E12).",
-      )
-    }
-    try {
-      process.kill(this.process.pid, "SIGSTOP")
-      this.paused = true
-    } catch (err) {
-      throw new Error(
-        `CodexSession.pause: failed to SIGSTOP pid=${this.process.pid}: ${String(err)}.\n` +
-          "  Fix: verify the process is still running and owned by this user.",
-      )
-    }
+    pauseCodexProcess(this.process, this.isAlive())
+    this.paused = true
   }
 
   /** Resume a paused Codex process via SIGCONT. Unix-only. */
   async resume(): Promise<void> {
-    if (!this.process || this.process.pid == null) {
-      throw new Error(
-        "CodexSession.resume: no process to resume.\n" +
-          "  Fix: ensure the session was previously paused before calling resume.",
-      )
-    }
-    if (process.platform === "win32") {
-      throw new Error(
-        "CodexSession.resume: SIGCONT is not supported on Windows.\n" +
-          "  Fix: pause/resume interventions require a POSIX platform.",
-      )
-    }
-    try {
-      process.kill(this.process.pid, "SIGCONT")
-      this.paused = false
-    } catch (err) {
-      throw new Error(
-        `CodexSession.resume: failed to SIGCONT pid=${this.process.pid}: ${String(err)}.\n` +
-          "  Fix: verify the process is still present and previously paused.",
-      )
-    }
+    resumeCodexProcess(this.process)
+    this.paused = false
   }
 
   /**
@@ -445,37 +403,23 @@ export class CodexSession extends BaseSession {
       }
 
       case "item/completed": {
-        const item = msg.params?.item as
-          | {
-              type?: string
-              text?: string
-              phase?: string | null
-              changes?: Array<{ path: string; kind: { type: string } }>
-            }
-          | undefined
+        const item = msg.params?.item as Record<string, unknown> | undefined
         if (item?.type === "agentMessage") {
-          if (item.phase != null) this.phasedMessageSeen = true
-          if (typeof item.text === "string") {
-            const exceeded = item.text.length > MAX_NATIVE_RESULT_LENGTH
-            const text = exceeded ? undefined : item.text
-            if (item.phase === "final_answer") {
-              this.finalAnswer = text
-              this.finalAnswerExceeded = exceeded
-            } else if (item.phase == null) {
-              this.completedMessage = text
-              this.completedMessageExceeded = exceeded
-            }
+          const parsed = parseCodexAgentMessageItem(item)
+          if (parsed.phasedMessageSeen) this.phasedMessageSeen = true
+          if (parsed.finalAnswer !== undefined || parsed.finalAnswerExceeded) {
+            this.finalAnswer = parsed.finalAnswer
+            this.finalAnswerExceeded = parsed.finalAnswerExceeded ?? false
+          }
+          if (parsed.completedMessage !== undefined || parsed.completedMessageExceeded) {
+            this.completedMessage = parsed.completedMessage
+            this.completedMessageExceeded = parsed.completedMessageExceeded ?? false
           }
         }
         if (item?.type === "fileChange") {
-          for (const change of item.changes ?? []) {
+          for (const change of extractCodexFileChanges(item)) {
             if (!this.filesChanged.includes(change.path)) this.filesChanged.push(change.path)
-            const kind = change.kind.type
-            this.emit({
-              type: "fileChange",
-              path: change.path,
-              changeType: kind === "add" || kind === "delete" ? kind : "modify",
-            })
+            this.emit({ type: "fileChange", ...change })
           }
         }
         break

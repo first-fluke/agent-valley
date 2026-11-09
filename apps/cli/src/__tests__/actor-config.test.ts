@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentAvailability } from "../agent-discovery"
-import { registerChiefCommands } from "../chief"
+import { registerChiefCommands } from "../chief-commands"
 import { resolveOrderConfig } from "../chief-config"
 
 vi.mock("@agent-valley/core/config/yaml-loader", async (original) => ({

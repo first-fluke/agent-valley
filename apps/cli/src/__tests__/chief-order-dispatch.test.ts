@@ -6,7 +6,8 @@ import { mission as missionFixture } from "@agent-valley/core/chief/reports.fixt
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { Command } from "commander"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { dispatchOrder, registerChiefCommands } from "../chief"
+import { dispatchOrder } from "../chief"
+import { registerChiefCommands } from "../chief-commands"
 import { operationStore } from "../chief-continuous"
 import { orderWorkerArgs } from "../chief-supervisor"
 

@@ -1,4 +1,6 @@
 import type { ChildProcess } from "node:child_process"
+import type { AgentConfig } from "./agent-session"
+import { MAX_NATIVE_RESULT_LENGTH } from "./native-result"
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0"
@@ -103,4 +105,104 @@ export function extractTokenUsage(
   if (input === 0 && output === 0) return undefined
   const model = (usage.model as string | undefined) ?? (params.model as string | undefined) ?? defaultModel ?? "codex"
   return { input, output, model }
+}
+
+export function pauseCodexProcess(proc: ChildProcess | null, isAlive: boolean): void {
+  if (!proc || !isAlive || proc.pid == null) {
+    throw new Error(
+      "CodexSession.pause: no live process to pause.\n" +
+        "  Fix: check session.isAlive() before dispatching a pause intervention.\n" +
+        "  Source: InterventionBus should gate on RunHandle.isAlive().",
+    )
+  }
+  if (process.platform === "win32") {
+    throw new Error(
+      "CodexSession.pause: SIGSTOP is not supported on Windows.\n" +
+        "  Fix: pause/resume interventions require a POSIX platform. Use `abort` instead.\n" +
+        "  Tracking: docs/plans/v0-2-bigbang-design.md § 6.3 (E12).",
+    )
+  }
+  try {
+    process.kill(proc.pid, "SIGSTOP")
+  } catch (err) {
+    throw new Error(
+      `CodexSession.pause: failed to SIGSTOP pid=${proc.pid}: ${String(err)}.\n` +
+        "  Fix: verify the process is still running and owned by this user.",
+    )
+  }
+}
+
+export function resumeCodexProcess(proc: ChildProcess | null): void {
+  if (!proc || proc.pid == null) {
+    throw new Error(
+      "CodexSession.resume: no process to resume.\n" +
+        "  Fix: ensure the session was previously paused before calling resume.",
+    )
+  }
+  if (process.platform === "win32") {
+    throw new Error(
+      "CodexSession.resume: SIGCONT is not supported on Windows.\n" +
+        "  Fix: pause/resume interventions require a POSIX platform.",
+    )
+  }
+  try {
+    process.kill(proc.pid, "SIGCONT")
+  } catch (err) {
+    throw new Error(
+      `CodexSession.resume: failed to SIGCONT pid=${proc.pid}: ${String(err)}.\n` +
+        "  Fix: verify the process is still present and previously paused.",
+    )
+  }
+}
+
+export function buildCodexAppServerArgs(config: AgentConfig): string[] {
+  const args = ["app-server", "--listen", "stdio://"]
+  if (config.model) {
+    args.push("-c", `model=${JSON.stringify(config.model)}`)
+  }
+  return args
+}
+
+export interface CodexFileChange {
+  path: string
+  changeType: "add" | "modify" | "delete"
+}
+
+export function extractCodexFileChanges(item: Record<string, unknown>): CodexFileChange[] {
+  const changes = item.changes as Array<{ path: string; kind: { type: string } }> | undefined
+  if (!changes) return []
+  return changes.map((change) => ({
+    path: change.path,
+    changeType: change.kind.type === "add" || change.kind.type === "delete" ? change.kind.type : "modify",
+  }))
+}
+
+export function parseCodexAgentMessageItem(item: Record<string, unknown>): {
+  phasedMessageSeen: boolean
+  finalAnswer?: string
+  finalAnswerExceeded?: boolean
+  completedMessage?: string
+  completedMessageExceeded?: boolean
+} {
+  const result: {
+    phasedMessageSeen: boolean
+    finalAnswer?: string
+    finalAnswerExceeded?: boolean
+    completedMessage?: string
+    completedMessageExceeded?: boolean
+  } = {
+    phasedMessageSeen: item.phase != null,
+  }
+  if (typeof item.text === "string") {
+    const exceeded = item.text.length > MAX_NATIVE_RESULT_LENGTH
+    const text = exceeded ? undefined : item.text
+    if (item.phase === "final_answer") {
+      result.finalAnswer = text
+      result.finalAnswerExceeded = exceeded
+    } else if (item.phase == null) {
+      result.completedMessage = text
+      result.completedMessageExceeded = exceeded
+    }
+  }
+  return result
 }
