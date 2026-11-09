@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.4](https://github.com/first-fluke/agent-valley/compare/v4.9.3...v4.9.4) (2026-11-09)
+
+
+### Tests
+
+* **chief:** run windows symlink and subprocess coverage instead of skipping ([4ceb408](https://github.com/first-fluke/agent-valley/commit/4ceb408cd061314ad1ca3b749aba50240289bf22))
+
 ## [4.9.3](https://github.com/first-fluke/agent-valley/compare/v4.9.2...v4.9.3) (2026-11-09)
 
 
