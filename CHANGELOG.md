@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.1](https://github.com/first-fluke/agent-valley/compare/v4.9.0...v4.9.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **chief:** do not cool a route after a framework attempt deadline ([8441d32](https://github.com/first-fluke/agent-valley/commit/8441d32c2868cbc8d5bb6d199e97f047acfebcf1))
+
 ## [4.9.0](https://github.com/first-fluke/agent-valley/compare/v4.8.8...v4.9.0) (2026-11-09)
 
 
