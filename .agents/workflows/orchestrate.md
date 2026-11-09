@@ -138,15 +138,14 @@ Spawn agents via **Agent tool** using `.claude/agents/{agent}.md` definitions.
 
 Spawn same-session subagents with the native `task` tool and `subagent_type: {agent-id}`. Do not use `oma agent spawn` for same-session OpenCode tasks; that external fallback does not appear as a native child task in the active UI/TUI.
 
+### If Kilo Code and target vendor is Kilo
+
+Same as OpenCode: spawn same-session subagents (`.kilo/agents/{agent}.md`) with the native `task` tool and `subagent_type: {agent-id}`. Do not use `oma agent spawn` for same-session Kilo tasks.
+
 ### If Codex CLI and target vendor is Codex
 
 Spawn native Codex custom agents using `.codex/agents/{agent}.toml` when available.
 Pass each agent its task description, API contracts, and relevant context.
-If native dispatch is not verified in the current runtime, fall back to `oma agent spawn {agent_id} {prompt_file} {session_id} --task-id {task.id} -w {workspace}`.
-
-### If Gemini CLI and target vendor is Gemini
-
-Spawn native Gemini subagents using `.gemini/agents/{agent}.md` when available.
 If native dispatch is not verified in the current runtime, fall back to `oma agent spawn {agent_id} {prompt_file} {session_id} --task-id {task.id} -w {workspace}`.
 
 ### If target vendor differs from current runtime, or native dispatch is unavailable
@@ -170,7 +169,7 @@ Use observed failures, missing artifacts, and unmet acceptance criteria to diagn
 
 If useful context is lost or progress remains stalled, save completed work, remaining criteria, verification, and artifact paths before resuming or re-dispatching. Preserve partial results and avoid duplicating a live attempt. Follow `.agents/skills/_shared/core/context-budget.md` and the existing retry/cost limits.
 
-> **Claude Code note**: Agent tool returns results synchronously, so no polling is needed. Check status, files changed, and issues directly in each agent's return value.
+> **Claude Code note**: agents dispatched with `run_in_background=true` report via background completion notifications, not synchronous return values — wait for each notification before proceeding (foreground Agent calls return inline). Check status, files changed, and issues in each agent's result; `oma agent:status` and `progress-*` polling remain the monitoring path for CLI-fallback spawns.
 
 ---
 
