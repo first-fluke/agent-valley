@@ -32,6 +32,7 @@ import { logger } from "../observability/logger"
 import { buildDarwinSandboxCommand, isSandboxExecAvailable, resolveSandboxExecPath } from "./sandbox-darwin"
 import { buildLinuxSandboxCommand, isBwrapAvailable, resolveBwrapPath } from "./sandbox-linux"
 import type { SandboxCommand } from "./sandbox-types"
+import { buildWindowsSandboxCommand, isWindowsSandboxAvailable, resolveWindowsSandboxPath } from "./sandbox-windows"
 
 export const DEFAULT_NETWORK_ALLOWLIST: readonly string[] = Object.freeze([
   "api.anthropic.com",
@@ -174,13 +175,37 @@ export async function planSandboxedSpawn(
     )
   }
 
+  if (platform === "win32") {
+    const available = deps.checkAvailable ? await deps.checkAvailable() : await isWindowsSandboxAvailable()
+    if (available) {
+      const sandboxPath = deps.checkAvailable
+        ? "powershell.exe"
+        : ((await resolveWindowsSandboxPath()) ?? "powershell.exe")
+      const wrapped = buildWindowsSandboxCommand(buildReq, sandboxPath)
+      logger.warn(
+        "sessions.sandbox",
+        "Windows sandbox enforces process and workspace confinement via PowerShell isolation. See docs/harness/SAFETY.md for platform limitations.",
+        { agentType: req.agentType, workspacePath: req.workspacePath },
+      )
+      return { ...wrapped, sandboxed: true, platform, networkAllowlist }
+    }
+    return fallbackOrThrow(
+      req,
+      platform,
+      env,
+      networkAllowlist,
+      "powershell.exe",
+      "PowerShell is required for Windows process isolation: ensure powershell.exe is on PATH or at C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe.",
+    )
+  }
+
   return fallbackOrThrow(
     req,
     platform,
     env,
     networkAllowlist,
     "(none)",
-    `Platform "${platform}" has no supported OS sandbox in this implementation (only darwin/sandbox-exec and linux/bwrap are handled).`,
+    `Platform "${platform}" has no supported OS sandbox in this implementation (only darwin/sandbox-exec, linux/bwrap and win32/powershell are handled).`,
   )
 }
 

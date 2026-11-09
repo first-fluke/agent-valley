@@ -30,6 +30,7 @@ import type { SkillMatrixDeps } from "@agent-valley/core/oma/skill-matrix-adapte
 import { resolveBinaryPath } from "@agent-valley/core/sessions/sandbox-binary"
 import { isSandboxExecAvailable } from "@agent-valley/core/sessions/sandbox-darwin"
 import { isBwrapAvailable } from "@agent-valley/core/sessions/sandbox-linux"
+import { isWindowsSandboxAvailable } from "@agent-valley/core/sessions/sandbox-windows"
 
 export type { AgentType }
 
@@ -61,6 +62,7 @@ export interface DoctorDeps {
   resolveBinary: (name: string, candidateAbsolutePaths?: string[]) => string | null
   isSandboxExecAvailable: () => Promise<boolean>
   isBwrapAvailable: () => Promise<boolean>
+  isWindowsSandboxAvailable?: () => Promise<boolean>
   resolveGlobalConfigPath: () => string
   loadGlobalConfig: (configPath?: string) => GlobalConfig | null
   loadProjectConfig: (projectRoot?: string) => ProjectConfig | null
@@ -81,6 +83,7 @@ export function defaultDoctorDeps(): DoctorDeps {
     resolveBinary: resolveBinaryPath,
     isSandboxExecAvailable,
     isBwrapAvailable,
+    isWindowsSandboxAvailable,
     resolveGlobalConfigPath,
     loadGlobalConfig,
     loadProjectConfig,
@@ -266,12 +269,36 @@ export async function checkSandbox(deps: DoctorDeps): Promise<CheckResult> {
           critical: true,
         }
   }
+  if (deps.platform === "win32") {
+    const available = deps.isWindowsSandboxAvailable
+      ? await deps.isWindowsSandboxAvailable()
+      : await isWindowsSandboxAvailable()
+    return available
+      ? {
+          id: "sandbox",
+          name: "Sandbox binary (powershell)",
+          status: "pass",
+          message: "powershell available for Windows isolation",
+          critical: false,
+        }
+      : {
+          id: "sandbox",
+          name: "Sandbox binary (powershell)",
+          status: "fail",
+          message: "powershell not found",
+          fix:
+            "Ensure PowerShell is installed at C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe or on PATH. " +
+            "The sandbox is fail-closed — agent spawns will be refused until powershell is installed, or set " +
+            "SYMPHONY_ALLOW_UNSANDBOXED=1 (NOT recommended).",
+          critical: true,
+        }
+  }
   return {
     id: "sandbox",
     name: "Sandbox binary",
     status: "fail",
-    message: `Platform "${deps.platform}" has no supported OS sandbox (only darwin/sandbox-exec and linux/bwrap).`,
-    fix: "Run on macOS or Linux, or set SYMPHONY_ALLOW_UNSANDBOXED=1 (NOT recommended).",
+    message: `Platform "${deps.platform}" has no supported OS sandbox (only darwin/sandbox-exec, linux/bwrap and win32/powershell).`,
+    fix: "Run on a supported platform, or set SYMPHONY_ALLOW_UNSANDBOXED=1 (NOT recommended).",
     critical: true,
   }
 }

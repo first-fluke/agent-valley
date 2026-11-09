@@ -749,11 +749,11 @@ describe("planSandboxedSpawn", () => {
   test("unsupported platform + no opt-in: fails closed and names the platform", async () => {
     await expect(
       planSandboxedSpawn(BASE_REQUEST, {
-        platform: "win32",
+        platform: "freebsd",
         env: {},
         checkAvailable: async () => false,
       }),
-    ).rejects.toThrow(/win32/)
+    ).rejects.toThrow(/freebsd/)
   })
 
   test("opt-in gate: SYMPHONY_ALLOW_UNSANDBOXED=1 allows a loud, unsandboxed fallback", async () => {

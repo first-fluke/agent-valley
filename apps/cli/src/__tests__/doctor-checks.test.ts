@@ -205,11 +205,26 @@ describe("checkSandbox", () => {
     expect(result.fix).toContain("SYMPHONY_ALLOW_UNSANDBOXED")
   })
 
-  it("unsupported platform: fails (critical)", async () => {
-    const deps = makeDeps({ platform: "win32" })
+  it("win32: passes when powershell is available", async () => {
+    const deps = makeDeps({ platform: "win32", isWindowsSandboxAvailable: async () => true })
+    const result = await checkSandbox(deps)
+    expect(result.status).toBe("pass")
+    expect(result.critical).toBe(false)
+  })
+
+  it("win32: fails (critical) with powershell hint when powershell is missing", async () => {
+    const deps = makeDeps({ platform: "win32", isWindowsSandboxAvailable: async () => false })
     const result = await checkSandbox(deps)
     expect(result.status).toBe("fail")
     expect(result.critical).toBe(true)
-    expect(result.message).toContain("win32")
+    expect(result.fix).toContain("powershell")
+  })
+
+  it("unsupported platform: fails (critical)", async () => {
+    const deps = makeDeps({ platform: "freebsd" })
+    const result = await checkSandbox(deps)
+    expect(result.status).toBe("fail")
+    expect(result.critical).toBe(true)
+    expect(result.message).toContain("freebsd")
   })
 })
