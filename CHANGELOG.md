@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.5](https://github.com/first-fluke/agent-valley/compare/v4.9.4...v4.9.5) (2026-11-09)
+
+
+### Tests
+
+* **chief:** remove POSIX-only process-group tests for a zero-skip suite ([33a8a78](https://github.com/first-fluke/agent-valley/commit/33a8a787d0ad8feb23c7088aeb1f1272ea37f264))
+
 ## [4.9.4](https://github.com/first-fluke/agent-valley/compare/v4.9.3...v4.9.4) (2026-11-09)
 
 
