@@ -7,7 +7,7 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, test } from "vitest"
-import type { Workspace } from "../domain/models"
+import type { DeadLetterEntry, Workspace } from "../domain/models"
 import type {
   PersistedAttempt,
   PersistedFinalization,
@@ -29,6 +29,13 @@ const RETRY: PersistedRetryEntry = {
   nextRetryAt: "2026-11-02T00:05:00.000Z",
   lastError: "tests failed",
   category: "verification",
+}
+const DEAD_LETTER: DeadLetterEntry = {
+  issueId: "i-dl",
+  attemptCount: 3,
+  failedAt: "2026-11-02T01:00:00.000Z",
+  lastError: "unrecoverable failure",
+  category: "capability",
 }
 const WORKSPACE: Workspace = {
   issueId: "i3",
@@ -58,17 +65,18 @@ afterEach(async () => {
 })
 
 describe("SqliteRunStateStore", () => {
-  test("round-trips attempts, retries and finalizations through the database", async () => {
+  test("round-trips attempts, retries, dead letters and finalizations through the database", async () => {
     const db = StateDatabase.inMemory()
     const writer = new SqliteRunStateStore(db)
     writer.replaceActiveAttempts([ATTEMPT, { ...ATTEMPT, issueId: "i9", attemptId: "a9", pid: null }])
-    writer.replaceRetryQueue([RETRY])
+    writer.replaceRetryQueue([RETRY], [DEAD_LETTER])
     writer.replacePendingFinalizations([FINALIZATION])
     await writer.flushOrThrow()
 
     const snapshot = await new SqliteRunStateStore(db).load()
     expect(snapshot.activeAttempts).toEqual([ATTEMPT, { ...ATTEMPT, issueId: "i9", attemptId: "a9", pid: null }])
     expect(snapshot.retryQueue).toEqual([RETRY])
+    expect(snapshot.deadLetterQueue).toEqual([DEAD_LETTER])
     expect(snapshot.pendingFinalizations).toEqual([FINALIZATION])
     expect(snapshot.updatedAt).not.toBe("")
     await db.close()
@@ -81,11 +89,13 @@ describe("SqliteRunStateStore", () => {
     store.replaceRetryQueue([{ ...RETRY, category: undefined }])
     store.replaceRetryQueue([])
     store.replaceRetryQueue([{ ...RETRY, category: undefined }])
+    store.replaceDeadLetterQueue([DEAD_LETTER])
     await store.flushOrThrow()
 
     const snapshot = await new SqliteRunStateStore(db).load()
     expect(snapshot.activeAttempts).toEqual([ATTEMPT])
     expect(snapshot.retryQueue).toEqual([{ ...RETRY, category: "infra" }])
+    expect(snapshot.deadLetterQueue).toEqual([DEAD_LETTER])
     await db.close()
   })
 
@@ -95,13 +105,20 @@ describe("SqliteRunStateStore", () => {
     const legacyPath = join(dir, "run-state.json")
     await writeFile(
       legacyPath,
-      JSON.stringify({ version: 1, updatedAt: "x", activeAttempts: [ATTEMPT], retryQueue: [RETRY] }),
+      JSON.stringify({
+        version: 1,
+        updatedAt: "x",
+        activeAttempts: [ATTEMPT],
+        retryQueue: [RETRY],
+        deadLetterQueue: [DEAD_LETTER],
+      }),
     )
     const db = StateDatabase.inMemory()
 
     const snapshot = await new SqliteRunStateStore(db, legacyPath).load()
     expect(snapshot.activeAttempts).toEqual([ATTEMPT])
     expect(snapshot.retryQueue).toEqual([RETRY])
+    expect(snapshot.deadLetterQueue).toEqual([DEAD_LETTER])
     expect(await readdir(dir)).toEqual(["run-state.json.migrated"])
 
     // A file that reappears later is left alone.

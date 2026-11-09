@@ -149,6 +149,8 @@ export function buildOrchestratorStatus(
     waitingIssueDetails: Array.from(state.waitingIssues.values()),
     retryQueueSize: retryQueue.size,
     retryQueue: retryQueue.entries,
+    deadLetterQueueSize: retryQueue.deadLetterSize,
+    deadLetterQueue: retryQueue.deadLetter,
     config: {
       agentType: config.agentType,
       maxParallel: config.maxParallel,

@@ -14,7 +14,7 @@
  */
 
 import { readFile } from "node:fs/promises"
-import type { RetryCategory } from "../../domain/models"
+import type { DeadLetterEntry, RetryCategory } from "../../domain/models"
 import { logger } from "../../observability/logger"
 import { writeJsonAtomic } from "../../util/atomic-json"
 
@@ -77,11 +77,19 @@ export interface RunStateSnapshot {
   updatedAt: string
   activeAttempts: PersistedAttempt[]
   retryQueue: PersistedRetryEntry[]
+  deadLetterQueue?: DeadLetterEntry[]
   pendingFinalizations?: PersistedFinalization[]
 }
 
 function emptySnapshot(): RunStateSnapshot {
-  return { version: 1, updatedAt: "", activeAttempts: [], retryQueue: [], pendingFinalizations: [] }
+  return {
+    version: 1,
+    updatedAt: "",
+    activeAttempts: [],
+    retryQueue: [],
+    deadLetterQueue: [],
+    pendingFinalizations: [],
+  }
 }
 
 /**
@@ -91,7 +99,8 @@ function emptySnapshot(): RunStateSnapshot {
 export interface RunStatePort {
   load(): Promise<RunStateSnapshot>
   replaceActiveAttempts(attempts: PersistedAttempt[]): void
-  replaceRetryQueue(entries: PersistedRetryEntry[]): void
+  replaceRetryQueue(entries: PersistedRetryEntry[], deadLetter?: DeadLetterEntry[]): void
+  replaceDeadLetterQueue(entries: DeadLetterEntry[]): void
   replacePendingFinalizations(entries: PersistedFinalization[]): void
   /** Await any in-flight writes. Test-only convenience. */
   flush(): Promise<void>
@@ -118,11 +127,15 @@ export class RunStatePersistence implements RunStatePort {
         retryQueue: Array.isArray(parsed.retryQueue)
           ? parsed.retryQueue.map((entry) => ({ ...entry, category: entry.category ?? "infra" }))
           : [],
+        deadLetterQueue: Array.isArray(parsed.deadLetterQueue)
+          ? parsed.deadLetterQueue.map((entry) => ({ ...entry, category: entry.category ?? "infra" }))
+          : [],
         pendingFinalizations: Array.isArray(parsed.pendingFinalizations) ? parsed.pendingFinalizations : [],
       }
       logger.info("run-state-persistence", `Loaded run-state snapshot`, {
         activeAttempts: String(this.snapshot.activeAttempts.length),
         retryQueue: String(this.snapshot.retryQueue.length),
+        deadLetterQueue: String(this.snapshot.deadLetterQueue?.length ?? 0),
       })
     } catch {
       // File doesn't exist (first boot) or is corrupt — start fresh.
@@ -138,8 +151,16 @@ export class RunStatePersistence implements RunStatePort {
     this.persistAsync()
   }
 
-  replaceRetryQueue(entries: PersistedRetryEntry[]): void {
+  replaceRetryQueue(entries: PersistedRetryEntry[], deadLetter?: DeadLetterEntry[]): void {
     this.snapshot.retryQueue = entries
+    if (deadLetter !== undefined) {
+      this.snapshot.deadLetterQueue = deadLetter
+    }
+    this.persistAsync()
+  }
+
+  replaceDeadLetterQueue(entries: DeadLetterEntry[]): void {
+    this.snapshot.deadLetterQueue = entries
     this.persistAsync()
   }
 

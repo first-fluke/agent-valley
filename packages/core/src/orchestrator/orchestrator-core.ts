@@ -23,15 +23,12 @@ import {
 } from "./persistence/recovery-apply"
 import { type PersistedAttempt, RunStatePersistence, type RunStatePort } from "./persistence/run-state-store"
 import type { RetryContext } from "./retry-queue"
-import { CAPACITY_WAIT_REASON, RetryQueue } from "./retry-queue"
+import { CAPACITY_WAIT_REASON, DEFAULT_MAX_BACKOFF_SEC, RetryQueue } from "./retry-queue"
 import { fillVacantSlots } from "./slot-filler"
 
 export type SlotDecision = { ok: true } | { ok: false; reason: "already_active" | "concurrency" | "stopping" }
-
 export type CoreEventEmit = (event: string, payload: Record<string, unknown>) => void
-
 export type FillSlotsHook = () => Promise<void>
-
 export type ReevaluateWaitingHook = () => Promise<void>
 
 export interface LifecycleDispatcher {
@@ -63,9 +60,7 @@ export class OrchestratorCore {
   readonly agentRunnerPort: SpawnAgentRunnerAdapter
   readonly retryQueue: RetryQueue
   readonly dagScheduler: DagScheduler
-
   readonly observability: ObservabilityHooks
-
   readonly budget: BudgetService
 
   readonly state: OrchestratorRuntimeState = {
@@ -103,7 +98,14 @@ export class OrchestratorCore {
 
     this.agentRunnerPort = deps.agentRunner ?? new SpawnAgentRunnerAdapter()
     this.agentRunner = this.agentRunnerPort.service
-    this.retryQueue = new RetryQueue(this.config.agentMaxRetries, this.config.agentRetryDelay)
+    const retentionMs = this.config.agentRetryRetentionSec ? this.config.agentRetryRetentionSec * 1000 : undefined
+    this.retryQueue = new RetryQueue(
+      this.config.agentMaxRetries,
+      this.config.agentRetryDelay,
+      Math.random,
+      DEFAULT_MAX_BACKOFF_SEC,
+      retentionMs,
+    )
     this.dagScheduler = new DagScheduler(deps.dagCache ?? `${this.config.workspaceRoot}/.agent-valley/dag-cache.json`)
     this.runStatePersistence =
       deps.runStatePersistence ?? new RunStatePersistence(`${this.config.workspaceRoot}/.agent-valley/run-state.json`)
@@ -170,19 +172,17 @@ export class OrchestratorCore {
   }
 
   canAcceptIssue(issueId: string): SlotDecision {
-    if (
+    const isBusy =
       this.processingIssues.has(issueId) ||
       this.state.activeWorkspaces.has(issueId) ||
-      this.recoveredAttempts.some((attempt) => attempt.issueId === issueId) ||
+      this.recoveredAttempts.some((a) => a.issueId === issueId) ||
       this.pendingFinalizations.has(issueId)
-    ) {
-      return { ok: false, reason: "already_active" }
-    }
+    if (isBusy) return { ok: false, reason: "already_active" }
     if (this.isStopping) return { ok: false, reason: "stopping" }
     const reserved = new Set([
       ...this.processingIssues,
       ...this.state.activeWorkspaces.keys(),
-      ...this.recoveredAttempts.map((attempt) => attempt.issueId),
+      ...this.recoveredAttempts.map((a) => a.issueId),
     ]).size
     if (Math.max(reserved, this.agentRunner.activeCount) >= this.config.maxParallel) {
       return { ok: false, reason: "concurrency" }
@@ -276,7 +276,7 @@ export class OrchestratorCore {
 
   /** Mirror the retry queue to disk. Called after every add/remove/drain. */
   private persistRetryQueue(): void {
-    this.runStatePersistence.replaceRetryQueue(this.retryQueue.entries)
+    this.runStatePersistence.replaceRetryQueue(this.retryQueue.entries, this.retryQueue.deadLetter)
   }
 
   /** Boot recovery — idempotent (guarded by `recoveryCompleted`). Called automatically from `start()`, before startup sync. */
@@ -286,6 +286,7 @@ export class OrchestratorCore {
 
     const snapshot = await this.runStatePersistence.load()
     this.pendingFinalizations.restore(snapshot.pendingFinalizations ?? [])
+    if (snapshot.deadLetterQueue?.length) this.retryQueue.restoreDeadLetter(snapshot.deadLetterQueue)
     if (snapshot.activeAttempts.length === 0 && snapshot.retryQueue.length === 0) return
 
     const recoverable = {
@@ -313,27 +314,21 @@ export class OrchestratorCore {
   ): void {
     this.state.waitingIssues.set(issueId, entry)
   }
-
   hasWaitingIssue(issueId: string): boolean {
     return this.state.waitingIssues.has(issueId)
   }
-
   deleteWaitingIssue(issueId: string): void {
     this.state.waitingIssues.delete(issueId)
   }
-
   waitingIssueIds(): string[] {
     return [...this.state.waitingIssues.keys()]
   }
-
   getWaitingEntry(issueId: string): { identifier: string } | undefined {
     return this.state.waitingIssues.get(issueId)
   }
-
   touchLastEvent(): void {
     this.state.lastEventAt = new Date().toISOString()
   }
-
   getPromptTemplate(): string {
     return this.promptTemplate
   }
@@ -455,8 +450,12 @@ export class OrchestratorCore {
     await this.pendingFinalizations.reconcile()
     if (this.reevaluateWaiting && this.state.waitingIssues.size > 0) await this.reevaluateWaiting()
     if (!this.dispatcher) return
+    const { purgedRetries, purgedDeadLetter } = this.retryQueue.purgeExpired()
     const ready = this.retryQueue.drain()
-    if (ready.length === 0) return
+    if (ready.length === 0) {
+      if (purgedRetries > 0 || purgedDeadLetter > 0) this.persistRetryQueue()
+      return
+    }
     this.persistRetryQueue()
 
     let issues: Issue[] = []

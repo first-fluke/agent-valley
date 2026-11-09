@@ -88,7 +88,7 @@ export async function createGitRepo(): Promise<RepoHandle> {
 
   await writeFile(join(repoDir, "README.md"), "# integ\n")
   run("add .")
-  run("commit -m 'initial commit'")
+  run('commit -m "initial commit"')
 
   return {
     repoDir,

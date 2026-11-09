@@ -1,6 +1,7 @@
 /**
- * Retry Queue — Exponential backoff retry scheduling with equal jitter
- * and per-failure-category attempt policy.
+ * Retry Queue — Exponential backoff retry scheduling with equal jitter,
+ * per-failure-category attempt policy, dead-letter queue (DLQ) for
+ * exhausted attempts, and retention-based expiration purging.
  *
  * Jitter: naive exponential backoff makes every failing issue retry at
  * exactly the same instants, so a shared upstream outage (Linear API,
@@ -16,10 +17,18 @@
  * are both plausibly fixed by another attempt). Capability failures
  * (agent produced nothing useful) get a shorter cap — re-running the
  * same incapable attempt rarely helps, so we escalate to cancelled sooner.
+ *
+ * Dead-Letter Queue & Retention:
+ * Exhausted retries are retained in the dead-letter queue for operator
+ * inspection or manual requeueing. Stale retries and dead-letter entries
+ * exceeding `retentionMs` are automatically purged during queue drain or
+ * explicit cleanup.
  */
 
-import type { RetryCategory, RetryEntry } from "../domain/models"
+import type { DeadLetterEntry, RetryCategory, RetryEntry } from "../domain/models"
 import { logger } from "../observability/logger"
+
+export type { DeadLetterEntry } from "../domain/models"
 
 /** Prior-attempt context handed to a retry dispatch. */
 export interface RetryContext {
@@ -29,14 +38,18 @@ export interface RetryContext {
 }
 
 /** Ceiling on the (pre-jitter) exponential delay, so a high attemptCount can't grow the wait unboundedly. */
-const DEFAULT_MAX_BACKOFF_SEC = 3600
+export const DEFAULT_MAX_BACKOFF_SEC = 3600
 
 /** Capability-class failures are capped at this many queued attempts regardless of the configured maxAttempts (unless maxAttempts is already smaller). */
 const CAPABILITY_MAX_ATTEMPTS = 2
 export const CAPACITY_WAIT_REASON = "Concurrency limit reached"
 
+/** Default retention period for dead-letter and stale retry entries: 7 days in milliseconds. */
+export const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+
 export class RetryQueue {
   private queue: RetryEntry[] = []
+  private deadLetterQueue: DeadLetterEntry[] = []
 
   constructor(
     private maxAttempts: number,
@@ -44,7 +57,12 @@ export class RetryQueue {
     /** Injectable RNG so jitter bounds are testable without flakiness. Defaults to Math.random. */
     private rng: () => number = Math.random,
     private maxBackoffSec: number = DEFAULT_MAX_BACKOFF_SEC,
+    private retentionMs: number = DEFAULT_RETENTION_MS,
   ) {}
+
+  get retention(): number {
+    return this.retentionMs
+  }
 
   /** Per-category attempt cap. Capability gets a shorter budget; infra/verification use the configured maxAttempts. */
   private maxAttemptsFor(category: RetryCategory): number {
@@ -66,6 +84,49 @@ export class RetryQueue {
   }
 
   /**
+   * Record an issue in the dead-letter queue. Updates in place if already present.
+   */
+  private recordDeadLetter(entry: DeadLetterEntry): void {
+    const existingIndex = this.deadLetterQueue.findIndex((e) => e.issueId === entry.issueId)
+    if (existingIndex >= 0) {
+      this.deadLetterQueue[existingIndex] = entry
+    } else {
+      this.deadLetterQueue.push(entry)
+    }
+  }
+
+  /**
+   * Purge retry entries and dead-letter entries that have exceeded retention.
+   */
+  purgeExpired(now: number = Date.now()): { purgedRetries: number; purgedDeadLetter: number } {
+    const cutoff = now - this.retentionMs
+    const initialDeadLetterLen = this.deadLetterQueue.length
+    this.deadLetterQueue = this.deadLetterQueue.filter((e) => {
+      const t = Date.parse(e.failedAt)
+      return !Number.isNaN(t) && t >= cutoff
+    })
+    const purgedDeadLetter = initialDeadLetterLen - this.deadLetterQueue.length
+
+    const initialQueueLen = this.queue.length
+    this.queue = this.queue.filter((e) => {
+      const t = Date.parse(e.nextRetryAt)
+      return !Number.isNaN(t) && t >= cutoff
+    })
+    const purgedRetries = initialQueueLen - this.queue.length
+
+    if (purgedDeadLetter > 0 || purgedRetries > 0) {
+      logger.info("orchestrator", "Purged expired entries from retry/dead-letter queues", {
+        purgedDeadLetter: String(purgedDeadLetter),
+        purgedRetries: String(purgedRetries),
+        remainingDeadLetter: String(this.deadLetterQueue.length),
+        remainingRetries: String(this.queue.length),
+      })
+    }
+
+    return { purgedRetries, purgedDeadLetter }
+  }
+
+  /**
    * @param category Failure classification driving the per-category max-attempts
    *   policy (see module docstring). Defaults to "infra" when a caller omits it,
    *   so existing 3-arg call sites keep their prior (infra) behavior unchanged.
@@ -73,11 +134,19 @@ export class RetryQueue {
   add(issueId: string, attemptCount: number, lastError: string, category: RetryCategory = "infra"): boolean {
     const cap = this.maxAttemptsFor(category)
     if (attemptCount >= cap) {
-      logger.error("orchestrator", `Max retry attempts reached for issue`, {
+      logger.error("orchestrator", "Max retry attempts reached for issue", {
         issueId,
         attemptCount: String(attemptCount),
         category,
         maxAttempts: String(cap),
+      })
+      this.queue = this.queue.filter((e) => e.issueId !== issueId)
+      this.recordDeadLetter({
+        issueId,
+        attemptCount,
+        failedAt: new Date().toISOString(),
+        lastError,
+        category,
       })
       return false
     }
@@ -105,6 +174,8 @@ export class RetryQueue {
     const nextRetryAt = new Date(Date.now() + delaySec * 1000).toISOString()
 
     this.queue.push({ issueId, attemptCount, nextRetryAt, lastError, category })
+    // If it was in dead-letter, clear it now that it is queued again
+    this.deadLetterQueue = this.deadLetterQueue.filter((e) => e.issueId !== issueId)
 
     logger.warn("orchestrator", "Retry scheduled", {
       issueId,
@@ -116,8 +187,9 @@ export class RetryQueue {
     return true
   }
 
-  /** Get entries that are ready to retry now. */
+  /** Get entries that are ready to retry now. Purges expired entries first. */
   drain(): RetryEntry[] {
+    this.purgeExpired()
     const now = new Date().toISOString()
     const ready: RetryEntry[] = []
     const remaining: RetryEntry[] = []
@@ -144,5 +216,39 @@ export class RetryQueue {
 
   get entries(): RetryEntry[] {
     return [...this.queue]
+  }
+
+  get deadLetter(): DeadLetterEntry[] {
+    return [...this.deadLetterQueue]
+  }
+
+  get deadLetterSize(): number {
+    return this.deadLetterQueue.length
+  }
+
+  getDeadLetter(issueId: string): DeadLetterEntry | undefined {
+    return this.deadLetterQueue.find((e) => e.issueId === issueId)
+  }
+
+  removeDeadLetter(issueId: string): boolean {
+    const initialLen = this.deadLetterQueue.length
+    this.deadLetterQueue = this.deadLetterQueue.filter((e) => e.issueId !== issueId)
+    return this.deadLetterQueue.length < initialLen
+  }
+
+  clearDeadLetter(): void {
+    this.deadLetterQueue = []
+  }
+
+  restoreDeadLetter(entries: DeadLetterEntry[]): void {
+    this.deadLetterQueue = [...entries]
+    this.purgeExpired()
+  }
+
+  requeueDeadLetter(issueId: string): boolean {
+    const entry = this.getDeadLetter(issueId)
+    if (!entry) return false
+    this.removeDeadLetter(issueId)
+    return this.add(issueId, 0, `Re-queued from dead-letter queue: ${entry.lastError}`, entry.category)
   }
 }

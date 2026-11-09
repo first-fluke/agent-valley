@@ -7,7 +7,7 @@
  */
 
 import type { InStatement } from "@libsql/client"
-import type { RetryCategory } from "../domain/models"
+import type { DeadLetterEntry, RetryCategory } from "../domain/models"
 import { logger } from "../observability/logger"
 import {
   type PersistedAttempt,
@@ -23,7 +23,13 @@ import type { StateDatabase } from "./state-database"
 const UPDATED_AT = "run_state_updated_at"
 
 export class SqliteRunStateStore implements RunStatePort {
-  private snapshot: RunStateSnapshot = { version: 1, updatedAt: "", activeAttempts: [], retryQueue: [] }
+  private snapshot: RunStateSnapshot = {
+    version: 1,
+    updatedAt: "",
+    activeAttempts: [],
+    retryQueue: [],
+    deadLetterQueue: [],
+  }
   private writeQueue: Promise<void> = Promise.resolve()
   private lastWriteError: unknown = null
 
@@ -40,13 +46,15 @@ export class SqliteRunStateStore implements RunStatePort {
       await this.db.write([
         ...this.attemptStatements(legacy.activeAttempts),
         ...this.retryStatements(legacy.retryQueue),
+        ...this.deadLetterStatements(legacy.deadLetterQueue ?? []),
         ...this.finalizationStatements(legacy.pendingFinalizations ?? []),
       ])
     })
 
-    const [attempts, retries, finalizations, updatedAt] = await Promise.all([
+    const [attempts, retries, deadLetters, finalizations, updatedAt] = await Promise.all([
       this.db.execute({ sql: "SELECT * FROM active_attempts ORDER BY started_at", args: [] }),
       this.db.execute({ sql: "SELECT * FROM retry_queue ORDER BY next_retry_at", args: [] }),
+      this.db.execute({ sql: "SELECT * FROM dead_letter_queue ORDER BY failed_at", args: [] }),
       this.db.execute({ sql: "SELECT record FROM pending_finalizations", args: [] }),
       this.db.getMeta(UPDATED_AT),
     ])
@@ -67,11 +75,19 @@ export class SqliteRunStateStore implements RunStatePort {
         lastError: String(row.last_error),
         category: String(row.category) as RetryCategory,
       })),
+      deadLetterQueue: deadLetters.rows.map((row) => ({
+        issueId: String(row.issue_id),
+        attemptCount: Number(row.attempt_count),
+        failedAt: String(row.failed_at),
+        lastError: String(row.last_error),
+        category: String(row.category) as RetryCategory,
+      })),
       pendingFinalizations: finalizations.rows.map((row) => JSON.parse(String(row.record)) as PersistedFinalization),
     }
     logger.info("run-state-persistence", "Loaded run-state from the state database", {
       activeAttempts: String(this.snapshot.activeAttempts.length),
       retryQueue: String(this.snapshot.retryQueue.length),
+      deadLetterQueue: String(this.snapshot.deadLetterQueue?.length ?? 0),
     })
     return this.snapshot
   }
@@ -81,9 +97,19 @@ export class SqliteRunStateStore implements RunStatePort {
     this.persist(this.attemptStatements(attempts))
   }
 
-  replaceRetryQueue(entries: PersistedRetryEntry[]): void {
+  replaceRetryQueue(entries: PersistedRetryEntry[], deadLetter?: DeadLetterEntry[]): void {
     this.snapshot.retryQueue = entries
-    this.persist(this.retryStatements(entries))
+    const stmts = [...this.retryStatements(entries)]
+    if (deadLetter !== undefined) {
+      this.snapshot.deadLetterQueue = deadLetter
+      stmts.push(...this.deadLetterStatements(deadLetter))
+    }
+    this.persist(stmts)
+  }
+
+  replaceDeadLetterQueue(entries: DeadLetterEntry[]): void {
+    this.snapshot.deadLetterQueue = entries
+    this.persist(this.deadLetterStatements(entries))
   }
 
   replacePendingFinalizations(entries: PersistedFinalization[]): void {
@@ -116,6 +142,16 @@ export class SqliteRunStateStore implements RunStatePort {
       ...entries.map((entry) => ({
         sql: "INSERT INTO retry_queue (issue_id, attempt_count, next_retry_at, last_error, category) VALUES (?, ?, ?, ?, ?)",
         args: [entry.issueId, entry.attemptCount, entry.nextRetryAt, entry.lastError, entry.category ?? "infra"],
+      })),
+    ]
+  }
+
+  private deadLetterStatements(entries: DeadLetterEntry[]): InStatement[] {
+    return [
+      { sql: "DELETE FROM dead_letter_queue", args: [] },
+      ...entries.map((entry) => ({
+        sql: "INSERT INTO dead_letter_queue (issue_id, attempt_count, failed_at, last_error, category) VALUES (?, ?, ?, ?, ?)",
+        args: [entry.issueId, entry.attemptCount, entry.failedAt, entry.lastError, entry.category ?? "infra"],
       })),
     ]
   }

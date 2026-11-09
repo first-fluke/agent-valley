@@ -3,6 +3,7 @@
  * Avoids touching the real filesystem (see persistence/run-state-store.ts).
  */
 
+import type { DeadLetterEntry } from "../../domain/models"
 import type {
   PersistedAttempt,
   PersistedFinalization,
@@ -15,6 +16,7 @@ export class FakeRunStatePersistence implements RunStatePort {
   /** Calls recorded for assertions. */
   public replaceActiveAttemptsCalls: PersistedAttempt[][] = []
   public replaceRetryQueueCalls: PersistedRetryEntry[][] = []
+  public replaceDeadLetterQueueCalls: DeadLetterEntry[][] = []
   public replacePendingFinalizationsCalls: PersistedFinalization[][] = []
 
   private snapshot: RunStateSnapshot
@@ -25,6 +27,7 @@ export class FakeRunStatePersistence implements RunStatePort {
       updatedAt: "",
       activeAttempts: initial.activeAttempts ?? [],
       retryQueue: initial.retryQueue ?? [],
+      deadLetterQueue: initial.deadLetterQueue ?? [],
       pendingFinalizations: initial.pendingFinalizations ?? [],
     }
   }
@@ -38,9 +41,21 @@ export class FakeRunStatePersistence implements RunStatePort {
     this.replaceActiveAttemptsCalls.push(attempts)
   }
 
-  replaceRetryQueue(entries: PersistedRetryEntry[]): void {
-    this.snapshot = { ...this.snapshot, retryQueue: entries }
+  replaceRetryQueue(entries: PersistedRetryEntry[], deadLetter?: DeadLetterEntry[]): void {
+    this.snapshot = {
+      ...this.snapshot,
+      retryQueue: entries,
+      ...(deadLetter !== undefined ? { deadLetterQueue: deadLetter } : {}),
+    }
     this.replaceRetryQueueCalls.push(entries)
+    if (deadLetter !== undefined) {
+      this.replaceDeadLetterQueueCalls.push(deadLetter)
+    }
+  }
+
+  replaceDeadLetterQueue(entries: DeadLetterEntry[]): void {
+    this.snapshot = { ...this.snapshot, deadLetterQueue: entries }
+    this.replaceDeadLetterQueueCalls.push(entries)
   }
 
   replacePendingFinalizations(entries: PersistedFinalization[]): void {

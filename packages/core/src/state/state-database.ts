@@ -28,6 +28,9 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS retry_queue (
     issue_id TEXT PRIMARY KEY, attempt_count INTEGER NOT NULL, next_retry_at TEXT NOT NULL,
     last_error TEXT NOT NULL, category TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS dead_letter_queue (
+    issue_id TEXT PRIMARY KEY, attempt_count INTEGER NOT NULL, failed_at TEXT NOT NULL,
+    last_error TEXT NOT NULL, category TEXT NOT NULL)`,
   "CREATE TABLE IF NOT EXISTS pending_finalizations (issue_id TEXT PRIMARY KEY, record TEXT NOT NULL)",
   `CREATE TABLE IF NOT EXISTS dag_nodes (
     issue_id TEXT PRIMARY KEY, identifier TEXT NOT NULL, status TEXT NOT NULL, parent_id TEXT,

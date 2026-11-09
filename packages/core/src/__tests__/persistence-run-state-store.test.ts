@@ -98,6 +98,31 @@ describe("RunStatePersistence", () => {
     expect(snapshot.retryQueue[0]?.category).toBe("capability")
   })
 
+  test("dead letter queue round-trips through persist -> reload", async () => {
+    const writer = new RunStatePersistence(TEST_STORE)
+    writer.replaceDeadLetterQueue([
+      {
+        issueId: "i-dl",
+        attemptCount: 3,
+        failedAt: "2026-07-16T00:10:00.000Z",
+        lastError: "unrecoverable failure",
+        category: "verification",
+      },
+    ])
+    await writer.flush()
+
+    const reader = new RunStatePersistence(TEST_STORE)
+    const snapshot = await reader.load()
+    expect(snapshot.deadLetterQueue).toHaveLength(1)
+    expect(snapshot.deadLetterQueue?.[0]).toMatchObject({
+      issueId: "i-dl",
+      attemptCount: 3,
+      failedAt: "2026-07-16T00:10:00.000Z",
+      lastError: "unrecoverable failure",
+      category: "verification",
+    })
+  })
+
   test("pending tracker finalization round-trips before a Done retry", async () => {
     const writer = new RunStatePersistence(TEST_STORE)
     writer.replacePendingFinalizations([

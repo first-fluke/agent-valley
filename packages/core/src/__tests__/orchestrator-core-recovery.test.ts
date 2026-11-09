@@ -81,6 +81,16 @@ describe("OrchestratorCore — persistence on mutation", () => {
     core.removeRetry("i1")
     expect(runState.replaceRetryQueueCalls.at(-1)).toEqual([])
   })
+
+  test("enqueueRetry exceeding max attempts mirrors dead-letter entry to run-state store", () => {
+    const { core, runState } = buildCore()
+    const added = core.enqueueRetry("i-exhausted", 3, "crash", "infra")
+    expect(added).toBe(false)
+    expect(core.retryQueue.deadLetterSize).toBe(1)
+    expect(runState.current().deadLetterQueue).toEqual([
+      expect.objectContaining({ issueId: "i-exhausted", attemptCount: 3, lastError: "crash" }),
+    ])
+  })
 })
 
 describe("OrchestratorCore — recoverFromPersistedState", () => {
@@ -214,6 +224,24 @@ describe("OrchestratorCore — recoverFromPersistedState", () => {
     await core.recoverFromPersistedState()
     expect(runState.replaceActiveAttemptsCalls).toHaveLength(0)
     expect(runState.replaceRetryQueueCalls).toHaveLength(0)
+  })
+
+  test("restores dead letter queue on boot recovery", async () => {
+    const runState = new FakeRunStatePersistence({
+      deadLetterQueue: [
+        {
+          issueId: "i-dead",
+          attemptCount: 3,
+          failedAt: new Date().toISOString(),
+          lastError: "fatal error",
+          category: "infra",
+        },
+      ],
+    })
+    const { core } = buildCore(runState)
+    await core.recoverFromPersistedState()
+    expect(core.retryQueue.deadLetterSize).toBe(1)
+    expect(core.retryQueue.getDeadLetter("i-dead")?.lastError).toBe("fatal error")
   })
 })
 

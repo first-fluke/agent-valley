@@ -221,4 +221,154 @@ describe("RetryQueue", () => {
       expect(q.entries[0]?.lastError).toBe("second error")
     })
   })
+
+  describe("dead-letter queue (DLQ)", () => {
+    test("exhausted attempts are recorded in the dead-letter queue", () => {
+      const q = new RetryQueue(3, 0)
+      expect(q.add("issue-exhausted", 3, "out of memory", "infra")).toBe(false)
+      expect(q.size).toBe(0)
+      expect(q.deadLetterSize).toBe(1)
+
+      const entry = q.getDeadLetter("issue-exhausted")
+      expect(entry).toBeDefined()
+      expect(entry?.issueId).toBe("issue-exhausted")
+      expect(entry?.attemptCount).toBe(3)
+      expect(entry?.lastError).toBe("out of memory")
+      expect(entry?.category).toBe("infra")
+      expect(entry?.failedAt).toBeDefined()
+    })
+
+    test("capability-class failures enter dead-letter queue when exceeding capability cap", () => {
+      const q = new RetryQueue(5, 0)
+      expect(q.add("issue-cap", 2, "no progress", "capability")).toBe(false)
+      expect(q.deadLetterSize).toBe(1)
+      expect(q.getDeadLetter("issue-cap")?.category).toBe("capability")
+    })
+
+    test("updating an existing dead-letter entry overwrites it with latest attempt and error", () => {
+      const q = new RetryQueue(2, 0)
+      q.add("issue-1", 2, "error 1", "infra")
+      expect(q.deadLetterSize).toBe(1)
+      expect(q.getDeadLetter("issue-1")?.lastError).toBe("error 1")
+
+      q.add("issue-1", 3, "error 2", "verification")
+      expect(q.deadLetterSize).toBe(1)
+      expect(q.getDeadLetter("issue-1")?.lastError).toBe("error 2")
+      expect(q.getDeadLetter("issue-1")?.category).toBe("verification")
+      expect(q.getDeadLetter("issue-1")?.attemptCount).toBe(3)
+    })
+
+    test("re-queuing or successfully adding an issue removes it from the dead-letter queue", () => {
+      const q = new RetryQueue(3, 0)
+      q.add("issue-1", 3, "failed", "infra")
+      expect(q.deadLetterSize).toBe(1)
+
+      // Successfully re-add
+      expect(q.add("issue-1", 1, "retry again", "infra")).toBe(true)
+      expect(q.deadLetterSize).toBe(0)
+      expect(q.size).toBe(1)
+    })
+
+    test("requeueDeadLetter() moves entry from dead-letter back to active retry queue", () => {
+      const q = new RetryQueue(3, 0)
+      q.add("issue-1", 3, "network failure", "infra")
+      expect(q.deadLetterSize).toBe(1)
+      expect(q.size).toBe(0)
+
+      expect(q.requeueDeadLetter("issue-1")).toBe(true)
+      expect(q.deadLetterSize).toBe(0)
+      expect(q.size).toBe(1)
+      expect(q.entries[0]?.attemptCount).toBe(0)
+      expect(q.entries[0]?.lastError).toContain("network failure")
+    })
+
+    test("requeueDeadLetter() returns false for unknown issue", () => {
+      const q = new RetryQueue(3, 0)
+      expect(q.requeueDeadLetter("unknown")).toBe(false)
+    })
+
+    test("removeDeadLetter and clearDeadLetter manipulate dead-letter queue", () => {
+      const q = new RetryQueue(1, 0)
+      q.add("i1", 1, "e1")
+      q.add("i2", 1, "e2")
+      expect(q.deadLetterSize).toBe(2)
+
+      expect(q.removeDeadLetter("i1")).toBe(true)
+      expect(q.removeDeadLetter("nonexistent")).toBe(false)
+      expect(q.deadLetterSize).toBe(1)
+
+      q.clearDeadLetter()
+      expect(q.deadLetterSize).toBe(0)
+    })
+  })
+
+  describe("retention expiration purging", () => {
+    test("purgeExpired() purges entries older than retentionMs", () => {
+      // 1000ms retention
+      const retentionMs = 1000
+      const q = new RetryQueue(3, 0, Math.random, 3600, retentionMs)
+
+      const now = Date.now()
+      // Manually restore dead letter entries with timestamps
+      q.restoreDeadLetter([
+        {
+          issueId: "expired",
+          attemptCount: 3,
+          failedAt: new Date(now - 2000).toISOString(),
+          lastError: "old",
+          category: "infra",
+        },
+        {
+          issueId: "fresh",
+          attemptCount: 3,
+          failedAt: new Date(now - 100).toISOString(),
+          lastError: "new",
+          category: "infra",
+        },
+      ])
+
+      expect(q.deadLetterSize).toBe(1)
+      expect(q.getDeadLetter("expired")).toBeUndefined()
+      expect(q.getDeadLetter("fresh")).toBeDefined()
+    })
+
+    test("drain() automatically triggers expiration purge", () => {
+      const retentionMs = 500
+      const q = new RetryQueue(3, 0, Math.random, 3600, retentionMs)
+
+      const now = Date.now()
+      q.restoreDeadLetter([
+        {
+          issueId: "stale-dl",
+          attemptCount: 3,
+          failedAt: new Date(now - 1000).toISOString(),
+          lastError: "err",
+          category: "infra",
+        },
+      ])
+      // Stale entry is initially purged on restoreDeadLetter
+      expect(q.deadLetterSize).toBe(0)
+
+      // Add fresh dead-letter entry
+      q.add("fresh-dl", 3, "err", "infra")
+      expect(q.deadLetterSize).toBe(1)
+
+      // Advancing time past retention and calling drain() purges it
+      const future = now + 10_000
+      q.purgeExpired(future)
+      expect(q.deadLetterSize).toBe(0)
+    })
+
+    test("purgeExpired() purges stale active retries exceeding retention", () => {
+      const retentionMs = 500
+      const q = new RetryQueue(3, 0, Math.random, 3600, retentionMs)
+      q.add("issue-stale", 1, "err")
+      expect(q.size).toBe(1)
+
+      // Simulate a future time where entry is older than retention cutoff
+      const res = q.purgeExpired(Date.now() + 5000)
+      expect(res.purgedRetries).toBe(1)
+      expect(q.size).toBe(0)
+    })
+  })
 })

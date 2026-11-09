@@ -10,6 +10,7 @@ export const actorDefaultsSchema = z.object({
   timeout: z.number().min(30).optional(),
   max_retries: z.number().min(1).optional(),
   retry_delay: z.number().min(1).optional(),
+  retry_retention_sec: z.number().min(1).optional(),
   max_parallel: z.number().min(1, "actor.max_parallel must be >= 1").optional(),
 })
 

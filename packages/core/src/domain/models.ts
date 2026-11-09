@@ -122,6 +122,14 @@ export interface RetryEntry {
   category: RetryCategory
 }
 
+export interface DeadLetterEntry {
+  issueId: string
+  attemptCount: number
+  failedAt: string
+  lastError: string
+  category: RetryCategory
+}
+
 export interface WaitingEntry {
   issueId: string
   identifier: string
