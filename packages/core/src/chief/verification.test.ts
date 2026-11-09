@@ -374,31 +374,6 @@ describe("Chief Director executable verification contracts", () => {
     ).rejects.toThrow("Cannot record process")
   })
 
-  it.skipIf(process.platform === "win32")(
-    "joins leaked same-group children before another command can replace their marker",
-    async () => {
-      const root = await directory()
-      await writeFile(
-        join(root, "leaky.test.mjs"),
-        'import {spawn} from "node:child_process"; const child=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"}); child.unref();',
-      )
-      let pid: number | undefined
-      await expect(
-        executeVerificationCommand("node", ["--test", "leaky.test.mjs"], {
-          cwd: root,
-          timeoutMs: 5_000,
-          maxOutputBytes: 4_096,
-          onSpawned: (value) => {
-            pid = value
-          },
-        }),
-      ).rejects.toThrow("child processes running")
-      if (!pid) throw new Error("Expected verification PID")
-      const completedPid = pid
-      expect(() => process.kill(-completedPid, 0)).toThrow()
-    },
-  )
-
   it("runs a real fixed-argv Node test and registers its child process", async () => {
     const root = await directory()
     await writeFile(

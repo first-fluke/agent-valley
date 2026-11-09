@@ -74,7 +74,7 @@ beforeEach(async () => {
   )
 })
 afterEach(async () => {
-  await rm(directory, { recursive: true, force: true })
+  await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 async function outcome(apply = false) {
