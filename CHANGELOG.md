@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.10.0](https://github.com/first-fluke/agent-valley/compare/v4.9.9...v4.10.0) (2026-11-10)
+
+
+### Features
+
+* **chief:** stall watchdog and single-pass task reviews ([1cebd33](https://github.com/first-fluke/agent-valley/commit/1cebd33c4e26571b2723c099b104f9cf968e9d5b))
+
 ## [4.9.9](https://github.com/first-fluke/agent-valley/compare/v4.9.8...v4.9.9) (2026-11-10)
 
 
