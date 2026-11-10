@@ -53,7 +53,8 @@ export const goalVerificationResultSchema = z.strictObject({
       z.strictObject({
         criterion: z.string().min(1).max(4_000),
         passed: z.boolean(),
-        checks: z.array(checkEvidenceSchema).min(1).max(10),
+        // Evidence mirrors the contract: one record per contract check, so the limits must match.
+        checks: z.array(checkEvidenceSchema).min(1).max(20),
       }),
     )
     .min(1)
