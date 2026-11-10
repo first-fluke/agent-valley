@@ -200,14 +200,20 @@ async function inspectCheck(
   } catch {
     return { ...common, passed: false, summary: checkSummary(false, "Observed file is not valid UTF-8 JSON.") }
   }
-  const passed = Object.is(jsonPointerValue(json, check.pointer), check.equals)
+  const observed = jsonPointerValue(json, check.pointer)
+  // Scalars compare by identity; an array of scalars compares element-wise in order.
+  const passed = Array.isArray(check.equals)
+    ? Array.isArray(observed) &&
+      observed.length === check.equals.length &&
+      check.equals.every((expected, index) => Object.is(observed[index], expected))
+    : Object.is(observed, check.equals)
   return {
     ...common,
     passed,
     summary: checkSummary(
       passed,
       passed
-        ? "Observed JSON pointer equals its required scalar."
+        ? "Observed JSON pointer equals its required value."
         : "Observed JSON pointer is missing or has a different value.",
     ),
   }

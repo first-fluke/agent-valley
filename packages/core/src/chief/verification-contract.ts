@@ -67,7 +67,7 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
     kind: z.literal("file"),
     path,
     minBytes: z.number().int().min(1).max(4_194_304).default(1),
-    contains: z.array(text).min(1).max(10).optional(),
+    contains: z.array(text).min(1).max(20).optional(),
     sha256: sha256.optional(),
   }),
   z.strictObject({
@@ -79,7 +79,13 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
       .refine((value) => value === "" || /^(?:\/(?:[^~]|~[01])*)+$/.test(value), {
         message: "Use an RFC 6901 JSON pointer such as /engines/node.",
       }),
-    equals: z.union([z.string().max(4_000), z.number().finite(), z.boolean(), z.null()]),
+    equals: z.union([
+      z.string().max(4_000),
+      z.number().finite(),
+      z.boolean(),
+      z.null(),
+      z.array(z.union([z.string().max(4_000), z.number().finite(), z.boolean(), z.null()])).max(50),
+    ]),
   }),
   z
     .strictObject({
@@ -88,7 +94,7 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
       args: z.array(z.string().min(1).max(1_024)).min(1).max(30),
       /** Planning-time estimate; the operator's per-check timeout governs when the mission runs. */
       timeoutMs: z.number().int().min(100).max(3_600_000).default(120_000),
-      stdoutIncludes: z.array(text).min(1).max(10).optional(),
+      stdoutIncludes: z.array(text).min(1).max(20).optional(),
     })
     .refine((check) => safeVerificationCommand(check.program, check.args), {
       message:
@@ -100,15 +106,15 @@ export const goalVerificationContractSchema = z
   .strictObject({
     version: z.literal(1),
     criteria: z
-      .array(z.strictObject({ criterion: text, checks: z.array(goalVerificationCheckSchema).min(1).max(10) }))
+      .array(z.strictObject({ criterion: text, checks: z.array(goalVerificationCheckSchema).min(1).max(20) }))
       .min(1)
       .max(20),
   })
   .superRefine((contract, ctx) => {
     if (new Set(contract.criteria.map((entry) => entry.criterion)).size !== contract.criteria.length)
       ctx.addIssue({ code: "custom", message: "Assess each success criterion exactly once." })
-    if (contract.criteria.reduce((sum, entry) => sum + entry.checks.length, 0) > 40)
-      ctx.addIssue({ code: "custom", message: "Keep the verification contract within 40 executable checks." })
+    if (contract.criteria.reduce((sum, entry) => sum + entry.checks.length, 0) > 80)
+      ctx.addIssue({ code: "custom", message: "Keep the verification contract within 80 executable checks." })
   })
 
 export type GoalVerificationCheck = z.infer<typeof goalVerificationCheckSchema>
