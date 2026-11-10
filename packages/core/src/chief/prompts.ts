@@ -17,6 +17,12 @@ export const CHIEF_DECISION_RESPONSIBILITY =
 const PARALLEL_SOURCE_PROVENANCE =
   "Parallel source provenance: in each sourceEvidence record, baselineHead is the accepted committed source baseline for cross-workspace citations, and baselineTree is the product tree of that exact commit (git rev-parse <baselineHead>^{tree}). When supplied, snapshotCommit and snapshotRef identify the Actor's initial isolated input snapshot, and snapshotTree is that snapshot's input tree, which may include an uncommitted source overlay absent from the committed baseline. workerRef preserves the Actor's checked-out HEAD at collection; uncommitted task edits may be absent from that commit and must be verified in the integrated worktree, using the delivery receipt when available. Label observations of the Actor's local HEAD, snapshot or uncommitted diffs with that scope and the actual inspected revision and paths; do not claim local changes are already in the committed baseline. An Actor-local file being tracked at its snapshot revision does not imply that it is already tracked in the review checkout. The Actor's snapshot HEAD and the review workspace's current HEAD can differ. Preserve actual source hashes; never substitute another checkout's HEAD or invent a missing revision."
 
+export const EXHAUSTIVE_REVIEW_RULE =
+  "Enumerate every blocking defect across the whole deliverable in this single review so that one repair round can resolve them all; do not reserve findings for a later round, and do not escalate the acceptance bar beyond the task's own acceptance and the mission goal."
+
+export const REPAIR_REVIEW_RULE =
+  "This is a repair review: previousReview lists the findings the Actor was asked to fix. Verify each one is resolved. Additional blocking findings are limited to defects in the repaired or newly changed code and severe pre-existing defects (data loss, deadlock, leaked permits or locks, security exposure, silent failure). Record other pre-existing concerns in summary as non-blocking notes, not findings."
+
 function context(mission: Mission): string {
   const unavailableAdvice = unavailableDirectorAdvice(mission)
   return JSON.stringify({
@@ -230,6 +236,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           "No container or service observation policy is configured for this mission: do not require a deployment target inventory, target health, availability or recent-error observations, and do not treat the sandbox's deliberate av.yaml read denial as a blocker. Numeric targets in goal criteria mean the goal's own documented targets.",
         ]),
     "Reject incomplete requirements, missing deliverables, weakened tests, correctness defects, or missing evidence.",
+    ...(task ? [EXHAUSTIVE_REVIEW_RULE, ...(state?.review ? [REPAIR_REVIEW_RULE] : [])] : []),
     ...(mission.technicalLeadId
       ? [
           "The Technical Director's technical preferences are advisory. Do not reject an authorized Chief Director strategy merely for choosing higher cost or a different stack; assess actual goal, acceptance, correctness and evidence.",

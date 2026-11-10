@@ -9,6 +9,8 @@ import {
   executionPolicySchema,
   executionState,
   finalizeAbandonedRuns,
+  isNativeAgentStall,
+  isNativeAgentTimeout,
   MissionPause,
   pauseForFailure,
   progressKey,
@@ -337,5 +339,15 @@ describe("external action reconciliation and observable progress", () => {
     const observed = progressKey(mission, "unchanged-files")
     mission.tasks = [{ id: "remote", reviewerId: "reviewer", status: "pending", attempts: 1, effectState: "completed" }]
     expect(progressKey(mission, "unchanged-files")).not.toBe(observed)
+  })
+})
+
+describe("native inactivity cutoffs", () => {
+  it("treats a runner-confirmed stall like a confirmed deadline cutoff", () => {
+    expect(isNativeAgentStall("Agent stalled: no activity for 1800s")).toBe(true)
+    expect(isNativeAgentStall("Agent stalled: no activity for a while")).toBe(false)
+    expect(isNativeAgentTimeout("Agent stalled: no activity for 1800s")).toBe(true)
+    expect(isNativeAgentTimeout("Agent timed out after 7200s")).toBe(true)
+    expect(classifyFailure("Agent stalled: no activity for 1800s")).toBe("provider")
   })
 })

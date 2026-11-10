@@ -12,9 +12,30 @@ export interface RunOptions {
   agentType: string
   model?: string
   timeout: number
+  /**
+   * Seconds without any session event (output, heartbeat, tool progress) before the attempt is
+   * treated as stalled and terminated. Defaults to AV_AGENT_INACTIVITY_TIMEOUT_SEC or 1800; 0 disables.
+   */
+  inactivityTimeout?: number
   prompt: string
   workspacePath: string
   env?: Record<string, string>
+}
+
+const DEFAULT_INACTIVITY_TIMEOUT_SEC = 1_800
+
+/** A native CLI that stops emitting events for this long is hung, not thinking. */
+export function resolveInactivityTimeoutSec(
+  requested: number | undefined,
+  source: NodeJS.ProcessEnv = process.env,
+): number {
+  const configured = Number.parseInt(source.AV_AGENT_INACTIVITY_TIMEOUT_SEC ?? "", 10)
+  const seconds = requested ?? (Number.isFinite(configured) ? configured : DEFAULT_INACTIVITY_TIMEOUT_SEC)
+  return Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0
+}
+
+export function agentStallMessage(seconds: number): string {
+  return `Agent stalled: no activity for ${seconds}s`
 }
 
 export interface RunCallbacks {
@@ -43,6 +64,7 @@ const MAX_OUTPUT_SNIPPET = 24
 export class AgentRunnerService {
   private activeSessions = new Map<string, AgentSession>()
   private activeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private activeIdleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private lastOutputs = new Map<string, string>()
   private activeAgentTypes = new Map<string, string>()
   private cancelAttempts = new Map<string, () => void>()
@@ -149,6 +171,9 @@ export class AgentRunnerService {
       const timer = this.activeTimers.get(attempt.id)
       if (timer) clearTimeout(timer)
       this.activeTimers.delete(attempt.id)
+      const idleTimer = this.activeIdleTimers.get(attempt.id)
+      if (idleTimer) clearTimeout(idleTimer)
+      this.activeIdleTimers.delete(attempt.id)
       this.activeSessions.delete(attempt.id)
       this.activeAgentTypes.delete(attempt.id)
       this.lastOutputs.delete(attempt.id)
@@ -195,15 +220,43 @@ export class AgentRunnerService {
       cleanup(false)
     })
 
+    // Inactivity watchdog — any session event proves the native CLI is still working.
+    const inactivitySec = resolveInactivityTimeoutSec(options.inactivityTimeout)
+    const touch = () => {
+      if (!inactivitySec || handled) return
+      const previous = this.activeIdleTimers.get(attempt.id)
+      if (previous) clearTimeout(previous)
+      this.activeIdleTimers.set(
+        attempt.id,
+        setTimeout(async () => {
+          this.activeIdleTimers.delete(attempt.id)
+          if (handled || !this.activeSessions.has(attempt.id)) return
+          logger.warn("orchestrator", "Agent stalled", {
+            attemptId: attempt.id,
+            issueId: attempt.issueId,
+            inactivityMs: inactivitySec * 1000,
+          })
+          handled = true
+          await this.kill(attempt.id)
+          callbacks.onError({ code: "TIMEOUT", message: agentStallMessage(inactivitySec), recoverable: true })
+        }, inactivitySec * 1000),
+      )
+    }
+
     // Wire up events
     session.on("spawned", (e) => {
+      touch()
       if (!handled) callbacks.onSpawned?.(e.pid)
     })
     session.on("heartbeat", (e) => {
+      touch()
       if (!handled) callbacks.onHeartbeat(e.timestamp)
     })
+    session.on("toolUse", () => touch())
+    session.on("fileChange", () => touch())
     session.on("output", (e) => {
       if (handled) return
+      touch()
       callbacks.onOutput?.(e.chunk)
       const snippet = e.chunk.trim().replace(/\s+/g, " ").slice(-MAX_OUTPUT_SNIPPET)
       if (snippet) this.lastOutputs.set(attempt.id, snippet)
@@ -276,6 +329,7 @@ export class AgentRunnerService {
     void executing.then(forgetExecution, forgetExecution)
 
     if (handled) return
+    touch()
     // Timeout watchdog — stored so it can be cleared on completion
     const timer = setTimeout(async () => {
       if (this.activeSessions.has(attempt.id)) {
