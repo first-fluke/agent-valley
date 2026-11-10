@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.9.9](https://github.com/first-fluke/agent-valley/compare/v4.9.8...v4.9.9) (2026-11-10)
+
+
+### Bug Fixes
+
+* **chief:** widen verification-contract limits and accept array equals ([19d9b34](https://github.com/first-fluke/agent-valley/commit/19d9b34dd4f102d06f17df6266f75b19e914e41c))
+
 ## [4.9.8](https://github.com/first-fluke/agent-valley/compare/v4.9.7...v4.9.8) (2026-11-09)
 
 
