@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.10.1](https://github.com/first-fluke/agent-valley/compare/v4.10.0...v4.10.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **chief:** align verification evidence limits with the contract ([fa0c7dc](https://github.com/first-fluke/agent-valley/commit/fa0c7dcf0b935eee3019e77b1cf8cd9248376c40))
+
 ## [4.10.0](https://github.com/first-fluke/agent-valley/compare/v4.9.9...v4.10.0) (2026-11-10)
 
 
