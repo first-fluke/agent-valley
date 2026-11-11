@@ -3,7 +3,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "bun \"/Users/gracefullight/workspace/agent-valley/.agents/hooks/core/keyword-detector.ts\"",
+        "command": "oma hook script --vendor antigravity --script keyword-detector.ts",
         "timeout": 5
       }
     ]
@@ -12,7 +12,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "bun \"/Users/gracefullight/workspace/agent-valley/.agents/hooks/core/state-boundary.ts\"",
+        "command": "oma hook script --vendor antigravity --script state-boundary.ts",
         "timeout": 5
       }
     ]
@@ -21,17 +21,80 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "bun \"/Users/gracefullight/workspace/agent-valley/.agents/hooks/core/skill-injector.ts\"",
+        "command": "oma hook script --vendor antigravity --script skill-injector.ts",
         "timeout": 3
       }
     ]
   },
-  "oma-serena-primer": {
+  "oma-code-intelligence-primer": {
     "PreInvocation": [
       {
         "type": "command",
-        "command": "bun \"/Users/gracefullight/workspace/agent-valley/.agents/hooks/core/serena-primer.ts\"",
+        "command": "oma hook script --vendor antigravity --script code-intelligence-primer.ts",
         "timeout": 3
+      }
+    ]
+  },
+  "oma-scm-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "oma hook script --vendor antigravity --script scm-guard.ts",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "oma-code-intelligence-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "oma hook script --vendor antigravity --script code-intelligence-guard.ts",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "oma-test-filter": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "oma hook script --vendor antigravity --script test-filter.ts",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "oma-refactor-guard": {
+    "PostToolUse": [
+      {
+        "matcher": "write_file|edit_file|write_to_file|replace_file_content|notebook_edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "oma hook script --vendor antigravity --script refactor-guard.ts",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "oma hook script --vendor antigravity --script refactor-guard.ts",
+        "timeout": 5
       }
     ]
   },
@@ -39,8 +102,8 @@
     "Stop": [
       {
         "type": "command",
-        "command": "bun \"/Users/gracefullight/workspace/agent-valley/.agents/hooks/core/persistent-mode.ts\"",
-        "timeout": 5
+        "command": "oma hook script --vendor antigravity --script persistent-mode.ts",
+        "timeout": 30
       }
     ]
   }
