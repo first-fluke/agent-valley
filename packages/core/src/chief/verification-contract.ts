@@ -26,11 +26,15 @@ const testPath = (name: string, nodeOnly = false): boolean =>
   !name.startsWith("node_modules/") &&
   (nodeOnly ? /(?:\.test|\.spec)\.(?:js|mjs|cjs)$/ : /(?:\.test|\.spec)\.(?:[cm]?[jt]sx?)$/).test(name)
 
+/** Planners often write `./tests/x.test.ts`; it names the same repository-relative file. */
+const plainTestPath = (name: string): string => (name.startsWith("./") && name.length > 2 ? name.slice(2) : name)
+
 export function verificationCommandTestPaths(program: string, args: string[]): string[] {
   if (program === "cargo") return ["Cargo.toml"]
-  if (program === "bun" && args[0] === "test") return args.slice(1)
-  if (program === "node" && args[0] === "--test") return args.slice(1)
-  if (program === "node" && args[0] === "node_modules/vitest/vitest.mjs" && args[1] === "run") return args.slice(2)
+  if (program === "bun" && args[0] === "test") return args.slice(1).map(plainTestPath)
+  if (program === "node" && args[0] === "--test") return args.slice(1).map(plainTestPath)
+  if (program === "node" && args[0] === "node_modules/vitest/vitest.mjs" && args[1] === "run")
+    return args.slice(2).map(plainTestPath)
   return []
 }
 
@@ -67,7 +71,7 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
     kind: z.literal("file"),
     path,
     minBytes: z.number().int().min(1).max(4_194_304).default(1),
-    contains: z.array(text).min(1).max(20).optional(),
+    contains: z.array(text).max(20).optional(),
     sha256: sha256.optional(),
   }),
   z.strictObject({
@@ -94,7 +98,7 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
       args: z.array(z.string().min(1).max(1_024)).min(1).max(30),
       /** Planning-time estimate; the operator's per-check timeout governs when the mission runs. */
       timeoutMs: z.number().int().min(100).max(3_600_000).default(120_000),
-      stdoutIncludes: z.array(text).min(1).max(20).optional(),
+      stdoutIncludes: z.array(text).max(20).optional(),
     })
     .superRefine((check, ctx) => {
       if (safeVerificationCommand(check.program, check.args)) return

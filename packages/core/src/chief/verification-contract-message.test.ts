@@ -24,4 +24,17 @@ describe("rejected verification commands", () => {
       goalVerificationContractSchema.safeParse(contract("bun", ["test", "scripts/coverage/gate.test.ts"])).success,
     ).toBe(true)
   })
+
+  it("accepts a leading ./ on test paths and empty content assertion lists", () => {
+    const dotted = contract("bun", ["test", "./apps/desktop/tests/dashboard.test.tsx"])
+    expect(goalVerificationContractSchema.safeParse(dotted).success).toBe(true)
+    const emptyContains = {
+      version: 1,
+      criteria: [{ criterion: "report exists", checks: [{ kind: "file", path: "report.md", contains: [] }] }],
+    }
+    expect(goalVerificationContractSchema.safeParse(emptyContains).success).toBe(true)
+    expect(goalVerificationContractSchema.safeParse(contract("bun", ["test", "../outside.test.ts"])).success).toBe(
+      false,
+    )
+  })
 })
