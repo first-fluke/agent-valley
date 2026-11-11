@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { collectStorageGarbage } from "@agent-valley/core/chief/storage-gc"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Command } from "commander"
 import { registerMissionReconciliation } from "./chief-reconcile"
@@ -18,7 +19,7 @@ export function registerMissionCommands(program: Command): void {
         )
       if (options.service && !options.watch) throw new Error("Use --service with av missions --watch.")
       if (options.watch) {
-        await watchOrders(process.cwd(), { service: options.service })
+        await watchOrders(process.cwd(), { service: options.service, storageGc: collectStorageGarbage })
         return
       }
       const missions = await new MissionStore(join(process.cwd(), ".agent-valley/missions")).list()

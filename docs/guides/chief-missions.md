@@ -204,9 +204,28 @@ bun av order --resume ORDER_ID
 bun av missions --watch
 ```
 
-Use the mission ID printed by `av order --once`, or a child mission ID from `av operations --report OPERATION_ID`, and run these commands from the same directory where you started it. Mission records live under `.agent-valley/missions/` there. They contain the goal, success criteria, assumptions, roster, plan, task attempts, review findings, verification output, recovery decisions, report, and history. Automatic orders also save the available CLI list and skill catalog. Worktrees remain available after completion or failure.
+Use the mission ID printed by `av order --once`, or a child mission ID from `av operations --report OPERATION_ID`, and run these commands from the same directory where you started it. Mission records live under `.agent-valley/missions/` there. They contain the goal, success criteria, assumptions, roster, plan, task attempts, review findings, verification output, recovery decisions, report, and history. Automatic orders also save the available CLI list and skill catalog. Mission worktrees remain available after completion or failure; disposable storage inside them is released as described in [Storage lifecycle](#storage-lifecycle).
 
 Ctrl-C or SIGTERM interrupts the current order and retains its state. Resume uses the saved goal, criteria, Actors, original Chief selection, effective handoff routes, workspace, verification contract and spent repair/recovery budgets without resetting the plan. Provider readiness is checked again when an exhaustion error requires a handoff. A pending Chief Director decision is retried before workers restart. A new goal or verification contract requires a new order. A live order is locked against a second resume process. If files changed since the checkpoint, previous approvals are invalidated and tasks are reviewed again. Older saved orders retain their original command and serial repair behavior.
+
+### Storage lifecycle
+
+Each parallel Actor works in its own clone, and Rust, Node and similar builds add large ignored output to every clone. AV releases what it no longer needs:
+
+- **After integration:** an Actor clone is removed once its delivery is applied, whether review passed or failed. The applied edits stay in the mission workspace, and the patch receipt (`.agent-valley/parallel/deliveries/`) and `refs/agent-valley/task-evidence/*` refs are kept.
+- **On completion:** remaining applied Actor clones, including attempts superseded by repairs, are removed, together with ignored build output (`target/`, `node_modules/` and so on) in AV-owned operation child workspaces. Unapplied or unrecorded Actor clones are always kept.
+- **Idle missions:** `av missions --watch` runs `av gc --apply` at most once an hour. Failed, paused or interrupted missions idle for 7 days get the same release; clones still referenced by an unfinished task are kept.
+- **Operation children:** finished children idle for 7 days are archived. Their branches, evidence refs and an exact product commit (including uncommitted files) move to the operation's `archive.git`; their receipts move to `<child>/archive/`; and `archive/archive.json` records the restore command. The current, decision, source-integration and two most recent accepted children stay whole. Obsolete baselines are pruned with the same checks as `av operations --prune`.
+
+Missions with a lock or active process marker are never touched, and nothing in your own checkout is removed. Preview and apply manually with:
+
+```bash
+av gc                      # report what can be released, with sizes
+av gc --apply              # release it
+av gc --apply --stale-days 0
+```
+
+Before creating a clone, AV checks free disk space. If less than `AV_MIN_FREE_DISK_GIB` (default 5) is free, it first releases the mission's own applied Actor clones, then stops with an error that asks you to run `av gc --apply` or free space. Set `AV_MIN_FREE_DISK_GIB=0` to disable the check.
 
 ### Advanced manual controls
 

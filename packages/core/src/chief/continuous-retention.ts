@@ -181,7 +181,8 @@ async function recoverable(current: ContinuousBaseline, baseline: ContinuousBase
     throw new Error("The current baseline is missing recovery objects.")
 }
 
-async function processEvidence(storePath: string, missionId: string): Promise<boolean> {
+/** True while a mission has a lock or active-process marker; such missions are never touched by storage cleanup. */
+export async function processEvidence(storePath: string, missionId: string): Promise<boolean> {
   if (await exists(join(storePath, `${missionId}.json.lock`))) return true
   if (await exists(join(storePath, `${missionId}.json.lock.reclaim`))) return true
   return (await readdir(storePath)).some(

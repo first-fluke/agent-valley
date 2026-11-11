@@ -36,6 +36,7 @@ import {
 } from "./runtime"
 import { registerSetupCommand } from "./setup/command"
 import { readStatus } from "./status-client"
+import { registerStorageGcCommand } from "./storage-gc-command"
 import { registerTeamCommands } from "./team"
 import { spawnTunnel, type TunnelHandle, type TunnelLogger } from "./tunnel"
 import { dashboardHost, startWebhookProxy, webhookPort } from "./webhook-proxy"
@@ -467,6 +468,7 @@ registerA2aCommands(program)
 registerOrganizationCommands(program)
 registerAgentClientCommands(program)
 registerTeamCommands(program)
+registerStorageGcCommand(program)
 
 program.parseAsync().catch((error: unknown) => {
   console.error(pc.red(error instanceof Error ? error.message : String(error)))

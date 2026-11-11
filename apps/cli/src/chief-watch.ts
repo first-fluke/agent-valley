@@ -15,7 +15,14 @@ interface WatchDependencies {
   delay?: typeof abortableDelay
   mission?: typeof superviseOrder
   operation?: typeof runOperation
+  /** Periodic storage release; the CLI wires collectStorageGarbage, tests leave it unset. */
+  storageGc?: (root: string, options: { apply: boolean }) => Promise<{ entries: { outcome: string }[] }>
+  storageGcIntervalMs?: number
+  now?: () => number
 }
+
+/** Release idle AV storage at most once per interval while the watcher runs. */
+export const STORAGE_GC_INTERVAL_MS = 60 * 60 * 1000
 
 export async function watchOrders(root = process.cwd(), dependencies: WatchDependencies = {}): Promise<void> {
   assertNotManagedRun()
@@ -29,8 +36,24 @@ export async function watchOrders(root = process.cwd(), dependencies: WatchDepen
     process.once("SIGTERM", terminate)
   }
   const missions = new MissionStore(join(root, ".agent-valley", "missions"))
+  const now = dependencies.now ?? Date.now
+  let lastStorageGc = Number.NEGATIVE_INFINITY
   try {
     while (!controller.signal.aborted) {
+      if (
+        dependencies.storageGc &&
+        now() - lastStorageGc >= (dependencies.storageGcIntervalMs ?? STORAGE_GC_INTERVAL_MS)
+      ) {
+        lastStorageGc = now()
+        try {
+          const { entries } = await dependencies.storageGc(root, { apply: true })
+          const released = entries.filter((entry) => entry.outcome === "released").length
+          const kept = entries.filter((entry) => entry.outcome === "kept").length
+          if (released || kept) console.log(`Storage GC: ${released} released, ${kept} kept. Run av gc for details.`)
+        } catch (error) {
+          console.error(`Storage GC failed: ${String(error)}. Run av gc to inspect.`)
+        }
+      }
       const operations = await operationStore(root).list()
       const childIds = new Set(
         operations.flatMap((operation) => (operation.currentMissionId ? [operation.currentMissionId] : [])),
