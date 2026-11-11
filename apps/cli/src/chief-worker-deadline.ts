@@ -5,6 +5,17 @@ import { WorkerTerminationError } from "./chief-worker-lifecycle"
 
 type Worker = (args: string[], root: string, signal: AbortSignal) => Promise<number | null>
 
+const MAX_DURATION_SEC = 604_800
+
+/** The --duration a resume requests for the worker, bounded like the worker's own validation. */
+function requestedDurationSec(args: string[]): number | undefined {
+  const index = args.indexOf("--duration")
+  if (index === -1) return undefined
+  const value = Number(args[index + 1])
+  if (!Number.isInteger(value) || value <= 0) return undefined
+  return Math.min(value, MAX_DURATION_SEC)
+}
+
 /** Pin the first persisted execution deadline across every worker restart in this supervisor. */
 export function createDeadlineWorkerRunner(store: MissionStore, id: string, parentSignal: AbortSignal) {
   let deadline: number | undefined
@@ -36,7 +47,10 @@ export function createDeadlineWorkerRunner(store: MissionStore, id: string, pare
         // Reporting an already terminal outcome still goes through normal worker option validation.
         if (mission?.status === "completed" && !pendingCodeDelivery(mission)) return
         if (mission?.executionPolicy && mission.execution) {
-          deadline = Date.parse(mission.execution.startedAt) + mission.executionPolicy.maxDurationSec * 1_000
+          // A resume may extend the wall-time budget (--duration); the worker persists it only after it starts,
+          // so honor the requested extension here or an expired mission could never be resumed.
+          const durationSec = Math.max(mission.executionPolicy.maxDurationSec, requestedDurationSec(args) ?? 0)
+          deadline = Date.parse(mission.execution.startedAt) + durationSec * 1_000
           if (!Number.isFinite(deadline))
             throw new MissionPause(
               "Restore the original saved Mission execution deadline before resuming.",

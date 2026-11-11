@@ -174,6 +174,24 @@ describe("Mission deadline during worker execution", () => {
     },
   )
 
+  it("honors a resume's --duration extension before pinning an expired deadline", async () => {
+    root = await mkdtemp(join(tmpdir(), "av-worker-deadline-extend-"))
+    const store = new MissionStore(join(root, ".agent-valley", "missions"))
+    const mission = missionFixture()
+    mission.status = "paused"
+    mission.executionPolicy = executionPolicySchema.parse({ maxDurationSec: 1 })
+    mission.execution = { startedAt: new Date(Date.now() - 60_000).toISOString(), runsStarted: 4, retries: 1 }
+    await store.save(mission)
+    const parent = new AbortController()
+    const run = createDeadlineWorkerRunner(store, mission.id, parent.signal)
+    const worker = vi.fn<Worker>().mockResolvedValue(0)
+    await expect(run(worker, ["order", "--resume", mission.id, "--duration", "172800"], root)).resolves.toBe(0)
+    expect(worker).toHaveBeenCalledOnce()
+    await expect(
+      createDeadlineWorkerRunner(store, mission.id, parent.signal)(worker, ["order", "--resume", mission.id], root),
+    ).rejects.toMatchObject({ kind: "budget" })
+  })
+
   it("does not reset the original deadline for a later worker", async () => {
     root = await mkdtemp(join(tmpdir(), "av-worker-deadline-pin-"))
     const store = new MissionStore(join(root, ".agent-valley", "missions"))

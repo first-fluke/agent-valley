@@ -9,7 +9,7 @@ const text = z.string().trim().min(1).max(32_000)
 export const supervisionResponseSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("repair"), reason: text, instructions: text, taskId: id.optional() }),
   z.strictObject({ action: z.literal("reassign"), reason: text, instructions: text, taskId: id, personaId: id }),
-  z.strictObject({ action: z.literal("replan"), reason: text, tasks: z.array(actorTaskSchema).min(1).max(24) }),
+  z.strictObject({ action: z.literal("replan"), reason: text, tasks: z.array(actorTaskSchema).min(1).max(48) }),
   z.strictObject({ action: z.literal("stop"), reason: text }),
   z.strictObject({ action: z.literal("wait"), reason: text, retryAfterSec: z.number().int().min(1).max(86_400) }),
 ])

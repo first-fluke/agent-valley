@@ -30,9 +30,14 @@ export class MissionPause extends Error {
   }
 }
 
-/** Exact deadline message emitted only after the native runner confirms termination. */
+/** Exact cutoff messages emitted only after the native runner confirms termination. */
 export function isNativeAgentTimeout(reason: string): boolean {
-  return /^Agent timed out after \d+(?:\.\d+)?s$/i.test(reason)
+  return /^Agent timed out after \d+(?:\.\d+)?s$/i.test(reason) || isNativeAgentStall(reason)
+}
+
+/** The runner killed a native CLI that emitted no event for its inactivity window. */
+export function isNativeAgentStall(reason: string): boolean {
+  return /^Agent stalled: no activity for \d+s$/i.test(reason)
 }
 
 /** Explicit native model selection failures are prerequisites, not transient provider outages. */

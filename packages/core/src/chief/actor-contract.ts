@@ -41,7 +41,7 @@ const actorTaskInputSchema = z.strictObject({
   actorId: id.optional(),
   personaId: id.optional(),
   instructions: text,
-  acceptance: z.array(text).min(1).max(20),
+  acceptance: z.array(text).min(1).max(40),
   dependencies: z.array(id).max(11),
   effectScope: z.enum(["workspace", "external"]).optional(),
 })

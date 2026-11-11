@@ -17,6 +17,12 @@ export const CHIEF_DECISION_RESPONSIBILITY =
 const PARALLEL_SOURCE_PROVENANCE =
   "Parallel source provenance: in each sourceEvidence record, baselineHead is the accepted committed source baseline for cross-workspace citations, and baselineTree is the product tree of that exact commit (git rev-parse <baselineHead>^{tree}). When supplied, snapshotCommit and snapshotRef identify the Actor's initial isolated input snapshot, and snapshotTree is that snapshot's input tree, which may include an uncommitted source overlay absent from the committed baseline. workerRef preserves the Actor's checked-out HEAD at collection; uncommitted task edits may be absent from that commit and must be verified in the integrated worktree, using the delivery receipt when available. Label observations of the Actor's local HEAD, snapshot or uncommitted diffs with that scope and the actual inspected revision and paths; do not claim local changes are already in the committed baseline. An Actor-local file being tracked at its snapshot revision does not imply that it is already tracked in the review checkout. The Actor's snapshot HEAD and the review workspace's current HEAD can differ. Preserve actual source hashes; never substitute another checkout's HEAD or invent a missing revision."
 
+export const EXHAUSTIVE_REVIEW_RULE =
+  "Enumerate every blocking defect across the whole deliverable in this single review so that one repair round can resolve them all; do not reserve findings for a later round, and do not escalate the acceptance bar beyond the task's own acceptance and the mission goal."
+
+export const REPAIR_REVIEW_RULE =
+  "This is a repair review: previousReview lists the findings the Actor was asked to fix. Verify each one is resolved. Additional blocking findings are limited to defects in the repaired or newly changed code and severe pre-existing defects (data loss, deadlock, leaked permits or locks, security exposure, silent failure). Record other pre-existing concerns in summary as non-blocking notes, not findings."
+
 function context(mission: Mission): string {
   const unavailableAdvice = unavailableDirectorAdvice(mission)
   return JSON.stringify({
@@ -88,7 +94,7 @@ export function planPrompt(mission: Mission): string {
     "Independent workspace tasks execute concurrently in isolated worktrees, then integrate in plan order before review. Declare dependencies when a task needs another task's delivered changes. Declare effectScope: external for actions that affect external systems (publishing, messages, purchases); these execute sequentially and uncertain effects require reconciliation before repetition. Other tasks use effectScope: workspace.",
     taskDecompositionGuidance(mission, "plan"),
     "Use recorded organization evidence and explicitly approved standards when relevant; historical outcomes are not approval of current files. Routing quality/cost evidence is measured only where reported, not a claim of universal model superiority. Explicit metric targets require actual recorded measurements and are additional completion gates; advisory ROI text is not measurement.",
-    "Use 1-24 tasks with unique ids, concrete instructions, nonempty acceptance criteria, and acyclic dependencies.",
+    "Use 1-48 tasks with unique ids, concrete instructions, nonempty acceptance criteria, and acyclic dependencies.",
     `Keep the complete JSON response within ${MAX_JSON_RESPONSE_LENGTH} characters; use concise Actors and tasks.`,
     "Every Actor must produce or update a material file deliverable, including research reports. Plan intermediate checks.",
     ...(requiresOmaActor(mission)
@@ -98,7 +104,7 @@ export function planPrompt(mission: Mission): string {
       : []),
     mission.verificationMode === "chief"
       ? [
-          'Design verificationContract: {"version":1,"criteria":[{"criterion":"exact goalBrief success criterion","checks":[{"kind":"file","path":"report.md","minBytes":200,"contains":["required finding"]}]}]}. Cover every success criterion exactly once. File checks inspect actual relative regular files; JSON checks use {"kind":"json","path":"package.json","pointer":"/engines/node","equals":">=26"}. Behavioral goals need relevant executable tests: {"kind":"command","program":"node","args":["node_modules/vitest/vitest.mjs","run","tests/login.test.ts"]}, or node --test / bun test with explicit test paths.',
+          'Design verificationContract: {"version":1,"criteria":[{"criterion":"exact goalBrief success criterion","checks":[{"kind":"file","path":"report.md","minBytes":200,"contains":["required finding"]}]}]}. Cover every success criterion exactly once. File checks inspect actual relative regular files; JSON checks use {"kind":"json","path":"package.json","pointer":"/engines/node","equals":">=26"}; equals is a string, number, boolean, null or a flat array of those. Each criterion takes at most 20 checks and the contract at most 80. Behavioral goals need relevant executable tests: {"kind":"command","program":"node","args":["node_modules/vitest/vitest.mjs","run","tests/login.test.ts"]}, or node --test / bun test with explicit test paths.',
           'For an authorized Rust workspace build/test goal, native Cargo checks are supported exactly as {"kind":"command","program":"cargo","args":["fmt","--all","--","--check"]}, {"kind":"command","program":"cargo","args":["clippy","--workspace","--all-targets","--","-D","warnings"]}, and {"kind":"command","program":"cargo","args":["test","--workspace"]}. Use one or more of these checks for the corresponding Rust criteria; do not replace required Cargo gates with JavaScript wrappers or report claims. Workers prepare the Rust toolchain, dependencies and lockfile during implementation. Cargo verification runs offline and binds workspace manifests, Rust sources and local tool configuration to the evidence.',
           "These are the complete command shapes. The supplied schema is sufficient; no harness validator-source discovery is needed. No shell, package scripts, other build/install/publish commands, absolute paths, globs or extra flags. A report claiming success is insufficient for a behavioral criterion. Keep checks immutable during recovery; assign workers the needed test/report deliverables.",
         ].join("\n")
@@ -230,6 +236,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           "No container or service observation policy is configured for this mission: do not require a deployment target inventory, target health, availability or recent-error observations, and do not treat the sandbox's deliberate av.yaml read denial as a blocker. Numeric targets in goal criteria mean the goal's own documented targets.",
         ]),
     "Reject incomplete requirements, missing deliverables, weakened tests, correctness defects, or missing evidence.",
+    ...(task ? [EXHAUSTIVE_REVIEW_RULE, ...(state?.review ? [REPAIR_REVIEW_RULE] : [])] : []),
     ...(mission.technicalLeadId
       ? [
           "The Technical Director's technical preferences are advisory. Do not reject an authorized Chief Director strategy merely for choosing higher cost or a different stack; assess actual goal, acceptance, correctness and evidence.",

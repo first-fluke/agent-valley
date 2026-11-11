@@ -53,7 +53,8 @@ export const goalVerificationResultSchema = z.strictObject({
       z.strictObject({
         criterion: z.string().min(1).max(4_000),
         passed: z.boolean(),
-        checks: z.array(checkEvidenceSchema).min(1).max(10),
+        // Evidence mirrors the contract: one record per contract check, so the limits must match.
+        checks: z.array(checkEvidenceSchema).min(1).max(20),
       }),
     )
     .min(1)
@@ -200,14 +201,20 @@ async function inspectCheck(
   } catch {
     return { ...common, passed: false, summary: checkSummary(false, "Observed file is not valid UTF-8 JSON.") }
   }
-  const passed = Object.is(jsonPointerValue(json, check.pointer), check.equals)
+  const observed = jsonPointerValue(json, check.pointer)
+  // Scalars compare by identity; an array of scalars compares element-wise in order.
+  const passed = Array.isArray(check.equals)
+    ? Array.isArray(observed) &&
+      observed.length === check.equals.length &&
+      check.equals.every((expected, index) => Object.is(observed[index], expected))
+    : Object.is(observed, check.equals)
   return {
     ...common,
     passed,
     summary: checkSummary(
       passed,
       passed
-        ? "Observed JSON pointer equals its required scalar."
+        ? "Observed JSON pointer equals its required value."
         : "Observed JSON pointer is missing or has a different value.",
     ),
   }

@@ -6,6 +6,55 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.10.1](https://github.com/first-fluke/agent-valley/compare/v4.10.0...v4.10.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **chief:** align verification evidence limits with the contract ([fa0c7dc](https://github.com/first-fluke/agent-valley/commit/fa0c7dcf0b935eee3019e77b1cf8cd9248376c40))
+
+## [4.10.0](https://github.com/first-fluke/agent-valley/compare/v4.9.9...v4.10.0) (2026-11-10)
+
+
+### Features
+
+* **chief:** stall watchdog and single-pass task reviews ([1cebd33](https://github.com/first-fluke/agent-valley/commit/1cebd33c4e26571b2723c099b104f9cf968e9d5b))
+
+## [4.9.9](https://github.com/first-fluke/agent-valley/compare/v4.9.8...v4.9.9) (2026-11-10)
+
+
+### Bug Fixes
+
+* **chief:** widen verification-contract limits and accept array equals ([19d9b34](https://github.com/first-fluke/agent-valley/commit/19d9b34dd4f102d06f17df6266f75b19e914e41c))
+
+## [4.9.8](https://github.com/first-fluke/agent-valley/compare/v4.9.7...v4.9.8) (2026-11-09)
+
+
+### Bug Fixes
+
+* **chief:** allow up to 48 tasks in long supervised missions ([de44345](https://github.com/first-fluke/agent-valley/commit/de4434560fb1630617c5f36ca9a066b40c4ac1eb))
+
+## [4.9.7](https://github.com/first-fluke/agent-valley/compare/v4.9.6...v4.9.7) (2026-11-09)
+
+
+### Bug Fixes
+
+* **cli:** honor --duration before pinning an expired mission deadline ([a91291c](https://github.com/first-fluke/agent-valley/commit/a91291c9ff722113674795461f9375be349ea3b7))
+
+## [4.9.6](https://github.com/first-fluke/agent-valley/compare/v4.9.5...v4.9.6) (2026-11-09)
+
+
+### Bug Fixes
+
+* **chief:** allow up to 40 acceptance criteria per task ([131b299](https://github.com/first-fluke/agent-valley/commit/131b299304a231a8b523a2b4dd663de555cf6dbc))
+
+## [4.9.5](https://github.com/first-fluke/agent-valley/compare/v4.9.4...v4.9.5) (2026-11-09)
+
+
+### Tests
+
+* **chief:** remove POSIX-only process-group tests for a zero-skip suite ([33a8a78](https://github.com/first-fluke/agent-valley/commit/33a8a787d0ad8feb23c7088aeb1f1272ea37f264))
+
 ## [4.9.4](https://github.com/first-fluke/agent-valley/compare/v4.9.3...v4.9.4) (2026-11-09)
 
 
