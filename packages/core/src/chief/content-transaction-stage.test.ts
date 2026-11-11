@@ -46,6 +46,22 @@ describe("stageIntegratedPaths", () => {
     expect(status).toEqual(["?? untracked-later.txt", "A  evidence.md", "D  untracked-later.txt", "M  tracked.txt"])
   })
 
+  it("ignores a delivered deletion of a file that was never indexed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "av-stage-"))
+    roots.push(root)
+    await git(root, "init", "-q", "-b", "main")
+    await writeFile(join(root, "a.txt"), "a\n")
+    await git(root, "add", "a.txt")
+    await git(root, "commit", "-q", "-m", "base")
+    // An in-workspace Actor created scaffold.tsx unstaged; a later delivery deleted it and added app.tsx.
+    await writeFile(join(root, "app.tsx"), "export {}\n")
+
+    await stageIntegratedPaths(root, ["scaffold.tsx", "app.tsx"])
+
+    const status = (await git(root, "status", "--porcelain", "-z")).split("\0").filter(Boolean)
+    expect(status).toEqual(["A  app.tsx"])
+  })
+
   it("is a no-op without delivered paths", async () => {
     const root = await mkdtemp(join(tmpdir(), "av-stage-"))
     roots.push(root)

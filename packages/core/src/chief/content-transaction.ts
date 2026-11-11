@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { readFile, rm, writeFile } from "node:fs/promises"
+import { lstat, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ParallelDelivery } from "./parallel-contract"
@@ -83,7 +83,18 @@ export async function stageIntegratedPaths(workspace: string, paths: string[]): 
   const head = (await parallelGit(workspace, ["rev-parse", "HEAD"])).trim()
   const tracked = new Set((await parallelGit(workspace, ["ls-tree", "-r", "--name-only", "-z", head])).split("\0"))
   const cached = new Set((await parallelGit(workspace, ["ls-files", "--cached", "-z"])).split("\0"))
-  const stageable = [...new Set(paths)].filter((path) => path && (cached.has(path) || !tracked.has(path)))
+  // A delivery can delete a file that was never indexed (created unstaged by an earlier in-workspace
+  // Actor). Nothing is left to stage for it, and naming it makes `git add` fail on the whole pathspec.
+  const present = async (path: string) =>
+    lstat(join(workspace, path)).then(
+      () => true,
+      () => false,
+    )
+  const stageable: string[] = []
+  for (const path of new Set(paths)) {
+    if (!path) continue
+    if (cached.has(path) || (!tracked.has(path) && (await present(path)))) stageable.push(path)
+  }
   if (!stageable.length) return
   const pathsFile = join(tmpdir(), `av-stage-${randomUUID()}.paths`)
   await writeFile(pathsFile, `${stageable.join("\0")}\0`, { flag: "wx", mode: 0o600 })
