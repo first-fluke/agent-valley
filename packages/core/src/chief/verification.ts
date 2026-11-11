@@ -82,6 +82,28 @@ function checkDigest(check: GoalVerificationCheck): string {
   return createHash("sha256").update(JSON.stringify(check)).digest("hex")
 }
 
+const FAILURE_LINE = /FAILED|panicked at|^failures:|^error(?:\[|:)|\(fail\)|AssertionError|assertion .*failed|✗|×/
+
+/**
+ * Test runners report which test failed on stdout (libtest, Bun, Vitest) and only progress on stderr.
+ * A stderr-only tail told the repairing Actor that a suite failed without naming the test, so it reran
+ * the suite locally, saw it pass and resubmitted. Lead with the failing lines, then both stream tails.
+ */
+export function commandFailureDetail(stdout: string, stderr: string): string {
+  const failing = stdout
+    .split("\n")
+    .filter((line) => FAILURE_LINE.test(line))
+    .slice(-12)
+    .map((line) => line.slice(0, 200))
+    .join("\n")
+  const parts = [
+    failing ? `Failing output:\n${failing}` : "",
+    stdout.trim() ? `stdout tail:\n${stdout.slice(-500)}` : "",
+    stderr.trim() ? `stderr tail:\n${stderr.slice(-400)}` : "",
+  ].filter(Boolean)
+  return parts.join("\n").slice(0, 1_800)
+}
+
 function checkSummary(passed: boolean, detail: string): string {
   return `${passed ? "PASS" : "FAIL"}: ${detail}`.slice(0, 2_000)
 }
@@ -166,7 +188,7 @@ async function inspectCheck(
       summary: checkSummary(
         passed,
         result.exitCode !== 0
-          ? `Process exited ${result.exitCode ?? "without an exit code"}. Repair the explicit test or Git check. ${(result.stderr || result.stdout).slice(-1_200)}`
+          ? `Process exited ${result.exitCode ?? "without an exit code"}. Repair the explicit test or Git check. ${commandFailureDetail(result.stdout, result.stderr)}`
           : passed
             ? "Explicit command exited zero and its required output assertions passed."
             : "Process exited zero but required stdout assertions are missing.",
