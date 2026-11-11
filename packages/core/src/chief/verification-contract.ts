@@ -96,9 +96,18 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
       timeoutMs: z.number().int().min(100).max(3_600_000).default(120_000),
       stdoutIncludes: z.array(text).min(1).max(20).optional(),
     })
-    .refine((check) => safeVerificationCommand(check.program, check.args), {
-      message:
-        "Use explicit node/bun/Vitest tests, read-only Git, or exactly cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- -D warnings, cargo test --workspace. Other Cargo commands or flags, shells, scripts, installs and publishing are forbidden.",
+    .superRefine((check, ctx) => {
+      if (safeVerificationCommand(check.program, check.args)) return
+      // Name the rejected argv: a generic rule left planners guessing which check to change.
+      const rejected = `${check.program} ${check.args.join(" ")}`.slice(0, 300)
+      const hint =
+        check.program === "bun" || check.program === "node"
+          ? " bun test and node --test take only explicit test file paths ending in .test or .spec; a bare test command, flags such as --cwd, globs and package scripts are rejected, so list each test file or record the gate in a JSON report checked by pointer."
+          : ""
+      ctx.addIssue({
+        code: "custom",
+        message: `Rejected command: ${rejected}.${hint} Use explicit node/bun/Vitest tests, read-only Git, or exactly cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- -D warnings, cargo test --workspace. Other Cargo commands or flags, shells, scripts, installs and publishing are forbidden.`,
+      })
     }),
 ])
 
