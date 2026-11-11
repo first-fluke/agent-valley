@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { mkdir, realpath, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdir, realpath, rm, writeFile } from "node:fs/promises"
 import { join, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 import { writeJsonAtomic } from "../util/atomic-json"
@@ -82,7 +82,17 @@ export async function writeParallelJson(path: string, value: unknown): Promise<v
   await writeJsonAtomic(path, value, { pretty: false })
 }
 /** A private index includes tracked changes, deletions, executable bits and nonignored untracked files. */
-export async function captureParallelBaseline(workspace: string): Promise<ParallelBaseline> {
+export async function captureParallelBaseline(
+  workspace: string,
+  options: {
+    /**
+     * Delivered paths to capture even when the target's ignore rules hide them. An integration whose
+     * delivery lands in an ignored directory (a new `coverage/` folder under a `coverage/` rule) was
+     * otherwise applied correctly and then reported as not matching its post images.
+     */
+    include?: readonly string[]
+  } = {},
+): Promise<ParallelBaseline> {
   const directory = await parallelRoot(workspace)
   const index = join(directory, `index-${randomUUID()}`)
   const pathsFile = `${index}.paths`
@@ -103,7 +113,13 @@ export async function captureParallelBaseline(workspace: string): Promise<Parall
     // temporary index starts from HEAD, so an explicit `add -A` pathspec for it matches nothing and fails.
     const deleted = await parallelGit(workspace, ["ls-files", "--deleted", "-z"])
     const vanished = new Set(deleted.split("\0").filter((path) => path && !headTracked.has(path)))
-    const paths = [...new Set(`${cached}${visible}`.split("\0"))].filter(
+    const listed = new Set(`${cached}${visible}`.split("\0"))
+    for (const path of options.include ?? []) {
+      if (!path || listed.has(path) || excludedParallelPath(path)) continue
+      // Only files that exist can be force-added; a delivered deletion is already absent from the tree.
+      if (headTracked.has(path) || (await lstat(join(workspace, path)).catch(() => undefined))) listed.add(path)
+    }
+    const paths = [...listed].filter(
       (path) => path && !untrackedSet.has(path) && !vanished.has(path) && !excludedParallelPath(path),
     )
     await parallelGit(workspace, ["read-tree", head], env)

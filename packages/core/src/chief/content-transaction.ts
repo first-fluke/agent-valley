@@ -27,7 +27,9 @@ export async function integrateContentTransaction(
   const patch = await readFile(transaction.patchPath)
   if (createHash("sha256").update(patch).digest("hex") !== transaction.patchSha256)
     throw new Error("Integration patch changed. Restore its saved SHA256 before integration.")
-  const current = await captureParallelBaseline(workspace)
+  // Delivered paths stay visible to the before/after comparison even where the target ignores them.
+  const include = transaction.changes.map((change) => change.path)
+  const current = await captureParallelBaseline(workspace, { include })
   const images = await parallelTreeImages(workspace, current.tree)
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const differs = (side: "before" | "after") =>
@@ -57,7 +59,7 @@ export async function integrateContentTransaction(
   await hooks.save()
   await hooks.assertLive?.()
   if (patch.length) await parallelGit(workspace, ["apply", "--binary", "--whitespace=nowarn", transaction.patchPath])
-  const final = await captureParallelBaseline(workspace)
+  const final = await captureParallelBaseline(workspace, { include })
   const applied = await parallelTreeImages(workspace, final.tree)
   const remaining = transaction.changes
     .filter((change) => !same(applied.get(change.path) ?? null, change.after))
