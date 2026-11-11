@@ -1,5 +1,7 @@
-import { createHash } from "node:crypto"
-import { readFile } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { ParallelDelivery } from "./parallel-contract"
 import { captureParallelBaseline, parallelGit, parallelTreeImages } from "./parallel-git"
 
@@ -13,6 +15,12 @@ export async function integrateContentTransaction(
     save(): Promise<void>
     conflict(paths: string[], detail?: string): Error
     assertLive?(): Promise<void>
+    /**
+     * Stage delivered paths in the target index after apply. Task deliveries into the mission workspace
+     * opt in so repository validators see them; operation source integration must leave the operator's
+     * index untouched and keeps the default.
+     */
+    stage?: boolean
   },
 ): Promise<{ alreadyApplied: boolean; changedPaths: string[] }> {
   await hooks.assertLive?.()
@@ -56,7 +64,32 @@ export async function integrateContentTransaction(
     .map((change) => change.path)
   if (remaining.length) throw hooks.conflict(remaining, "Applied task patch did not match its saved post images.")
   await hooks.assertLive?.()
+  if (hooks.stage) await stageIntegratedPaths(workspace, changedPaths)
   transaction.status = "applied"
   await hooks.save()
   return { alreadyApplied: false, changedPaths }
+}
+
+/**
+ * `git apply` only touches the worktree, so integrated deliveries used to sit unstaged: new files stayed
+ * untracked and staged files showed as modified, which breaks repository validators that compare the
+ * index with the worktree (`git ls-files`, "indexed and working evidence differ"). Stage the delivered
+ * paths in the mission index, except files the mission intentionally untracked (`git rm --cached`).
+ */
+export async function stageIntegratedPaths(workspace: string, paths: string[]): Promise<void> {
+  if (!paths.length) return
+  const head = (await parallelGit(workspace, ["rev-parse", "HEAD"])).trim()
+  const tracked = new Set((await parallelGit(workspace, ["ls-tree", "-r", "--name-only", "-z", head])).split("\0"))
+  const cached = new Set((await parallelGit(workspace, ["ls-files", "--cached", "-z"])).split("\0"))
+  const stageable = [...new Set(paths)].filter((path) => path && (cached.has(path) || !tracked.has(path)))
+  if (!stageable.length) return
+  const pathsFile = join(tmpdir(), `av-stage-${randomUUID()}.paths`)
+  await writeFile(pathsFile, `${stageable.join("\0")}\0`, { flag: "wx", mode: 0o600 })
+  try {
+    await parallelGit(workspace, ["add", "-A", "-f", `--pathspec-from-file=${pathsFile}`, "--pathspec-file-nul"], {
+      GIT_LITERAL_PATHSPECS: "1",
+    })
+  } finally {
+    await rm(pathsFile, { force: true })
+  }
 }

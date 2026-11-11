@@ -270,6 +270,9 @@ export async function integrateTaskDelivery(
   const result = await integrateContentTransaction(mission.workspace.path, delivery, {
     save: () => writeParallelJson(location.delivery, delivery),
     conflict: (paths, detail) => new ParallelIntegrationConflict(delivery.workspace.taskId, paths, detail),
+    // The mission index is operator-owned by default. Repositories whose validators compare the index
+    // with the worktree can opt in so integrated deliveries are visible to them.
+    stage: process.env.AV_STAGE_TASK_DELIVERIES === "1",
   })
   input.status = "applied"
   input.workerHead = delivery.workerHead
