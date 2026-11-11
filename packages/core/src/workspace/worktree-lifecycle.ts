@@ -14,6 +14,7 @@ import { join } from "node:path"
 import type { Issue, RunAttempt, Workspace } from "../domain/models"
 import { logger } from "../observability/logger"
 import { type CommandResult, runCommand } from "./command"
+import { ensureDiskBudget } from "./disk-budget"
 import { ensureRuntimeGitignore } from "./runtime-ignore"
 
 export { type CommandResult, GIT_SAFETY_ARGS, type RunCommandOptions, runCommand } from "./command"
@@ -149,6 +150,7 @@ export async function createWorkspace(
 
   await mkdir(workspaceRoot, { recursive: true })
   await removeEmptyDirectory(path)
+  if (!(await getWorkspace(workspaceRoot, issue.id))) await ensureDiskBudget(workspaceRoot, `the ${key} workspace`)
 
   if (platform === "linux") {
     const existing = await getWorkspace(workspaceRoot, issue.id)
