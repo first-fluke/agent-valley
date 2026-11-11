@@ -175,6 +175,17 @@ export async function performParallelWave(
   }
   if ([...failures.values()].some((failure) => hooks.fatal?.(failure.error)))
     return wave.flatMap((task) => failures.get(task.id) ?? [])
+  // Integrated edits live in the mission workspace, its patch receipt, and retained Git evidence refs,
+  // so the Actor repository (including its build output) is redundant whether review passed or not.
+  // Callers run inside serialize(), so the retention checkpoint uses rawSave.
+  const release = (taskId: string, record: NonNullable<ChiefTaskState["parallel"]>) =>
+    parallel.dispose(record).catch(async (error: unknown) => {
+      await rawSave(
+        "parallel-retained",
+        `Task ${taskId} Actor workspace was retained at ${record.path}: ${error instanceof Error ? error.message : String(error)}`,
+        taskId,
+      )
+    })
   // Reviews are read-only inspections of the integrated worktree: overlap them up to the parallel limit,
   // while every mission-state mutation and checkpoint stays on the shared serialized queue.
   const reviewLimit = Math.max(1, mission.executionPolicy?.maxParallel ?? 1)
@@ -196,26 +207,20 @@ export async function performParallelWave(
               `Task ${task.id} passed independent review after parallel integration.`,
               task.id,
             )
-            // Only confirmed integrated edits may be disposed; failed work stays available.
-            await parallel.dispose(record).catch(async (error: unknown) => {
-              await rawSave(
-                "parallel-retained",
-                `Task ${task.id} completed, but its workspace was retained at ${record.path}: ${error instanceof Error ? error.message : String(error)}`,
-                task.id,
-              )
-            })
+            await release(task.id, record)
           } else {
             state.status = "pending"
-            const reason = `Task ${task.id} failed independent review: ${state.review?.findings.join("; ") ?? "No passing review"}. Actor edits retained at ${record.path}.`
+            const reason = `Task ${task.id} failed independent review: ${state.review?.findings.join("; ") ?? "No passing review"}. Actor edits from ${record.path} remain integrated in the mission workspace.`
             await rawSave("parallel-review-rejected", reason, task.id)
             delete state.parallel
             delete state.changeSet
             delete state.output
             await rawSave(
               "parallel-repair-pending",
-              `Task ${task.id} awaits the Chief's repair decision; the previous Actor workspace remains in history.`,
+              `Task ${task.id} awaits the Chief's repair decision; the previous Actor patch and evidence refs remain in history.`,
               task.id,
             )
+            await release(task.id, record)
             fail(task.id, new ParallelTaskReviewRejected(reason), "review")
           }
         })

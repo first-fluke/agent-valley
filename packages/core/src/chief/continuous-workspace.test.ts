@@ -6,6 +6,7 @@ import { supportsLiteralGlobNames, supportsPosixModes, makeSymlink as symlink } 
 import {
   createContinuousMissionWorkspace,
   prepareContinuousBaseline,
+  releaseContinuousBuildOutputs,
   validateContinuousBaseline,
 } from "./continuous-workspace"
 import { fingerprintWorkspace } from "./fingerprint"
@@ -167,5 +168,41 @@ describe("accepted continuous operation baselines", () => {
     await expect(prepareContinuousBaseline(root, "operation", root, "verified-child", "a".repeat(64))).rejects.toThrow(
       "identity",
     )
+  })
+
+  it("releases ignored build output of an owned child while keeping product files, Git metadata and AV receipts", async () => {
+    await writeFile(join(root, ".gitignore"), ".agent-valley/\nignored.txt\ntarget/\n")
+    const baseline = await prepareContinuousBaseline(root, "operation", root)
+    const child = await createContinuousMissionWorkspace(root, "operation", baseline.path, "built-child", "Build")
+    await writeFile(join(child.path, "product.txt"), "Uncommitted accepted product\n")
+    await mkdir(join(child.path, "target", "debug"), { recursive: true })
+    await writeFile(join(child.path, "target", "debug", "artifact"), "large build output")
+    await mkdir(join(child.path, ".agent-valley", "parallel", "deliveries"), { recursive: true })
+    await writeFile(join(child.path, ".agent-valley", "parallel", "deliveries", "receipt.json"), "{}")
+    await mkdir(join(child.path, ".agents", "results"), { recursive: true })
+    await writeFile(join(child.path, ".agents", "results", "result.md"), "Actor result")
+    const fingerprint = await fingerprintWorkspace(child.path)
+    // .agent-valley/ is ignored as a whole directory; it must never be listed for removal.
+    expect(await releaseContinuousBuildOutputs(child.path, { apply: false })).toEqual(["target/"])
+    expect(await lstat(join(child.path, "target", "debug", "artifact"))).toBeDefined()
+    expect(await releaseContinuousBuildOutputs(child.path)).toEqual(["target/"])
+    await expect(lstat(join(child.path, "target"))).rejects.toMatchObject({ code: "ENOENT" })
+    expect(await readFile(join(child.path, "product.txt"), "utf8")).toBe("Uncommitted accepted product\n")
+    expect(await readFile(join(child.path, ".agent-valley", "parallel", "deliveries", "receipt.json"), "utf8")).toBe(
+      "{}",
+    )
+    expect(await readFile(join(child.path, ".agents", "results", "result.md"), "utf8")).toBe("Actor result")
+    expect(await fingerprintWorkspace(child.path)).toBe(fingerprint)
+    expect((await parallelGit(child.path, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe(child.branch)
+  })
+
+  it("never cleans a workspace AV does not own as an operation child", async () => {
+    await writeFile(join(root, "ignored.txt"), "Operator-owned ignored file\n")
+    expect(await releaseContinuousBuildOutputs(root)).toBe(false)
+    const baseline = await prepareContinuousBaseline(root, "operation", root)
+    await writeFile(join(baseline.path, "ignored.txt"), "Frozen baseline ignored file\n")
+    expect(await releaseContinuousBuildOutputs(baseline.path)).toBe(false)
+    expect(await readFile(join(root, "ignored.txt"), "utf8")).toBe("Operator-owned ignored file\n")
+    expect(await readFile(join(baseline.path, "ignored.txt"), "utf8")).toBe("Frozen baseline ignored file\n")
   })
 })

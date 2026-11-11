@@ -143,5 +143,7 @@ export interface ChiefPorts {
     integrate(mission: Mission, record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
     dispose(record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
   }
+  /** Release disposable storage (applied Actor repositories, ignored build output) after the mission completes. */
+  releaseStorage?(mission: Mission): Promise<void>
   signal?: AbortSignal
 }

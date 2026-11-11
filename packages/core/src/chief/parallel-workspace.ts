@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { dirname, join, sep } from "node:path"
+import { ensureDiskBudget } from "../workspace/disk-budget"
 import { integrateContentTransaction } from "./content-transaction"
 import {
   type ParallelBaseline,
@@ -135,6 +136,10 @@ export async function prepareTaskWorktree(
     throw new Error(
       `Unrecorded parallel workspace exists at ${location.path}. Preserve its edits and inspect it before retrying.`,
     )
+  const referenced = new Set(mission.tasks.flatMap((state) => (state.parallel ? [state.parallel.path] : [])))
+  await ensureDiskBudget(dirname(location.path), `a parallel Actor workspace for ${taskId}`, () =>
+    releaseAppliedTaskWorktrees(mission, { keep: referenced }),
+  )
   await parallelGit(mission.workspace.path, [
     "clone",
     "--local",
@@ -407,6 +412,59 @@ export async function collectTaskChangeSet(
     }
   }
   return undefined
+}
+
+/**
+ * Remove Actor repositories whose delivery was applied, even when later repairs superseded their edits.
+ * Each delivery keeps its patch receipt and retained Git evidence refs. Unapplied or unrecorded Actor
+ * repositories, and any path in `keep` (still referenced by an unfinished task), are always retained.
+ * With `apply: false` nothing is removed and `released` lists what would be removed.
+ */
+export async function releaseAppliedTaskWorktrees(
+  mission: Mission,
+  options: { keep?: ReadonlySet<string>; apply?: boolean } = {},
+): Promise<{ released: string[]; retained: string[] }> {
+  const source = await realpath(mission.workspace.path)
+  if (!(await lstat(join(source, ".agent-valley", "parallel")).catch(() => undefined)))
+    return { released: [], retained: [] }
+  const root = await parallelRoot(source)
+  const workspaces = join(root, "workspaces")
+  const names = await readdir(workspaces).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [] as string[]
+    throw error
+  })
+  const released: string[] = []
+  const retained: string[] = []
+  for (const key of names.sort()) {
+    const path = join(workspaces, key)
+    const receipt = join(root, "deliveries", key, "delivery.json")
+    const delivery = await readFile(receipt, "utf8")
+      .then((raw) => parallelDeliverySchema.safeParse(JSON.parse(raw)))
+      .catch(() => undefined)
+    if (
+      !delivery?.success ||
+      delivery.data.status !== "applied" ||
+      delivery.data.workspace.missionId !== mission.id ||
+      delivery.data.workspace.path !== path ||
+      options.keep?.has(path)
+    ) {
+      retained.push(path)
+      continue
+    }
+    if (options.apply === false) {
+      released.push(path)
+      continue
+    }
+    try {
+      assertParallelPath(root, path)
+      await retainDeliveryEvidence(delivery.data, () => writeParallelJson(receipt, delivery.data))
+      await rm(path, { recursive: true, force: true })
+      released.push(path)
+    } catch {
+      retained.push(path)
+    }
+  }
+  return { released, retained }
 }
 
 export async function integrateTaskWorktree(mission: Mission, workspace: ParallelTaskWorkspace) {

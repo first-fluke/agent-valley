@@ -1,10 +1,18 @@
-import { lstat, mkdir, readFile, realpath } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { lstat, mkdir, readFile, realpath, rm } from "node:fs/promises"
+import { dirname, join, resolve, sep } from "node:path"
 import { z } from "zod"
 import type { Workspace } from "../domain/models"
+import { isActorConfigPath } from "../workspace/actor-config"
+import { ensureDiskBudget } from "../workspace/disk-budget"
 import { type ContinuousBaseline, continuousBaselineSchema, operationIdSchema } from "./continuous-contract"
 import { fingerprintWorkspace } from "./fingerprint"
-import { captureParallelBaseline, parallelGit, parallelTreeImages, writeParallelJson } from "./parallel-git"
+import {
+  captureParallelBaseline,
+  excludedParallelPath,
+  parallelGit,
+  parallelTreeImages,
+  writeParallelJson,
+} from "./parallel-git"
 
 async function localDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true, mode: 0o700 })
@@ -149,6 +157,7 @@ async function ensureClone(source: string, path: string, branch: string, commit:
     throw error
   })
   if (!exists) {
+    await ensureDiskBudget(dirname(path), "an operation workspace clone")
     await parallelGit(source, ["clone", "--local", "--no-hardlinks", "--no-checkout", "--quiet", source, path])
   } else if (!exists.isDirectory() || (await realpath(path)) !== path) {
     throw new Error("Operation workspace path redirects outside its private directory. Restore it before resuming.")
@@ -212,6 +221,56 @@ const missionWorkspaceSchema = z.strictObject({
   branch: z.string().min(1),
   createdAt: z.iso.datetime(),
 })
+
+/**
+ * A completed operation child keeps its product files, Git metadata and AV receipts. Ignored build output
+ * (for example Cargo `target/` or `node_modules/`) is excluded from fingerprints and snapshots, so it is disposable.
+ * Returns false for any workspace AV does not own as an operation child; otherwise the removed (or, with
+ * `apply: false`, removable) top-level paths relative to the workspace.
+ */
+export async function releaseContinuousBuildOutputs(
+  workspacePath: string,
+  options: { apply?: boolean } = {},
+): Promise<string[] | false> {
+  const path = resolve(workspacePath)
+  const record = await readContinuousMissionWorkspace(dirname(path))
+  if (!record || record.path !== path || (await realpath(path).catch(() => undefined)) !== path) return false
+  await assertRepository(path, record.branch)
+  // List ignored entries and filter them here: git clean pathspec exclusions do not protect whole ignored
+  // directories, which would remove AV receipts under .agent-valley/.
+  const listed = await parallelGit(path, [
+    "ls-files",
+    "-z",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+    "--directory",
+    "--no-empty-directory",
+  ])
+  const removable: string[] = []
+  for (const entry of listed.split("\0").filter(Boolean)) {
+    const name = entry.replace(/\/$/, "")
+    if (!name || excludedParallelPath(name) || isActorConfigPath(name)) continue
+    const target = resolve(path, name)
+    if (!target.startsWith(`${path}${sep}`)) continue
+    if (await lstat(join(target, ".git")).catch(() => undefined)) continue
+    removable.push(entry)
+  }
+  if (options.apply !== false)
+    for (const entry of removable) await rm(resolve(path, entry), { recursive: true, force: true })
+  return removable
+}
+
+/** Reads an operation child receipt only when it matches the private path AV assigns to that child. */
+export async function readContinuousMissionWorkspace(container: string) {
+  const raw = await readJson(join(container, "workspace.json")).catch(() => undefined)
+  const parsed = raw === undefined ? undefined : missionWorkspaceSchema.safeParse(raw)
+  if (!parsed?.success) return undefined
+  const { repositoryRoot, operationId, missionId } = parsed.data
+  const owned = join(repositoryRoot, ".agent-valley", "operations", operationId, "workspaces", missionId)
+  if (resolve(container) !== owned || parsed.data.path !== join(owned, "workspace")) return undefined
+  return parsed.data
+}
 
 /** Child and decision repositories are siblings of frozen baselines, so new work cannot alter accepted trees. */
 export async function createContinuousMissionWorkspace(

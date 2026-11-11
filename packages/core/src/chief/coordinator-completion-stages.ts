@@ -132,5 +132,15 @@ export async function reportMission(context: CoordinatorContext): Promise<StageT
     "completed",
     "Every task passed independent review, verification passed, and the Chief Director approved the mission.",
   )
+  await ports
+    .releaseStorage?.(mission)
+    .catch((error: unknown) =>
+      checkpoint
+        .record(
+          "storage-retained",
+          `Mission completed, but disposable Actor workspaces or build output were retained: ${error instanceof Error ? error.message : String(error)}. Applied Actor repositories under ${mission.workspace.path}/.agent-valley/parallel/workspaces and ignored build output in operation child workspaces are safe to delete once their delivery.json status is "applied".`,
+        )
+        .catch(() => {}),
+    )
   return { kind: "return" }
 }

@@ -10,12 +10,18 @@ import {
   type SkillMatrixDeps,
 } from "../oma/skill-matrix-adapter"
 import { runVerificationGate } from "../orchestrator/verification-gate"
+import { releaseContinuousBuildOutputs } from "./continuous-workspace"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
 import { fingerprintWorkspace } from "./fingerprint"
 import { createLocalMissionRunner, finishLocalProcess } from "./local-runner"
 import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
-import { disposeTaskWorktree, integrateTaskWorktree, prepareTaskWorktree } from "./parallel-workspace"
+import {
+  disposeTaskWorktree,
+  integrateTaskWorktree,
+  prepareTaskWorktree,
+  releaseAppliedTaskWorktrees,
+} from "./parallel-workspace"
 import { selectWorkActor, workActorCandidates } from "./routing"
 import { admitNativeDispatch } from "./runtime-admission"
 import {
@@ -80,6 +86,10 @@ export class ChiefRuntime {
         dispose: async (record) => {
           await disposeTaskWorktree(record)
         },
+      },
+      releaseStorage: async (mission) => {
+        await releaseAppliedTaskWorktrees(mission)
+        await releaseContinuousBuildOutputs(mission.workspace.path)
       },
     }
   }

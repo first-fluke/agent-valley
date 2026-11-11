@@ -87,4 +87,27 @@ describe("completion report generation", () => {
     expect(snapshots.some((saved) => saved.status === "completed")).toBe(false)
     expect(mission.report?.summary).toContain("미완료")
   })
+
+  it("releases disposable storage only after the completed checkpoint is saved", async () => {
+    const { mission, ports, snapshots } = executionFixture()
+    const releaseStorage = vi.fn(async (current: typeof mission) => {
+      expect(current.status).toBe("completed")
+      expect(snapshots.at(-1)?.status).toBe("completed")
+    })
+    ports.releaseStorage = releaseStorage
+    await coordinate(mission, ports)
+    expect(mission.status).toBe("completed")
+    expect(releaseStorage).toHaveBeenCalledOnce()
+  })
+
+  it("keeps the mission completed and records the reason when storage release fails", async () => {
+    const { mission, ports } = executionFixture()
+    ports.releaseStorage = vi.fn(async () => {
+      throw new Error("disk busy")
+    })
+    await coordinate(mission, ports)
+    expect(mission.status).toBe("completed")
+    expect(mission.history.at(-1)).toMatchObject({ stage: "storage-retained" })
+    expect(mission.history.at(-1)?.message).toContain("disk busy")
+  })
 })

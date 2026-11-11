@@ -157,7 +157,26 @@ describe("parallel Chief task coordination", () => {
     expect(parallel.dispose).toHaveBeenCalledTimes(1)
   })
 
-  it("retains rejected edits in history, clears retry output, and lets root consume the repair budget once", async () => {
+  it("records a dispose failure for rejected work without failing the wave", async () => {
+    const { mission, ports, wave, parallel, hooks } = setup()
+    hooks.review = vi.fn(async (task, state) => {
+      state.review =
+        task.id === "a"
+          ? { passed: false, summary: "Incomplete", findings: ["Missing evidence"] }
+          : { passed: true, summary: "Passed", findings: [] }
+    })
+    parallel.dispose = vi.fn(async () => {
+      throw new Error("disk busy")
+    })
+    const failures = await performParallelWave(mission, ports, wave, hooks)
+    expect(failures.map((failure) => failure.taskId)).toEqual(["a"])
+    expect(failures[0]?.error).toBeInstanceOf(ParallelTaskReviewRejected)
+    expect(
+      mission.history.filter((event) => event.stage === "parallel-retained" && event.message.includes("disk busy")),
+    ).toHaveLength(2)
+  })
+
+  it("integrates rejected edits, clears retry output, disposes the Actor repository, and lets root consume the repair budget once", async () => {
     const { mission, ports, wave, parallel, hooks } = setup()
     const first = mission.tasks[0]
     if (!first) throw new Error("Missing fixture task")
@@ -193,7 +212,14 @@ describe("parallel Chief task coordination", () => {
         (event) => event.stage === "parallel-review-rejected" && event.message.includes("/private/actor-a"),
       ),
     ).toBe(true)
-    expect(parallel.dispose).toHaveBeenCalledTimes(1)
+    // Rejected edits are already integrated and kept as patch + evidence refs; the clone is redundant.
+    expect(parallel.dispose).toHaveBeenCalledTimes(2)
+    expect(
+      vi
+        .mocked(parallel.dispose)
+        .mock.calls.map(([workspace]) => workspace.taskId)
+        .sort(),
+    ).toEqual(["a", "b"])
   })
 
   it("joins abort cleanup without integrating, reviewing, or discarding child workspaces", async () => {
