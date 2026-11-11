@@ -1,4 +1,4 @@
-import type { Mission, Review } from "./types"
+import type { ChiefTask, Mission, Review } from "./types"
 
 export class ContractViolation extends Error {}
 
@@ -71,8 +71,14 @@ export function selectRepairTaskId(mission: Mission, reason?: string, taskId?: s
     const matched = [...pool].reverse().find((task) => reason.includes(task.id))
     if (matched) return matched.id
   }
-  return pool.at(-1)?.id
+  // A verification failure with no task reference is code work: a planning, review or marketing persona
+  // appended last cannot repair failing gates, so prefer the latest task owned by a code-capable Actor.
+  const codeCapable = (task: ChiefTask) =>
+    mission.personas.find((persona) => persona.id === task.personaId)?.skills.some((skill) => CODE_SKILL.test(skill))
+  return [...pool].reverse().find(codeCapable)?.id ?? pool.at(-1)?.id
 }
+
+const CODE_SKILL = /^oma-(?:backend|debug|frontend|mobile|refactor|db)$/
 
 /** Partial deliveries survive drift; repair deliberately creates a new Actor attempt. */
 export function resetTaskApprovals(
