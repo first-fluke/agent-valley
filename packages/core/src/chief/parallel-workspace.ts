@@ -26,6 +26,7 @@ import {
 } from "./parallel-git"
 import type { Mission } from "./types"
 import { assertMissionWorkspace } from "./workspace"
+import { seedWorkspaceCaches } from "./workspace-cache"
 
 export * from "./parallel-contract"
 export { captureParallelBaseline } from "./parallel-git"
@@ -165,6 +166,12 @@ export async function prepareTaskWorktree(
   ).trim()
   await parallelGit(location.path, ["checkout", "-q", "-b", location.branch, commit])
   await parallelGit(location.path, ["remote", "remove", "origin"])
+  // A repair starts from its previous attempt's build cache; a first attempt from the mission's.
+  const earlier = Array.from({ length: attempt - 1 }, (_, index) =>
+    join(location.root, "workspaces", identity(mission.id, taskId, attempt - 1 - index)),
+  )
+  const seeded = await seedWorkspaceCaches({ workspace: location.path, sources: [...earlier, mission.workspace.path] })
+  if (seeded.length) await writeParallelJson(join(location.directory, "cache-seed.json"), seeded)
   // baselineTree must resolve from baselineHead for reviewers; the snapshot input may add an uncommitted overlay.
   const baselineTree = (await parallelGit(mission.workspace.path, ["rev-parse", `${snapshot.head}^{tree}`])).trim()
   const record: ParallelTaskWorkspace = {

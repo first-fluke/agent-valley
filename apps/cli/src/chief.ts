@@ -18,6 +18,7 @@ import {
 import { discoverMissionSkills, prepareMissionSkills } from "@agent-valley/core/chief/skills"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
+import { seedWorkspaceCaches, siblingMissionWorkspaces } from "@agent-valley/core/chief/workspace-cache"
 import { ensureRuntimeGitignore } from "@agent-valley/core/workspace/runtime-ignore"
 import { WorkspaceManager } from "@agent-valley/core/workspace/workspace-manager"
 import { discoverReadyAgents, resetHandoffForRetry } from "./chief-agent-discovery"
@@ -157,7 +158,14 @@ export async function runOrder(
               undefined,
               codeDelivery ? join(config.workspace, ".agent-valley", "workspaces") : undefined,
             )
-      if (options.operationId) await restoreOperationOrigin(config.workspace, workspace.path)
+      if (options.operationId) {
+        await restoreOperationOrigin(config.workspace, workspace.path)
+        // A new child starts from the previous child's build cache instead of compiling from nothing.
+        await seedWorkspaceCaches({
+          workspace: workspace.path,
+          sources: await siblingMissionWorkspaces(workspace.path),
+        })
+      }
       if (!codeDelivery) await prepareMissionSkills(config.workspace, workspace.path)
       const now = new Date().toISOString()
       mission = {
