@@ -16,17 +16,35 @@ import type { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { abortableDelay } from "./chief-supervisor"
 
-/** An explicit operator retry permits one corrected response without replenishing automatic retries. */
+/**
+ * An explicit operator retry reopens a decision the operator interrupted, or permits one corrected response without
+ * replenishing automatic retries. Spent calls, retries and the original deadline stay recorded in both cases.
+ */
 export function rearmContinuousDecision(mission: Mission): void {
   const state = executionState(mission)
   const reason = mission.error ?? state.pauseReason ?? ""
+  if (mission.status === "paused" && state.failureKind === "interrupted") {
+    assertNoUncertainExecution(mission)
+    assertExecutionBudget(mission)
+    mission.history.push({
+      at: new Date().toISOString(),
+      stage: "continuous-decision-operator-resume",
+      message: `Operator resumed the interrupted decision; ${state.runsStarted} spent calls and ${state.retries} automatic retries remain recorded.`,
+    })
+    mission.status = "planning"
+    delete mission.error
+    delete state.pauseReason
+    delete state.failureKind
+    delete state.nextRunAt
+    return
+  }
   if (
     mission.status !== "paused" ||
     state.failureKind !== "implementation" ||
     !reason.startsWith("Invalid Chief decision")
   )
     throw new Error(
-      "Operation --retry requires a paused invalid-JSON decision. Inspect its saved blocker or resume the active child instead.",
+      "Operation --retry requires a paused decision that the operator interrupted or that returned invalid JSON. Inspect its saved blocker or resume the active child instead.",
     )
   assertNoUncertainExecution(mission)
   assertExecutionBudget(mission)
@@ -98,7 +116,11 @@ export async function runContinuousDecision(
         : Infinity
       await delay(Math.min(Date.parse(state.nextRunAt) - Date.now(), remaining, 30_000), signal)
     }
-    if (signal?.aborted) throw interruptionPause(signal, "Operation decision interrupted.")
+    if (signal?.aborted)
+      throw interruptionPause(
+        signal,
+        "Operation decision interrupted. Resume it explicitly with av order --resume <operation-id> --retry.",
+      )
     mission.status = "planning"
     delete mission.error
     delete state.pauseReason

@@ -244,7 +244,10 @@ export async function decideContinuousGoal(
       },
       () => {
         if (dependencies.signal?.aborted)
-          throw interruptionPause(dependencies.signal, "Operation decision interrupted.")
+          throw interruptionPause(
+            dependencies.signal,
+            "Operation decision interrupted. Resume it explicitly with av order --resume <operation-id> --retry.",
+          )
       },
     )
     await consultContinuousDirectors(mission, ports, run)
