@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { selectRepairTaskId } from "./coordinator-state"
 import { fixture, plan } from "./goal-supervision.fixture"
-import { BUILD_AUTHORIZATION_RULE, planPrompt, workPrompt } from "./prompts"
+import { BUILD_AUTHORIZATION_RULE, HANDOFF_PATH_RULE, planPrompt, reviewPrompt, workPrompt } from "./prompts"
 import type { ChiefTaskState } from "./types"
 
 function missionWithGates() {
@@ -51,5 +51,18 @@ describe("build authorization in prompts", () => {
     const state: ChiefTaskState = { id: task.id, reviewerId: "reviewer", status: "running", attempts: 1 }
     expect(planPrompt(mission)).toContain(BUILD_AUTHORIZATION_RULE)
     expect(workPrompt(mission, task, state, persona)).toContain(BUILD_AUTHORIZATION_RULE)
+  })
+
+  it("tells planners, Actors and task reviewers that ignored paths are never handed off", () => {
+    const mission = missionWithGates()
+    const task = mission.plan?.tasks[1]
+    const persona = mission.personas.find((entry) => entry.id === "backend")
+    if (!task || !persona) throw new Error("Expected fixture task and persona")
+    const state: ChiefTaskState = { id: task.id, reviewerId: "reviewer", status: "running", attempts: 1 }
+    expect(HANDOFF_PATH_RULE).toContain("no separate artifact channel")
+    expect(planPrompt(mission)).toContain(HANDOFF_PATH_RULE)
+    expect(workPrompt(mission, task, state, persona)).toContain(HANDOFF_PATH_RULE)
+    expect(reviewPrompt(mission, task, state)).toContain(HANDOFF_PATH_RULE)
+    expect(reviewPrompt(mission)).not.toContain(HANDOFF_PATH_RULE)
   })
 })
