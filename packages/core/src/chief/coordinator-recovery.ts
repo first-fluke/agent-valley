@@ -9,6 +9,7 @@ import {
 } from "./execution"
 import { supervisePrompt } from "./prompts"
 import { parseSupervisionResponse } from "./schemas"
+import { runStructuredStage } from "./structured-stage"
 import { applyRecovery, recordDecision } from "./supervision"
 import type { ChiefPorts, Mission, Persona } from "./types"
 
@@ -64,10 +65,16 @@ export function createChiefRecovery(mission: Mission, ports: ChiefPorts, hooks: 
         "Chief Director supervision stalled for three rounds without changed evidence. The original goal remains unresolved.",
         "budget",
       )
-    const response = parseSupervisionResponse(
-      await hooks.run(hooks.persona(mission.chiefId), supervisePrompt(mission), "supervise"),
+    // One invalid recovery decision used to fail the whole mission; like planning, it gets one corrected attempt.
+    const response = await runStructuredStage({
       mission,
-    )
+      stage: "supervise",
+      prompt: supervisePrompt(mission),
+      scopeKey: `${supervision.rounds}:${fingerprint}`,
+      run: (prompt) => hooks.run(hooks.persona(mission.chiefId), prompt, "supervise"),
+      parse: (output) => parseSupervisionResponse(output, mission),
+      save: (stage, message) => hooks.save(stage, message, taskId),
+    })
     const decision = recordDecision(mission, response, fingerprint)
     if (response.action === "stop") {
       delete supervision.pendingRecovery

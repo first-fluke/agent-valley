@@ -215,6 +215,39 @@ describe("durable Chief Director goal supervision", () => {
     },
   )
 
+  it("lets the Chief Director correct one invalid recovery decision instead of failing the mission", async () => {
+    const { mission, ports, runAgent } = fixture()
+    const original = runAgent.getMockImplementation()
+    let reviews = 0
+    let decisions = 0
+    runAgent.mockImplementation(async (...args) => {
+      if (args[3] === "review" && reviews++ === 0) return rejected
+      if (args[3] === "supervise") {
+        if (decisions++ === 0)
+          return JSON.stringify({
+            action: "replan",
+            reason: "Drop the failing obligation",
+            tasks: [{ ...plan.tasks[0], acceptance: ["A file exists"] }],
+          })
+        expect(args[1]).toContain("The previous response did not validate")
+        expect(args[1]).toContain("weakens an original acceptance obligation")
+        return JSON.stringify({
+          action: "reassign",
+          reason: "Another specialist can handle this missing state.",
+          taskId: "onboarding",
+          personaId: "reviewer",
+          instructions: "Repair empty-account onboarding and provide acceptance evidence.",
+        })
+      }
+      return (await original?.(...args)) ?? ""
+    })
+    await coordinate(mission, ports)
+    expect(decisions).toBe(2)
+    expect(mission.supervision?.rounds).toBe(1)
+    expect(mission.supervision?.decisions.map((entry) => entry.action)).toEqual(["reassign"])
+    expect(mission.status).toBe("completed")
+  })
+
   it("rejects a weak replan before persisting or dispatching it", async () => {
     const { mission, ports, runAgent } = fixture()
     const original = runAgent.getMockImplementation()
