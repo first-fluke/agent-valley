@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process"
-import { lstat, mkdir, readdir, rm, rmdir } from "node:fs/promises"
+import { lstat, mkdir, readdir, rename, rm, rmdir } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
 import { promisify } from "node:util"
 import { clearedGitEnvironment } from "../util/git-environment"
+import { readContinuousMissionWorkspace } from "./continuous-workspace"
 
 const exec = promisify(execFile)
 const CLONE_TIMEOUT_MS = 180_000
+const PRUNE_TIMEOUT_MS = 120_000
 export const WORKSPACE_CACHE_ENV = "AV_WORKSPACE_CACHE_PATHS"
 const disabled = new Set(["0", "off", "none", "false"])
 
@@ -95,6 +97,7 @@ export async function seedWorkspaceCaches(options: {
   sources: readonly string[]
   paths?: readonly string[]
   clone?: CloneTree
+  prune?: (workspace: string) => Promise<void>
 }): Promise<CacheSeed[]> {
   const seeded: CacheSeed[] = []
   try {
@@ -115,10 +118,61 @@ export async function seedWorkspaceCaches(options: {
         await rm(destination, { recursive: true, force: true })
       }
     }
+    if (seeded.length) await (options.prune ?? pruneCarriedArtifacts)(options.workspace).catch(() => undefined)
   } catch {
     // A cache is an optimization; the workspace stays usable without it.
   }
   return seeded
+}
+
+/**
+ * A cloned Cargo cache still holds the source workspace's own crates, which the new path can never reuse.
+ * Dropping them keeps only dependency builds, so the cache does not grow with every workspace it passes through.
+ */
+export async function pruneCarriedArtifacts(workspace: string): Promise<void> {
+  if (!(await lstat(join(workspace, "Cargo.toml")).catch(() => undefined))?.isFile()) return
+  await exec("cargo", ["clean", "--workspace", "--offline", "--quiet"], {
+    cwd: workspace,
+    timeout: PRUNE_TIMEOUT_MS,
+    env: { ...process.env, CARGO_NET_OFFLINE: "true" },
+  })
+}
+
+/** Where one operation keeps the build caches of its latest completed child, laid out like a workspace. */
+export async function operationCacheStore(workspace: string): Promise<string | undefined> {
+  const container = dirname(workspace)
+  const record = await readContinuousMissionWorkspace(container).catch(() => undefined)
+  return record?.path === workspace ? join(dirname(dirname(container)), "build-cache") : undefined
+}
+
+/**
+ * Move a finished workspace's build caches into `store` instead of deleting them, replacing the previous
+ * copy. A rename costs nothing on one volume and bounds the cache to one copy per operation.
+ */
+export async function retainWorkspaceCaches(
+  workspace: string,
+  store: string,
+  paths?: readonly string[],
+): Promise<string[]> {
+  const retained: string[] = []
+  try {
+    for (const path of paths ?? (await workspaceCachePaths(workspace))) {
+      const source = join(workspace, path)
+      if (!(await lstat(source).catch(() => undefined))?.isDirectory()) continue
+      const destination = join(store, path)
+      try {
+        await mkdir(dirname(destination), { recursive: true })
+        await rm(destination, { recursive: true, force: true })
+        await rename(source, destination)
+        retained.push(path)
+      } catch {
+        // Another volume or a busy directory: leave it for the ordinary build-output release.
+      }
+    }
+  } catch {
+    // Retaining a cache is an optimization; storage release continues without it.
+  }
+  return retained
 }
 
 /** Other mission workspaces of one operation, newest first, as cache sources for a new mission. */

@@ -37,6 +37,7 @@ import type { ChiefPorts, ChiefRunContext, ChiefStage, Mission, Persona } from "
 import { finishOperatingRun, markOperatingRunUnknown } from "./usage"
 import { executeGoalVerification } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
+import { operationCacheStore, retainWorkspaceCaches } from "./workspace-cache"
 
 export { intermediateVerifyCommand, missionIssue } from "./runtime-inputs"
 
@@ -89,6 +90,9 @@ export class ChiefRuntime {
       },
       releaseStorage: async (mission) => {
         await releaseAppliedTaskWorktrees(mission)
+        // The next operation child starts from this child's build cache instead of compiling from nothing.
+        const store = await operationCacheStore(mission.workspace.path)
+        if (store) await retainWorkspaceCaches(mission.workspace.path, store)
         await releaseContinuousBuildOutputs(mission.workspace.path)
       },
     }

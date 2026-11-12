@@ -4,7 +4,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { copyOnWriteClone, seedWorkspaceCaches, siblingMissionWorkspaces, workspaceCachePaths } from "./workspace-cache"
+import {
+  copyOnWriteClone,
+  operationCacheStore,
+  retainWorkspaceCaches,
+  seedWorkspaceCaches,
+  siblingMissionWorkspaces,
+  workspaceCachePaths,
+} from "./workspace-cache"
 
 const exec = promisify(execFile)
 const copy = vi.fn((source: string, destination: string) => cp(source, destination, { recursive: true }))
@@ -108,6 +115,56 @@ describe("workspace cache seeding", () => {
     const cloned = join(workspace, "target/debug/deps/artifact")
     expect(await readFile(cloned, "utf8")).toBe("real clone")
     expect((await lstat(cloned)).mtimeMs).toBe(stamp.getTime())
+  })
+})
+
+describe("operation build cache", () => {
+  it("prunes carried artifacts only after a cache was actually seeded", async () => {
+    const prune = vi.fn(async () => {})
+    await seedWorkspaceCaches({ workspace, sources: [source], paths: ["target/debug"], clone: copy, prune })
+    expect(prune).not.toHaveBeenCalled()
+    await cache(source, "target/debug", "from mission")
+    await seedWorkspaceCaches({ workspace, sources: [source], paths: ["target/debug"], clone: copy, prune })
+    expect(prune).toHaveBeenCalledExactlyOnceWith(workspace)
+    const failing = vi.fn(async () => {
+      throw new Error("cargo is unavailable")
+    })
+    await rm(join(workspace, "target"), { recursive: true })
+    expect(
+      await seedWorkspaceCaches({ workspace, sources: [source], paths: ["target/debug"], clone: copy, prune: failing }),
+    ).toEqual([{ path: "target/debug", source }])
+  })
+
+  it("moves a finished workspace's caches into the store and replaces the previous copy", async () => {
+    const store = join(directory, "build-cache")
+    await cache(store, "target/debug", "older child")
+    await cache(workspace, "target/debug", "latest child")
+    expect(await retainWorkspaceCaches(workspace, store, ["target/debug", "target/release"])).toEqual(["target/debug"])
+    expect(await readFile(join(store, "target/debug/deps/artifact"), "utf8")).toBe("latest child")
+    expect(await exists(join(workspace, "target/debug"))).toBe(false)
+    expect(await retainWorkspaceCaches(workspace, store, ["target/debug"])).toEqual([])
+    expect(await readFile(join(store, "target/debug/deps/artifact"), "utf8")).toBe("latest child")
+  })
+
+  it("names a store only for a recorded operation child workspace", async () => {
+    expect(await operationCacheStore(workspace)).toBeUndefined()
+    const operation = join(directory, "repository", ".agent-valley", "operations", "operation")
+    const container = join(operation, "workspaces", "child")
+    await mkdir(join(container, "workspace"), { recursive: true })
+    await writeFile(
+      join(container, "workspace.json"),
+      JSON.stringify({
+        operationId: "operation",
+        repositoryRoot: join(directory, "repository"),
+        missionId: "child",
+        baselinePath: join(operation, "baselines", "initial", "workspace"),
+        baselineCommit: "a".repeat(40),
+        path: join(container, "workspace"),
+        branch: "av-operation/operation/child",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    )
+    expect(await operationCacheStore(join(container, "workspace"))).toBe(join(operation, "build-cache"))
   })
 })
 
