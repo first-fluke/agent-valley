@@ -325,7 +325,7 @@ export async function integrateContinuousSource(
         await assertIdentity()
         for (const change of verifiedChanges) await inspectPath(root, change.path)
         if (alreadySatisfied.length) {
-          const current = await captureParallelBaseline(root)
+          const current = await captureParallelBaseline(root, { include: alreadySatisfied })
           const currentImages = await parallelTreeImages(root, current.tree)
           if (
             sourceChanges.some(
@@ -346,7 +346,9 @@ export async function integrateContinuousSource(
           )
       },
     })
-    const final = await captureParallelBaseline(root)
+    // A verified path the source ignores (tracked by the child despite an ignore rule) was applied to disk
+    // but is invisible to an ordinary snapshot; without naming it the applied cycle reads as a mismatch.
+    const final = await captureParallelBaseline(root, { include: sourceChanges.map((change) => change.path) })
     const finalImages = await parallelTreeImages(root, final.tree)
     if (sourceChanges.some((change) => !same(finalImages.get(change.path) ?? null, change.after)))
       throw new Error(
