@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { commandFailureDetail } from "./verification"
+import { commandFailureDetail, fileFailureDetail, jsonFailureDetail } from "./verification"
 
 describe("verification command failure detail", () => {
   it("names the failing libtest case that only appears on stdout", () => {
@@ -29,5 +29,31 @@ describe("verification command failure detail", () => {
     expect(detail).toContain("stdout tail:")
     expect(detail).toContain("stderr tail:")
     expect(commandFailureDetail("", "only stderr")).toBe("stderr tail:\nonly stderr")
+  })
+})
+
+describe("verification file and JSON failure detail", () => {
+  it("names the JSON file, pointer, required value and observed value", () => {
+    expect(
+      jsonFailureDetail({ path: "evidence/qa.json", pointer: "/receiptBindingsVerified", equals: true }, false),
+    ).toBe("evidence/qa.json pointer /receiptBindingsVerified must equal true; observed false.")
+    expect(jsonFailureDetail({ path: "evidence/qa.json", pointer: "/missing", equals: 0 }, undefined)).toContain(
+      "must equal 0; observed no value.",
+    )
+    expect(
+      jsonFailureDetail({ path: "a.json", pointer: "/sequence", equals: ["Normal", "Critical"] }, "x".repeat(5_000))
+        .length,
+    ).toBeLessThan(400)
+  })
+
+  it("names the file and every unmet byte, hash and content assertion", () => {
+    const detail = fileFailureDetail(
+      { path: "evidence/final.md", minBytes: 200, sha256: "a".repeat(64), contains: ["Outstanding", "present"] },
+      { bytes: 12, sha256: "b".repeat(64), text: "present only" },
+    )
+    expect(detail).toContain("evidence/final.md has 12 bytes, needs at least 200")
+    expect(detail).toContain(`has SHA-256 ${"b".repeat(64)}, needs ${"a".repeat(64)}`)
+    expect(detail).toContain('lacks required text "Outstanding"')
+    expect(detail).not.toContain('"present"')
   })
 })

@@ -108,6 +108,33 @@ function checkSummary(passed: boolean, detail: string): string {
   return `${passed ? "PASS" : "FAIL"}: ${detail}`.slice(0, 2_000)
 }
 
+const shown = (value: unknown) => (value === undefined ? "no value" : JSON.stringify(value).slice(0, 200))
+
+/** Name the file and each unmet assertion so the repairing Actor does not have to rediscover them. */
+export function fileFailureDetail(
+  check: { path: string; minBytes: number; sha256?: string; contains?: readonly string[] },
+  observed: { bytes: number; sha256: string; text: string },
+): string {
+  const unmet = [
+    observed.bytes < check.minBytes ? `has ${observed.bytes} bytes, needs at least ${check.minBytes}` : "",
+    check.sha256 !== undefined && check.sha256 !== observed.sha256
+      ? `has SHA-256 ${observed.sha256}, needs ${check.sha256}`
+      : "",
+    ...(check.contains ?? [])
+      .filter((part) => !observed.text.includes(part))
+      .slice(0, 5)
+      .map((part) => `lacks required text ${shown(part.slice(0, 120))}`),
+  ].filter(Boolean)
+  return `${check.path} ${unmet.join("; ")}.`
+}
+
+export function jsonFailureDetail(
+  check: { path: string; pointer: string; equals: unknown },
+  observed: unknown,
+): string {
+  return `${check.path} pointer ${check.pointer || "(root)"} must equal ${shown(check.equals)}; observed ${shown(observed)}.`
+}
+
 /** Persisted observations cannot omit checks or alter their bound contract. */
 export function validateGoalVerificationResult(
   input: unknown,
@@ -213,7 +240,7 @@ async function inspectCheck(
         passed,
         passed
           ? "Regular file satisfies its byte/content/hash assertions."
-          : "File byte/content/hash assertions are unmet.",
+          : fileFailureDetail(check, { bytes: file.bytes.length, sha256: file.sha256, text }),
       ),
     }
   }
@@ -221,7 +248,11 @@ async function inspectCheck(
   try {
     json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(file.bytes))
   } catch {
-    return { ...common, passed: false, summary: checkSummary(false, "Observed file is not valid UTF-8 JSON.") }
+    return {
+      ...common,
+      passed: false,
+      summary: checkSummary(false, `${check.path} is not valid UTF-8 JSON.`),
+    }
   }
   const observed = jsonPointerValue(json, check.pointer)
   // Scalars compare by identity; an array of scalars compares element-wise in order.
@@ -235,9 +266,7 @@ async function inspectCheck(
     passed,
     summary: checkSummary(
       passed,
-      passed
-        ? "Observed JSON pointer equals its required value."
-        : "Observed JSON pointer is missing or has a different value.",
+      passed ? "Observed JSON pointer equals its required value." : jsonFailureDetail(check, observed),
     ),
   }
 }
