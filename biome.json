@@ -39,7 +39,7 @@
       }
     },
     {
-      "includes": ["CHANGELOG.md"],
+      "includes": ["CHANGELOG.md", "AGENTS.md"],
       "formatter": {
         "enabled": false
       }
