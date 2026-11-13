@@ -78,7 +78,7 @@ export function selectRepairTaskId(mission: Mission, reason?: string, taskId?: s
   return [...pool].reverse().find(codeCapable)?.id ?? pool.at(-1)?.id
 }
 
-const CODE_SKILL = /^oma-(?:backend|debug|frontend|mobile|refactor|db)$/
+export const CODE_SKILL = /^oma-(?:backend|debug|frontend|mobile|refactor|db)$/
 
 /** Partial deliveries survive drift; repair deliberately creates a new Actor attempt. */
 export function resetTaskApprovals(
@@ -129,6 +129,7 @@ export function resetTaskApprovals(
       state.status = "reviewing"
       delete state.review
       delete state.fingerprint
+      delete state.integrationCheck
       if (state.parallel) {
         mission.history.push({
           at: new Date().toISOString(),
@@ -147,6 +148,7 @@ export function resetTaskApprovals(
       state.status = "reviewing"
       delete state.review
       delete state.fingerprint
+      delete state.integrationCheck
       if (state.parallel) {
         mission.history.push({
           at: new Date().toISOString(),

@@ -38,6 +38,9 @@ export const taskStateSchema = z.strictObject({
   effectState: z.enum(["not-started", "running", "unknown", "completed"]).optional(),
   parallel: taskWorktreeRecordSchema.optional(),
   changeSet: taskChangeSetSchema.optional(),
+  integrationCheck: z
+    .strictObject({ at: z.string().datetime(), ok: z.boolean(), output: z.string().max(8_000) })
+    .optional(),
 })
 
 export const verificationSchema = z.strictObject({

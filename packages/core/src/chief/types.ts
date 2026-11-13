@@ -127,6 +127,11 @@ export interface ChiefPorts {
     context?: ChiefRunContext,
   ): Promise<string>
   verify(mission: Mission): Promise<{ ok: boolean; output?: string }>
+  /**
+   * Run the verification contract's command checks on the integrated tree between task waves. The result is
+   * evidence for task reviewers, never a completion verdict. Undefined when there is nothing to run.
+   */
+  integrationCheck?(mission: Mission): Promise<{ ok: boolean; output: string } | undefined>
   save(mission: Mission): Promise<void>
   fingerprint(mission: Mission): Promise<string>
   refreshOrganization?(mission: Mission): Promise<OrganizationContext>

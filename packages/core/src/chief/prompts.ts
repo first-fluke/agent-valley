@@ -160,6 +160,9 @@ export const BUILD_AUTHORIZATION_RULE =
 export const HANDOFF_PATH_RULE =
   "Handoff transport: files move between task workspaces only as Git-visible changes; there is no separate artifact channel. A file written under a path the repository ignores (build output, caches, local result folders) is not delivered from an isolated task workspace, so reviewers and later tasks never see it. Put every deliverable or handoff file that a reviewer or another task must read at a non-ignored path; a deliverable missing for this reason is repaired by writing it at a non-ignored path."
 
+export const INTEGRATION_CHECK_RULE =
+  "integrationCheck is what AV itself observed by running the verification contract's commands on the integrated tree after this delivery, before this review. Treat it as executed evidence. A failing test or lint that existed before, or that covers code this delivery or its wave changed, is a blocking finding for this task: name the failing check and the repair. A command that fails only because a later planned task has not yet delivered the files it names is not a finding; say so in the summary."
+
 const OPERATOR_NOTES_RULE =
   "mission.operatorNotes are operator instructions recorded after earlier attempts. When a note reports an environment or prerequisite change, re-run the affected check in the current environment instead of relying on evidence that predates the note; a note never changes the goal, acceptance criteria or verification command."
 
@@ -247,6 +250,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           "No container or service observation policy is configured for this mission: do not require a deployment target inventory, target health, availability or recent-error observations, and do not treat the sandbox's deliberate av.yaml read denial as a blocker. Numeric targets in goal criteria mean the goal's own documented targets.",
         ]),
     "Reject incomplete requirements, missing deliverables, weakened tests, correctness defects, or missing evidence.",
+    ...(task && state?.integrationCheck ? [INTEGRATION_CHECK_RULE] : []),
     ...(task ? [HANDOFF_PATH_RULE, EXHAUSTIVE_REVIEW_RULE, ...(state?.review ? [REPAIR_REVIEW_RULE] : [])] : []),
     ...(mission.technicalLeadId
       ? [
@@ -281,6 +285,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           }
         : {}),
       ...(state?.changeSet ? { changeSet: state.changeSet } : {}),
+      ...(state?.integrationCheck ? { integrationCheck: state.integrationCheck } : {}),
       previousReview: task ? state?.review : mission.finalReview,
       verification: mission.verification,
       ...(task ? {} : { goalVerification: mission.goalVerification }),

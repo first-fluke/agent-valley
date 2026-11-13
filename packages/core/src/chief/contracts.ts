@@ -56,6 +56,8 @@ export interface ChiefTaskState {
   effectState?: "not-started" | "running" | "unknown" | "completed"
   parallel?: TaskWorktreeRecord
   changeSet?: TaskChangeSet
+  /** AV-executed command checks on the integrated tree before this delivery's review. */
+  integrationCheck?: { at: string; ok: boolean; output: string }
 }
 
 export interface MissionEvent {

@@ -330,3 +330,38 @@ export async function executeGoalVerification(
     contract,
   )
 }
+
+/**
+ * Run only the contract's command checks. Used between task waves, where evidence files of later tasks do
+ * not exist yet: it tells reviewers what the integrated tree actually does without judging completion.
+ */
+export async function executeCommandChecks(
+  input: unknown,
+  workspaceRoot: string,
+  options: GoalVerificationOptions,
+): Promise<{ ok: boolean; output: string } | undefined> {
+  const contract = validateGoalVerificationContract(input, options.successCriteria)
+  const commands = new Map<string, Extract<GoalVerificationCheck, { kind: "command" }>>()
+  for (const criterion of contract.criteria)
+    for (const check of criterion.checks)
+      if (check.kind === "command") commands.set(JSON.stringify([check.program, check.args]), check)
+  if (!commands.size) return undefined
+  const root = await verificationRoot(workspaceRoot)
+  const budget = { remaining: MAX_VERIFICATION_TOTAL_BYTES }
+  const lines: string[] = []
+  let ok = true
+  for (const check of commands.values()) {
+    if (options.signal?.aborted) throw new Error("Integration check interrupted. Resume the mission to rerun it.")
+    const label = [check.program, ...check.args].join(" ").slice(0, 300)
+    try {
+      const observed = await inspectCheck(check, root, options, budget)
+      ok &&= observed.passed
+      lines.push(`${label}\n${observed.summary}`)
+    } catch (error) {
+      if (options.signal?.aborted) throw error
+      ok = false
+      lines.push(`${label}\n${checkSummary(false, error instanceof Error ? error.message : "Check could not run.")}`)
+    }
+  }
+  return { ok, output: lines.join("\n\n").slice(0, 8_000) }
+}

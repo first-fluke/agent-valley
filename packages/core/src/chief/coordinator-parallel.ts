@@ -1,4 +1,5 @@
 import type { Workspace } from "../domain/models"
+import { recordIntegrationCheck } from "./coordinator-integration"
 import { applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import { MissionPause } from "./execution"
 import { runJoinedWave } from "./parallel"
@@ -175,6 +176,17 @@ export async function performParallelWave(
   }
   if ([...failures.values()].some((failure) => hooks.fatal?.(failure.error)))
     return wave.flatMap((task) => failures.get(task.id) ?? [])
+  try {
+    await recordIntegrationCheck(
+      mission,
+      ports,
+      integrated.map((entry) => entry.state),
+      save,
+    )
+  } catch (error) {
+    for (const entry of integrated) fail(entry.task.id, error, "review")
+    return wave.flatMap((task) => failures.get(task.id) ?? [])
+  }
   // Integrated edits live in the mission workspace, its patch receipt, and retained Git evidence refs,
   // so the Actor repository (including its build output) is redundant whether review passed or not.
   // Callers run inside serialize(), so the retention checkpoint uses rawSave.

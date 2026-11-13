@@ -1,5 +1,6 @@
 import { refreshActorCooldown } from "./actor-availability"
 import { actorRouteHealth } from "./actor-health"
+import { recordIntegrationCheck } from "./coordinator-integration"
 import { ParallelTaskReviewRejected, performParallelWave } from "./coordinator-parallel"
 import { applyTaskReviewResult, applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
@@ -142,6 +143,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
           )
         }
         if (!awaitingReview) await save("work", `Worker returned evidence for ${task.id}.`, task.id)
+        await recordIntegrationCheck(mission, ports, [state], save)
         reviewStarted = true
         await taskReview(task, state)
       } catch (error) {

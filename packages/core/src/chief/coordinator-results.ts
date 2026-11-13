@@ -30,6 +30,8 @@ export function applyWorkResult(task: ChiefTask, state: ChiefTaskState, output: 
   // The AV-computed delta described an earlier integrated delivery; a new Actor attempt replaces it.
   // Parallel integration recomputes it after this call. A direct attempt has none.
   delete state.changeSet
+  // The integrated tree changed with this attempt; its earlier check no longer describes it.
+  delete state.integrationCheck
   if (task.effectScope === "external") state.effectState = "completed"
 }
 

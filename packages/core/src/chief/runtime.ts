@@ -30,6 +30,7 @@ import {
   personaSkills,
   unattendedVerificationGuidance,
 } from "./runtime-inputs"
+import { integrationCheckEnabled, runIntegrationCheck } from "./runtime-integration-check"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
@@ -72,6 +73,14 @@ export class ChiefRuntime {
         return fingerprintWorkspace(mission.workspace.path)
       },
       verify: (mission) => withMissionDeadline(mission, this.signal, (signal) => this.verifyMission(mission, signal)),
+      ...(integrationCheckEnabled()
+        ? {
+            integrationCheck: (mission: Mission) =>
+              withMissionDeadline(mission, this.signal, (signal) =>
+                runIntegrationCheck(mission, this.store.processGuard(mission.id), signal),
+              ),
+          }
+        : {}),
       runAgent: (persona, prompt, mission, stage, context) => this.runAgent(persona, prompt, mission, stage, context),
       parallel: {
         prepare: async (mission, taskId, attempt) => {
