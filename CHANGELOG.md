@@ -6,6 +6,41 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.11.0](https://github.com/first-fluke/agent-valley/compare/v4.10.1...v4.11.0) (2026-11-13)
+
+
+### Features
+
+* **chief:** check the integrated tree before each code review ([5915a39](https://github.com/first-fluke/agent-valley/commit/5915a39500002bae3b4631366b8a06414eb2a1b1))
+* **chief:** optional staging of task deliveries in the mission index ([3af1e6c](https://github.com/first-fluke/agent-valley/commit/3af1e6c4086fadec0266b3525297cd63bb2eb59f))
+* **cli:** add av gc to release idle mission storage ([c1d706d](https://github.com/first-fluke/agent-valley/commit/c1d706d11e37f42ed7d72718ed9da5a91062afa5))
+* **workspace:** refuse new clones when free disk is low ([a043d2c](https://github.com/first-fluke/agent-valley/commit/a043d2c80992e6e4c96965ccc3adaa60b51f61ac))
+
+
+### Bug Fixes
+
+* **chief:** accept ./ test paths and empty assertion lists in plans ([3c73e19](https://github.com/first-fluke/agent-valley/commit/3c73e19430be124b2905b709e24ed98aa787dbc7))
+* **chief:** confirm applied source paths that the source ignores ([1460953](https://github.com/first-fluke/agent-valley/commit/1460953ecce6f63465f0aaaa4522676f05ab799c))
+* **chief:** end a hung reviewer after ten minutes and retry at once ([1868a43](https://github.com/first-fluke/agent-valley/commit/1868a4367e290f20913e9fb36fa8f36f88b2bfbf))
+* **chief:** give an invalid recovery decision one corrected attempt ([c70a117](https://github.com/first-fluke/agent-valley/commit/c70a11726423d30a7a03f60ff5283d163d665205))
+* **chief:** keep an operation build cache across children ([9c5e5bc](https://github.com/first-fluke/agent-valley/commit/9c5e5bc06b15917502ae64bcada2142b449c8556))
+* **chief:** keep the full inactivity window for planning and recovery ([473aa88](https://github.com/first-fluke/agent-valley/commit/473aa884148e5427a68c80035ff6b9f72a68a990))
+* **chief:** name the file, pointer and values in failed verification checks ([c673dba](https://github.com/first-fluke/agent-valley/commit/c673dbabd10fdf64b74b2dd247331516b3db414c))
+* **chief:** name the rejected verification command in plan errors ([826dffa](https://github.com/first-fluke/agent-valley/commit/826dffa169476c1e631e74b3793efb1cfd724c13))
+* **chief:** release integrated actor clones and build output ([6de6ac5](https://github.com/first-fluke/agent-valley/commit/6de6ac548be4101cd6f4b874bfb6a0b17045d2e4))
+* **chief:** reopen an operator-interrupted decision on explicit retry ([40a146b](https://github.com/first-fluke/agent-valley/commit/40a146bcc42f8c70eaeba315b73f9e35665f86d8))
+* **chief:** route gate repairs to code Actors and assert build rights ([42eade2](https://github.com/first-fluke/agent-valley/commit/42eade2620842cc9a59c0919ebf784e2ab0d8364))
+* **chief:** show the failing test in verification failures ([c83a208](https://github.com/first-fluke/agent-valley/commit/c83a208a677513bd83881446584613d6395d3684))
+* **chief:** skip never-indexed deletions when staging deliveries ([a0bf2fa](https://github.com/first-fluke/agent-valley/commit/a0bf2facb7b0020068456729e01983714cca75fb))
+* **chief:** state that ignored paths are never handed off between tasks ([70500f6](https://github.com/first-fluke/agent-valley/commit/70500f61df230e540e61752c8d893dd68b294f96))
+* **chief:** verify integrated files that the target ignores ([a6dbd3b](https://github.com/first-fluke/agent-valley/commit/a6dbd3b6b8653111e1ec334225a206723f51083a))
+* hook ([77a5875](https://github.com/first-fluke/agent-valley/commit/77a5875a839331894e847867f43edadb9183a615))
+
+
+### Performance
+
+* **chief:** seed new workspaces with the previous build cache ([3bbbf49](https://github.com/first-fluke/agent-valley/commit/3bbbf49ea989623713b773ea81a49feacf0d88f8))
+
 ## [4.10.1](https://github.com/first-fluke/agent-valley/compare/v4.10.0...v4.10.1) (2026-11-10)
 
 
