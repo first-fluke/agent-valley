@@ -7,6 +7,7 @@ import type { RunAttempt } from "../../domain/models"
 import { logger } from "../../observability/logger"
 import type { AgentConfig, AgentEvent, AgentSession } from "../agent-session"
 import { createSession, registerBuiltinSessions } from "../session-factory"
+import { resolveInactivityTimeoutSec } from "./inactivity-window"
 
 export interface RunOptions {
   agentType: string
@@ -22,17 +23,7 @@ export interface RunOptions {
   env?: Record<string, string>
 }
 
-const DEFAULT_INACTIVITY_TIMEOUT_SEC = 1_800
-
-/** A native CLI that stops emitting events for this long is hung, not thinking. */
-export function resolveInactivityTimeoutSec(
-  requested: number | undefined,
-  source: NodeJS.ProcessEnv = process.env,
-): number {
-  const configured = Number.parseInt(source.AV_AGENT_INACTIVITY_TIMEOUT_SEC ?? "", 10)
-  const seconds = requested ?? (Number.isFinite(configured) ? configured : DEFAULT_INACTIVITY_TIMEOUT_SEC)
-  return Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0
-}
+export { resolveInactivityTimeoutSec, stageInactivityTimeoutSec } from "./inactivity-window"
 
 export function agentStallMessage(seconds: number): string {
   return `Agent stalled: no activity for ${seconds}s`

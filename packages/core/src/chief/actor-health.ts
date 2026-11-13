@@ -31,7 +31,7 @@ const key = (route: ActorRoute) => JSON.stringify([route.actorType, route.model 
 function frameworkFailure(reason: string | undefined): boolean {
   return (
     !!reason &&
-    /OMA completion evidence failed|Coordinator process ended before usage could be reconciled|Order interrupted\. Resume the saved mission|Operator stopped the order|Mission interrupted\.|OS-owned service is shutting down|Agent timed out after \d+s|\b(?:ENOENT|EACCES|ENOSPC)\b|command not found|verification command|verifyCommand/i.test(
+    /OMA completion evidence failed|Coordinator process ended before usage could be reconciled|Order interrupted\. Resume the saved mission|Operator stopped the order|Mission interrupted\.|OS-owned service is shutting down|Agent timed out after \d+s|Agent stalled: no activity for \d+s|\b(?:ENOENT|EACCES|ENOSPC)\b|command not found|verification command|verifyCommand/i.test(
       reason,
     )
   )
@@ -40,7 +40,7 @@ function frameworkFailure(reason: string | undefined): boolean {
 function nativeOutcome(run: OperatingRun): "passed" | "failed" | undefined {
   if (run.nativeOutcome === "cancelled") return undefined
   if (run.nativeOutcome === "passed") return "passed"
-  // A framework-attested failure (attempt deadline, local validation, operator interruption) does not
+  // A framework-attested failure (attempt deadline, inactivity stall, local validation, operator interruption) does not
   // establish a provider transport failure even when the native attempt settled as failed.
   if (run.nativeOutcome === "failed") return frameworkFailure(run.evidence) ? undefined : "failed"
   // Acceptance rejection changes the work verdict after a successful native execution.

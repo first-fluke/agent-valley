@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { AgentRunnerService, resolveInactivityTimeoutSec } from "../sessions/adapters/agent-runner-service"
+import {
+  AgentRunnerService,
+  resolveInactivityTimeoutSec,
+  stageInactivityTimeoutSec,
+} from "../sessions/adapters/agent-runner-service"
 import { registerSession } from "../sessions/session-factory"
 import { FakeAgentSession } from "./characterization/helpers"
 
@@ -35,6 +39,16 @@ describe("inactivity watchdog", () => {
     expect(resolveInactivityTimeoutSec(undefined, {})).toBe(1_800)
     expect(resolveInactivityTimeoutSec(0, {})).toBe(0)
     expect(resolveInactivityTimeoutSec(undefined, { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "0" })).toBe(0)
+  })
+
+  test("gives read-only stages a ten-minute window and work the full window", () => {
+    expect(stageInactivityTimeoutSec("work", {})).toBe(1_800)
+    expect(stageInactivityTimeoutSec(undefined, {})).toBe(1_800)
+    for (const stage of ["review", "final-review", "plan", "supervise"])
+      expect(stageInactivityTimeoutSec(stage, {})).toBe(600)
+    expect(stageInactivityTimeoutSec("review", { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "120" })).toBe(120)
+    expect(stageInactivityTimeoutSec("review", { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "0" })).toBe(0)
+    expect(stageInactivityTimeoutSec("work", { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "3600" })).toBe(3_600)
   })
 
   test("terminates a session that emits nothing for the inactivity window", async () => {

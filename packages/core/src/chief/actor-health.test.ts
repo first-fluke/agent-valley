@@ -64,6 +64,14 @@ describe("Actor route cooldown", () => {
     })
   })
 
+  it("does not cool a route when the inactivity watchdog ends a hung attempt", () => {
+    const mission = setup([run("stall", 0, { evidence: "Agent stalled: no activity for 600s" })])
+    expect(actorRouteHealth(mission, route, start + 2_000)).toMatchObject({
+      state: "ready",
+      consecutiveFailures: 0,
+    })
+  })
+
   it("still cools a route after a genuine provider transport failure", () => {
     const mission = setup([run("crash", 0, { evidence: "Agent exited with code 1: ECONNRESET" })])
     expect(actorRouteHealth(mission, route, start + 2_000)).toMatchObject({

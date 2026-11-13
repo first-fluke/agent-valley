@@ -15,6 +15,7 @@ import type {
 import { AgentRunError, InterventionUnsupportedError } from "../../domain/ports/agent-runner"
 import { RunHandleEmitter } from "../../util/run-handle-events"
 import { AgentRunnerService } from "./agent-runner-service"
+import { stageInactivityTimeoutSec } from "./inactivity-window"
 
 export const CAPABILITY_TABLE: Record<string, InterventionCapability[]> = Object.freeze(
   Object.fromEntries(AGENT_IDS.map((id) => [id, capabilitiesFor(id)])),
@@ -121,6 +122,7 @@ class ServiceBackedRunHandle implements RunHandle {
           agentType: this.input.agentType,
           model: this.input.model,
           timeout: Math.max(1, Math.round((this.input.timeoutMs ?? 3_600_000) / 1000)),
+          inactivityTimeout: stageInactivityTimeoutSec(this.input.stage),
           prompt: this.input.prompt,
           workspacePath: this.input.workspace.path,
           env: this.input.env,
