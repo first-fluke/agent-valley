@@ -10,15 +10,16 @@ export function resolveInactivityTimeoutSec(
   return Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0
 }
 
-const READ_ONLY_INACTIVITY_TIMEOUT_SEC = 600
+const REVIEW_INACTIVITY_TIMEOUT_SEC = 600
 
 /**
- * Only a work stage runs long commands that print nothing. A planner or reviewer reads and reasons, so the
- * native CLI keeps emitting protocol events; one that is silent for ten minutes is hung. Waiting the full
- * work window there cost thirty idle minutes per hung review.
+ * A reviewer reads files and returns a short verdict, so its native CLI keeps emitting tool events; one that
+ * is silent for ten minutes is hung, and waiting the full window cost thirty idle minutes per hung review.
+ * Work runs long silent commands, and planning or recovery generates one large response without
+ * intermediate events (a healthy plan was silent for over ten minutes), so those keep the full window.
  */
 export function stageInactivityTimeoutSec(stage: string | undefined, source: NodeJS.ProcessEnv = process.env): number {
   const general = resolveInactivityTimeoutSec(undefined, source)
-  if (!general || !stage || stage === "work") return general
-  return Math.min(general, READ_ONLY_INACTIVITY_TIMEOUT_SEC)
+  if (!general || !stage || !/(?:^|-)review$/.test(stage)) return general
+  return Math.min(general, REVIEW_INACTIVITY_TIMEOUT_SEC)
 }

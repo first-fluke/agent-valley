@@ -41,14 +41,14 @@ describe("inactivity watchdog", () => {
     expect(resolveInactivityTimeoutSec(undefined, { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "0" })).toBe(0)
   })
 
-  test("gives read-only stages a ten-minute window and work the full window", () => {
-    expect(stageInactivityTimeoutSec("work", {})).toBe(1_800)
-    expect(stageInactivityTimeoutSec(undefined, {})).toBe(1_800)
-    for (const stage of ["review", "final-review", "plan", "supervise"])
+  test("gives review stages a ten-minute window and every generating stage the full window", () => {
+    for (const stage of ["work", "plan", "supervise", "report", undefined])
+      expect(stageInactivityTimeoutSec(stage, {})).toBe(1_800)
+    for (const stage of ["review", "gate-review", "final-review", "technical-review", "design-review"])
       expect(stageInactivityTimeoutSec(stage, {})).toBe(600)
     expect(stageInactivityTimeoutSec("review", { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "120" })).toBe(120)
     expect(stageInactivityTimeoutSec("review", { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "0" })).toBe(0)
-    expect(stageInactivityTimeoutSec("work", { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "3600" })).toBe(3_600)
+    expect(stageInactivityTimeoutSec("plan", { AV_AGENT_INACTIVITY_TIMEOUT_SEC: "3600" })).toBe(3_600)
   })
 
   test("terminates a session that emits nothing for the inactivity window", async () => {
