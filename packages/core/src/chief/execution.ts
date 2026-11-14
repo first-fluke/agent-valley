@@ -46,7 +46,15 @@ export function isUnavailableAgentModel(reason: string): boolean {
   return /\bmodel not (?:found|available)\b|(?:^|:\s*)(?:the )?model (?:is )?unavailable(?:[.!:]|$)/i.test(normalized)
 }
 
+/**
+ * Transport failures of the native CLI's own backend. They are checked first: the RPC timeout text advises
+ * checking authentication, which used to classify a timeout as an authentication failure, and the routing
+ * failure matched nothing, so a short provider outage stopped a mission until an operator resumed it.
+ */
+const TRANSIENT_TRANSPORT = /\bRPC timeout for\b|\bworkspace routing discovery failed\b/i
+
 export function classifyFailure(reason: string): FailureKind {
+  if (TRANSIENT_TRANSPORT.test(reason)) return "provider"
   if (
     /unauthori[sz]ed|authentication|login required|log in|expired token|invalid.*(?:token|api.key)|\b401\b|\b403\b/i.test(
       reason,

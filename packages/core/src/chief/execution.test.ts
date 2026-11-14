@@ -349,5 +349,10 @@ describe("native inactivity cutoffs", () => {
     expect(isNativeAgentTimeout("Agent stalled: no activity for 1800s")).toBe(true)
     expect(isNativeAgentTimeout("Agent timed out after 7200s")).toBe(true)
     expect(classifyFailure("Agent stalled: no activity for 1800s")).toBe("provider")
+    expect(
+      classifyFailure("Error: RPC timeout for thread/start (id=2). Check Codex authentication and process logs."),
+    ).toBe("provider")
+    expect(classifyFailure("other: workspace routing discovery failed")).toBe("provider")
+    expect(classifyFailure("401 authentication required")).toBe("authentication")
   })
 })
