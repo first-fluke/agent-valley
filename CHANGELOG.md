@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.11.1](https://github.com/first-fluke/agent-valley/compare/v4.11.0...v4.11.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **chief:** treat Codex transport failures as transient provider failures ([6eaefae](https://github.com/first-fluke/agent-valley/commit/6eaefae805ac752fa591704ee628fc59543b233b))
+
 ## [4.11.0](https://github.com/first-fluke/agent-valley/compare/v4.10.1...v4.11.0) (2026-11-13)
 
 
