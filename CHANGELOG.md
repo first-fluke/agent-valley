@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.12.1](https://github.com/first-fluke/agent-valley/compare/v4.12.0...v4.12.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **chief:** make the Actor under review repair failing checks itself ([dc667e5](https://github.com/first-fluke/agent-valley/commit/dc667e5bd132d27d8a5b6b279804160cf2046620))
+
 ## [4.12.0](https://github.com/first-fluke/agent-valley/compare/v4.11.1...v4.12.0) (2026-11-14)
 
 
