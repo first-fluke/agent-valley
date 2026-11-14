@@ -10,6 +10,21 @@ export function readyTaskWave(plan: ChiefPlan, states: ChiefTaskState[], limit: 
     .slice(0, limit)
 }
 
+/** Task counts of the dependency waves a plan can run in, in order; a cyclic remainder is left out. */
+export function planWaveWidths(tasks: ReadonlyArray<Pick<ChiefTask, "id" | "dependencies">>): number[] {
+  const completed = new Set<string>()
+  const widths: number[] = []
+  let remaining = [...tasks]
+  while (remaining.length) {
+    const ready = remaining.filter((task) => task.dependencies.every((id) => completed.has(id)))
+    if (!ready.length) break
+    for (const task of ready) completed.add(task.id)
+    remaining = remaining.filter((task) => !completed.has(task.id))
+    widths.push(ready.length)
+  }
+  return widths
+}
+
 /** Starts up to `limit` children at once, preserves input order, and joins on abort. */
 export async function runJoinedWave<T, R>(
   items: readonly T[],

@@ -10,6 +10,7 @@ import {
   finalizeAbandonedRuns,
   MissionPause,
 } from "./execution"
+import { planWaveWidths } from "./parallel"
 import { planPrompt } from "./prompts"
 import { parsePlanningResponse } from "./schemas"
 import { runStructuredStage } from "./structured-stage"
@@ -98,7 +99,16 @@ export async function planMission(context: CoordinatorContext): Promise<StageTra
     })
     applyPlanningResult(mission, planned)
     contract.pin()
-    await save("plan", `Chief Director planned ${mission.tasks.length} tasks.`)
+    const widths = planWaveWidths(planned.plan.tasks)
+    const limit = mission.executionPolicy?.maxParallel ?? 1
+    await save(
+      "plan",
+      `Chief Director planned ${mission.tasks.length} tasks${
+        widths.length && limit > 1
+          ? ` in ${widths.length} dependency waves (widest ${Math.min(Math.max(...widths), limit)} of ${limit} slots; waves ${widths.join("-")})`
+          : ""
+      }.`,
+    )
   }
   if (mission.supervision?.pendingRecovery) {
     const pending = mission.supervision.pendingRecovery

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { readyTaskWave, runJoinedWave } from "./parallel"
+import { planWaveWidths, readyTaskWave, runJoinedWave } from "./parallel"
 import type { ChiefPlan, ChiefTaskState } from "./types"
 
 function barrier() {
@@ -151,5 +151,19 @@ describe("dependency-ready parallel waves", () => {
       ),
     ).rejects.toThrow("Interrupted")
     expect(started).toBe(false)
+  })
+})
+
+describe("plan dependency waves", () => {
+  it("reports how many tasks each wave can run", () => {
+    expect(
+      planWaveWidths([task("contract"), task("a", ["contract"]), task("b", ["contract"]), task("c", ["contract"])]),
+    ).toEqual([1, 3])
+    expect(planWaveWidths([task("one"), task("two", ["one"]), task("three", ["two"])])).toEqual([1, 1, 1])
+    expect(planWaveWidths([])).toEqual([])
+  })
+
+  it("leaves out tasks whose dependencies can never complete", () => {
+    expect(planWaveWidths([task("ready"), task("left", ["right"]), task("right", ["left"])])).toEqual([1])
   })
 })
