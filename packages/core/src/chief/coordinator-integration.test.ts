@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { coordinate } from "./coordinator"
 import { fixture, passed, rejected } from "./goal-supervision.fixture"
 import { INTEGRATION_CHECK_RULE } from "./prompts"
-import { integrationCheckEnabled } from "./runtime-integration-check"
+import {
+  integrationCheckCommand,
+  integrationCheckEnabled,
+  operatorIntegrationResult,
+} from "./runtime-integration-check"
 import { executeCommandChecks } from "./verification"
 
 const roots: string[] = []
@@ -72,6 +76,29 @@ describe("integration check between task delivery and review", () => {
     expect(integrationCheckEnabled({})).toBe(false)
     expect(integrationCheckEnabled({ AV_INTEGRATION_CHECK: "0" })).toBe(false)
     expect(integrationCheckEnabled({ AV_INTEGRATION_CHECK: "1" })).toBe(true)
+  })
+
+  it("lets the operator supply the project's own gate command, which also enables the check", () => {
+    expect(integrationCheckCommand({})).toBeUndefined()
+    expect(integrationCheckCommand({ AV_INTEGRATION_CHECK_COMMAND: "  " })).toBeUndefined()
+    const env = { AV_INTEGRATION_CHECK_COMMAND: " cargo test --workspace && ./scripts/harness/validate.sh " }
+    expect(integrationCheckCommand(env)).toBe("cargo test --workspace && ./scripts/harness/validate.sh")
+    expect(integrationCheckEnabled(env)).toBe(true)
+    expect(operatorIntegrationResult("make gate", { ok: true, output: "noise" })).toEqual({
+      ok: true,
+      output: "make gate\nPASS: the operator's integration command exited zero.",
+    })
+    const failed = operatorIntegrationResult("make gate", {
+      ok: false,
+      output: `${"x".repeat(20_000)}harness: layer violation`,
+    })
+    expect(failed.ok).toBe(false)
+    expect(failed.output).toContain("exited nonzero")
+    expect(failed.output.endsWith("harness: layer violation")).toBe(true)
+    expect(failed.output.length).toBeLessThanOrEqual(8_000)
+    expect(operatorIntegrationResult("make gate", { ok: false, output: "", timedOut: true }).output).toContain(
+      "timed out",
+    )
   })
 })
 
