@@ -118,6 +118,24 @@ describe("read-only persistent Chief operation decisions", () => {
     expect(fake.call).toHaveBeenCalledOnce()
   })
 
+  it("skips the goal-selection Director round when AV_DECISION_ADVICE=off", async () => {
+    vi.stubEnv("AV_DECISION_ADVICE", "off")
+    try {
+      const current = await operation()
+      const fake = dependencies(async (_mission, prompt) => {
+        expect(prompt).toContain("Permanent Director advice")
+        return JSON.stringify({ action: "wait", reason: "Fresh evidence is required" })
+      })
+      expect(await decideContinuousGoal(current, "decision-no-advice", root, fake.result)).toMatchObject({
+        action: "wait",
+      })
+      expect(fake.advisory).not.toHaveBeenCalled()
+      expect(fake.call).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it("retains actual unavailable Director evidence while the same Chief decides after a budget-adjusted resume", async () => {
     const current = await operation()
     current.settings.runs = "4"

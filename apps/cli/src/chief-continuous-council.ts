@@ -4,12 +4,23 @@ import { MissionPause } from "@agent-valley/core/chief/execution"
 import { missionAdviceKey } from "@agent-valley/core/chief/technical-lead"
 import type { ChiefPorts, ChiefStage, Mission, Persona } from "@agent-valley/core/chief/types"
 
+export const DECISION_ADVICE_ENV = "AV_DECISION_ADVICE"
+
+/**
+ * Every child mission consults the same Directors again about its concrete goal before planning. An operation
+ * whose charter already fixes the roadmap can set `AV_DECISION_ADVICE=off` to skip the goal-selection round.
+ */
+export function decisionAdviceEnabled(source: NodeJS.ProcessEnv = process.env): boolean {
+  return source[DECISION_ADVICE_ENV]?.trim().toLowerCase() !== "off"
+}
+
 /** Ordinary missing advice is evidence for the Chief; transport failures never create an opinion. */
 export async function consultContinuousDirectors(
   mission: Mission,
   ports: ChiefPorts,
   run: (actor: Persona, prompt: string, stage: ChiefStage) => Promise<string>,
 ): Promise<void> {
+  if (!decisionAdviceEnabled()) return
   const key = async (actor: Persona, stage: ChiefStage) =>
     JSON.stringify({
       actorId: actor.id,
