@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.13.1](https://github.com/first-fluke/agent-valley/compare/v4.13.0...v4.13.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **chief:** keep accepted cycles when source sync sees a lagging commit ([4c8fae3](https://github.com/first-fluke/agent-valley/commit/4c8fae39bed7d577c2d7fdf963d46d349e24c4af))
+
 ## [4.13.0](https://github.com/first-fluke/agent-valley/compare/v4.12.1...v4.13.0) (2026-11-14)
 
 
