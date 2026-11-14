@@ -6,6 +6,58 @@ import { productPath, regularFile, sourceRoot } from "./continuous-source-helper
 import { validateContinuousBaseline } from "./continuous-workspace"
 import { captureParallelBaseline, parallelGit, parallelTreeImages, writeParallelJson } from "./parallel-git"
 
+type Image = { mode: "100644" | "100755" | "120000"; oid: string }
+const imageKey = (image: Image | null) => (image ? `${image.mode} ${image.oid}` : "absent")
+
+/**
+ * Every image the given paths held along the accepted baseline lineage. A source commit that lags the
+ * baseline carries an earlier accepted cycle, not a new operator change; its images are found here.
+ */
+async function acceptedLineageImages(
+  baselinePath: string,
+  commit: string,
+  sourceHead: string,
+  paths: string[],
+): Promise<Map<string, Set<string>>> {
+  const images = new Map<string, Set<string>>()
+  for (let start = 0; start < paths.length; start += 200) {
+    const out = await parallelGit(
+      baselinePath,
+      [
+        "log",
+        "--first-parent",
+        "--diff-merges=first-parent",
+        "--no-renames",
+        "--raw",
+        "--no-abbrev",
+        "-z",
+        "--format=",
+        commit,
+        "--not",
+        sourceHead,
+        "--",
+        ...paths.slice(start, start + 200),
+      ],
+      { GIT_LITERAL_PATHSPECS: "1" },
+    )
+    const tokens = out.split("\0")
+    for (let index = 0; index + 1 < tokens.length; index++) {
+      const meta = tokens[index]?.trim() ?? ""
+      if (!meta.startsWith(":")) continue
+      const [oldMode = "", newMode = "", oldOid = "", newOid = ""] = meta.slice(1).split(" ")
+      const path = tokens[++index] ?? ""
+      const seen = images.get(path) ?? new Set<string>()
+      for (const [mode, oid] of [
+        [oldMode, oldOid],
+        [newMode, newOid],
+      ])
+        seen.add(/^0+$/.test(mode ?? "") ? "absent" : `${mode} ${oid}`)
+      images.set(path, seen)
+    }
+  }
+  return images
+}
+
 /** Back-propagate committed source product changes from the pinned source HEAD into the accepted operation baseline. */
 export async function synchronizeContinuousBaselineWithSource(
   operation: Operation,
@@ -28,12 +80,13 @@ export async function synchronizeContinuousBaselineWithSource(
     .catch(() => "")
   const baseImages = baseCommit
     ? await parallelTreeImages(current.path, `${baseCommit}^{tree}`)
-    : new Map<string, { mode: "100644" | "100755" | "120000"; oid: string }>()
+    : new Map<string, Image>()
   const headImages = await parallelTreeImages(current.path, `${policy.head}^{tree}`)
   const baselineImages = await parallelTreeImages(current.path, current.baselineTree)
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const removed: string[] = []
-  const upserted: Array<{ path: string; image: { mode: "100644" | "100755" | "120000"; oid: string } }> = []
+  const upserted: Array<{ path: string; image: Image }> = []
+  const contested: Array<{ path: string; after: Image | null }> = []
   for (const path of [...new Set([...baseImages.keys(), ...headImages.keys()])].sort()) {
     if (!productPath(path)) continue
     const before = baseImages.get(path) ?? null
@@ -45,8 +98,24 @@ export async function synchronizeContinuousBaselineWithSource(
       )
     const existing = baselineImages.get(path) ?? null
     if (same(existing, after)) continue
-    if (!after) removed.push(path)
+    if (!same(existing, before)) contested.push({ path, after })
+    else if (!after) removed.push(path)
     else upserted.push({ path, image: after })
+  }
+  if (contested.length) {
+    // The baseline changed these paths too. Source wins only with an image the accepted lineage never held;
+    // an image it already held is an earlier accepted cycle the operator committed, and the baseline is ahead.
+    const lineage = await acceptedLineageImages(
+      current.path,
+      current.commit,
+      policy.head,
+      contested.map((entry) => entry.path),
+    )
+    for (const { path, after } of contested) {
+      if (lineage.get(path)?.has(imageKey(after))) continue
+      if (!after) removed.push(path)
+      else upserted.push({ path, image: after })
+    }
   }
   let nextTree = current.baselineTree
   if (removed.length || upserted.length) {
