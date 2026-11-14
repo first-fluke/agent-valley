@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.12.0](https://github.com/first-fluke/agent-valley/compare/v4.11.1...v4.12.0) (2026-11-14)
+
+
+### Features
+
+* **chief:** allow skipping the goal-selection Director round ([30136ce](https://github.com/first-fluke/agent-valley/commit/30136ce80f7b82b6ea807f1e30043c8b70d2467e))
+
 ## [4.11.1](https://github.com/first-fluke/agent-valley/compare/v4.11.0...v4.11.1) (2026-11-14)
 
 
