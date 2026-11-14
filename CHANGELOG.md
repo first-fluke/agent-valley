@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.13.0](https://github.com/first-fluke/agent-valley/compare/v4.12.1...v4.13.0) (2026-11-14)
+
+
+### Features
+
+* **chief:** run the operator's own gate command in the integration check ([bd71a01](https://github.com/first-fluke/agent-valley/commit/bd71a019e658dde5bca301ea0892908a21e35641))
+
 ## [4.12.1](https://github.com/first-fluke/agent-valley/compare/v4.12.0...v4.12.1) (2026-11-14)
 
 
