@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.14.0](https://github.com/first-fluke/agent-valley/compare/v4.13.1...v4.14.0) (2026-11-14)
+
+
+### Features
+
+* **chief:** steer plans toward parallel waves and report their width ([9968bdc](https://github.com/first-fluke/agent-valley/commit/9968bdc793b80286918b3173e2eb596657f17f5e))
+
 ## [4.13.1](https://github.com/first-fluke/agent-valley/compare/v4.13.0...v4.13.1) (2026-11-14)
 
 
