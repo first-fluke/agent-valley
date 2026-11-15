@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.14.2](https://github.com/first-fluke/agent-valley/compare/v4.14.1...v4.14.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **chief:** attribute wave failures to the task that owns the files ([476a783](https://github.com/first-fluke/agent-valley/commit/476a783dbda48ff6dd4c8c61ae2b19b83c9c194c))
+
 ## [4.14.1](https://github.com/first-fluke/agent-valley/compare/v4.14.0...v4.14.1) (2026-11-15)
 
 
