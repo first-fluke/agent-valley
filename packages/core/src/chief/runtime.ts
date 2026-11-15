@@ -30,7 +30,7 @@ import {
   personaSkills,
   unattendedVerificationGuidance,
 } from "./runtime-inputs"
-import { integrationCheckEnabled, runIntegrationCheck } from "./runtime-integration-check"
+import { integrationCheckEnabled, integrationEvidenceFor, runIntegrationCheck } from "./runtime-integration-check"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
@@ -150,12 +150,15 @@ export class ChiefRuntime {
     active.begin("verify")
     try {
       if (mission.verificationContract) {
+        // Commands that passed in the integration check on this identical workspace are not run again.
+        const reuse = await integrationEvidenceFor(mission)
         mission.goalVerification = await executeGoalVerification(mission.verificationContract, mission.workspace.path, {
           successCriteria: mission.goalBrief?.successCriteria ?? [],
           expectedContractSha256: mission.verificationContractSha256,
           timeoutMs: mission.timeoutSec * 1_000,
           signal: signal,
           onSpawned: (pid, detached) => active.spawned(pid, detached),
+          ...(reuse ? { reuse } : {}),
         })
         if (!mission.goalVerification.ok || !mission.verifyCommand.trim()) return mission.goalVerification
         await finishLocalProcess(active)

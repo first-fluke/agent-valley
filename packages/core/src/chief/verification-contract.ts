@@ -46,6 +46,7 @@ export function safeVerificationCommand(program: string, args: string[]): boolea
       ["fmt", "--all", "--", "--check"],
       ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
       ["test", "--workspace"],
+      ["test", "--workspace", "--no-fail-fast"],
     ].some((allowed) => args.length === allowed.length && args.every((arg, index) => arg === allowed[index]))
   const tests = verificationCommandTestPaths(program, args)
   if (tests.length) return tests.every((name) => testPath(name, program === "node" && args[0] === "--test"))

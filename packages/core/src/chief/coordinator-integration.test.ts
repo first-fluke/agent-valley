@@ -6,11 +6,14 @@ import { coordinate } from "./coordinator"
 import { fixture, passed, rejected } from "./goal-supervision.fixture"
 import { INTEGRATION_CHECK_RULE } from "./prompts"
 import {
+  combinedIntegrationResult,
   integrationCheckCommand,
   integrationCheckEnabled,
+  integrationEvidenceFor,
   operatorIntegrationResult,
+  reusableEvidence,
 } from "./runtime-integration-check"
-import { executeCommandChecks } from "./verification"
+import { executeCommandChecks, executeGoalVerification, safeVerificationCommand } from "./verification"
 
 const roots: string[] = []
 afterEach(async () => {
@@ -126,5 +129,93 @@ describe("command-only contract checks", () => {
     expect(failed?.output).toContain("legacy ... FAILED")
     const filesOnly = { version: 1, criteria: [{ criterion: "Tests pass", checks: [contract.criteria[0]?.checks[1]] }] }
     expect(await executeCommandChecks(filesOnly, root, { successCriteria: ["Tests pass"] })).toBeUndefined()
+  })
+})
+
+describe("verification reuses integration evidence from the identical workspace", () => {
+  const command = { kind: "command", program: "node", args: ["--test", "a.test.js"] }
+  const contract = { version: 1, criteria: [{ criterion: "Tests pass", checks: [command] }] }
+  const successCriteria = ["Tests pass"]
+
+  async function observed() {
+    const root = await mkdtemp(join(tmpdir(), "av-integration-evidence-"))
+    roots.push(root)
+    await writeFile(join(root, "a.test.js"), "// first")
+    const executeCommand = vi.fn(async () => ({ exitCode: 0, stdout: "ok", stderr: "" }))
+    const check = await executeCommandChecks(contract, root, { successCriteria, executeCommand })
+    if (!check) throw new Error("Expected a command check result")
+    return { root, executeCommand, check }
+  }
+
+  it("does not run a command again while its evidence and inputs are unchanged", async () => {
+    const { root, executeCommand, check } = await observed()
+    const evidence = reusableEvidence(check, "same", "same", new Date("2026-01-01T00:00:00Z"))
+    expect(evidence).toMatchObject({ fingerprint: "same", checkedAt: "2026-01-01T00:00:00.000Z" })
+    const result = await executeGoalVerification(contract, root, {
+      successCriteria,
+      executeCommand,
+      reuse: evidence?.checks,
+    })
+    expect(executeCommand).toHaveBeenCalledOnce()
+    expect(result.ok).toBe(true)
+    expect(result.evidence[0]?.checks[0]).toMatchObject({
+      passed: true,
+      exitCode: 0,
+      outputSha256: check.evidence[0]?.outputSha256,
+    })
+    expect(result.evidence[0]?.checks[0]?.summary).toContain("reused")
+  })
+
+  it("runs the command again when a bound input changed or the earlier run failed", async () => {
+    const { root, executeCommand, check } = await observed()
+    await writeFile(join(root, "a.test.js"), "// second")
+    await executeGoalVerification(contract, root, { successCriteria, executeCommand, reuse: check.evidence })
+    expect(executeCommand).toHaveBeenCalledTimes(2)
+    const failed = check.evidence.map((entry) => ({ ...entry, passed: false, exitCode: 1 }))
+    await executeGoalVerification(contract, root, { successCriteria, executeCommand, reuse: failed })
+    expect(executeCommand).toHaveBeenCalledTimes(3)
+  })
+
+  it("keeps evidence only for a fully passing check that left the workspace unchanged", async () => {
+    const { check } = await observed()
+    expect(reusableEvidence(check, "before", "after")).toBeUndefined()
+    expect(reusableEvidence({ ...check, ok: false }, "same", "same")).toBeUndefined()
+    const partial = [...check.evidence, { ...check.evidence[0], passed: false, exitCode: 1 }] as typeof check.evidence
+    expect(reusableEvidence({ ok: true, evidence: partial }, "same", "same")).toBeUndefined()
+    expect(reusableEvidence({ ok: true, evidence: [] }, "same", "same")).toBeUndefined()
+  })
+
+  it("offers evidence only while the workspace fingerprint still matches", async () => {
+    const { mission } = codeFixture()
+    const { check } = await observed()
+    expect(await integrationEvidenceFor(mission, async () => "same")).toBeUndefined()
+    mission.integrationEvidence = reusableEvidence(check, "same", "same")
+    expect(await integrationEvidenceFor(mission, async () => "same")).toEqual(check.evidence)
+    expect(await integrationEvidenceFor(mission, async () => "changed")).toBeUndefined()
+    expect(
+      await integrationEvidenceFor(mission, async () => {
+        throw new Error("no git metadata")
+      }),
+    ).toBeUndefined()
+  })
+
+  it("leads a combined result with the failing part and keeps the end of a long operator output", () => {
+    const contractPart = { ok: true, output: "cargo test --workspace\nPASS" }
+    const operator = { ok: false, output: `make gate\nFAIL${"x".repeat(9_000)}harness: layer violation` }
+    const combined = combinedIntegrationResult(contractPart, operator)
+    expect(combined.ok).toBe(false)
+    expect(combined.output.startsWith("make gate")).toBe(true)
+    expect(combined.output).toContain("harness: layer violation")
+    expect(combined.output.endsWith("cargo test --workspace\nPASS")).toBe(true)
+    expect(combined.output.length).toBeLessThanOrEqual(8_000)
+    expect(combinedIntegrationResult(contractPart, { ok: true, output: "make gate\nPASS" })).toEqual({
+      ok: true,
+      output: "cargo test --workspace\nPASS\n\nmake gate\nPASS",
+    })
+  })
+
+  it("accepts a workspace test run that reports every failing binary", () => {
+    expect(safeVerificationCommand("cargo", ["test", "--workspace", "--no-fail-fast"])).toBe(true)
+    expect(safeVerificationCommand("cargo", ["test", "--workspace", "--no-run"])).toBe(false)
   })
 })

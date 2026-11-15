@@ -46,6 +46,7 @@ import {
   goalVerificationContractDigest,
   goalVerificationContractSchema,
   goalVerificationResultSchema,
+  integrationEvidenceSchema,
   validateGoalVerificationContract,
   validateGoalVerificationResult,
 } from "./verification"
@@ -157,6 +158,7 @@ export const missionSchema = z
       .regex(/^[a-f0-9]{64}$/)
       .optional(),
     goalVerification: goalVerificationResultSchema.optional(),
+    integrationEvidence: integrationEvidenceSchema.optional(),
     executionPolicy: executionPolicySchema.optional(),
     execution: executionStateSchema.optional(),
     handoff: handoffStateSchema.optional(),

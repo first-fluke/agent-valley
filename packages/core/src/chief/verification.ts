@@ -62,7 +62,18 @@ export const goalVerificationResultSchema = z.strictObject({
 })
 
 export type GoalVerificationResult = z.infer<typeof goalVerificationResultSchema>
-type CheckEvidence = z.infer<typeof checkEvidenceSchema>
+export type CheckEvidence = z.infer<typeof checkEvidenceSchema>
+
+/**
+ * Passing command evidence the integration check observed, bound to the workspace fingerprint it ran on.
+ * Verification may reuse it only while the workspace still has that fingerprint.
+ */
+export const integrationEvidenceSchema = z.strictObject({
+  fingerprint: z.string().min(1).max(200),
+  checkedAt: z.string().datetime(),
+  checks: z.array(checkEvidenceSchema).min(1).max(40),
+})
+export type IntegrationEvidence = z.infer<typeof integrationEvidenceSchema>
 
 export interface GoalVerificationOptions {
   successCriteria: string[]
@@ -76,6 +87,11 @@ export interface GoalVerificationOptions {
   executeCommand?: VerificationCommandExecutor
   onSpawned?: (pid: number, detached: boolean) => void
   now?: () => Date
+  /**
+   * Passing command evidence already observed on this exact workspace state. A matching command whose
+   * bound inputs are unchanged is not executed again; the caller guarantees the workspace is identical.
+   */
+  reuse?: readonly CheckEvidence[]
 }
 
 function checkDigest(check: GoalVerificationCheck): string {
@@ -192,6 +208,27 @@ async function inspectCheck(
 ): Promise<Omit<CheckEvidence, "checkSha256" | "kind">> {
   if (check.kind === "command") {
     const inputs = await verificationCommandInputs(root, check.program, check.args, budget)
+    const sha256 = checkDigest(check)
+    const earlier = options.reuse?.find(
+      (entry) =>
+        entry.kind === "command" &&
+        entry.checkSha256 === sha256 &&
+        entry.passed &&
+        entry.exitCode === 0 &&
+        !!entry.outputSha256 &&
+        JSON.stringify(entry.inputs ?? []) === JSON.stringify(inputs),
+    )
+    if (earlier)
+      return {
+        passed: true,
+        summary: checkSummary(
+          true,
+          "Explicit command exited zero in the integration check on this identical workspace; its evidence is reused.",
+        ),
+        exitCode: 0,
+        outputSha256: earlier.outputSha256,
+        inputs,
+      }
     const result = await (options.executeCommand ?? executeVerificationCommand)(check.program, check.args, {
       cwd: root,
       timeoutMs: options.timeoutMs ?? check.timeoutMs,
@@ -339,7 +376,7 @@ export async function executeCommandChecks(
   input: unknown,
   workspaceRoot: string,
   options: GoalVerificationOptions,
-): Promise<{ ok: boolean; output: string } | undefined> {
+): Promise<{ ok: boolean; output: string; evidence: CheckEvidence[] } | undefined> {
   const contract = validateGoalVerificationContract(input, options.successCriteria)
   const commands = new Map<string, Extract<GoalVerificationCheck, { kind: "command" }>>()
   for (const criterion of contract.criteria)
@@ -349,6 +386,7 @@ export async function executeCommandChecks(
   const root = await verificationRoot(workspaceRoot)
   const budget = { remaining: MAX_VERIFICATION_TOTAL_BYTES }
   const lines: string[] = []
+  const evidence: CheckEvidence[] = []
   let ok = true
   for (const check of commands.values()) {
     if (options.signal?.aborted) throw new Error("Integration check interrupted. Resume the mission to rerun it.")
@@ -356,6 +394,7 @@ export async function executeCommandChecks(
     try {
       const observed = await inspectCheck(check, root, options, budget)
       ok &&= observed.passed
+      evidence.push({ checkSha256: checkDigest(check), kind: check.kind, ...observed })
       lines.push(`${label}\n${observed.summary}`)
     } catch (error) {
       if (options.signal?.aborted) throw error
@@ -363,5 +402,5 @@ export async function executeCommandChecks(
       lines.push(`${label}\n${checkSummary(false, error instanceof Error ? error.message : "Check could not run.")}`)
     }
   }
-  return { ok, output: lines.join("\n\n").slice(0, 8_000) }
+  return { ok, output: lines.join("\n\n").slice(0, 8_000), evidence }
 }
