@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.16.1](https://github.com/first-fluke/agent-valley/compare/v4.16.0...v4.16.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **orchestrator:** honor gate timeouts above one hour ([9f95408](https://github.com/first-fluke/agent-valley/commit/9f9540805f017cc69276985c68482a7d757e6f6a))
+
 ## [4.16.0](https://github.com/first-fluke/agent-valley/compare/v4.15.0...v4.16.0) (2026-11-15)
 
 
