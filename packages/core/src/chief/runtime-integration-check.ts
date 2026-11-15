@@ -5,6 +5,7 @@ import { finishLocalProcess } from "./local-runner"
 import type { Mission } from "./types"
 import { type CheckEvidence, executeCommandChecks } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
+import { directorySizes, growthReport, growthThresholdBytes } from "./workspace-growth"
 
 export const INTEGRATION_CHECK_ENV = "AV_INTEGRATION_CHECK"
 export const INTEGRATION_CHECK_COMMAND_ENV = "AV_INTEGRATION_CHECK_COMMAND"
@@ -92,6 +93,22 @@ export async function runIntegrationCheck(
   const command = integrationCheckCommand(source)
   if (!command && !mission.verificationContract) return undefined
   await assertMissionWorkspace(mission)
+  const threshold = growthThresholdBytes(source)
+  const before = threshold > 0 ? await directorySizes(mission.workspace.path) : undefined
+  const result = await checkIntegratedTree(mission, active, command, signal, source)
+  if (!result || !before) return result
+  // A check that leaves output behind is reported first, where the reviewer's excerpt starts.
+  const storage = growthReport(before, await directorySizes(mission.workspace.path), threshold)
+  return storage ? { ok: result.ok, output: `${storage}\n${result.output}`.slice(0, 8_000) } : result
+}
+
+async function checkIntegratedTree(
+  mission: Mission,
+  active: ActiveMissionProcess,
+  command: string | undefined,
+  signal: AbortSignal | undefined,
+  source: NodeJS.ProcessEnv,
+): Promise<{ ok: boolean; output: string } | undefined> {
   active.begin("verify")
   try {
     const operator = async () =>

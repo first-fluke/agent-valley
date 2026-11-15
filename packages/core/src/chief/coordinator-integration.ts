@@ -1,6 +1,13 @@
 import { CODE_SKILL } from "./coordinator-state"
 import { MissionPause } from "./execution"
 import type { ChiefPorts, ChiefTaskState, Mission } from "./types"
+import { STORAGE_NOTE_PREFIX } from "./workspace-growth"
+
+/** A passing check that left output behind still says so in the mission history. */
+const storageNote = (output: string) => {
+  const first = output.split("\n", 1)[0] ?? ""
+  return first.startsWith(STORAGE_NOTE_PREFIX) ? ` ${first}` : ""
+}
 
 /**
  * Task reviewers only read files, and Actors run focused tests in their own workspaces, so a regression in
@@ -44,7 +51,7 @@ export async function recordIntegrationCheck(
   for (const state of targets) state.integrationCheck = observed
   await save(
     "integration-check",
-    `${result.ok ? "Contract command checks pass" : "Contract command checks fail"} on the integrated tree before review of ${targets.map((state) => state.id).join(", ")}.${result.ok ? "" : ` ${result.output.slice(0, 1_500)}`}`,
+    `${result.ok ? "Contract command checks pass" : "Contract command checks fail"} on the integrated tree before review of ${targets.map((state) => state.id).join(", ")}.${result.ok ? storageNote(result.output) : ` ${result.output.slice(0, 1_500)}`}`,
     first.id,
   )
 }
