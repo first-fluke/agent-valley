@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.14.3](https://github.com/first-fluke/agent-valley/compare/v4.14.2...v4.14.3) (2026-11-15)
+
+
+### Bug Fixes
+
+* **chief:** scope recovery instructions to the attempt they were written for ([a3ba586](https://github.com/first-fluke/agent-valley/commit/a3ba586392e7d10e0f666b48ee301c33ed57fc32))
+
 ## [4.14.2](https://github.com/first-fluke/agent-valley/compare/v4.14.1...v4.14.2) (2026-11-15)
 
 
