@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.14.1](https://github.com/first-fluke/agent-valley/compare/v4.14.0...v4.14.1) (2026-11-15)
+
+
+### Performance
+
+* **chief:** reuse integration check evidence in mission verification ([1bd0f9e](https://github.com/first-fluke/agent-valley/commit/1bd0f9ebf4134f2b2867e429584238e2d89a6a2c))
+
 ## [4.14.0](https://github.com/first-fluke/agent-valley/compare/v4.13.1...v4.14.0) (2026-11-14)
 
 
