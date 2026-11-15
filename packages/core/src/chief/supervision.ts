@@ -71,6 +71,10 @@ function recoveryResetTaskIds(previousPlan: ChiefPlan, plan: ChiefPlan, targetId
   }
 }
 
+/** Appended to recovery instructions so a limit meant for one attempt does not outlive it. */
+export const recoveryScope = (attempt: number) =>
+  `This recovery text was written for attempt ${attempt}. A limit it sets for a single attempt, such as changing only named files, ends with that attempt; a later attempt repairs the repairFindings of the newest review.`
+
 export function applyRecovery(mission: Mission, response: SupervisionResponse): void {
   if (!mission.plan) throw new Error("Chief Director recovery needs an existing plan. Restore the mission checkpoint.")
   if (response.action === "stop" || response.action === "wait") return
@@ -91,7 +95,10 @@ export function applyRecovery(mission: Mission, response: SupervisionResponse): 
     for (const task of mission.plan.tasks) {
       if (targetId && task.id !== targetId) continue
       if (response.action === "reassign") task.personaId = response.personaId
-      task.instructions = `${task.instructions.split(/\n\nChief(?: Director)? recovery:\n/)[0]}\n\nChief Director recovery:\n${response.instructions}`
+      // A limit the Chief set for one attempt ("change only this file") used to bind every later repair of
+      // the task, which then left newer review findings unrepaired. The text names the attempt it is for.
+      const attempt = (previousStates.find((state) => state.id === task.id)?.attempts ?? 0) + 1
+      task.instructions = `${task.instructions.split(/\n\nChief(?: Director)? recovery:\n/)[0]}\n\nChief Director recovery:\n${response.instructions}\n\n${recoveryScope(attempt)}`
     }
     plan = mission.plan
   }

@@ -6,7 +6,7 @@ import { brief, fixture, plan } from "./goal-supervision.fixture"
 import { CMO_ROLE, MARKETING_DIRECTOR_ROLE } from "./marketing-lead"
 import { CHIEF_DIRECTOR_ROLE, planPrompt, supervisePrompt } from "./prompts"
 import { actorSchema, parsePlanningResponse, parseSupervisionResponse, personaSchema, validateMission } from "./schemas"
-import { applyRecovery } from "./supervision"
+import { applyRecovery, recoveryScope } from "./supervision"
 import { CTO_ROLE, TECHNICAL_DIRECTOR_ROLE } from "./technical-lead"
 import type { Actor, Persona } from "./types"
 
@@ -205,7 +205,23 @@ describe("Director and Actor contract compatibility", () => {
     const original = task.instructions
     task.instructions += "\n\nChief recovery:\nPrevious repair instructions."
     applyRecovery(mission, { action: "repair", reason: "Refresh the repair", instructions: "Current repair." })
-    expect(task.instructions).toBe(`${original}\n\nChief Director recovery:\nCurrent repair.`)
+    expect(task.instructions).toBe(`${original}\n\nChief Director recovery:\nCurrent repair.\n\n${recoveryScope(1)}`)
     expect(task.acceptance).toEqual(plan.tasks[0]?.acceptance)
+  })
+
+  it("names the attempt a recovery instruction is for, so a one-attempt limit does not bind later repairs", () => {
+    const { mission } = fixture()
+    mission.plan = structuredClone(plan)
+    const task = mission.plan.tasks[0]
+    if (!task) throw new Error("Missing assignment fixture")
+    mission.tasks = [{ id: task.id, reviewerId: mission.chiefId, status: "pending", attempts: 6 }]
+    applyRecovery(mission, {
+      action: "repair",
+      taskId: task.id,
+      reason: "Record the receipt",
+      instructions: "Make this attempt evidence-only.",
+    })
+    expect(task.instructions).toContain("written for attempt 7")
+    expect(task.instructions).toContain("a later attempt repairs the repairFindings of the newest review")
   })
 })
