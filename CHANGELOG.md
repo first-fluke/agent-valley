@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.15.0](https://github.com/first-fluke/agent-valley/compare/v4.14.3...v4.15.0) (2026-11-15)
+
+
+### Features
+
+* **chief:** report storage an integration check leaves behind ([93fec63](https://github.com/first-fluke/agent-valley/commit/93fec639822bd4577dba49dacc956a8989264f82))
+
 ## [4.14.3](https://github.com/first-fluke/agent-valley/compare/v4.14.2...v4.14.3) (2026-11-15)
 
 
