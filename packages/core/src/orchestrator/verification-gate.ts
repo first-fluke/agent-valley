@@ -24,7 +24,9 @@ import { BoundedProcessOutput } from "../util/bounded-process-output"
 const MAX_OUTPUT_LENGTH = 10_240
 const DEFAULT_TIMEOUT_SEC = 600
 const MIN_TIMEOUT_SEC = 10
-const MAX_TIMEOUT_SEC = 3_600
+// The same ceiling as a mission's per-check timeout. A lower cap here cut a two-hour operator gate
+// (workspace tests, then coverage) at one hour and reported a timeout the operator had not configured.
+const MAX_TIMEOUT_SEC = 86_400
 
 /**
  * Build a reduced environment for the verify child. The child inherits the

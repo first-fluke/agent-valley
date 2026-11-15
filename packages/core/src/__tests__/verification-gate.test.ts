@@ -148,6 +148,17 @@ describe("runVerificationGate", () => {
     expect(capturedCwd).toBe("/workspace/PROJ-9")
     expect(capturedTimeoutMs).toBe(30_000)
   })
+
+  test("keeps a multi-hour gate timeout and still bounds invalid values", async () => {
+    const seen: number[] = []
+    const exec: VerifyExecFn = async (_command, _cwd, timeoutMs) => {
+      seen.push(timeoutMs)
+      return { exitCode: 0, output: "", timedOut: false }
+    }
+    for (const timeoutSec of [7_200, 1_000_000, 0])
+      await runVerificationGate(makeWorkspace(), "bun test", { exec, timeoutSec })
+    expect(seen).toEqual([7_200_000, 86_400_000, 10_000])
+  })
 })
 
 describe("defaultVerifyExec (real subprocess)", () => {
