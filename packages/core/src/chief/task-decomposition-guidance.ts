@@ -15,6 +15,7 @@ export function taskDecompositionGuidance(mission: Mission, phase: "plan" | "wor
     ...(limit > 1
       ? [
           `Up to ${limit} ready tasks run at once, and a wave with one ready task leaves the other slots idle for its whole duration. When the work is substantial, shape the plan so several tasks are ready together: split implementation by disjoint owned paths (package, module, surface) rather than by layer, role or step, and keep each unit's tests in the task that implements that unit instead of a later test-only task.`,
+          "Tasks of one wave run in separate workspaces and are merged afterwards, so two of them can never edit the same file. A wave task's own tests must pass with only its files and its dependencies' deliveries: wiring that every wave task needs (dispatch, registration, routing) is delivered by the preceding contract task, and tests that need wiring done after the wave belong to the later integration task.",
         ]
       : []),
     "Reuse existing stable interfaces. If independent consumers need a missing or changing contract, assign a concise contract-producing task first to establish the shared types, API, protocol or artifact and its acceptance evidence. Consumers may then depend on that contract without waiting for unrelated implementation work.",

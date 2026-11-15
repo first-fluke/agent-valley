@@ -25,6 +25,34 @@ export function planWaveWidths(tasks: ReadonlyArray<Pick<ChiefTask, "id" | "depe
   return widths
 }
 
+/**
+ * The other tasks of `id`'s dependency wave, and the later tasks that depend on any task of that wave.
+ * Wave tasks run in separate workspaces and are merged afterwards, so a file two of them edit cannot merge.
+ */
+export function planWaveOf(
+  tasks: ReadonlyArray<Pick<ChiefTask, "id" | "dependencies">>,
+  id: string,
+): { peers: string[]; dependents: string[] } {
+  const completed = new Set<string>()
+  let remaining = [...tasks]
+  while (remaining.length) {
+    const ready = remaining.filter((task) => task.dependencies.every((entry) => completed.has(entry)))
+    if (!ready.length) break
+    if (ready.some((task) => task.id === id)) {
+      const wave = new Set(ready.map((task) => task.id))
+      return {
+        peers: [...wave].filter((entry) => entry !== id),
+        dependents: tasks
+          .filter((task) => !wave.has(task.id) && task.dependencies.some((entry) => wave.has(entry)))
+          .map((task) => task.id),
+      }
+    }
+    for (const task of ready) completed.add(task.id)
+    remaining = remaining.filter((task) => !completed.has(task.id))
+  }
+  return { peers: [], dependents: [] }
+}
+
 /** Starts up to `limit` children at once, preserves input order, and joins on abort. */
 export async function runJoinedWave<T, R>(
   items: readonly T[],

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { planWaveWidths, readyTaskWave, runJoinedWave } from "./parallel"
+import { planWaveOf, planWaveWidths, readyTaskWave, runJoinedWave } from "./parallel"
 import type { ChiefPlan, ChiefTaskState } from "./types"
 
 function barrier() {
@@ -165,5 +165,23 @@ describe("plan dependency waves", () => {
 
   it("leaves out tasks whose dependencies can never complete", () => {
     expect(planWaveWidths([task("ready"), task("left", ["right"]), task("right", ["left"])])).toEqual([1])
+  })
+
+  it("names the other tasks of a wave and the later tasks that depend on it", () => {
+    const lanes = [
+      task("contract"),
+      task("go", ["contract"]),
+      task("swift", ["contract"]),
+      task("integration", ["go", "swift"]),
+      task("qa", ["go", "swift"]),
+    ]
+    expect(planWaveOf(lanes, "go")).toEqual({ peers: ["swift"], dependents: ["integration", "qa"] })
+    expect(planWaveOf(lanes, "integration")).toEqual({ peers: ["qa"], dependents: [] })
+    expect(planWaveOf(lanes, "contract")).toEqual({ peers: [], dependents: ["go", "swift"] })
+    expect(planWaveOf(lanes, "missing")).toEqual({ peers: [], dependents: [] })
+    expect(planWaveOf([task("left", ["right"]), task("right", ["left"])], "left")).toEqual({
+      peers: [],
+      dependents: [],
+    })
   })
 })

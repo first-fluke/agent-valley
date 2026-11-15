@@ -2,6 +2,7 @@ import { actorData, actorPlanData, actorTaskData, canonicalTaskResponseKeys } fr
 import { unavailableDirectorAdvice } from "./advisory-evidence"
 import { requiresOmaActor } from "./oma-actor"
 import { operationsEvidence } from "./operations-report"
+import { planWaveOf } from "./parallel"
 import { MAX_JSON_RESPONSE_LENGTH } from "./plan-validation"
 import { reviewResponseFormat } from "./review-response"
 import { finalCriteria } from "./schemas"
@@ -166,6 +167,32 @@ export const INTEGRATION_CHECK_RULE =
 export const OWN_REPAIR_RULE =
   "Repair ownership: when a review finding, integrationCheck or your own run shows a failing test, lint or build in this repository, repair it in this task even when the failing code was delivered by an earlier task or lies outside this task's stated files. Recording the failure for another owner or for the Chief is not a repair and will be rejected again. Hand back only a prerequisite you cannot change from this workspace, such as missing credentials or an external service."
 
+/**
+ * In a wave of several tasks the two rules above made every Actor repair the same failure in the same
+ * shared files, and the second patch could no longer be merged. Ownership decides instead.
+ */
+function waveOf(mission: Mission, task: ChiefTask): { peers: string[]; dependents: string[] } {
+  return planWaveOf(mission.plan?.tasks ?? [], task.id)
+}
+
+export function waveRepairRule(mission: Mission, task: ChiefTask): string | undefined {
+  const { peers, dependents } = waveOf(mission, task)
+  if (!peers.length) return undefined
+  const later = dependents.length
+    ? `the later task that integrates this wave (${dependents.join(", ")})`
+    : "the Chief Director"
+  return `Concurrent wave: ${peers.join(", ")} run at the same time as this task in separate workspaces, and the deliveries are merged afterwards. This limits the repair ownership rule above: edit only the files this assignment owns. A file that another wave task owns or also has to change cannot be merged twice, so do not edit it; when a failure needs such a change, report the file and the exact change needed for ${later} instead. A failure located in another wave task's files is that task's to repair.`
+}
+
+export function waveReviewRule(mission: Mission, task: ChiefTask): string | undefined {
+  const { peers, dependents } = waveOf(mission, task)
+  if (!peers.length) return undefined
+  const shared = dependents.length
+    ? `belongs to the later task that integrates this wave (${dependents.join(", ")}): record it in the summary and do not block this task on it`
+    : `is repaired by the first of ${[task.id, ...peers].sort().join(", ")} only`
+  return `Wave ownership: this task was delivered in one wave with ${peers.join(", ")}, and integrationCheck ran once on their combined tree. This limits the rule above. Hold this task responsible only for failures caused by or located in the files of its own changeSet and assignment. A failure located in another wave task's files is that task's finding: name that task in the summary and do not ask this task's Actor to edit those files. A failure that needs a change to a file outside every wave task's assignment, such as shared wiring, registration or manifests, ${shared}.`
+}
+
 const OPERATOR_NOTES_RULE =
   "mission.operatorNotes are operator instructions recorded after earlier attempts. When a note reports an environment or prerequisite change, re-run the affected check in the current environment instead of relying on evidence that predates the note; a note never changes the goal, acceptance criteria or verification command."
 
@@ -190,6 +217,7 @@ export function workPrompt(mission: Mission, task: ChiefTask, state: ChiefTaskSt
     OPERATOR_NOTES_RULE,
     BUILD_AUTHORIZATION_RULE,
     OWN_REPAIR_RULE,
+    ...[waveRepairRule(mission, task)].filter((rule): rule is string => rule !== undefined),
     HANDOFF_PATH_RULE,
     VERIFICATION_TIMEOUT_RULE,
     "Do not weaken tests or acceptance criteria to make verification pass. Do not alter the operator's verification command.",
@@ -254,7 +282,9 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           "No container or service observation policy is configured for this mission: do not require a deployment target inventory, target health, availability or recent-error observations, and do not treat the sandbox's deliberate av.yaml read denial as a blocker. Numeric targets in goal criteria mean the goal's own documented targets.",
         ]),
     "Reject incomplete requirements, missing deliverables, weakened tests, correctness defects, or missing evidence.",
-    ...(task && state?.integrationCheck ? [INTEGRATION_CHECK_RULE] : []),
+    ...(task && state?.integrationCheck
+      ? [INTEGRATION_CHECK_RULE, waveReviewRule(mission, task)].filter((rule): rule is string => rule !== undefined)
+      : []),
     ...(task ? [HANDOFF_PATH_RULE, EXHAUSTIVE_REVIEW_RULE, ...(state?.review ? [REPAIR_REVIEW_RULE] : [])] : []),
     ...(mission.technicalLeadId
       ? [
