@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.16.0](https://github.com/first-fluke/agent-valley/compare/v4.15.0...v4.16.0) (2026-11-15)
+
+
+### Features
+
+* **chief:** clear declared workspace scratch before checks and verification ([7aabcf6](https://github.com/first-fluke/agent-valley/commit/7aabcf618061c196d2e4be11dfc5e9f248631cc5))
+
 ## [4.15.0](https://github.com/first-fluke/agent-valley/compare/v4.14.3...v4.15.0) (2026-11-15)
 
 
