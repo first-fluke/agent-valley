@@ -39,6 +39,7 @@ import { finishOperatingRun, markOperatingRunUnknown } from "./usage"
 import { executeGoalVerification } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
 import { operationCacheStore, retainWorkspaceCaches } from "./workspace-cache"
+import { releaseWorkspaceScratch } from "./workspace-scratch"
 
 export { intermediateVerifyCommand, missionIssue } from "./runtime-inputs"
 
@@ -146,6 +147,8 @@ export class ChiefRuntime {
     if (!mission.verifyCommand.trim() && !mission.verificationContract)
       throw new Error("A trusted verification command is required. Set --verify before creating an order.")
     if (mission.verificationContract) await assertMissionWorkspace(mission)
+    // Verification runs the project's tests once more; scratch of earlier runs is released first.
+    await releaseWorkspaceScratch(mission.workspace.path).catch(() => undefined)
     const active = this.store.processGuard(mission.id)
     active.begin("verify")
     try {

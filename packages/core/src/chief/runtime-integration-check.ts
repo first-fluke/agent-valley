@@ -5,7 +5,8 @@ import { finishLocalProcess } from "./local-runner"
 import type { Mission } from "./types"
 import { type CheckEvidence, executeCommandChecks } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
-import { directorySizes, growthReport, growthThresholdBytes } from "./workspace-growth"
+import { directorySizes, growthReport, growthThresholdBytes, STORAGE_NOTE_PREFIX } from "./workspace-growth"
+import { releaseWorkspaceScratch, scratchNote } from "./workspace-scratch"
 
 export const INTEGRATION_CHECK_ENV = "AV_INTEGRATION_CHECK"
 export const INTEGRATION_CHECK_COMMAND_ENV = "AV_INTEGRATION_CHECK_COMMAND"
@@ -93,12 +94,18 @@ export async function runIntegrationCheck(
   const command = integrationCheckCommand(source)
   if (!command && !mission.verificationContract) return undefined
   await assertMissionWorkspace(mission)
+  // Declared scratch of earlier runs goes first, so the growth below is what this check alone leaves behind.
+  const cleared = scratchNote(await releaseWorkspaceScratch(mission.workspace.path, source))
   const threshold = growthThresholdBytes(source)
   const before = threshold > 0 ? await directorySizes(mission.workspace.path) : undefined
   const result = await checkIntegratedTree(mission, active, command, signal, source)
-  if (!result || !before) return result
-  // A check that leaves output behind is reported first, where the reviewer's excerpt starts.
-  const storage = growthReport(before, await directorySizes(mission.workspace.path), threshold)
+  if (!result) return result
+  const growth = before ? growthReport(before, await directorySizes(mission.workspace.path), threshold) : undefined
+  // Storage findings lead, where the reviewer's excerpt starts; one line so the history can quote it.
+  const storage = [cleared, growth]
+    .filter((note): note is string => note !== undefined)
+    .map((note, index) => (index ? note.slice(STORAGE_NOTE_PREFIX.length + 1) : note))
+    .join(" ")
   return storage ? { ok: result.ok, output: `${storage}\n${result.output}`.slice(0, 8_000) } : result
 }
 

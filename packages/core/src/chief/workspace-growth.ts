@@ -73,5 +73,5 @@ export function growthReport(
   const size = (after.get("") ?? 0) - (after.get(".git") ?? 0) - (after.get(".agent-valley") ?? 0)
   return `${STORAGE_NOTE_PREFIX} this check left ${gib(total)} of new files in the workspace (${gib(size)} in total)${
     where.length ? `, mostly under ${where.join(", ")}` : ""
-  }. Nothing removes them, so repeated checks fill the disk; the tests or scripts that create these files have to remove them.`
+  }. Nothing removes them, so repeated checks fill the disk; the tests or scripts that create these files have to remove them. Until they do, name the directory in AV_WORKSPACE_SCRATCH and AV clears entries of earlier runs before each check.`
 }
