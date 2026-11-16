@@ -25,9 +25,9 @@
     "PostToolUse": [
       {
         "type": "command",
-        "bash": "'.github/hooks/oma-hook.sh' --vendor 'copilot' --event 'PostToolUse' --matcher 'Edit|Write'",
-        "timeoutSec": 10,
-        "matcher": "Edit|Write"
+        "bash": "'.github/hooks/oma-hook.sh' --vendor 'copilot' --event 'PostToolUse' --matcher 'Edit|Write|skill|Read|Bash'",
+        "timeoutSec": 13,
+        "matcher": "Edit|Write|skill|Read|Bash"
       }
     ],
     "Stop": [

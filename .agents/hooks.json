@@ -98,6 +98,20 @@
       }
     ]
   },
+  "oma-skill-route": {
+    "PostToolUse": [
+      {
+        "matcher": "read_file|run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "oma hook script --vendor antigravity --script skill-route.ts",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  },
   "oma-persistent-mode": {
     "Stop": [
       {
