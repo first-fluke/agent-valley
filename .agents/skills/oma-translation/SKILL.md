@@ -41,31 +41,16 @@ structure.
   are defined in `resources/style-skills.md`.
 - Shared prose diagnostics and translation exceptions for other target languages.
 - Existing siblings and glossary when translating into a project.
-
-### Control-flow features
-- Branches by UI batch versus prose, profile availability, locale variant, ambiguity, and review mode.
-- Loads only the target profile and references required for the content type.
-- Edits files only when the user asked for file changes.
+- Configured `code_intelligence` capability when available for code-context navigation; native
+  search/read for local source and sibling translations, and when the capability is unavailable
+  or times out.
 
 ## Structural Flow
-
-### Entry
-1. Identify source, target locale, content type, and whether this is translate, review, or diff-sync.
-2. Preserve exact tokens first: placeholders, code, URLs, keys, and structural markers.
-3. Load the target profile if available; read sibling translations when the target is in a project.
-
-### Scenes
-1. **PREPARE**: Resolve locale, output mode, target audience, and protected syntax.
-2. **ACQUIRE**: Read the target profile, relevant siblings, glossary, and source context. Select the substantive prose-style route in the canonical workflow; keep short independent UI strings on the lightweight path.
-3. **REASON**: Determine meaning, register, terminology, cultural references, and any ambiguity. Decide whether an idiom should be interpreted, substituted, or retained.
-4. **ACT**: Write natural target-language text. Match established project patterns without adding meaning, opinion, or personality.
-5. **VERIFY**: Check protected syntax and structure. For substantive text, check meaning, terminology, register, and target-language naturalness against the rubric.
-6. **FINALIZE**: Return the requested text, patch, or review with only supported findings.
 
 ### Transitions
 - A profile exists -> load it; its target-language rules take precedence over shared guidance.
 - A locale variant is required -> resolve it before drafting.
-- No profile exists -> use shared guidance and note that limit once; do not borrow another language's rules.
+- No profile exists -> use shared guidance and note that limit once.
 - A short independent UI string with established siblings -> use protected-syntax and sibling checks; the full prose review is optional.
 - Long prose, documentation, marketing copy, mixed tables/code, or review mode -> use the rubric.
 - Ambiguous meaning that changes the result -> ask one targeted question or flag the choice.
@@ -77,9 +62,8 @@ structure.
 | Missing target context | Use the source register and state the assumption, unless the ambiguity changes meaning |
 | Conflicting literal wording and project convention | Follow the established target convention and explain a material difference |
 | Placeholder or structure mismatch | Revise before emitting or applying a patch |
-| Missing profile | Use shared guidance and identify the coverage limit once |
 | Unclear cultural reference | Add a concise note only when the target audience needs it |
-| Selected external style skill unavailable | Complete supported translation checks and report the unavailable style pass; do not substitute another language's style skill or claim it ran |
+| Selected external style skill unavailable | Use the in-repo fallback in `resources/style-skills.md`, complete supported translation checks, and report that the external style pass did not run; do not substitute another language's style skill or claim it ran |
 
 ### Exit
 - Success: the text is faithful, natural, structurally safe, and checked in proportion to content risk.
@@ -125,8 +109,8 @@ Always check:
 - The target follows its profile's typography and register rules.
 - Existing siblings are matched when they establish terminology or UI style.
 
-For substantive content and review mode, also check the rubric: meaning, naturalness,
-terminology, register, cultural fit, and emotional force. Apply the selected target-language
+For substantive content and review mode, also check the rubric: naturalness, accuracy,
+register, terminology, and technical integrity. Apply the selected target-language
 style route while preserving intentional source style and content.
 
 ### Review mode
@@ -157,57 +141,29 @@ the suggested revision only when warranted, and the evidence for each finding.
 
 ## Logical Operations
 
-### Actions
-| Action | SSL primitive | Evidence |
-|---|---|---|
-| Resolve locale and mode | `SELECT` | User request and file context |
-| Read profile and siblings conditionally | `READ` | Target profile, glossary, nearby translations |
-| Protect syntax and structure | `VALIDATE` | Source tokens and structural markers |
-| Infer meaning and register | `INFER` | Source, audience, project convention |
-| Translate or revise | `WRITE` | Target text or requested file patch |
-| Review substantive content | `VALIDATE` | Rubric and concrete findings |
-| Report result and limits | `NOTIFY` | Translation, patch, or review |
-
-### Tools and instruments
-- Native search/read for local source and sibling translations.
-- Configured `code_intelligence` capability when available for code-context navigation; native
-  search/read when it is unavailable or times out.
-- Target profile, rubric, selected prose-style implementation, and language-template
-  resources as selected by the canonical workflow.
-
 ### Canonical workflow path
-1. Resolve target locale and protect exact syntax.
+1. Identify the source, target locale, content type, and mode (translate, review, or
+   diff-sync). Protect exact tokens first: placeholders, code, URLs, keys, and structural markers.
 2. Load the one applicable language profile and relevant siblings; load the rubric for substantive
    content or review. For substantive prose, select by the **target** BCP 47 primary subtag:
    - `en` (including regional variants): load `resources/style-skills.md` and resolve `humanizer`.
    - `ko` (including regional variants): load that resource and resolve `humanize-korean`.
    - Other languages: load `../_shared/core/anti-ai-prose.md` with
      `resources/anti-ai-patterns.md` and the target profile.
-   Short independent UI strings with established siblings need protected-syntax and
-   sibling checks; they do not require an external prose-style pass.
-3. Infer meaning, register, terminology, and figurative-language handling.
-4. Draft in natural target order and project style.
-5. Apply the selected style implementation to the draft, preserving review-only mode
-   and translation fidelity. Then verify exact syntax, terminology, source claims,
-   structure and diff-sync scope, and check substantive content against the rubric.
-6. Emit the requested translation, patch, or evidence-backed review. State a missing-profile or
-   context limitation when material.
+   When a prose-style route is selected, record it with subject
+   `translation.route-selection` per `../_shared/runtime/route-selection.md`
+   (style skill, target subtag that selected it, and `translation_voice`).
+3. Infer and draft per Translation method.
+4. Apply the selected style implementation to the draft, preserving review-only mode
+   and translation fidelity, then run Verification, including diff-sync scope.
+5. Emit the requested translation, patch, or evidence-backed review. State a material
+   context limitation.
 
-### Resource scope
-| Scope | Resource target |
-|---|---|
-| `LOCAL_FS` | Source/target files, glossaries, language profiles |
-| `CODEBASE` | Sibling translations and code context |
-| `PROCESS` | Syntax checks and selected external-skill acquisition or local gates |
-| `NETWORK` | Upstream style-skill retrieval when not already available |
-| `MEMORY` | Locale, terminology, register, protected syntax, unresolved ambiguity |
-
-### Effects and side effects
-- Produces translated text or review findings.
-- Changes locale/docs files only when explicitly requested.
-- Retains source structure, identifiers, and placeholders.
-- May retrieve a missing selected style-skill bundle; reuses installed or cached
-  instructions. Upstream intermediate files stay in a writable scratch workspace.
+### Resource scope and effects
+Changes locale or docs files only when the user asked for file changes; otherwise the result is
+translated text or review findings in the response. May retrieve a missing selected style-skill
+bundle from upstream over the network; installed or cached instructions are reused. Upstream
+intermediate files stay in a writable scratch workspace.
 
 ### Guardrails
 1. Preserve meaning, protected syntax, and file structure before stylistic preference.

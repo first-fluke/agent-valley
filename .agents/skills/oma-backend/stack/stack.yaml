@@ -1,2 +1,17 @@
 language: python
+framework: fastapi
+orm: sqlalchemy
 source: preset
+
+verify:
+  detect: pyproject.toml
+  syntax:
+    cmd: "python -m compileall -q ."
+  tests:
+    cmd: "uv run pytest"
+    skip_if_missing: uv
+  raw_sql:
+    patterns:
+      - "f[\"'].*(SELECT|INSERT|UPDATE|DELETE)"
+    include_glob: "*.py"
+    exclude_dirs: [test, tests, node_modules, .venv]

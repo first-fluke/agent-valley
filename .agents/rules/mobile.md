@@ -6,9 +6,8 @@ alwaysApply: false
 
 # Mobile Development Standards
 
-Variant-specific stacks live in `.agents/skills/oma-mobile/variants/{flutter,react-native,swift-ios,kotlin-android}/`.
-React Native sources (`.ts`/`.tsx`) are not matched by this rule's glob — for RN work, read the
-`react-native` variant directly. `.kt` files are Kotlin-native (Compose) when the project is an
+React Native sources (`.ts`/`.tsx`) are not matched by this rule's glob. `.kt` files are
+Kotlin-native (Compose) when the project is an
 Android application (`settings.gradle.kts` + `com.android.application`, no `pubspec.yaml` /
 `react-native`); otherwise they are Flutter/RN Android host code.
 
@@ -20,5 +19,5 @@ Android application (`settings.gradle.kts` + `com.android.application`, no `pubs
 4. **Resource Cleanup**: dispose controllers / cancel structured tasks; Swift: `.task {}` auto-cancel, never `deinit`; Kotlin: `viewModelScope`, never `GlobalScope`
 5. **Networking**: transport client with interceptors (Flutter: Dio; RN: axios behind TanStack Query hooks; Swift: swift-openapi-generator Client; Kotlin: openapi-generator `jvm-ktor` `*Api` over Ktor with an injected OkHttp engine) + repository-layer response cache when required; handle offline gracefully
 6. **Secrets**: secure storage only (flutter_secure_storage / Keychain / react-native-keychain / Android Keystore-backed storage) — never plain prefs or MMKV
-7. **Performance**: 60fps target; test on both platforms
+7. **Performance**: 60fps target; test on every platform the app ships to
 8. **E2E Testing**: Maestro (Flutter/RN/Kotlin) or XCUITest (Swift native) for critical user flows

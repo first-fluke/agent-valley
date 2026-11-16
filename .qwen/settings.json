@@ -43,11 +43,11 @@
           {
             "name": "oma-hook-PostToolUse",
             "type": "command",
-            "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'PostToolUse' --matcher 'write_file|edit|replace|notebook_edit|edit_file'",
-            "timeout": 21
+            "command": "\"$QWEN_PROJECT_DIR/.qwen/hooks/oma-hook.sh\" --vendor 'qwen' --event 'PostToolUse' --matcher 'write_file|edit|replace|notebook_edit|skill|read_file|run_shell_command|edit_file'",
+            "timeout": 24
           }
         ],
-        "matcher": "write_file|edit|replace|notebook_edit|edit_file"
+        "matcher": "write_file|edit|replace|notebook_edit|skill|read_file|run_shell_command|edit_file"
       }
     ],
     "SessionStart": [
@@ -111,5 +111,10 @@
   "memory": {
     "enableManagedAutoMemory": false,
     "enableManagedAutoDream": false
+  },
+  "model": {
+    "generationConfig": {
+      "timeout": 300000
+    }
   }
 }
