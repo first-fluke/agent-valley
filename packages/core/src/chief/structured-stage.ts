@@ -2,7 +2,13 @@ import { createHash } from "node:crypto"
 import { AgentRunError } from "../domain/ports/agent-runner"
 import { CheckpointError, ReadOnlyViolation } from "./coordinator-run"
 import { ContractViolation } from "./coordinator-state"
-import { assertExecutionDeadline, assertNoUncertainExecution, isNativeAgentTimeout, MissionPause } from "./execution"
+import {
+  assertExecutionDeadline,
+  assertNoUncertainExecution,
+  isNativeAgentTimeout,
+  isProviderOutage,
+  MissionPause,
+} from "./execution"
 import type { ChiefStage, Mission } from "./types"
 
 export class StructuredStageError extends Error {
@@ -343,7 +349,7 @@ export async function runStructuredStage<T>(options: StructuredStage<T>): Promis
         error instanceof Error &&
         !(error instanceof MissionPause) &&
         !(error instanceof AgentRunError && error.outcomeUnknown) &&
-        isNativeAgentTimeout(error.message)
+        (isNativeAgentTimeout(error.message) || isProviderOutage(error.message))
       ) {
         assertNoUncertainExecution(mission)
         mission.history.push({
@@ -353,7 +359,7 @@ export async function runStructuredStage<T>(options: StructuredStage<T>): Promis
         })
         await save(
           "structured-output",
-          `${stage} ended at its native deadline without a response. Retained the JSON correction allowance; Actor calls, elapsed time, cost and provider retries remain spent.`,
+          `${stage} ended ${isProviderOutage(error.message) ? "because the provider was unreachable" : "at its native deadline"} without a response. Retained the JSON correction allowance; Actor calls, elapsed time, cost and provider retries remain spent.`,
         )
       }
       throw error

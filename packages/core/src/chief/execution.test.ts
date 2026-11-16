@@ -200,6 +200,26 @@ describe("durable execution classification and limits", () => {
     expect(mission.supervision).toBeUndefined()
   })
 
+  it.each([
+    "other: workspace routing discovery failed",
+    "Agent execution failed: Error: RPC timeout for thread/start (id=2). Check Codex authentication and process logs.",
+    "fetch failed: ENOTFOUND",
+  ])("waits out the unreachable provider %s under supervision without spending a retry", (reason) => {
+    const { mission } = fixture()
+    mission.executionPolicy = executionPolicySchema.parse({ maxRetries: 0 })
+    let pause: unknown
+    try {
+      pauseForFailure(mission, reason)
+    } catch (error) {
+      pause = error
+    }
+    expect(pause).toBeInstanceOf(MissionPause)
+    expect(pause).toMatchObject({ kind: "provider", nextRunAt: new Date(now + 180_000).toISOString() })
+    expect(mission.execution?.retries ?? 0).toBe(0)
+    recordPause(mission, pause as MissionPause)
+    expect(mission.status).toBe("waiting")
+  })
+
   it.each(["HTTP 401 Unauthorized", "ENOENT actor CLI missing"])(
     "leaves %s to Chief recovery without spending transient retries",
     (reason) => {

@@ -1,9 +1,12 @@
+import { AgentRunError } from "../domain/ports/agent-runner"
 import type { createMissionRun } from "./coordinator-run"
 import {
   assertExecutionDeadline,
   assertNoUncertainExecution,
   executionState,
+  isProviderOutage,
   MissionPause,
+  outagePause,
   progressKey,
   recordPause,
 } from "./execution"
@@ -27,6 +30,19 @@ export function createChiefRecovery(mission: Mission, ports: ChiefPorts, hooks: 
     if (!supervision) throw new Error(reason)
     hooks.checkAbort()
     assertExecutionDeadline(mission)
+    // An unreachable provider leaves the Chief nothing to decide and no way to answer. The failed call is
+    // retried when the provider is back; no recovery is recorded, so the resumed mission repeats that call.
+    if (isProviderOutage(reason)) {
+      delete supervision.pendingRecovery
+      const pause = outagePause(reason)
+      recordPause(mission, pause)
+      await hooks.save(
+        "supervise-wait",
+        `The provider is unreachable (${reason.slice(0, 300)}). No Chief Director recovery round is spent; the failed call is retried at ${pause.nextRunAt}.`,
+        taskId,
+      )
+      throw pause
+    }
     supervision.pendingRecovery = { reason: reason.slice(-32_000), ...(taskId ? { taskId } : {}) }
     await hooks.save("recovery-requested", reason, taskId)
     const fingerprint = await ports.fingerprint(mission)
@@ -74,6 +90,26 @@ export function createChiefRecovery(mission: Mission, ports: ChiefPorts, hooks: 
       run: (prompt) => hooks.run(hooks.persona(mission.chiefId), prompt, "supervise"),
       parse: (output) => parseSupervisionResponse(output, mission),
       save: (stage, message) => hooks.save(stage, message, taskId),
+    }).catch(async (error: unknown) => {
+      const failure = error instanceof Error ? error.message : String(error)
+      if (
+        error instanceof MissionPause ||
+        (error instanceof AgentRunError && error.outcomeUnknown) ||
+        !isProviderOutage(failure)
+      )
+        throw error
+      // The Chief never answered, so this round decided nothing: it is returned and the saved recovery
+      // request is asked again when the provider is back.
+      supervision.rounds -= 1
+      supervision.stalledRounds = previousStalled
+      const pause = outagePause(failure)
+      recordPause(mission, pause)
+      await hooks.save(
+        "supervise-wait",
+        `The Chief Director could not be reached (${failure.slice(0, 300)}). Recovery round ${supervision.rounds + 1} is not spent; the same request is asked again at ${pause.nextRunAt}.`,
+        taskId,
+      )
+      throw pause
     })
     const decision = recordDecision(mission, response, fingerprint)
     if (response.action === "stop") {

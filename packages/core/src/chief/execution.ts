@@ -53,6 +53,23 @@ export function isUnavailableAgentModel(reason: string): boolean {
  */
 const TRANSIENT_TRANSPORT = /\bRPC timeout for\b|\bworkspace routing discovery failed\b/i
 
+/**
+ * The provider cannot be reached at all: the CLI's own transport failed or the host has no route or name
+ * resolution. A reset or refused single request stays an ordinary transient failure with its bounded retries.
+ */
+const PROVIDER_OUTAGE =
+  /\bRPC timeout for\b|\bworkspace routing discovery failed\b|enotfound|eai_again|enetunreach|ehostunreach|network is unreachable/i
+export const OUTAGE_RETRY_MS = 180_000
+
+export function isProviderOutage(reason: string): boolean {
+  return PROVIDER_OUTAGE.test(reason)
+}
+
+/** A scheduled retry that spends neither a transient retry nor a Chief recovery round. */
+export function outagePause(reason: string, now = Date.now()): MissionPause {
+  return new MissionPause(reason, "provider", new Date(now + OUTAGE_RETRY_MS).toISOString())
+}
+
 export function classifyFailure(reason: string): FailureKind {
   if (TRANSIENT_TRANSPORT.test(reason)) return "provider"
   if (
@@ -240,6 +257,10 @@ export function pauseForFailure(mission: Mission, reason: string, taskId?: strin
     throw new MissionPause(`${reason} Required source access is unavailable; the goal remains unresolved.`, kind)
   }
   if (kind !== "rate-limit" && kind !== "provider") return
+  // The Chief works through the same provider, so an unreachable provider is waited out instead of being
+  // handed to it. A host that slept overnight used to exhaust the three retries within seconds, spend four
+  // recovery rounds on "routing discovery failed" and pause the mission as stalled.
+  if (mission.supervision && isProviderOutage(reason)) throw outagePause(reason)
   const execution = executionState(mission)
   if (execution.retries >= mission.executionPolicy.maxRetries) {
     if (mission.supervision) return
