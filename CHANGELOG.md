@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.16.2](https://github.com/first-fluke/agent-valley/compare/v4.16.1...v4.16.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **chief:** wait out an unreachable provider instead of spending recovery rounds ([cf521ce](https://github.com/first-fluke/agent-valley/commit/cf521ce3d329ef7ba2a9a9f682d536ddbd7f3844))
+
 ## [4.16.1](https://github.com/first-fluke/agent-valley/compare/v4.16.0...v4.16.1) (2026-11-15)
 
 
