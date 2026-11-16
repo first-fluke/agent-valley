@@ -91,11 +91,14 @@ export const charterAmendmentsSchema = z
             message: "A charter amendment can only supersede an earlier recorded amendment ID.",
           })
     }
-    if (amendments.reduce((total, entry) => total + entry.text.length, 0) > 32_000)
+    // Only amendments that still instruct the Chief spend the budget; a superseded one is audit record.
+    const superseded = new Set(amendments.flatMap((entry) => entry.supersedes ?? []))
+    const active = amendments.filter((entry) => !superseded.has(entry.id))
+    if (active.reduce((total, entry) => total + entry.text.length, 0) > 32_000)
       context.addIssue({
         code: "custom",
         message:
-          "Charter amendments exceed their 32000 character budget. Start a new order with a corrected charter instead of extending this one.",
+          "Active charter amendments exceed their 32000 character budget. Retract amendments that no longer apply with --charter-supersede <ids> alongside --charter-append, or start a new order with a corrected charter.",
       })
   })
 

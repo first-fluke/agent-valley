@@ -89,4 +89,19 @@ describe("operator charter amendments", () => {
       charterAmendmentsSchema.safeParse(Array.from({ length: 51 }, (_, index) => entry(index + 1, "x"))).success,
     ).toBe(false)
   })
+
+  it("spends the text budget only on amendments that still instruct the Chief", () => {
+    const entry = (id: number, text: string, supersedes?: number[]) => ({
+      id,
+      at: timestamp,
+      text,
+      ...(supersedes ? { supersedes } : {}),
+    })
+    const full = Array.from({ length: 4 }, (_, index) => entry(index + 1, "x".repeat(7_000)))
+    // A fifth 7000-character amendment fits once it retracts one of the four that filled the budget.
+    expect(charterAmendmentsSchema.safeParse([...full, entry(5, "y".repeat(7_000), [1])]).success).toBe(true)
+    expect(charterAmendmentsSchema.safeParse([...full, entry(5, "y".repeat(7_000))]).success).toBe(false)
+    const overBudget = charterAmendmentsSchema.safeParse([...full, entry(5, "y".repeat(7_000))])
+    expect(overBudget.error?.issues[0]?.message).toContain("--charter-supersede")
+  })
 })
