@@ -24,14 +24,14 @@ const healthStages = new Set<OperatingRun["stage"]>(["work", "review", "gate-rev
 const key = (route: ActorRoute) => JSON.stringify([route.actorType, route.model ?? null])
 
 /**
- * Local validation, coordinator interruption and the framework's own attempt deadline do not establish
- * an Actor transport failure: a long task killed at timeoutSec says nothing about provider health, and
+ * Local validation, coordinator interruption, a sleeping host and the framework's own attempt deadline do not
+ * establish an Actor transport failure: a long task killed at timeoutSec says nothing about provider health, and
  * counting it idled healthy routes for a 15-minute cooldown.
  */
 function frameworkFailure(reason: string | undefined): boolean {
   return (
     !!reason &&
-    /OMA completion evidence failed|Coordinator process ended before usage could be reconciled|Order interrupted\. Resume the saved mission|Operator stopped the order|Mission interrupted\.|OS-owned service is shutting down|Agent timed out after \d+s|Agent stalled: no activity for \d+s|\b(?:ENOENT|EACCES|ENOSPC)\b|command not found|verification command|verifyCommand/i.test(
+    /Host was suspended during the call\.|OMA completion evidence failed|Coordinator process ended before usage could be reconciled|Order interrupted\. Resume the saved mission|Operator stopped the order|Mission interrupted\.|OS-owned service is shutting down|Agent timed out after \d+s|Agent stalled: no activity for \d+s|\b(?:ENOENT|EACCES|ENOSPC)\b|command not found|verification command|verifyCommand/i.test(
       reason,
     )
   )

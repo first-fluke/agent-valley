@@ -14,6 +14,7 @@ import { releaseContinuousBuildOutputs } from "./continuous-workspace"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
 import { fingerprintWorkspace } from "./fingerprint"
+import { HOST_SUSPENDED_EVIDENCE, isHostSleepArtefact } from "./host-suspension"
 import { createLocalMissionRunner, finishLocalProcess } from "./local-runner"
 import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
 import {
@@ -389,7 +390,10 @@ export class ChiefRuntime {
         }
       }
       failure = error
-      entry.evidence = (error instanceof Error ? error.message : String(error)).slice(-2_000)
+      const detail = (error instanceof Error ? error.message : String(error)).slice(-1_900)
+      // A call the host slept through says nothing about the route: the prefix keeps it out of route health,
+      // which used to add a 15 to 60 minute cooldown after every overnight sleep.
+      entry.evidence = isHostSleepArtefact(detail) ? `${HOST_SUSPENDED_EVIDENCE} ${detail}` : detail
       if ((error instanceof AgentRunError && error.outcomeUnknown) || (!this.localExecution && !executionSettled)) {
         markOperatingRunUnknown(entry, error instanceof Error ? error.message : String(error))
         failure = new MissionPause(

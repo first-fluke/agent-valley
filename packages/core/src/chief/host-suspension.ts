@@ -50,6 +50,9 @@ export function hostResumedSince(since: number, now = Date.now()): boolean {
 const SLEEP_ARTEFACT =
   /Agent stalled: no activity for \d+s|Agent timed out after \d|RPC timeout for|econnreset|etimedout|epipe|socket hang up|fetch failed|network error|connection (?:closed|lost|reset)|stream (?:closed|disconnected)/i
 
+/** Prefixed to the recorded evidence of a call the host slept through; route health ignores such runs. */
+export const HOST_SUSPENDED_EVIDENCE = "Host was suspended during the call."
+
 /** A verdict or a check result quotes such text from the work it judged; it is evidence, not a lost call. */
 const JUDGED_WORK = /failed independent review|command checks fail/i
 
