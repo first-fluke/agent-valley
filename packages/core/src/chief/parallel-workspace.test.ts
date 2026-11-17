@@ -426,6 +426,51 @@ describe("isolated parallel Actor worktrees", () => {
     expect(await git(["diff", "--cached", "--binary"])).toBe(originalIndex)
   })
 
+  it.runIf(supportsPosixModes)("leaves out an untracked link that points outside the Actor workspace", async () => {
+    const root = mission.workspace.path
+    await writeFile(join(root, ".gitignore"), "deps/\n")
+    await mkdir(join(root, "deps"))
+    await writeFile(join(root, "deps", "package.txt"), "Installed dependency\n")
+    const workspace = await prepareTaskWorktree(mission, "linked-deps", 1)
+    // The ignore rule matches the directory in the mission, not a link of the same name.
+    await symlink(join(root, "deps"), join(workspace.path, "deps"))
+    await symlink("a.txt", join(workspace.path, "inside"))
+    await writeFile(join(workspace.path, "b.txt"), "Actor B\n")
+    const receipt = await integrateTaskWorktree(mission, workspace)
+    expect(receipt.changedPaths).toEqual(["b.txt", "inside"])
+    expect((await lstat(join(root, "deps"))).isDirectory()).toBe(true)
+    expect(await readFile(join(root, "deps", "package.txt"), "utf8")).toBe("Installed dependency\n")
+    expect(await readFile(join(root, "b.txt"), "utf8")).toBe("Actor B\n")
+  })
+
+  it.runIf(supportsPosixModes)(
+    "restores the files a failed apply removed and leaves the delivery ready to integrate again",
+    async () => {
+      const root = mission.workspace.path
+      await writeFile(join(root, ".gitignore"), "cache/\n")
+      await mkdir(join(root, "cache"))
+      await writeFile(join(root, "cache", "entry.txt"), "Local cache\n")
+      const workspace = await prepareTaskWorktree(mission, "collision", 1)
+      // A link inside the workspace is a deliverable; here it lands on a directory the mission ignores.
+      await symlink("a.txt", join(workspace.path, "cache"))
+      await writeFile(join(workspace.path, "b.txt"), "Actor B\n")
+      await writeFile(join(workspace.path, "script.sh"), "#!/bin/sh\necho changed\n")
+      const delivery = await collectTaskDelivery(mission, workspace)
+      await expect(integrateTaskDelivery(mission, delivery)).rejects.toThrow("restored to their content")
+      expect(await readFile(join(root, "b.txt"), "utf8")).toBe("B baseline\n")
+      expect(await readFile(join(root, "script.sh"), "utf8")).toBe("#!/bin/sh\necho fixture\n")
+      expect(await readFile(join(root, "cache", "entry.txt"), "utf8")).toBe("Local cache\n")
+      const saved = JSON.parse(await readFile(join(dirname(delivery.patchPath), "delivery.json"), "utf8"))
+      expect(saved.status).toBe("prepared")
+      // Once the collision is cleared the same delivery integrates.
+      await rm(join(root, "cache"), { recursive: true })
+      const receipt = await integrateTaskDelivery(mission, delivery)
+      expect(receipt.alreadyApplied).toBe(false)
+      expect(await readFile(join(root, "b.txt"), "utf8")).toBe("Actor B\n")
+      expect((await lstat(join(root, "cache"))).isSymbolicLink()).toBe(true)
+    },
+  )
+
   it("rejects identical same-file work from a second Actor and retains both the first result and conflicting edits", async () => {
     const snapshot = await captureParallelBaseline(mission.workspace.path)
     const [first, second] = await Promise.all([

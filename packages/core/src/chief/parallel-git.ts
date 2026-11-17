@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { lstat, mkdir, realpath, rm, writeFile } from "node:fs/promises"
-import { join, relative, resolve, sep } from "node:path"
+import { lstat, mkdir, readlink, realpath, rm, writeFile } from "node:fs/promises"
+import { dirname, join, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 import { writeJsonAtomic } from "../util/atomic-json"
 import { clearedGitEnvironment } from "../util/git-environment"
@@ -118,6 +118,18 @@ export async function captureParallelBaseline(
       if (!path || listed.has(path) || excludedParallelPath(path)) continue
       // Only files that exist can be force-added; a delivered deletion is already absent from the tree.
       if (headTracked.has(path) || (await lstat(join(workspace, path)).catch(() => undefined))) listed.add(path)
+    }
+    // An untracked link that points outside the workspace is a local convenience, not a deliverable: an
+    // Actor linked node_modules to the mission's copy to run its tests, a `node_modules/` ignore rule does
+    // not match a link, and the captured link then collided with the real directory during integration.
+    const roots = [resolve(workspace), await realpath(workspace)]
+    for (const path of listed) {
+      if (!path || indexed.has(path) || headTracked.has(path)) continue
+      const file = join(workspace, path)
+      const stat = await lstat(file).catch(() => undefined)
+      if (!stat?.isSymbolicLink()) continue
+      const target = resolve(dirname(file), await readlink(file))
+      if (!roots.some((root) => target === root || target.startsWith(`${root}${sep}`))) listed.delete(path)
     }
     const paths = [...listed].filter(
       (path) => path && !untrackedSet.has(path) && !vanished.has(path) && !excludedParallelPath(path),

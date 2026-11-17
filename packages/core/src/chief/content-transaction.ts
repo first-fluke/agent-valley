@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto"
-import { lstat, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import type { ParallelDelivery } from "./parallel-contract"
-import { captureParallelBaseline, parallelGit, parallelTreeImages } from "./parallel-git"
+import { captureParallelBaseline, parallelBlob, parallelGit, parallelTreeImages } from "./parallel-git"
 
 type ContentTransaction = Pick<ParallelDelivery, "patchPath" | "patchSha256" | "changes" | "status">
 
@@ -58,7 +58,20 @@ export async function integrateContentTransaction(
   transaction.status = "applying"
   await hooks.save()
   await hooks.assertLive?.()
-  if (patch.length) await parallelGit(workspace, ["apply", "--binary", "--whitespace=nowarn", transaction.patchPath])
+  if (patch.length)
+    try {
+      await parallelGit(workspace, ["apply", "--binary", "--whitespace=nowarn", transaction.patchPath])
+    } catch (error) {
+      // `git apply` removes every file it is about to rewrite before it writes the first one. A failure in
+      // between (a delivered path that collides with a directory the check does not see) left the target
+      // without those files, and every later check failed on a tree no task had produced.
+      if (!(await restoreBeforeImages(workspace, transaction, include))) throw error
+      transaction.status = "prepared"
+      await hooks.save()
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)} The target files were restored to their content before this integration.`,
+      )
+    }
   const final = await captureParallelBaseline(workspace, { include })
   const applied = await parallelTreeImages(workspace, final.tree)
   const remaining = transaction.changes
@@ -70,6 +83,40 @@ export async function integrateContentTransaction(
   transaction.status = "applied"
   await hooks.save()
   return { alreadyApplied: false, changedPaths }
+}
+
+/** Puts every delivered path back to its proven before-image; false when the target cannot be proven restored. */
+async function restoreBeforeImages(
+  workspace: string,
+  transaction: ContentTransaction,
+  include: string[],
+): Promise<boolean> {
+  try {
+    for (const change of transaction.changes) {
+      const path = join(workspace, change.path)
+      const stat = await lstat(path).catch(() => undefined)
+      // A directory at a delivered path was there before the patch; the patch only writes files and links.
+      if (stat?.isDirectory()) {
+        if (change.before) return false
+        continue
+      }
+      await rm(path, { force: true })
+      if (!change.before) continue
+      const content = await parallelBlob(workspace, change.before.oid)
+      await mkdir(dirname(path), { recursive: true })
+      if (change.before.mode === "120000") await symlink(content.toString("utf8"), path)
+      else {
+        await writeFile(path, content)
+        await chmod(path, change.before.mode === "100755" ? 0o755 : 0o644)
+      }
+    }
+    const restored = await parallelTreeImages(workspace, (await captureParallelBaseline(workspace, { include })).tree)
+    return transaction.changes.every(
+      (change) => JSON.stringify(restored.get(change.path) ?? null) === JSON.stringify(change.before),
+    )
+  } catch {
+    return false
+  }
 }
 
 /**
