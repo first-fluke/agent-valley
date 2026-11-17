@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.16.4](https://github.com/first-fluke/agent-valley/compare/v4.16.3...v4.16.4) (2026-11-17)
+
+
+### Bug Fixes
+
+* **chief:** wait out host sleep instead of spending restarts and recovery ([23a4dbf](https://github.com/first-fluke/agent-valley/commit/23a4dbfeb78e051820822491ed65fe16063f779c))
+
 ## [4.16.3](https://github.com/first-fluke/agent-valley/compare/v4.16.2...v4.16.3) (2026-11-16)
 
 
