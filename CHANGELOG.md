@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.16.6](https://github.com/first-fluke/agent-valley/compare/v4.16.5...v4.16.6) (2026-11-17)
+
+
+### Bug Fixes
+
+* **chief:** keep a failed task integration from breaking the mission tree ([cec0baa](https://github.com/first-fluke/agent-valley/commit/cec0baae14e8f057aea67ba816d232bdc5bafcef))
+
 ## [4.16.5](https://github.com/first-fluke/agent-valley/compare/v4.16.4...v4.16.5) (2026-11-17)
 
 
