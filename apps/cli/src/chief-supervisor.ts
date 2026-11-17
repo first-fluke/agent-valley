@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { pendingCodeDelivery } from "@agent-valley/core/chief/code-delivery-contract"
 import { automaticMissionRecovery } from "@agent-valley/core/chief/continuous-recovery"
 import { assertExecutionDeadline, executionState, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
+import { hostResumedSince, hostStablyAwake } from "@agent-valley/core/chief/host-suspension"
 import { fallbackReport } from "@agent-valley/core/chief/reports"
 import {
   isServiceShutdown,
@@ -118,6 +119,10 @@ export async function superviseOrder(
         args = workerArgs(undefined, { resume: id })
       }
       if (controller.signal.aborted) break
+      // A closed laptop wakes for seconds at a time; a worker started in such a window is suspended again
+      // before its Actors answer. The next worker starts once the host has stayed awake.
+      await hostStablyAwake((ms) => (dependencies.delay ?? abortableDelay)(ms, controller.signal))
+      const workerStartedAt = Date.now()
       let workerExit = await runWorker(dependencies.runWorker ?? runOrderWorker, args, root)
       const competingOwner = await waitForOwner()
       let mission = await store.load(id).catch(() => undefined)
@@ -206,8 +211,10 @@ export async function superviseOrder(
         try {
           const latest = await store.load(id)
           const state = executionState(latest)
-          state.crashRestarts = (state.crashRestarts ?? 0) + 1
-          if (state.crashRestarts > (latest.executionPolicy?.maxRetries ?? 3)) {
+          // A worker that was suspended with the host did not crash; its restart is not a spent attempt.
+          const slept = hostResumedSince(workerStartedAt)
+          if (!slept) state.crashRestarts = (state.crashRestarts ?? 0) + 1
+          if (!slept && (state.crashRestarts ?? 0) > (latest.executionPolicy?.maxRetries ?? 3)) {
             recordPause(
               latest,
               new MissionPause(
@@ -222,7 +229,9 @@ export async function superviseOrder(
           latest.history.push({
             at: new Date().toISOString(),
             stage: "worker-restart",
-            message: `Restarting crashed mission worker, attempt ${state.crashRestarts} (exit ${workerExit ?? "signal"}).`,
+            message: slept
+              ? `The host was suspended while the mission worker ran (exit ${workerExit ?? "signal"}). Restarting it once the host stays awake; no restart attempt is spent.`
+              : `Restarting crashed mission worker, attempt ${state.crashRestarts} (exit ${workerExit ?? "signal"}).`,
           })
           await store.save(latest)
         } finally {

@@ -20,6 +20,7 @@ import {
   resolveExternalEffect,
 } from "./execution"
 import { fixture, plan } from "./goal-supervision.fixture"
+import { watchHostSuspension } from "./host-suspension"
 import type { OperatingRun } from "./operations"
 import type { OrganizationContext } from "./organization-types"
 import { MissionStore } from "./store"
@@ -218,6 +219,27 @@ describe("durable execution classification and limits", () => {
     expect(mission.execution?.retries ?? 0).toBe(0)
     recordPause(mission, pause as MissionPause)
     expect(mission.status).toBe("waiting")
+  })
+
+  it("repeats a call the host slept through without spending a retry or handing it to the Chief", () => {
+    const { mission } = fixture()
+    mission.executionPolicy = executionPolicySchema.parse({ maxRetries: 0 })
+    const stall = "Agent stalled: no activity for 600s"
+    // The watch last ticked an hour ago: the host was suspended until now.
+    const stop = watchHostSuspension(now - 3_600_000)
+    let pause: unknown
+    try {
+      pauseForFailure(mission, stall)
+    } catch (error) {
+      pause = error
+    } finally {
+      stop()
+    }
+    expect(pause).toBeInstanceOf(MissionPause)
+    expect(pause).toMatchObject({ kind: "provider", nextRunAt: new Date(now + 180_000).toISOString() })
+    expect(mission.execution?.retries ?? 0).toBe(0)
+    // On a host that stayed awake the same stall is an ordinary failure left to Chief recovery.
+    expect(() => pauseForFailure(mission, stall)).not.toThrow()
   })
 
   it.each(["HTTP 401 Unauthorized", "ENOENT actor CLI missing"])(

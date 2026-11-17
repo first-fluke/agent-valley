@@ -10,6 +10,7 @@ import {
   progressKey,
   recordPause,
 } from "./execution"
+import { isHostSleepArtefact } from "./host-suspension"
 import { supervisePrompt } from "./prompts"
 import { parseSupervisionResponse } from "./schemas"
 import { runStructuredStage } from "./structured-stage"
@@ -32,13 +33,14 @@ export function createChiefRecovery(mission: Mission, ports: ChiefPorts, hooks: 
     assertExecutionDeadline(mission)
     // An unreachable provider leaves the Chief nothing to decide and no way to answer. The failed call is
     // retried when the provider is back; no recovery is recorded, so the resumed mission repeats that call.
-    if (isProviderOutage(reason)) {
+    const asleep = isHostSleepArtefact(reason)
+    if (asleep || isProviderOutage(reason)) {
       delete supervision.pendingRecovery
       const pause = outagePause(reason)
       recordPause(mission, pause)
       await hooks.save(
         "supervise-wait",
-        `The provider is unreachable (${reason.slice(0, 300)}). No Chief Director recovery round is spent; the failed call is retried at ${pause.nextRunAt}.`,
+        `${asleep ? "The host was suspended during the call" : "The provider is unreachable"} (${reason.slice(0, 300)}). No Chief Director recovery round is spent; the failed call is retried at ${pause.nextRunAt}.`,
         taskId,
       )
       throw pause
@@ -95,7 +97,7 @@ export function createChiefRecovery(mission: Mission, ports: ChiefPorts, hooks: 
       if (
         error instanceof MissionPause ||
         (error instanceof AgentRunError && error.outcomeUnknown) ||
-        !isProviderOutage(failure)
+        !(isProviderOutage(failure) || isHostSleepArtefact(failure))
       )
         throw error
       // The Chief never answered, so this round decided nothing: it is returned and the saved recovery

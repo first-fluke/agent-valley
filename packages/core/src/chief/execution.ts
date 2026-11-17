@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import type { ExecutionState, FailureKind } from "./contracts"
+import { isHostSleepArtefact } from "./host-suspension"
 import type { Mission } from "./types"
 import { markOperatingRunUnknown } from "./usage"
 
@@ -251,6 +252,9 @@ export function pauseForFailure(mission: Mission, reason: string, taskId?: strin
       "unknown-effect",
     )
   }
+  // A host that slept suspended the call: its failure says nothing about the Actor, the provider or the
+  // work, so it is repeated after the wake without spending a retry, a repair or a recovery round.
+  if (mission.supervision && isHostSleepArtefact(reason)) throw outagePause(reason)
   const kind = classifyFailure(reason)
   if (kind === "authentication" || kind === "environment") {
     if (mission.supervision) return

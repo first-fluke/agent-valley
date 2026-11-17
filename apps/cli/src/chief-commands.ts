@@ -1,3 +1,4 @@
+import { watchHostSuspension } from "@agent-valley/core/chief/host-suspension"
 import { type Command, Option } from "commander"
 import { dispatchOrder } from "./chief"
 import type { ContinuousOptions } from "./chief-continuous"
@@ -70,14 +71,20 @@ export function registerChiefCommands(program: Command): void {
     .addOption(new Option("--native-model", "Internal pinned Chief native model default").hideHelp())
     .option("--resume <id>", "Resume the saved continuing order or single mission with its original contract")
     .action(async (goal: string | undefined, options: ContinuousOptions) => {
-      const result = await dispatchOrder(goal, options)
-      if ("phase" in result) {
-        console.log(`Order ${result.id}: ${result.phase}; ${result.completedCycles} verified improvements.`)
-        if (result.error) console.error(result.error)
-        process.exitCode = result.phase === "paused" ? 2 : 0
-      } else {
-        if (!options.worker) printOrderOutcome(result)
-        process.exitCode = orderExitCode(result)
+      // Supervisor and worker both watch for host sleep, so failures after a wake are not charged to Actors.
+      const stopWatch = watchHostSuspension()
+      try {
+        const result = await dispatchOrder(goal, options)
+        if ("phase" in result) {
+          console.log(`Order ${result.id}: ${result.phase}; ${result.completedCycles} verified improvements.`)
+          if (result.error) console.error(result.error)
+          process.exitCode = result.phase === "paused" ? 2 : 0
+        } else {
+          if (!options.worker) printOrderOutcome(result)
+          process.exitCode = orderExitCode(result)
+        }
+      } finally {
+        stopWatch()
       }
     })
 

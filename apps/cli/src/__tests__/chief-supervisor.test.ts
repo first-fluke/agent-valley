@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { executionPolicySchema } from "@agent-valley/core/chief/execution"
+import { watchHostSuspension } from "@agent-valley/core/chief/host-suspension"
 import { mission as missionFixture } from "@agent-valley/core/chief/reports.fixture"
 import { MissionStore } from "@agent-valley/core/chief/store"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -111,6 +112,41 @@ describe("durable order worker supervision", () => {
     expect(worker.mock.calls[1]?.[0]).toEqual(["order", "--once", "--worker", "--resume", current.id])
     expect(result.history.filter((event) => event.stage === "worker-restart")).toHaveLength(1)
     expect(delay).toHaveBeenCalledWith(1_000, expect.any(AbortSignal))
+  })
+
+  it("restarts a worker the host slept through once the host stays awake, without spending a restart", async () => {
+    const current = checkpoint()
+    await store.save(current)
+    const stop = watchHostSuspension()
+    try {
+      const worker = vi
+        .fn<Worker>()
+        .mockImplementationOnce(async () => {
+          // The lid closes for an hour: the wall clock moves on and no timer fires.
+          vi.setSystemTime(Date.now() + 3_600_000)
+          return 1
+        })
+        .mockImplementation(async () => {
+          const restored = await store.load(current.id)
+          restored.status = "completed"
+          await store.save(restored)
+          return 0
+        })
+      const delay = vi.fn<typeof abortableDelay>().mockImplementation(async (milliseconds) => {
+        vi.advanceTimersByTime(milliseconds)
+      })
+      const result = await superviseOrder(undefined, { resume: current.id }, root, { runWorker: worker, delay })
+      expect(result.status).toBe("completed")
+      expect(worker).toHaveBeenCalledTimes(2)
+      expect(result.execution?.crashRestarts).toBeUndefined()
+      expect(result.history.filter((event) => event.stage === "worker-restart").map((event) => event.message)).toEqual([
+        expect.stringContaining("host was suspended"),
+      ])
+      // The second worker starts only after two minutes without another suspension.
+      expect(delay.mock.calls.filter((call) => call[0] === 5_000).length).toBeGreaterThanOrEqual(23)
+    } finally {
+      stop()
+    }
   })
 
   it("bounds repeated worker crashes and preserves the last checkpoint for operator retry", async () => {
