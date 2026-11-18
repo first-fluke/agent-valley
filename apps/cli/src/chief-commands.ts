@@ -57,6 +57,14 @@ export function registerChiefCommands(program: Command): void {
     .option("--account-cost <usd>", "Operator-observed USD cost for --account-run; stored separately from native usage")
     .option("--retry", "Resume after repairing a blocker; retain prior evidence and spent budget")
     .option(
+      "--waive-criterion <number>",
+      "On mission resume, record that this success criterion stays unmet; it is still reported and no longer holds the mission open",
+    )
+    .option(
+      "--waive-reason <text>",
+      "The operator's reason for --waive-criterion, kept in the mission record and report",
+    )
+    .option(
       "--note <text>",
       "Record an operator note on resume (environment or prerequisite change) that Actors and the Chief read before repeating earlier conclusions",
     )

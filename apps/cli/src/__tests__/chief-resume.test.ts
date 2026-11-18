@@ -1,4 +1,5 @@
 import { assertExecutionBudget, chiefRecoveryStopped, executionPolicySchema } from "@agent-valley/core/chief/execution"
+import { finalCriteria } from "@agent-valley/core/chief/goal-evidence"
 import type { OperatingRun } from "@agent-valley/core/chief/operations"
 import { mission as missionFixture } from "@agent-valley/core/chief/reports.fixture"
 import { goalVerificationContractDigest, goalVerificationContractSchema } from "@agent-valley/core/chief/verification"
@@ -83,6 +84,46 @@ describe("operator resume without weakening acceptance or resetting spend", () =
     expect(() => applyResumeOptions(current, undefined, { resume: current.id, note: "   " })).toThrow(
       "--note needs text",
     )
+  })
+
+  it("records an operator waiver for one numbered success criterion and reopens the repeated final review", () => {
+    const current = mission()
+    current.goalBrief = {
+      interpretation: "Speed up the suite.",
+      assumptions: [],
+      successCriteria: ["A passes.", "B is fast."],
+    }
+    if (current.supervision) current.supervision.finalReviewFailures = ["B is fast."]
+    const criteria = finalCriteria(current)
+    const position = criteria.indexOf("B is fast.") + 1
+    applyResumeOptions(current, undefined, {
+      resume: current.id,
+      waiveCriterion: String(position),
+      waiveReason: "  Goal of the next cycle.  ",
+    })
+    expect(current.criterionWaivers).toEqual([
+      { at: new Date(now).toISOString(), criterion: "B is fast.", reason: "Goal of the next cycle." },
+    ])
+    expect(current.status).toBe("pending")
+    expect(current.supervision?.finalReviewFailures).toBeUndefined()
+    expect(current.history.some((event) => event.stage === "criterion-waived")).toBe(true)
+    expect(current.goalBrief.successCriteria).toEqual(["A passes.", "B is fast."])
+    // A second waiver of the same criterion replaces the first.
+    applyResumeOptions(current, undefined, {
+      resume: current.id,
+      waiveCriterion: String(position),
+      waiveReason: "Later.",
+    })
+    expect(current.criterionWaivers?.map((waiver) => waiver.reason)).toEqual(["Later."])
+    for (const options of [
+      { waiveCriterion: String(criteria.length + 1), waiveReason: "Out of range" },
+      { waiveCriterion: "0", waiveReason: "Out of range" },
+      { waiveCriterion: String(position) },
+      { waiveReason: "No number" },
+    ])
+      expect(() => applyResumeOptions(current, undefined, { resume: current.id, ...options })).toThrow(
+        "--waive-criterion takes the number",
+      )
   })
 
   it("increases limits while retaining original goal, roster, checks, spent calls and elapsed time", () => {

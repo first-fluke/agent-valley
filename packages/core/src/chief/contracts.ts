@@ -41,7 +41,15 @@ export interface Review {
   passed: boolean
   summary: string
   findings: string[]
-  criteria?: { criterion: string; passed: boolean; evidence: string }[]
+  /** `waived` marks an unmet criterion the operator recorded as accepted for this mission. */
+  criteria?: { criterion: string; passed: boolean; evidence: string; waived?: boolean }[]
+}
+
+/** The operator's recorded decision that a success criterion stays unmet in this mission. */
+export interface CriterionWaiver {
+  at: string
+  criterion: string
+  reason: string
 }
 
 export interface ChiefTaskState {
@@ -139,6 +147,8 @@ export interface MissionSupervision {
   operatorGoal?: string
   operatorVerifyCommand?: string
   pendingRecovery?: { reason: string; taskId?: string }
+  /** Success criteria the last final review failed; a repeat after a repair stops for the operator. */
+  finalReviewFailures?: string[]
 }
 
 // ── Execution policy/state ───────────────────────────────────────────────────

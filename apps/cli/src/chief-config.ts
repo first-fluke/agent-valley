@@ -36,6 +36,9 @@ export interface OrderOptions {
   retry?: boolean
   /** Operator note recorded on resume; read by Actors and the Chief before repeating earlier conclusions. */
   note?: string
+  /** Number of a success criterion the operator accepts as unmet in this mission; needs waiveReason. */
+  waiveCriterion?: string
+  waiveReason?: string
   runs?: string
   duration?: string
   cost?: string

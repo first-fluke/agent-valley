@@ -12,7 +12,7 @@ export const reviewSchema = z
     summary: text,
     findings: z.array(text).max(50),
     criteria: z
-      .array(z.strictObject({ criterion: text, passed: z.boolean(), evidence: text }))
+      .array(z.strictObject({ criterion: text, passed: z.boolean(), evidence: text, waived: z.boolean().optional() }))
       .min(1)
       .max(40)
       .optional(),
@@ -65,6 +65,7 @@ export const supervisionSchema = z.strictObject({
   operatorGoal: text.optional(),
   operatorVerifyCommand: z.string().trim().max(32_000).optional(),
   pendingRecovery: z.strictObject({ reason: text, taskId: id.optional() }).optional(),
+  finalReviewFailures: z.array(text).max(40).optional(),
   decisions: z
     .array(
       z

@@ -5,6 +5,7 @@ import {
   reconcileRunCost,
   resolveExternalEffect,
 } from "@agent-valley/core/chief/execution"
+import { finalCriteria } from "@agent-valley/core/chief/goal-evidence"
 import type { Mission } from "@agent-valley/core/chief/types"
 import type { OrderOptions } from "./chief-config"
 import { deliveryResumeKeys } from "./chief-delivery-resume"
@@ -17,6 +18,8 @@ export function validateResumeOptions(goal: string | undefined, options: OrderOp
     "service",
     "retry",
     "note",
+    "waiveCriterion",
+    "waiveReason",
     "timeout",
     "runs",
     "duration",
@@ -50,6 +53,27 @@ export function applyResumeOptions(mission: Mission, goal: string | undefined, o
     if (note.length > 4_000)
       throw new Error("--note must stay within 4000 characters; point to a file for longer context.")
     mission.operatorNotes = [...(mission.operatorNotes ?? []), { at: new Date().toISOString(), text: note }]
+    changed = true
+  }
+  if (options.waiveCriterion !== undefined || options.waiveReason !== undefined) {
+    const criteria = finalCriteria(mission)
+    const index = Number(options.waiveCriterion)
+    const reason = options.waiveReason?.trim()
+    if (!Number.isInteger(index) || index < 1 || index > criteria.length || !reason || reason.length > 1_000)
+      throw new Error(
+        `--waive-criterion takes the number of a success criterion together with --waive-reason <text of at most 1000 characters>. Criteria: ${criteria.map((criterion, position) => `${position + 1}. ${criterion.slice(0, 160)}`).join(" | ") || "none recorded"}`,
+      )
+    const criterion = criteria[index - 1] as string
+    const at = new Date().toISOString()
+    mission.criterionWaivers = [
+      ...(mission.criterionWaivers ?? []).filter((waiver) => waiver.criterion !== criterion),
+      { at, criterion, reason },
+    ]
+    mission.history.push({
+      at,
+      stage: "criterion-waived",
+      message: `Operator accepted success criterion ${index} as unmet in this mission: ${reason} The criterion is still assessed and reported; it no longer holds the mission open.`,
+    })
     changed = true
   }
   if (options.accountRun || options.accountCost !== undefined) {
@@ -109,7 +133,11 @@ export function applyResumeOptions(mission: Mission, goal: string | undefined, o
     delete state.pauseReason
     delete state.nextRunAt
     delete state.failureKind
-    if (mission.supervision) mission.supervision.stalledRounds = 0
+    if (mission.supervision) {
+      mission.supervision.stalledRounds = 0
+      // The operator looked at the repeated final-review failure; the next one may be repaired once more.
+      delete mission.supervision.finalReviewFailures
+    }
     mission.status = "pending"
     mission.history.push({
       at: state.interventionAt,

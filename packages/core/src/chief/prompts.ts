@@ -45,6 +45,7 @@ function context(mission: Mission): string {
     // values are planning estimates. Stating it here keeps Actors from emulating a 120-second wrapper.
     verificationCheckTimeoutMs: mission.timeoutSec * 1_000,
     ...(mission.operatorNotes?.length ? { operatorNotes: mission.operatorNotes } : {}),
+    ...(mission.criterionWaivers?.length ? { criterionWaivers: mission.criterionWaivers } : {}),
     operations: operationsEvidence(mission),
     operatingPolicy: mission.operatingPolicy,
     verificationContract: mission.verificationContract,
@@ -303,6 +304,11 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
     ...(criteria
       ? [
           `Assess every goal success criterion in this exact JSON list once with a concise nonempty description of inspected files/checks: ${JSON.stringify(criteria)}. Every task acceptance obligation also needs its fresh independent task review. passed must equal all goal criteria passing; failed criteria need actionable findings.`,
+        ]
+      : []),
+    ...(criteria && mission.criterionWaivers?.length
+      ? [
+          "mission.criterionWaivers lists success criteria the operator accepted as unmet for this mission. Assess each of them truthfully from the evidence and set its passed to false when it is unmet, but write no finding for it and derive the top-level passed from the other criteria only. The waiver is the operator's recorded decision and appears in the report; a waived criterion does not hold the mission open.",
         ]
       : []),
     reviewResponseFormat("evidence-based assessment", criteria),

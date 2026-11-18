@@ -145,6 +145,44 @@ describe("Chief Director goal supervision boundaries", () => {
     ).toThrow("different Actor")
   })
 
+  it("lets an operator waiver keep an unmet criterion from holding the mission open, and nothing else", () => {
+    const mission = savedMission()
+    const criterion = finalCriteria(mission)[0] as string
+    const unmet = {
+      passed: false,
+      summary: "The suite takes 1,066 seconds.",
+      findings: ["Bring the suite under the stated limit."],
+      criteria: [{ criterion, passed: false, evidence: "Runner recorded 1,066 seconds." }],
+    }
+    // Without a waiver the rejection stands, and a reviewer cannot pass an unmet criterion.
+    expect(parseFinalReview(JSON.stringify(unmet), mission)).toMatchObject({ passed: false })
+    expect(() => parseFinalReview(JSON.stringify({ ...unmet, passed: true, findings: [] }), mission)).toThrow(
+      "passed must match",
+    )
+    mission.criterionWaivers = [{ at: "2026-11-18T06:00:00.000Z", criterion, reason: "Goal of the next cycle." }]
+    const waived = { criterion, passed: false, evidence: "Runner recorded 1,066 seconds.", waived: true }
+    // A reviewer that still counted the waived criterion is normalised; one that followed the prompt is kept.
+    expect(parseFinalReview(JSON.stringify(unmet), mission)).toEqual({
+      ...unmet,
+      passed: true,
+      findings: [],
+      criteria: [waived],
+    })
+    expect(parseFinalReview(JSON.stringify({ ...unmet, passed: true, findings: [] }), mission)).toMatchObject({
+      passed: true,
+      criteria: [waived],
+    })
+    expect(reviewPrompt(mission)).toContain("mission.criterionWaivers lists success criteria the operator accepted")
+    // The mark belongs to the waiver, not to the reviewer: a met criterion carries none.
+    const met = {
+      ...finalReview(mission),
+      criteria: [{ criterion, passed: true, evidence: "Measured.", waived: true }],
+    }
+    expect(parseFinalReview(JSON.stringify(met), mission).criteria).toEqual([
+      { criterion, passed: true, evidence: "Measured." },
+    ])
+  })
+
   it("requires an exact evidence assessment of every saved final criterion", () => {
     const mission = savedMission()
     const review = finalReview(mission)

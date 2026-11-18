@@ -5,6 +5,7 @@ import { ReadOnlyViolation } from "./coordinator-run"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
 import { finalReviewRepairScope, selectRepairTaskId } from "./coordinator-state"
 import { MissionPause, pauseForFailure, recordPause } from "./execution"
+import { blockingCriteria, finalCriteria } from "./goal-evidence"
 import { reviewPrompt } from "./prompts"
 import { fallbackReport } from "./reports"
 import { reviewGatesAreCurrent } from "./review-gate-check"
@@ -104,6 +105,20 @@ export async function approveMission(context: CoordinatorContext): Promise<Stage
   }
   await save("final-review", mission.finalReview.summary)
   if (!mission.finalReview.passed) {
+    // A criterion no task can reach used to send an arbitrary task into repair after every final review.
+    // When the same criteria fail again after a repair, the decision belongs to the operator.
+    const failing = blockingCriteria(mission.finalReview)
+    const previous = mission.supervision?.finalReviewFailures ?? []
+    if (mission.supervision) mission.supervision.finalReviewFailures = failing
+    if (failing.length && failing.every((criterion) => previous.includes(criterion))) {
+      const numbered = finalCriteria(mission)
+        .map((criterion, index) => (failing.includes(criterion) ? `${index + 1}. ${criterion.slice(0, 200)}` : ""))
+        .filter(Boolean)
+      throw new MissionPause(
+        `The final review failed again on the same success criteria after a repair: ${numbered.join(" | ")}. No further repair is started automatically. Resume with --retry to repair once more, or record that a criterion stays unmet in this mission with --waive-criterion <number> --waive-reason <text>.`,
+        "budget",
+      )
+    }
     const reason = mission.finalReview.findings.join("; ")
     await requestRepair(reason, finalReviewRepairScope(mission, mission.finalReview))
     return { kind: "next", stage: "tasks" }

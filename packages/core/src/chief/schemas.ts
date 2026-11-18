@@ -142,6 +142,10 @@ export const missionSchema = z
       .array(z.strictObject({ at: text, text: z.string().trim().min(1).max(4_000) }))
       .max(50)
       .optional(),
+    criterionWaivers: z
+      .array(z.strictObject({ at: text, criterion: text, reason: z.string().trim().min(1).max(1_000) }))
+      .max(40)
+      .optional(),
     error: text.optional(),
     fingerprint: text.optional(),
     initialFingerprint: text.optional(),

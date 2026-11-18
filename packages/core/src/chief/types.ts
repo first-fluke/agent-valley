@@ -68,6 +68,8 @@ export interface Mission {
   history: import("./contracts").MissionEvent[]
   /** Operator notes recorded with `--note` on resume; newest last. */
   operatorNotes?: import("./contracts").OperatorNote[]
+  /** Success criteria the operator accepted as unmet with `--waive-criterion` on resume. */
+  criterionWaivers?: import("./contracts").CriterionWaiver[]
   error?: string
   fingerprint?: string
   initialFingerprint?: string

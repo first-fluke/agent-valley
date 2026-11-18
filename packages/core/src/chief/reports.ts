@@ -188,7 +188,9 @@ function checkEvidence(mission: Mission): string[] {
 
 function criterionEvidence(mission: Mission): string[] {
   return (mission.finalReview?.criteria ?? []).map((item) =>
-    bounded(`${bounded(item.criterion, 200)}: ${item.passed ? "통과" : "실패"} / 근거: ${bounded(item.evidence, 250)}`),
+    bounded(
+      `${bounded(item.criterion, 200)}: ${item.passed ? "통과" : item.waived ? "미달(운영자 면제)" : "실패"} / 근거: ${bounded(item.evidence, 250)}`,
+    ),
   )
 }
 

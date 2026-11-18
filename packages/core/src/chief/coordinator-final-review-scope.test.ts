@@ -222,3 +222,55 @@ describe("final-review repair through the coordinator", () => {
     expect(result.history.some((event) => event.stage === "task-preserved" && event.taskId === "task-1")).toBe(true)
   })
 })
+
+describe("a success criterion no repair reaches", () => {
+  /** Every final review rejects the mission's criterion with a finding that names no task. */
+  function alwaysFailFinal(value: ReturnType<typeof fixture>): void {
+    const original = value.runAgent.getMockImplementation()
+    value.runAgent.mockImplementation(async (actor, prompt, mission, stage, context) => {
+      if (stage === "work") return `Repaired ${context?.taskId}`
+      if (stage === "review") return passed
+      if (stage === "final-review") return failingFinal(mission, ["The suite still takes longer than the stated limit"])
+      if (stage === "report") return JSON.stringify(fallbackReport(mission))
+      return (await original?.(actor, prompt, mission, stage, context)) ?? passed
+    })
+    value.verify.mockImplementation(async () => ({ ok: true, output: "verified" }))
+  }
+  const finalReviews = (value: ReturnType<typeof fixture>) =>
+    value.runAgent.mock.calls.filter((call) => call[3] === "final-review").length
+
+  it("repairs once, then stops for the operator when the same criterion fails again", async () => {
+    const value = fixture()
+    const finished = await completeMission(value, [task("task-1"), task("task-2")])
+    const before = finalReviews(value)
+    alwaysFailFinal(value)
+    const result = await coordinate(finished, value.ports)
+
+    expect(finalReviews(value) - before).toBe(2)
+    expect(result.status).toBe("paused")
+    expect(result.error).toContain("failed again on the same success criteria")
+    expect(result.error).toContain("--waive-criterion")
+    expect(result.error).toContain(`1. ${finalCriteria(result)[0]}`)
+    expect(result.supervision?.finalReviewFailures).toEqual(finalCriteria(result))
+    // One repair was attempted; the second failure starts none.
+    expect(result.history.filter((event) => event.stage === "repair-scope")).toHaveLength(1)
+    expect(result.tasks.map((state) => state.status)).toEqual(["completed", "completed"])
+  })
+
+  it("completes with the criterion reported as unmet once the operator waived it", async () => {
+    const value = fixture()
+    const finished = await completeMission(value, [task("task-1"), task("task-2")])
+    const criterion = finalCriteria(finished)[0] as string
+    finished.criterionWaivers = [
+      { at: "2026-11-18T06:00:00.000Z", criterion, reason: "Scheduled as the goal of the next cycle." },
+    ]
+    alwaysFailFinal(value)
+    const result = await coordinate(finished, value.ports)
+
+    expect(result.status).toBe("completed")
+    expect(result.finalReview).toMatchObject({ passed: true, findings: [] })
+    expect(result.finalReview?.criteria).toEqual([{ criterion, passed: false, evidence: "missing", waived: true }])
+    expect(result.history.some((event) => event.stage === "repair-scope")).toBe(false)
+    expect(result.tasks.every((state) => state.attempts === 1)).toBe(true)
+  })
+})
