@@ -117,6 +117,25 @@ describe("measured work routing", () => {
       "Every configured routing candidate failed",
     )
   })
+  it("keeps the only route after a call the host slept through", () => {
+    // Regression: a laptop slept during the first attempt of a task. After the wake the single configured
+    // route counted as having failed the task, dispatch stopped with "Every configured routing candidate
+    // failed" and a Chief recovery round was spent on a failure that was the host's.
+    const mission = setup()
+    if (!mission.operatingPolicy?.routing) throw new Error("Missing routing policy")
+    mission.operatingPolicy.routing.candidates = [
+      { actorType: "codex", model: "cheap", inputPerMillionUsd: 1, outputPerMillionUsd: 2 },
+    ]
+    mission.operations.runs.push(
+      run({ outcome: "failed", evidence: "Host was suspended during the call. Agent stalled: no activity for 1800s" }),
+    )
+    expect(selectWorkActor(mission, fixtureActor(mission, "worker"), "onboarding").actor.agentType).toBe("codex")
+    expect(routeEvidence(mission).find((entry) => entry.actorType === "codex")?.samples ?? 0).toBe(0)
+    mission.operations.runs.push(run({ runId: "second", outcome: "failed", evidence: "Agent stalled: no activity" }))
+    expect(() => selectWorkActor(mission, fixtureActor(mission, "worker"), "onboarding")).toThrow(
+      "Every configured routing candidate failed",
+    )
+  })
   it("repairs a rejected single candidate in place while repair budget remains", () => {
     const mission = setup()
     if (!mission.operatingPolicy?.routing) throw new Error("Missing routing policy")

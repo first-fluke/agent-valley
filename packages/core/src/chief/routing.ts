@@ -2,11 +2,18 @@ import { availableActorRoutes } from "./actor-availability"
 import { aggregateProviderHealth } from "./actor-health"
 import { cancelledWorkRunProofs } from "./cancelled-work-run"
 import { isNativeAgentTimeout } from "./execution"
+import { HOST_SUSPENDED_EVIDENCE } from "./host-suspension"
 import { DEFAULT_EVIDENCE_WINDOW, type RouteEvidence, type RoutingCandidate } from "./operations"
 import { appendRouteOutcome, routePrice, routeQuality } from "./route-quality"
 import type { Mission, Persona } from "./types"
 
 export const routeKey = (entry: { actorType: string; model?: string }) => `${entry.actorType}\u0000${entry.model ?? ""}`
+
+/**
+ * A call the host slept through failed because the machine was suspended. It says nothing about the route, so
+ * it neither counts against the route's quality nor marks the route as having failed the task.
+ */
+const hostSlept = (run: { evidence?: string }) => run.evidence?.startsWith(HOST_SUSPENDED_EVIDENCE) === true
 
 /** Include unsuccessful attempts in successful-deliverable cost; unknown costs stay unknown. */
 export function routeEvidence(mission: Mission): RouteEvidence[] {
@@ -26,7 +33,12 @@ export function routeEvidence(mission: Mission): RouteEvidence[] {
       successfulDeliverableCostUsd: null,
     }
     // A confirmed deadline cutoff is not a deliverable-quality verdict; spent cost still counts.
-    if (!cancelled.has(run.runId) && run.nativeOutcome !== "cancelled" && !isNativeAgentTimeout(run.evidence ?? "")) {
+    if (
+      !cancelled.has(run.runId) &&
+      run.nativeOutcome !== "cancelled" &&
+      !isNativeAgentTimeout(run.evidence ?? "") &&
+      !hostSlept(run)
+    ) {
       item.samples += 1
       appendRouteOutcome(item, { at: run.finishedAt ?? run.startedAt, outcome: run.outcome }, window)
     }
@@ -137,7 +149,11 @@ export function selectWorkActor(
   const cancelled = cancelledWorkRunProofs(mission)
   const taskRuns = (mission.operations?.runs ?? []).filter(
     (run) =>
-      run.stage === "work" && run.taskId === taskId && !cancelled.has(run.runId) && run.nativeOutcome !== "cancelled",
+      run.stage === "work" &&
+      run.taskId === taskId &&
+      !cancelled.has(run.runId) &&
+      run.nativeOutcome !== "cancelled" &&
+      !hostSlept(run),
   )
   if (hasUnreviewedRoutingProbe(mission, taskId, taskRuns))
     throw new Error(
