@@ -1,3 +1,5 @@
+import { mkdir, readdir, rm } from "node:fs/promises"
+import { join } from "node:path"
 import { runVerificationGate, type VerificationGateResult } from "../orchestrator/verification-gate"
 import { fingerprintWorkspace } from "../workspace/fingerprint"
 import type { ActiveMissionProcess } from "./active-process"
@@ -34,14 +36,34 @@ export function integrationCheckEnabled(source: NodeJS.ProcessEnv = process.env)
 export function operatorIntegrationResult(
   command: string,
   result: Pick<VerificationGateResult, "ok" | "output" | "timedOut">,
+  logPath?: string,
 ): { ok: boolean; output: string } {
   const verdict = result.ok
     ? "PASS: the operator's integration command exited zero."
     : result.timedOut
       ? "FAIL: the operator's integration command timed out."
       : "FAIL: the operator's integration command exited nonzero. Output tail:"
+  // The retained tail often ends in passing steps; the failing step of a chained gate is in the file.
+  const complete = logPath ? `\nComplete output of this check: ${logPath}` : ""
   const tail = result.ok ? "" : `\n${(result.output ?? "").slice(-6_000)}`
-  return { ok: result.ok, output: `${command.slice(0, 600)}\n${verdict}${tail}`.slice(0, 8_000) }
+  return { ok: result.ok, output: `${command.slice(0, 600)}${complete}\n${verdict}${tail}`.slice(0, 8_000) }
+}
+
+const CHECK_LOGS_KEPT = 12
+
+/** A file under the mission's own `.agent-valley` directory, outside product paths and task deliveries. */
+export async function integrationCheckLog(workspacePath: string, now: Date = new Date()): Promise<string | undefined> {
+  try {
+    const directory = join(workspacePath, ".agent-valley", "integration-checks")
+    await mkdir(directory, { recursive: true })
+    const earlier = (await readdir(directory)).filter((name) => name.endsWith(".log")).sort()
+    for (const name of earlier.slice(0, Math.max(0, earlier.length - (CHECK_LOGS_KEPT - 1))))
+      await rm(join(directory, name), { force: true })
+    return join(directory, `${now.toISOString().replace(/[:.]/g, "-")}.log`)
+  } catch {
+    // The log is a convenience; a check never fails because it could not be written.
+    return undefined
+  }
 }
 
 /** A failing part leads, so the reviewer's excerpt of the result starts with what has to be repaired. */
@@ -118,15 +140,19 @@ async function checkIntegratedTree(
 ): Promise<{ ok: boolean; output: string } | undefined> {
   active.begin("verify")
   try {
-    const operator = async () =>
-      operatorIntegrationResult(
+    const operator = async () => {
+      const logPath = await integrationCheckLog(mission.workspace.path)
+      return operatorIntegrationResult(
         command ?? "",
         await runVerificationGate(mission.workspace, command ?? "", {
           timeoutSec: mission.timeoutSec,
           signal,
           onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
+          ...(logPath ? { outputFile: logPath } : {}),
         }),
+        logPath,
       )
+    }
     // Alone, the operator's command is the project's whole cheap gate and replaces the contract's commands.
     if (command && (source[INTEGRATION_CHECK_ENV] !== "1" || !mission.verificationContract)) return await operator()
     delete mission.integrationEvidence

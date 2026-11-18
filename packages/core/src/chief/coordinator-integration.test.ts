@@ -102,6 +102,16 @@ describe("integration check between task delivery and review", () => {
     expect(operatorIntegrationResult("make gate", { ok: false, output: "", timedOut: true }).output).toContain(
       "timed out",
     )
+    // The failing step of a long chained gate is above the retained tail; the result names the complete log.
+    const logged = operatorIntegrationResult(
+      "make gate",
+      { ok: false, output: "last passing step" },
+      "/work/.agent-valley/integration-checks/2026-11-18T06-00-00-000Z.log",
+    )
+    expect(logged.output).toContain(
+      "Complete output of this check: /work/.agent-valley/integration-checks/2026-11-18T06-00-00-000Z.log",
+    )
+    expect(logged.output.endsWith("last passing step")).toBe(true)
   })
 })
 

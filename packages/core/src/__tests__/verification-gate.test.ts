@@ -3,7 +3,7 @@
  * buildVerificationFailurePrompt, and the real (non-injected) exec path.
  */
 import { existsSync } from "node:fs"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "vitest"
@@ -162,6 +162,28 @@ describe("runVerificationGate", () => {
 })
 
 describe("defaultVerifyExec (real subprocess)", () => {
+  test.runIf(process.platform !== "win32")(
+    "writes the complete output to the requested file while returning only the tail",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "av-gate-log-"))
+      try {
+        const file = join(directory, "check.log")
+        // About 40 KB of stdout, then one stderr line: the first lines are far above the retained 10 KB tail.
+        const command =
+          "i=0; while [ $i -lt 2000 ]; do echo step-$i-0123456789; i=$((i+1)); done; echo failing-step >&2; exit 3"
+        const result = await defaultVerifyExec(command, directory, 30_000, undefined, undefined, undefined, file)
+        const log = await readFile(file, "utf8")
+        expect(result.exitCode).toBe(3)
+        expect(result.output).not.toContain("step-0-0123456789")
+        expect(log).toContain("step-0-0123456789")
+        expect(log).toContain("step-1999-0123456789")
+        expect(log).toContain("failing-step")
+      } finally {
+        await rm(directory, { recursive: true, force: true })
+      }
+    },
+  )
+
   test("stops a verifier when recording its PID fails", async () => {
     let pid: number | undefined
     const result = await defaultVerifyExec("sleep 5", process.cwd(), 10_000, undefined, (spawnedPid) => {

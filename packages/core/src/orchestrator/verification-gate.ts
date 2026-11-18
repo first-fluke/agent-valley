@@ -13,6 +13,7 @@
  */
 
 import { spawn } from "node:child_process"
+import { createWriteStream, type WriteStream } from "node:fs"
 import type { ResolvedRoute } from "../config/routing"
 import type { Config } from "../config/yaml-loader"
 import type { Workspace } from "../domain/models"
@@ -73,10 +74,12 @@ export type VerifyExecFn = (
   signal?: AbortSignal,
   onSpawned?: (pid: number | undefined) => void,
   extraEnv?: NodeJS.ProcessEnv,
+  /** Receives the complete stdout and stderr; the returned output keeps only the tail. */
+  outputFile?: string,
 ) => Promise<VerifyExecResult>
 
 /** Real implementation: runs `command` through the shell in `cwd`, killing it if it exceeds `timeoutMs`. */
-export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal, onSpawned, extraEnv) =>
+export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal, onSpawned, extraEnv, outputFile) =>
   new Promise((resolve) => {
     if (signal?.aborted) {
       resolve({ exitCode: -1, output: "Verification cancelled.", timedOut: false, aborted: true })
@@ -95,6 +98,17 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
     })
 
     const output = new BoundedProcessOutput(MAX_OUTPUT_LENGTH)
+    // A long chained gate reports its failing step far above the retained tail; the file keeps all of it.
+    let log: WriteStream | undefined
+    if (outputFile)
+      try {
+        log = createWriteStream(outputFile, { mode: 0o600 })
+        log.on("error", () => {
+          log = undefined
+        })
+      } catch {
+        log = undefined
+      }
     let timedOut = false
     let settled = false
     let aborted = false
@@ -107,6 +121,7 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
       clearTimeout(timer)
       clearTimeout(forceTimer)
       signal?.removeEventListener("abort", onAbort)
+      log?.end()
       resolve({
         exitCode: timedOut || aborted || registrationFailed ? -1 : (code ?? -1),
         output: output.finish(),
@@ -144,10 +159,14 @@ export const defaultVerifyExec: VerifyExecFn = (command, cwd, timeoutMs, signal,
     if (signal?.aborted) onAbort()
 
     proc.stdout?.on("data", (chunk: Buffer) => {
-      if (!settled) output.write("stdout", chunk)
+      if (settled) return
+      output.write("stdout", chunk)
+      log?.write(chunk)
     })
     proc.stderr?.on("data", (chunk: Buffer) => {
-      if (!settled) output.write("stderr", chunk)
+      if (settled) return
+      output.write("stderr", chunk)
+      log?.write(chunk)
     })
     proc.stdout?.once("end", () => output.end("stdout"))
     proc.stderr?.once("end", () => output.end("stderr"))
@@ -199,6 +218,8 @@ export interface VerificationGateOptions {
    * defeat the secret-leak isolation (AGENTS.md §3).
    */
   extraEnv?: NodeJS.ProcessEnv
+  /** File that receives the command's complete output; `output` in the result stays the bounded tail. */
+  outputFile?: string
 }
 
 /**
@@ -239,7 +260,9 @@ export async function runVerificationGate(
 
   logger.info("verification-gate", "Running verify_command", { workspacePath: workspace.path, command, timeoutSec })
 
-  const result = await exec(command, workspace.path, timeoutMs, opts.signal, opts.onSpawned, opts.extraEnv)
+  const result = opts.outputFile
+    ? await exec(command, workspace.path, timeoutMs, opts.signal, opts.onSpawned, opts.extraEnv, opts.outputFile)
+    : await exec(command, workspace.path, timeoutMs, opts.signal, opts.onSpawned, opts.extraEnv)
   // Bound here too so the guarantee holds for caller-supplied mocks that
   // return oversized output; `defaultVerifyExec` binds at capture time for
   // the real subprocess path. Both are idempotent for already-bounded input.
