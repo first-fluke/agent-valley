@@ -1,8 +1,9 @@
 import type { Workspace } from "../domain/models"
 import { recordIntegrationCheck } from "./coordinator-integration"
 import { applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
-import { MissionPause } from "./execution"
+import { classifyFailure, MissionPause } from "./execution"
 import { runJoinedWave } from "./parallel"
+import { ParallelIntegrationConflict } from "./parallel-workspace"
 import { workPrompt } from "./prompts"
 import type { ChiefPorts, ChiefStage, ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
 
@@ -27,6 +28,21 @@ export interface ParallelWaveFailure {
   phase?: "work" | "integration" | "review"
 }
 export class ParallelTaskReviewRejected extends Error {}
+
+/**
+ * Whether a wave failure needs a Chief recovery decision instead of an ordinary repair. A review rejection
+ * never does: its text is the reviewer's findings, which quote error names from the code under review
+ * (ENOSPC, "not found", 401), and classifying that text once sent a rejected task to Chief recovery as an
+ * environment failure.
+ */
+export function waveFailureNeedsRecovery(failure: ParallelWaveFailure): boolean {
+  if (failure.error instanceof ParallelTaskReviewRejected) return false
+  return (
+    failure.phase === "review" ||
+    failure.error instanceof ParallelIntegrationConflict ||
+    ["environment", "authentication", "provider", "rate-limit"].includes(classifyFailure(failure.reason))
+  )
+}
 
 /** A failed pre-delivery check goes back to its Actor at most this often; the integration check still follows. */
 export const LANE_CHECK_ROUNDS = 2

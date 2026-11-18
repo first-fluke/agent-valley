@@ -1,13 +1,12 @@
 import { refreshActorCooldown } from "./actor-availability"
 import { actorRouteHealth } from "./actor-health"
 import { recordIntegrationCheck } from "./coordinator-integration"
-import { ParallelTaskReviewRejected, performParallelWave } from "./coordinator-parallel"
+import { ParallelTaskReviewRejected, performParallelWave, waveFailureNeedsRecovery } from "./coordinator-parallel"
 import { applyTaskReviewResult, applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
-import { classifyFailure, MissionPause, pauseForFailure } from "./execution"
+import { MissionPause, pauseForFailure } from "./execution"
 import { clearReviewerNoVerdict, handoffActor, noteReviewerNoVerdict } from "./handoff"
 import { readyTaskWave } from "./parallel"
-import { ParallelIntegrationConflict } from "./parallel-workspace"
 import { reviewPrompt, workPrompt } from "./prompts"
 import { settleRepairReview } from "./review-response"
 import { selectTaskReviewer } from "./review-routing"
@@ -250,14 +249,17 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
       const unrecoverable = failures.find((failure) => protectedFailure(failure.error))
       if (unrecoverable) throw unrecoverable.error
       for (const failure of failures) {
-        pauseForFailure(mission, failure.reason, failure.taskId)
+        // A rejection's reason is the reviewer's findings; only its fact is passed on, never its wording.
+        pauseForFailure(
+          mission,
+          failure.error instanceof ParallelTaskReviewRejected
+            ? `Task ${failure.taskId} failed independent review.`
+            : failure.reason,
+          failure.taskId,
+        )
         const state = mission.tasks.find((task) => task.id === failure.taskId)
         if (!state) throw new Error("Recovery task disappeared. Restore the recorded plan.")
-        if (
-          (failure.phase === "review" && !(failure.error instanceof ParallelTaskReviewRejected)) ||
-          failure.error instanceof ParallelIntegrationConflict ||
-          ["environment", "authentication", "provider", "rate-limit"].includes(classifyFailure(failure.reason))
-        ) {
+        if (waveFailureNeedsRecovery(failure)) {
           await requestRecovery(failure.reason, failure.taskId)
           break
         }

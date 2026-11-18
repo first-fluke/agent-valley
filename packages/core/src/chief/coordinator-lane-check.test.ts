@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
-import { LANE_CHECK_ROUNDS, type ParallelWaveHooks, performParallelWave } from "./coordinator-parallel"
+import {
+  LANE_CHECK_ROUNDS,
+  ParallelTaskReviewRejected,
+  type ParallelWaveHooks,
+  performParallelWave,
+  waveFailureNeedsRecovery,
+} from "./coordinator-parallel"
 import { fixture } from "./goal-supervision.fixture"
 import type { TaskWorktreeRecord } from "./parallel-workspace"
 import type { ChiefPorts, ChiefTask, Mission } from "./types"
@@ -96,5 +102,30 @@ describe("pre-delivery check in an Actor's workspace", () => {
     expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
     expect(prompts.a).toHaveLength(1)
     expect(check).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("routing a wave failure to repair or to Chief recovery", () => {
+  // Regression: a rejection whose findings mentioned ENOSPC was classified as an environment failure and
+  // spent a Chief recovery round instead of an ordinary repair.
+  it("repairs a review rejection whatever its findings quote", () => {
+    const reason = "Task a failed independent review: after an ENOSPC partial write the file is not found (401)."
+    expect(
+      waveFailureNeedsRecovery({ taskId: "a", phase: "review", reason, error: new ParallelTaskReviewRejected(reason) }),
+    ).toBe(false)
+  })
+
+  it("still asks the Chief when a review produced no verdict or the environment failed", () => {
+    expect(
+      waveFailureNeedsRecovery({ taskId: "a", phase: "review", reason: "no verdict", error: new Error("no verdict") }),
+    ).toBe(true)
+    const missing = "spawn codex ENOENT"
+    expect(waveFailureNeedsRecovery({ taskId: "a", phase: "work", reason: missing, error: new Error(missing) })).toBe(
+      true,
+    )
+    const defect = "The Actor returned an empty handoff."
+    expect(waveFailureNeedsRecovery({ taskId: "a", phase: "work", reason: defect, error: new Error(defect) })).toBe(
+      false,
+    )
   })
 })
