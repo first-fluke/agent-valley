@@ -66,6 +66,47 @@ export async function integrationCheckLog(workspacePath: string, now: Date = new
   }
 }
 
+export const LANE_CHECK_COMMAND_ENV = "AV_LANE_CHECK_COMMAND"
+export const LANE_CHECK_TIMEOUT_ENV = "AV_LANE_CHECK_TIMEOUT_SEC"
+
+/**
+ * The operator's quick command for one Actor's isolated workspace, for example a formatter, a linter and an
+ * architecture check. A delivery used to meet its first machine check only after every Actor of the wave had
+ * returned and the tree was integrated, so a failure a twenty-second command finds cost a whole round of
+ * Actor run, integration check and review. This command runs as soon as the Actor returns, and its failure
+ * goes straight back to that Actor.
+ */
+export function laneCheckCommand(source: NodeJS.ProcessEnv = process.env): string | undefined {
+  return source[LANE_CHECK_COMMAND_ENV]?.trim() || undefined
+}
+
+export async function runLaneCheck(
+  mission: Mission,
+  workspacePath: string,
+  signal?: AbortSignal,
+  source: NodeJS.ProcessEnv = process.env,
+): Promise<{ ok: boolean; output: string } | undefined> {
+  const command = laneCheckCommand(source)
+  if (!command) return undefined
+  const seconds = Number(source[LANE_CHECK_TIMEOUT_ENV])
+  const result = await runVerificationGate({ ...mission.workspace, path: workspacePath }, command, {
+    timeoutSec: Number.isFinite(seconds) && seconds > 0 ? seconds : 900,
+    signal,
+  })
+  const verdict = result.ok
+    ? "PASS"
+    : result.timedOut
+      ? "FAIL: the command timed out."
+      : "FAIL: the command exited nonzero. Output tail:"
+  return {
+    ok: result.ok,
+    output: `${command.slice(0, 600)}\n${verdict}${result.ok ? "" : `\n${(result.output ?? "").slice(-6_000)}`}`.slice(
+      0,
+      8_000,
+    ),
+  }
+}
+
 /** A failing part leads, so the reviewer's excerpt of the result starts with what has to be repaired. */
 export function combinedIntegrationResult(
   contract: { ok: boolean; output: string },

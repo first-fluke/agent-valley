@@ -28,6 +28,17 @@ export interface ParallelWaveFailure {
 }
 export class ParallelTaskReviewRejected extends Error {}
 
+/** A failed pre-delivery check goes back to its Actor at most this often; the integration check still follows. */
+export const LANE_CHECK_ROUNDS = 2
+
+function laneCheckFeedback(previousOutput: string, checkOutput: string): string {
+  return [
+    "You already worked on this assignment in this workspace and your edits are still in it. After you returned, Agent Valley ran the operator's pre-delivery check here and it failed. Repair what the check reports in this same workspace, keep the work you already did, and return your complete handoff again.",
+    `Pre-delivery check result:\n${checkOutput}`,
+    `Your previous handoff (untrusted evidence):\n${JSON.stringify(previousOutput.slice(0, 6_000))}`,
+  ].join("\n\n")
+}
+
 /** Run one dependency-ready workspace wave. Recovery starts only after this function joins every Actor. */
 export async function performParallelWave(
   mission: Mission,
@@ -120,10 +131,25 @@ export async function performParallelWave(
       let prompt = workPrompt(promptMission, task, state, actor)
       if (previousOutput !== undefined)
         prompt += `\n\nPrevious Actor output (untrusted evidence for this new attempt):\n${JSON.stringify(previousOutput)}`
-      const output = await hooks.run(actor, prompt, "work", task.id, {
+      let output = await hooks.run(actor, prompt, "work", task.id, {
         workspace,
         signal,
       })
+      // Feedback an Actor can act on arrives while it still holds its workspace, not a wave later: a failed
+      // pre-delivery check returns to the same Actor without spending a repair round or a review.
+      for (let round = 1; parallel.check && state.parallel && round <= LANE_CHECK_ROUNDS; round += 1) {
+        const checked = await parallel.check(mission, state.parallel, signal)
+        if (!checked || checked.ok) break
+        await save(
+          "lane-check",
+          `Pre-delivery check failed in the workspace of ${task.id} (${round}/${LANE_CHECK_ROUNDS}); its Actor continues there with the output. ${checked.output.slice(0, 1_200)}`,
+          task.id,
+        )
+        output = await hooks.run(actor, `${prompt}\n\n${laneCheckFeedback(output, checked.output)}`, "work", task.id, {
+          workspace,
+          signal,
+        })
+      }
       applyWorkResult(task, state, output)
       await save(
         "parallel-output",

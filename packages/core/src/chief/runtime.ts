@@ -31,7 +31,13 @@ import {
   personaSkills,
   unattendedVerificationGuidance,
 } from "./runtime-inputs"
-import { integrationCheckEnabled, integrationEvidenceFor, runIntegrationCheck } from "./runtime-integration-check"
+import {
+  integrationCheckEnabled,
+  integrationEvidenceFor,
+  laneCheckCommand,
+  runIntegrationCheck,
+  runLaneCheck,
+} from "./runtime-integration-check"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
@@ -98,6 +104,12 @@ export class ChiefRuntime {
         dispose: async (record) => {
           await disposeTaskWorktree(record)
         },
+        ...(laneCheckCommand()
+          ? {
+              check: (mission: Mission, record: { path: string }, signal?: AbortSignal) =>
+                runLaneCheck(mission, record.path, signal ?? this.signal),
+            }
+          : {}),
       },
       releaseStorage: async (mission) => {
         await releaseAppliedTaskWorktrees(mission)
