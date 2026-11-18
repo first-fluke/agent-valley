@@ -6,9 +6,10 @@ import { applyTaskReviewResult, applyWorkResult, recordTaskReviewFailure } from 
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
 import { classifyFailure, MissionPause, pauseForFailure } from "./execution"
 import { clearReviewerNoVerdict, handoffActor, noteReviewerNoVerdict } from "./handoff"
-import { readyTaskWave } from "./parallel"
+import { earlyDependentsEnabled, readyTaskWave } from "./parallel"
 import { ParallelIntegrationConflict } from "./parallel-workspace"
 import { reviewPrompt, workPrompt } from "./prompts"
+import { settleRepairReview } from "./review-response"
 import { selectTaskReviewer } from "./review-routing"
 import { parseReview } from "./schemas"
 import type { ChiefTask, ChiefTaskState, Persona } from "./types"
@@ -216,7 +217,9 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
       continue
     }
     const limit = mission.executionPolicy?.maxParallel ?? 1
-    const wave = readyTaskWave(plan, mission.tasks, limit).filter((task) => task.effectScope !== "external")
+    const wave = readyTaskWave(plan, mission.tasks, limit, { earlyDependents: earlyDependentsEnabled() }).filter(
+      (task) => task.effectScope !== "external",
+    )
     // A task whose isolated delivery was rejected keeps that delivery mode: its repair must produce a fresh
     // AV-captured changeSet, otherwise the review would compare a direct worktree edit against stale capture.
     const isolatedBefore = (taskId: string) =>

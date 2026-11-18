@@ -36,6 +36,32 @@ describe("dependency-ready parallel waves", () => {
     expect(() => readyTaskWave(plan, [], 0)).toThrow("between 1 and 20")
   })
 
+  it("lets a dependent start beside a predecessor's repair only when early dependents are enabled", () => {
+    // Regression: a task waited for the review sign-off of work that was already integrated and had passed
+    // the integration check, so one open review finding held every later task and left slots idle.
+    const plan: ChiefPlan = { tasks: [task("lane"), task("other"), task("integrate", ["lane", "other"])] }
+    const repairing: ChiefTaskState = {
+      ...state("lane", "pending"),
+      review: { passed: false, summary: "One finding.", findings: ["Rename the flag."] },
+      integrationCheck: { at: "2026-01-01T00:00:00.000Z", ok: true, output: "PASS" },
+    }
+    const states = [repairing, state("other", "completed")]
+    expect(readyTaskWave(plan, states, 3).map((entry) => entry.id)).toEqual(["lane"])
+    expect(readyTaskWave(plan, states, 3, { earlyDependents: true }).map((entry) => entry.id)).toEqual([
+      "lane",
+      "integrate",
+    ])
+    expect(readyTaskWave(plan, states, 1, { earlyDependents: true }).map((entry) => entry.id)).toEqual(["lane"])
+    const broken = [{ ...repairing, integrationCheck: { ...repairing.integrationCheck, ok: false } }, states[1]]
+    expect(
+      readyTaskWave(plan, broken as ChiefTaskState[], 3, { earlyDependents: true }).map((entry) => entry.id),
+    ).toEqual(["lane"])
+    const unreviewed = [{ ...state("lane", "reviewing"), integrationCheck: repairing.integrationCheck }, states[1]]
+    expect(
+      readyTaskWave(plan, unreviewed as ChiefTaskState[], 3, { earlyDependents: true }).map((entry) => entry.id),
+    ).toEqual(["lane"])
+  })
+
   it("actually overlaps independent children and returns results in input order", async () => {
     const bothStarted = barrier()
     const finish = barrier()

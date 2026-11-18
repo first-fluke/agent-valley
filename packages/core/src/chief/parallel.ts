@@ -1,12 +1,34 @@
 import type { ChiefPlan, ChiefTask, ChiefTaskState } from "./types"
 
-/** A dependent task becomes ready only after its predecessors passed review. */
-export function readyTaskWave(plan: ChiefPlan, states: ChiefTaskState[], limit: number): ChiefTask[] {
+export const EARLY_DEPENDENTS_ENV = "AV_EARLY_DEPENDENTS"
+
+/** `AV_EARLY_DEPENDENTS=1`: a dependent may start on a predecessor's integrated, machine-checked delivery. */
+export function earlyDependentsEnabled(source: NodeJS.ProcessEnv = process.env): boolean {
+  return source[EARLY_DEPENDENTS_ENV] === "1"
+}
+
+/**
+ * A dependent task becomes ready after its predecessors passed review. With `earlyDependents`, a predecessor
+ * also counts once its delivery is integrated in the mission tree and the integration check passed on it,
+ * while its review findings are still being repaired: the dependent then runs beside that repair in a free
+ * slot instead of waiting for a sign-off on work it can already build on. Tasks that are not complete keep
+ * their plan order, so repairs take slots before their dependents do.
+ */
+export function readyTaskWave(
+  plan: ChiefPlan,
+  states: ChiefTaskState[],
+  limit: number,
+  options: { earlyDependents?: boolean } = {},
+): ChiefTask[] {
   if (!Number.isInteger(limit) || limit < 1 || limit > 20)
     throw new Error("Use a parallel Actor limit between 1 and 20.")
   const completed = new Set(states.filter((state) => state.status === "completed").map((state) => state.id))
+  const usable = new Set(completed)
+  if (options.earlyDependents)
+    for (const state of states)
+      if (state.integrationCheck?.ok && state.review !== undefined && !state.review.passed) usable.add(state.id)
   return plan.tasks
-    .filter((task) => !completed.has(task.id) && task.dependencies.every((id) => completed.has(id)))
+    .filter((task) => !completed.has(task.id) && task.dependencies.every((id) => usable.has(id)))
     .slice(0, limit)
 }
 
