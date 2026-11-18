@@ -45,7 +45,12 @@ describe("Chief review response contract", () => {
     expect(responses[0]?.findings).toEqual([])
     expect(responses[1]?.findings.length).toBeGreaterThan(0)
     for (const response of responses) {
-      expect(Object.keys(response).sort()).toEqual(["findings", "passed", "summary"])
+      // Only a task review carries followUps: concerns that are recorded without failing the task.
+      expect(Object.keys(response).sort()).toEqual(
+        _stage === "task and gate review"
+          ? ["findings", "followUps", "passed", "summary"]
+          : ["findings", "passed", "summary"],
+      )
       expect(response.findings.every((finding) => typeof finding === "string" && finding.trim().length > 0)).toBe(true)
       expect(() => parseReview(JSON.stringify({ ...response, recommendation: "Unexpected extra key" }))).toThrow()
     }
