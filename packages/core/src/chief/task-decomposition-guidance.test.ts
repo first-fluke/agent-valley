@@ -15,6 +15,15 @@ describe("task decomposition guidance", () => {
     expect(taskDecompositionGuidance(mission(3), "replan")).toContain("Up to 3 ready tasks run at once")
   })
 
+  it("tells the planner what a dependency level costs and to plan no prose-only task", () => {
+    for (const phase of ["plan", "replan"] as const) {
+      const guidance = taskDecompositionGuidance(mission(3), phase)
+      expect(guidance).toContain("as shallow as the real dependencies allow")
+      expect(guidance).toContain("only deliverable is prose about other tasks' work")
+    }
+    expect(taskDecompositionGuidance(mission(3), "work")).not.toContain("as shallow as")
+  })
+
   it("omits the wave guidance for sequential missions and Actor work", () => {
     expect(taskDecompositionGuidance(mission(1), "plan")).not.toContain("ready tasks run at once")
     expect(taskDecompositionGuidance(mission(), "plan")).not.toContain("ready tasks run at once")
