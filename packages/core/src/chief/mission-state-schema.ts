@@ -11,6 +11,7 @@ export const reviewSchema = z
     passed: z.boolean(),
     summary: text,
     findings: z.array(text).max(50),
+    followUps: z.array(text).max(50).optional(),
     criteria: z
       .array(z.strictObject({ criterion: text, passed: z.boolean(), evidence: text, waived: z.boolean().optional() }))
       .min(1)

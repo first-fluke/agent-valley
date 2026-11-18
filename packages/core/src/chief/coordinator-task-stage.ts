@@ -49,7 +49,11 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
       let response: string | undefined
       try {
         response = await run(reviewer, prompt, "review", task.id)
-        review = parseReview(response)
+        review = settleRepairReview(
+          parseReview(response),
+          state.review,
+          state.changeSet?.files.map((file) => file.path),
+        )
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
         const decision = await serialize(async () => {

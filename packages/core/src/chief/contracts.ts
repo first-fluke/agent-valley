@@ -41,6 +41,8 @@ export interface Review {
   passed: boolean
   summary: string
   findings: string[]
+  /** Concerns that do not fail the review: recorded for the report, never a reason to repeat the task. */
+  followUps?: string[]
   /** `waived` marks an unmet criterion the operator recorded as accepted for this mission. */
   criteria?: { criterion: string; passed: boolean; evidence: string; waived?: boolean }[]
 }

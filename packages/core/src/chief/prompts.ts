@@ -19,10 +19,10 @@ const PARALLEL_SOURCE_PROVENANCE =
   "Parallel source provenance: in each sourceEvidence record, baselineHead is the accepted committed source baseline for cross-workspace citations, and baselineTree is the product tree of that exact commit (git rev-parse <baselineHead>^{tree}). When supplied, snapshotCommit and snapshotRef identify the Actor's initial isolated input snapshot, and snapshotTree is that snapshot's input tree, which may include an uncommitted source overlay absent from the committed baseline. workerRef preserves the Actor's checked-out HEAD at collection; uncommitted task edits may be absent from that commit and must be verified in the integrated worktree, using the delivery receipt when available. Label observations of the Actor's local HEAD, snapshot or uncommitted diffs with that scope and the actual inspected revision and paths; do not claim local changes are already in the committed baseline. An Actor-local file being tracked at its snapshot revision does not imply that it is already tracked in the review checkout. The Actor's snapshot HEAD and the review workspace's current HEAD can differ. Preserve actual source hashes; never substitute another checkout's HEAD or invent a missing revision."
 
 export const EXHAUSTIVE_REVIEW_RULE =
-  "Enumerate every blocking defect across the whole deliverable in this single review so that one repair round can resolve them all; do not reserve findings for a later round, and do not escalate the acceptance bar beyond the task's own acceptance and the mission goal."
+  "Enumerate every blocking defect across the whole deliverable in this single review so that one repair round can resolve them all; do not reserve findings for a later round, and do not escalate the acceptance bar beyond the task's own acceptance and the mission goal. Observations that do not block acceptance go in followUps, not findings."
 
 export const REPAIR_REVIEW_RULE =
-  "This is a repair review: previousReview lists the findings the Actor was asked to fix. Verify each one is resolved. Additional blocking findings are limited to defects in the repaired or newly changed code and severe pre-existing defects (data loss, deadlock, leaked permits or locks, security exposure, silent failure). Record other pre-existing concerns in summary as non-blocking notes, not findings."
+  "This is a repair review: previousReview lists the findings the Actor was asked to fix. A repair review rejects on four grounds only, and every findings entry starts with the label of its ground: UNRESOLVED: a finding of previousReview that the repair did not resolve (quote it); CHANGED: a defect in a file this repair changed, as listed in changeSet when one is supplied (cite the path and line); CHECK: a failed step of integrationCheck caused by this task's files; SEVERE: data loss, deadlock, leaked permits or locks, security exposure or silent failure, wherever it is. Every other concern, including a newly noticed weakness in code the task did not change, goes in followUps and does not fail the review. Agent Valley moves a findings entry without a label, and a CHANGED entry that names no file of the supplied changeSet, to followUps; a review left without a labelled finding passes."
 
 function context(mission: Mission): string {
   const unavailableAdvice = unavailableDirectorAdvice(mission)
@@ -311,7 +311,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           "mission.criterionWaivers lists success criteria the operator accepted as unmet for this mission. Assess each of them truthfully from the evidence and set its passed to false when it is unmet, but write no finding for it and derive the top-level passed from the other criteria only. The waiver is the operator's recorded decision and appears in the report; a waived criterion does not hold the mission open.",
         ]
       : []),
-    reviewResponseFormat("evidence-based assessment", criteria),
+    reviewResponseFormat("evidence-based assessment", criteria, { followUps: !!task }),
     `Review input (JSON data):\n${JSON.stringify({
       // A task review inspects one deliverable: the mission run ledger and goal verification belong to the
       // final review only, and dropping them keeps the prompt within argv-delivered CLI limits.

@@ -183,6 +183,10 @@ function checkEvidence(mission: Mission): string[] {
       (task) =>
         `${task.id}: 상태 ${task.status}, 시도 ${task.attempts}회, 독립 리뷰 ${task.review ? (task.review.passed && task.review.findings.length === 0 ? "통과" : "실패") : "미실행"} / 리뷰어 ${task.reviewerId}`,
     ),
+    // Concerns a reviewer recorded without failing the task: visible to the operator, never a repair.
+    ...mission.tasks
+      .flatMap((task) => (task.review?.followUps ?? []).map((item) => `${task.id} 후속 항목(비차단): ${item}`))
+      .slice(0, 30),
   ])
 }
 
