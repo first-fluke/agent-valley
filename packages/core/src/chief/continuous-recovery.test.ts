@@ -115,6 +115,23 @@ describe("automatic Chief recovery eligibility", () => {
     }
   })
 
+  it("keeps a mission complete when its only unmet criterion carries a recorded operator waiver", () => {
+    // Regression: the first waived mission was approved by its final review, then its supervisor judged the
+    // completed mission unverified, restarted the worker and began verification again.
+    const mission = checkpoint()
+    const assessment = mission.finalReview?.criteria?.[0]
+    if (!assessment) throw new Error("Expected an assessed criterion")
+    assessment.passed = false
+    expect(verifiedMissionEvidence(mission)).toBe(false)
+    mission.criterionWaivers = [
+      { at: new Date(now).toISOString(), criterion: assessment.criterion, reason: "Out of reach in this mission" },
+    ]
+    assessment.waived = true
+    expect(verifiedMissionEvidence(mission)).toBe(true)
+    delete mission.criterionWaivers
+    expect(verifiedMissionEvidence(mission)).toBe(false)
+  })
+
   it("binds completion to completed reviewed tasks and the recorded final worktree fingerprint", () => {
     const mission = checkpoint()
     expect(verifiedMissionEvidence(mission)).toBe(true)

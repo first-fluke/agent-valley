@@ -69,7 +69,7 @@ function incompleteReasons(mission: Mission): string[] {
       expected.some((criterion) => assessments.filter((item) => item.criterion === criterion).length !== 1)
     ) {
       reasons.push("성공 기준별 최종 판정에 누락 또는 중복이 있습니다.")
-    } else if (assessments.some((item) => !item.passed || !item.evidence.trim())) {
+    } else if (assessments.some((item) => !(item.passed || item.waived) || !item.evidence.trim())) {
       reasons.push("통과하지 못했거나 확인 근거가 없는 성공 기준이 있습니다.")
     }
   }

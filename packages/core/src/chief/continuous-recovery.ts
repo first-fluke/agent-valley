@@ -32,7 +32,9 @@ export function verifiedMissionEvidence(mission: Mission): boolean {
     mission.verification.fingerprint !== mission.fingerprint ||
     !reviewGatesAreCurrent(mission, mission.fingerprint) ||
     mission.tasks.length !== plan.tasks.length ||
-    review.criteria?.some((criterion) => !criterion.passed || !criterion.evidence.trim()) ||
+    // A criterion the operator recorded as waived is assessed and reported as unmet without holding the
+    // mission open; validateFinalReview below rejects a waived mark that has no recorded waiver.
+    review.criteria?.some((criterion) => !(criterion.passed || criterion.waived) || !criterion.evidence.trim()) ||
     !mission.tasks.every(
       (task) =>
         task.status === "completed" &&
