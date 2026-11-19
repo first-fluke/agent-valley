@@ -21,6 +21,8 @@ export interface RunOptions {
   prompt: string
   workspacePath: string
   env?: Record<string, string>
+  /** Keep the agent's input open so operator messages reach the run without a restart, where the session supports it. */
+  liveInput?: boolean
 }
 
 export { resolveInactivityTimeoutSec, stageInactivityTimeoutSec } from "./inactivity-window"
@@ -48,6 +50,7 @@ export interface RunCallbacks {
    */
   onSpawned?: (pid: number | undefined) => void
   onOutput?: (text: string) => void
+  onToolUse?: (tool: string, args: unknown) => void
 }
 
 const MAX_OUTPUT_SNIPPET = 24
@@ -243,7 +246,10 @@ export class AgentRunnerService {
       touch()
       if (!handled) callbacks.onHeartbeat(e.timestamp)
     })
-    session.on("toolUse", () => touch())
+    session.on("toolUse", (e) => {
+      touch()
+      if (!handled) callbacks.onToolUse?.(e.tool, e.args)
+    })
     session.on("fileChange", () => touch())
     session.on("output", (e) => {
       if (handled) return
@@ -262,6 +268,7 @@ export class AgentRunnerService {
       timeout: options.timeout,
       workspacePath: options.workspacePath,
       env: options.env,
+      options: options.liveInput ? { liveInput: true } : undefined,
     }
 
     try {

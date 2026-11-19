@@ -28,6 +28,8 @@ import { OrchestratorEventEmitter } from "./event-emitter"
 import type { InterventionBus } from "./intervention-bus"
 import { InterventionBus as InterventionBusImpl } from "./intervention-bus"
 import { IssueLifecycle } from "./issue-lifecycle"
+import { recordOperatorMessage, recordThreadEvent } from "./issue-thread-recorder"
+import { IssueThreadStore } from "./issue-thread-store"
 import { OrchestratorCore } from "./orchestrator-core"
 import type { DagCachePort } from "./persistence/dag-cache-store"
 import type { RunStatePort } from "./persistence/run-state-store"
@@ -55,6 +57,8 @@ export class Orchestrator extends OrchestratorEventEmitter {
   private codeHostWebhook: WebhookReceiver<ParsedWebhookEvent> | null = null
   /** Live intervention mediator (C). Exposed for the HTTP surface. */
   public readonly intervention: InterventionBus
+  /** Per-issue operator/actor threads. Written only here; read by the HTTP surface. */
+  public readonly threads = new IssueThreadStore()
 
   constructor(
     config: Config,
@@ -82,7 +86,7 @@ export class Orchestrator extends OrchestratorEventEmitter {
       webhook,
       workspace,
       agentRunner: runner,
-      emit: (event, payload) => this.emitEvent(event, payload),
+      emit: (event, payload) => this.publishRuntimeEvent(event, payload),
       observability,
       budget,
       runStatePersistence: persistence?.runState,
@@ -100,10 +104,14 @@ export class Orchestrator extends OrchestratorEventEmitter {
         port: this.core.agentRunnerPort,
         logger,
         telemetry: {
-          onPaused: (ctx) => this.emitEvent("agent.paused", ctx as unknown as Record<string, unknown>),
-          onResumed: (ctx) => this.emitEvent("agent.resumed", ctx as unknown as Record<string, unknown>),
-          onPromptAppended: (ctx) => this.emitEvent("agent.prompt_appended", ctx as unknown as Record<string, unknown>),
-          onAborted: (ctx) => this.emitEvent("agent.aborted", ctx as unknown as Record<string, unknown>),
+          onPaused: (ctx) => this.publishRuntimeEvent("agent.paused", ctx as unknown as Record<string, unknown>),
+          onResumed: (ctx) => this.publishRuntimeEvent("agent.resumed", ctx as unknown as Record<string, unknown>),
+          // The thread keeps the full message; the event stream carries only the preview.
+          onPromptAppended: ({ message, ...ctx }) => {
+            recordOperatorMessage(this.threads, ctx, message, ctx.delivery)
+            this.emitEvent("agent.prompt_appended", ctx as unknown as Record<string, unknown>)
+          },
+          onAborted: (ctx) => this.publishRuntimeEvent("agent.aborted", ctx as unknown as Record<string, unknown>),
         },
       })
     this.core.attachIntervention(this.intervention)
@@ -121,6 +129,12 @@ export class Orchestrator extends OrchestratorEventEmitter {
       },
       () => this.lifecycle.reevaluateWaitingIssues(),
     )
+  }
+
+  /** Mirror a runtime event into its issue thread, then publish it to listeners. */
+  private publishRuntimeEvent(event: string, payload: Record<string, unknown>): void {
+    recordThreadEvent(this.threads, event, payload)
+    this.emitEvent(event, payload)
   }
 
   async start(): Promise<void> {

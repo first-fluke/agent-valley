@@ -25,6 +25,10 @@ export const ORCHESTRATOR_EVENTS = {
   agentResumed: "agent.resumed",
   agentPromptAppended: "agent.prompt_appended",
   agentAborted: "agent.aborted",
+  /** High-frequency activity for issue threads: { issueKey, issueId, attemptId, text }. */
+  agentOutput: "agent.output",
+  /** { issueKey, issueId, attemptId, tool, args } */
+  agentTool: "agent.tool",
 } as const
 
 export class OrchestratorEventEmitter {

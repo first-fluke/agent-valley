@@ -16,6 +16,7 @@ import { logger } from "../observability/logger"
 import { buildOmaGuidance, prepareOmaAttempt } from "../oma/receipt-adapter"
 import { formatBudgetBlockComment } from "./budget-service"
 import { createCompletionCallbacks } from "./completion-handler"
+import { ORCHESTRATOR_EVENTS } from "./event-emitter"
 import type { OrchestratorCore } from "./orchestrator-core"
 import type { RetryContext } from "./retry-queue"
 import { analyzeScoreInBackground } from "./scoring-service"
@@ -196,8 +197,8 @@ export class IssueLifecycle {
 
     // Register the attempt with the intervention bus so the dashboard
     // can send pause / resume / append_prompt / abort. When the session
-    // is stateless (claude / gemini-CLI), `requestRetry` re-queues the
-    // issue with the extra instruction appended.
+    // cannot take a message in place, `requestRetry` re-queues the issue
+    // with the extra instruction appended.
     const bus = core.getInterventionBus()
     if (bus) {
       bus.registerAttempt({
@@ -286,6 +287,10 @@ export class IssueLifecycle {
     // slot; this call updates it in place with the pid so crash recovery
     // can persist a real, probeable pid instead of null.
     callbacks.onSpawned = (pid) => core.registerAttempt(issue.id, attempt.id, pid)
+    // Live activity for the issue thread (dashboard drawer, `av attach`).
+    const activity = { issueKey: issue.identifier, issueId: issue.id, attemptId: attempt.id }
+    callbacks.onOutput = (text) => core.emitEvent(ORCHESTRATOR_EVENTS.agentOutput, { ...activity, text })
+    callbacks.onToolUse = (tool, args) => core.emitEvent(ORCHESTRATOR_EVENTS.agentTool, { ...activity, tool, args })
 
     if (core.isStopping || core.getAttempt(issue.id) !== attempt.id) return
     await core.agentRunner.spawn(
@@ -295,6 +300,8 @@ export class IssueLifecycle {
         timeout: core.config.agentTimeout,
         prompt,
         workspacePath: workspace.path,
+        // Tracker runs are the ones an operator follows and messages.
+        liveInput: true,
       },
       callbacks,
     )

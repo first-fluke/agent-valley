@@ -19,8 +19,10 @@
  * Supported command → session method matrix:
  *   pause         → session.pause()           (codex only; POSIX only)
  *   resume        → session.resume()          (codex only; POSIX only)
- *   append_prompt → session.sendUserMessage() native; for claude/gemini-CLI
- *                   we cancel + request a retry from the orchestrator.
+ *   append_prompt → session.sendUserMessage() native (codex; claude and
+ *                   antigravity with live input; opencode over ACP). When
+ *                   it is absent or throws, we cancel + request a retry
+ *                   from the orchestrator.
  *   abort         → service.kill(attemptId)
  */
 
@@ -37,7 +39,12 @@ type Logger = typeof loggerInstance
 export interface InterventionTelemetry {
   onPaused?(ctx: InterventionContext): void
   onResumed?(ctx: InterventionContext): void
-  onPromptAppended?(ctx: InterventionContext & { text: string }): void
+  /**
+   * `text` is a short preview for event streams; `message` is the full
+   * sanitized text. `delivery` is "restart" when the agent could not take
+   * the message mid-run and the attempt was cancelled and re-queued with it.
+   */
+  onPromptAppended?(ctx: InterventionContext & { text: string; message: string; delivery: "native" | "restart" }): void
   onAborted?(ctx: InterventionContext & { reason: string }): void
 }
 
@@ -56,7 +63,7 @@ export interface InterventionAttemptMeta {
   attemptId: string
   issueKey: string
   agentType: string
-  /** Optional hook invoked for append_prompt on stateless agents (claude / gemini-CLI). */
+  /** Optional hook invoked for append_prompt when the session cannot take the message in place. */
   requestRetry?: (text: string) => Promise<void>
   onAborted?: (reason: string) => Promise<void>
 }
@@ -245,11 +252,16 @@ export class InterventionBus {
           this.logger.info("intervention", `Appended prompt to ${meta.attemptId} (native)`, {
             agentType: meta.agentType,
           })
-          this.telemetry.onPromptAppended?.({ ...ctx, text: truncate(sanitized) })
+          this.telemetry.onPromptAppended?.({
+            ...ctx,
+            text: truncate(sanitized),
+            message: sanitized,
+            delivery: "native",
+          })
           return { ok: true }
         } catch (err) {
           // Fall through to cancel+respawn if the native path is unavailable
-          // (e.g. GeminiSession in CLI fallback mode).
+          // (e.g. a Claude run started without live input, or a closed stdin).
           this.logger.warn(
             "intervention",
             `Native sendUserMessage failed for ${meta.attemptId}; falling back to cancel+respawn`,
@@ -272,7 +284,12 @@ export class InterventionBus {
       this.logger.info("intervention", `Appended prompt via cancel+retry for ${meta.attemptId}`, {
         agentType: meta.agentType,
       })
-      this.telemetry.onPromptAppended?.({ ...ctx, text: truncate(sanitized) })
+      this.telemetry.onPromptAppended?.({
+        ...ctx,
+        text: truncate(sanitized),
+        message: sanitized,
+        delivery: "restart",
+      })
       return { ok: true }
     }
 
