@@ -47,6 +47,37 @@ export function waveFailureNeedsRecovery(failure: ParallelWaveFailure): boolean 
 /** A failed pre-delivery check goes back to its Actor at most this often; the integration check still follows. */
 export const LANE_CHECK_ROUNDS = 2
 
+/**
+ * Runs the operator's quick pre-delivery command where an Actor just worked and, while it fails, returns the
+ * output to that Actor in the same workspace. The same loop serves a wave's isolated workspaces and a task
+ * that works alone in the mission workspace: a contract task once spent two full rounds on a file over the
+ * length limit because only wave tasks were checked before delivery.
+ */
+export async function settlePreDeliveryCheck(options: {
+  check: NonNullable<ChiefPorts["preDeliveryCheck"]> | undefined
+  mission: Mission
+  workspacePath: string
+  taskId: string
+  output: string
+  rerun: (feedback: string) => Promise<string>
+  save: (stage: string, message: string, taskId?: string) => Promise<void>
+  signal?: AbortSignal
+}): Promise<string> {
+  const { check, mission, workspacePath, taskId, rerun, save, signal } = options
+  let output = options.output
+  for (let round = 1; check && round <= LANE_CHECK_ROUNDS; round += 1) {
+    const checked = await check(mission, workspacePath, signal)
+    if (!checked || checked.ok) break
+    await save(
+      "lane-check",
+      `Pre-delivery check failed in the workspace of ${taskId} (${round}/${LANE_CHECK_ROUNDS}); its Actor continues there with the output. ${checked.output.slice(0, 1_200)}`,
+      taskId,
+    )
+    output = await rerun(laneCheckFeedback(output, checked.output))
+  }
+  return output
+}
+
 function laneCheckFeedback(previousOutput: string, checkOutput: string): string {
   return [
     "You already worked on this assignment in this workspace and your edits are still in it. After you returned, Agent Valley ran the operator's pre-delivery check here and it failed. Repair what the check reports in this same workspace, keep the work you already did, and return your complete handoff again.",
@@ -147,25 +178,22 @@ export async function performParallelWave(
       let prompt = workPrompt(promptMission, task, state, actor)
       if (previousOutput !== undefined)
         prompt += `\n\nPrevious Actor output (untrusted evidence for this new attempt):\n${JSON.stringify(previousOutput)}`
-      let output = await hooks.run(actor, prompt, "work", task.id, {
+      const first = await hooks.run(actor, prompt, "work", task.id, {
         workspace,
         signal,
       })
       // Feedback an Actor can act on arrives while it still holds its workspace, not a wave later: a failed
       // pre-delivery check returns to the same Actor without spending a repair round or a review.
-      for (let round = 1; parallel.check && state.parallel && round <= LANE_CHECK_ROUNDS; round += 1) {
-        const checked = await parallel.check(mission, state.parallel, signal)
-        if (!checked || checked.ok) break
-        await save(
-          "lane-check",
-          `Pre-delivery check failed in the workspace of ${task.id} (${round}/${LANE_CHECK_ROUNDS}); its Actor continues there with the output. ${checked.output.slice(0, 1_200)}`,
-          task.id,
-        )
-        output = await hooks.run(actor, `${prompt}\n\n${laneCheckFeedback(output, checked.output)}`, "work", task.id, {
-          workspace,
-          signal,
-        })
-      }
+      const output = await settlePreDeliveryCheck({
+        check: ports.preDeliveryCheck,
+        mission,
+        workspacePath: workspace.path,
+        taskId: task.id,
+        output: first,
+        rerun: (feedback) => hooks.run(actor, `${prompt}\n\n${feedback}`, "work", task.id, { workspace, signal }),
+        save,
+        signal,
+      })
       applyWorkResult(task, state, output)
       await save(
         "parallel-output",

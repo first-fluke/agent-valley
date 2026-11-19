@@ -1,7 +1,12 @@
 import { refreshActorCooldown } from "./actor-availability"
 import { actorRouteHealth } from "./actor-health"
 import { recordIntegrationCheck } from "./coordinator-integration"
-import { ParallelTaskReviewRejected, performParallelWave, waveFailureNeedsRecovery } from "./coordinator-parallel"
+import {
+  ParallelTaskReviewRejected,
+  performParallelWave,
+  settlePreDeliveryCheck,
+  waveFailureNeedsRecovery,
+} from "./coordinator-parallel"
 import { applyTaskReviewResult, applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
 import { MissionPause, pauseForFailure } from "./execution"
@@ -125,12 +130,22 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
             "unknown-effect",
           )
         if (!awaitingReview && (task.effectScope !== "external" || state.effectState !== "completed")) {
-          const output = await run(
-            persona(task.personaId),
-            workPrompt(mission, task, state, persona(task.personaId)),
-            "work",
-            task.id,
-          )
+          const prompt = workPrompt(mission, task, state, persona(task.personaId))
+          const first = await run(persona(task.personaId), prompt, "work", task.id)
+          // A task that works alone edits the mission workspace; an external effect is never repeated.
+          const output =
+            task.effectScope === "external"
+              ? first
+              : await settlePreDeliveryCheck({
+                  check: ports.preDeliveryCheck,
+                  mission,
+                  workspacePath: mission.workspace.path,
+                  taskId: task.id,
+                  output: first,
+                  rerun: (feedback) => run(persona(task.personaId), `${prompt}\n\n${feedback}`, "work", task.id),
+                  save,
+                  signal: ports.signal,
+                })
           applyWorkResult(task, state, output)
         }
         if (awaitingReview && state.parallel) {

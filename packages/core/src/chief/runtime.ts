@@ -89,6 +89,12 @@ export class ChiefRuntime {
               ),
           }
         : {}),
+      ...(laneCheckCommand()
+        ? {
+            preDeliveryCheck: (mission: Mission, workspacePath: string, signal?: AbortSignal) =>
+              runLaneCheck(mission, workspacePath, signal ?? this.signal),
+          }
+        : {}),
       runAgent: (persona, prompt, mission, stage, context) => this.runAgent(persona, prompt, mission, stage, context),
       parallel: {
         prepare: async (mission, taskId, attempt) => {
@@ -104,12 +110,6 @@ export class ChiefRuntime {
         dispose: async (record) => {
           await disposeTaskWorktree(record)
         },
-        ...(laneCheckCommand()
-          ? {
-              check: (mission: Mission, record: { path: string }, signal?: AbortSignal) =>
-                runLaneCheck(mission, record.path, signal ?? this.signal),
-            }
-          : {}),
       },
       releaseStorage: async (mission) => {
         await releaseAppliedTaskWorktrees(mission)

@@ -136,6 +136,16 @@ export interface ChiefPorts {
    * evidence for task reviewers, never a completion verdict. Undefined when there is nothing to run.
    */
   integrationCheck?(mission: Mission): Promise<{ ok: boolean; output: string } | undefined>
+  /**
+   * Run the operator's quick pre-delivery command in the workspace an Actor just returned from (its isolated
+   * wave workspace or the mission workspace), before the work waits for an integration check and a review.
+   * Resolves to undefined when no command is configured.
+   */
+  preDeliveryCheck?(
+    mission: Mission,
+    workspacePath: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; output: string } | undefined>
   save(mission: Mission): Promise<void>
   fingerprint(mission: Mission): Promise<string>
   refreshOrganization?(mission: Mission): Promise<OrganizationContext>
@@ -150,15 +160,6 @@ export interface ChiefPorts {
       attempt: number,
     ): Promise<import("./parallel-contract").TaskWorktreeRecord>
     integrate(mission: Mission, record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
-    /**
-     * Run the operator's quick pre-delivery command in an Actor's isolated workspace, before its work waits
-     * for the wave, the integration check and a review. Undefined when no command is configured.
-     */
-    check?(
-      mission: Mission,
-      record: import("./parallel-contract").TaskWorktreeRecord,
-      signal?: AbortSignal,
-    ): Promise<{ ok: boolean; output: string } | undefined>
     dispose(record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
   }
   /** Release disposable storage (applied Actor repositories, ignored build output) after the mission completes. */

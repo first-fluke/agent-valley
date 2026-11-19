@@ -4,6 +4,7 @@ import {
   ParallelTaskReviewRejected,
   type ParallelWaveHooks,
   performParallelWave,
+  settlePreDeliveryCheck,
   waveFailureNeedsRecovery,
 } from "./coordinator-parallel"
 import { fixture } from "./goal-supervision.fixture"
@@ -24,7 +25,7 @@ function record(mission: Mission, taskId: string, attempt = 1): TaskWorktreeReco
   }
 }
 
-function setup(check: NonNullable<NonNullable<ChiefPorts["parallel"]>["check"]>) {
+function setup(check: NonNullable<ChiefPorts["preDeliveryCheck"]>) {
   const { mission, ports } = fixture()
   const wave: ChiefTask[] = ["a", "b"].map((id) => ({
     id,
@@ -43,8 +44,8 @@ function setup(check: NonNullable<NonNullable<ChiefPorts["parallel"]>["check"]>)
       events.push(`integrate:${workspace.taskId}`)
     }),
     dispose: vi.fn(async () => {}),
-    check,
   }
+  ports.preDeliveryCheck = check
   const prompts: Record<string, string[]> = { a: [], b: [] }
   const hooks: ParallelWaveHooks = {
     run: vi.fn(async (_actor, prompt, _stage, taskId) => {
@@ -70,8 +71,8 @@ describe("pre-delivery check in an Actor's workspace", () => {
   // mission went to it.
   it("returns a failed check to the same Actor before integration and delivers its repaired output", async () => {
     const failed = new Set(["a"])
-    const check = vi.fn(async (_mission: Mission, workspace: TaskWorktreeRecord) => {
-      if (!failed.delete(workspace.taskId)) return { ok: true, output: "PASS" }
+    const check = vi.fn(async (_mission: Mission, workspacePath: string) => {
+      if (!failed.delete(workspacePath.replace("/private/actor-", ""))) return { ok: true, output: "PASS" }
       return { ok: false, output: "FAIL: src/long.rs has 554 lines" }
     })
     const { mission, ports, wave, hooks, events, prompts } = setup(check)
@@ -102,6 +103,58 @@ describe("pre-delivery check in an Actor's workspace", () => {
     expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
     expect(prompts.a).toHaveLength(1)
     expect(check).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("pre-delivery check for a task that works alone in the mission workspace", () => {
+  // Regression: a contract task that ran alone was rejected twice in one mission, each time after a
+  // twenty-minute integration check, once for two files over the length limit: only wave tasks were checked.
+  it("returns a failed check to the Actor with the output and the previous handoff, then delivers", async () => {
+    const { mission } = fixture()
+    const outputs = ["first handoff", "repaired handoff"]
+    const feedback: string[] = []
+    const saved: string[] = []
+    const check = vi
+      .fn<NonNullable<ChiefPorts["preDeliveryCheck"]>>()
+      .mockResolvedValueOnce({ ok: false, output: "FAIL: connection.rs has 528 lines" })
+      .mockResolvedValueOnce({ ok: true, output: "PASS" })
+    const output = await settlePreDeliveryCheck({
+      check,
+      mission,
+      workspacePath: mission.workspace.path,
+      taskId: "contract",
+      output: outputs[0] as string,
+      rerun: async (text) => {
+        feedback.push(text)
+        return outputs[1] as string
+      },
+      save: async (stage, _message, taskId) => {
+        saved.push(`${stage}:${taskId}`)
+      },
+    })
+    expect(output).toBe("repaired handoff")
+    expect(check).toHaveBeenCalledTimes(2)
+    expect(check).toHaveBeenCalledWith(mission, mission.workspace.path, undefined)
+    expect(feedback).toHaveLength(1)
+    expect(feedback[0]).toContain("FAIL: connection.rs has 528 lines")
+    expect(feedback[0]).toContain("first handoff")
+    expect(saved).toEqual(["lane-check:contract"])
+  })
+
+  it("delivers the first output when no check is configured", async () => {
+    const { mission } = fixture()
+    const rerun = vi.fn(async () => "never")
+    const output = await settlePreDeliveryCheck({
+      check: undefined,
+      mission,
+      workspacePath: mission.workspace.path,
+      taskId: "contract",
+      output: "first handoff",
+      rerun,
+      save: async () => {},
+    })
+    expect(output).toBe("first handoff")
+    expect(rerun).not.toHaveBeenCalled()
   })
 })
 
