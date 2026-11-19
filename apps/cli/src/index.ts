@@ -20,6 +20,7 @@ import { program } from "commander"
 import pc from "picocolors"
 import { registerA2aCommands } from "./a2a"
 import { registerAgentClientCommands } from "./agent-client-commands"
+import { registerAttachCommand } from "./attach"
 import { registerChiefCommands } from "./chief-commands"
 import { registerOrganizationCommands } from "./chief-organization"
 import { watchConfig } from "./config-watch"
@@ -415,7 +416,7 @@ program
         }
 
         console.log()
-        console.log(pc.dim("  Press Ctrl+C to exit"))
+        console.log(pc.dim("  av attach <issue> follows and messages an actor  |  Ctrl+C to exit"))
       } catch (error) {
         process.stdout.write("\x1b[2J\x1b[H")
         console.log(pc.red(error instanceof Error ? error.message : "Server not responding. Start with: av up"))
@@ -438,6 +439,8 @@ program
     // Keep process alive
     await new Promise(() => {})
   })
+
+registerAttachCommand(program, { root: ROOT, pidFile: PID_FILE })
 
 // ── login ────────────────────────────────────────────────────────────────────
 program

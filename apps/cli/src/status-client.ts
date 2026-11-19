@@ -1,10 +1,15 @@
 import { dashboardTargetHost } from "./webhook-proxy"
 
-export async function readStatus(port: string): Promise<Record<string, unknown>> {
-  const token = process.env.SYMPHONY_DASHBOARD_TOKEN
+/** Absolute URL of a dashboard API path on the locally running dashboard. */
+export function dashboardUrl(port: string, path: string): string {
   const targetHost = dashboardTargetHost()
   const host = targetHost.includes(":") ? `[${targetHost}]` : targetHost
-  const response = await fetch(`http://${host}:${port}/api/status`, {
+  return `http://${host}:${port}${path}`
+}
+
+export async function readStatus(port: string): Promise<Record<string, unknown>> {
+  const token = process.env.SYMPHONY_DASHBOARD_TOKEN
+  const response = await fetch(dashboardUrl(port, "/api/status"), {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
   if (!response.ok) {
