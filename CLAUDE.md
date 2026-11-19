@@ -45,7 +45,7 @@ Tests run via `bun test` (vitest). CI runs `validate.sh` + tests.
 **Clean architecture layers — dependencies point downward only:**
 
 ```
-Presentation   apps/dashboard/src/app/api/   Next.js Route Handlers (/api/webhook, /api/status, /api/events, /api/health)
+Presentation   apps/dashboard/src/app/api/   Next.js Route Handlers (/api/webhook, /api/status, /api/events, /api/thread, /api/intervention, /api/health)
                apps/cli/src/                 commander-based `av` CLI
      ↓
 Application    packages/core/src/orchestrator/   Orchestrator (state machine), AgentRunnerService, RetryQueue, DagScheduler

@@ -50,22 +50,78 @@ consumes the adapter's static capability table so the dashboard can
 pre-disable unsupported intervention controls:
 
 ```
-claude       → ["append_prompt", "abort"]               (stateless; pause/resume absent)
+claude       → ["append_prompt", "abort"]               (live stdin on tracker runs; pause/resume absent)
 codex        → ["pause", "resume", "append_prompt", "abort"]
 qwen         → ["abort"]
 dsh          → ["abort"]
 zcode        → ["abort"]
-antigravity  → ["append_prompt", "abort"] conservatively (stateless)
+antigravity  → ["append_prompt", "abort"]               (stream-json stdin on tracker runs)
 cursor       → ["append_prompt", "abort"] conservatively (stateless)
 grok         → ["append_prompt", "abort"] conservatively (stateless)
 kimi         → ["append_prompt", "abort"] conservatively (stateless)
-opencode     → ["append_prompt", "abort"] conservatively (stateless)
+opencode     → ["append_prompt", "abort"]               (ACP session on tracker runs)
 ```
 
 `send()` rejects with `InterventionUnsupportedError` when the command is
-outside the advertised set. For `append_prompt` on a stateless agent
-(Claude), the upper-layer `InterventionBus` cancels the session and
-re-queues the issue with the appended instruction.
+outside the advertised set. Codex and Claude take `append_prompt` in the
+running session. Claude does so on tracker runs, which start it with
+`--input-format stream-json` and keep stdin open (`RunOptions.liveInput`):
+the message is read at the next tool boundary, or answered in a follow-up
+turn when it arrives after the current turn ended, and the run completes
+only after that turn. For the other one-shot agents, and whenever the
+native path refuses the message, the upper-layer `InterventionBus` cancels
+the session and re-queues the issue with the appended instruction.
+
+### Antigravity live input
+
+Antigravity tracker runs start `agy --print= --input-format stream-json
+--output-format stream-json` and keep stdin open (`sessions/agy-live-run.ts`).
+A message written while a turn runs is queued by agy and answered in a
+follow-up turn of the same conversation, so the operator's message is read
+when the current turn ends, not inside it; the issue thread says so. The run
+completes after the last such turn. This mode is used instead of `agy acp`
+because its `result` event waits for the turn's background commands, while the
+ACP server can end a turn with a command still running. An agy that predates
+stream-json input exits with a usage error and the run falls back to the
+one-shot `agy -p`.
+
+### ACP sessions
+
+OpenCode tracker runs start `opencode acp` and drive it over the
+[Agent Client Protocol](https://agentclientprotocol.com) with
+`@agentclientprotocol/sdk` (`sessions/acp-run.ts`, `sessions/acp-session.ts`).
+The process is still spawned through the OS sandbox; the SDK only speaks
+JSON-RPC on its stdio. Agent Valley declares no client file-system or terminal
+capability, so the agent keeps using its own tools, and it approves permission
+requests the way the one-shot `--auto` flag does.
+
+ACP v1 is turn-based and OpenCode refuses a second prompt while one is active,
+so `append_prompt` sends `session/cancel`, waits for the turn to end as
+`cancelled`, and prompts again in the same session with the operator message
+and an instruction to continue interrupted work. The run completes after the
+last such turn. A CLI that does not answer the ACP handshake (an older build)
+falls back to the one-shot `opencode run`; an agent that answers with an error
+(credentials, model) fails the run instead. Any CLI with an ACP server can use
+the same path by calling `executeOverAcp()` with its launch arguments.
+
+### Issue thread
+
+Tracker-driven runs mirror their activity into a per-issue thread
+(`domain/issue-thread.ts`, `orchestrator/issue-thread-store.ts`) that the
+dashboard drawer and `av attach` follow through `GET /api/thread?issue=<key>`.
+`IssueLifecycle` publishes `agent.output` and `agent.tool` for each session
+`output` / `toolUse` event; the Orchestrator facade records those, the
+lifecycle events (`agent.start` / `done` / `failed`) and intervention results
+as thread entries of kind `output`, `tool`, `operator` or `system`.
+
+- The thread is keyed by issue, not attempt, so it survives a restart that
+  delivers an operator message; the entry after the message states the restart.
+- Output chunks from one attempt that arrive within one second extend the same
+  entry (token streaming); a longer gap starts a new entry.
+- The store is in-memory and bounded: 400 entries per issue, 8,000 characters
+  per entry, 50 issues, least recently used first to go. Watched threads stay.
+- The Orchestrator facade is the only writer. `agent.output` and `agent.tool`
+  are not forwarded to the team ledger relay.
 
 `SpawnInput` accepts a caller-owned `attempt`, `model`, explicitly allowed `env`,
 `signal` and diagnostic `stage`. The caller persists the attempt before dispatch.

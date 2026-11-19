@@ -80,6 +80,7 @@ bun av up                 # 대시보드 빌드 후 백그라운드 데몬으로
 bun av down               # 백그라운드 데몬 중지
 bun av status             # Orchestrator 상태 조회
 bun av top                # 실시간 Actor 상태 모니터
+bun av attach [issue]     # Actor의 라이브 스레드 확인, 메시지 전송·일시정지·재개·중단
 bun av logs               # 대시보드 로그 조회 (-n으로 라인 수 지정)
 bun av login              # AV 사용자 팀 토큰을 검증하고 로컬 로그인 저장
 bun av logout             # 팀 로그아웃
@@ -373,6 +374,7 @@ Qwen·DSH·ZCode는 네이티브 단발 실행과 `abort`를 지원합니다. �
 | `/api/webhook/github` | POST   | GitHub 웹훅 수신기 (HMAC-SHA256 검증)                            |
 | `/api/events`         | GET    | 실시간 대시보드 업데이트를 위한 SSE 스트림                       |
 | `/api/status`         | GET    | Orchestrator 상태 JSON 스냅샷                                    |
+| `/api/thread`         | GET    | 이슈 스레드 SSE 스트림 (`?issue=<key>`). 상태 인증 적용          |
 | `/api/health`         | GET    | 헬스 체크 (Orchestrator 초기화 실패 또는 중지 시 503)            |
 | `/api/intervention`   | POST   | 라이브 Actor 제어. 기본은 로컬 접근, 토큰 설정 시 인증 필요      |
 | `/api/metrics`        | GET    | Prometheus 메트릭 (`observability.prometheus.enabled` 시 활성화) |
@@ -391,7 +393,7 @@ Linear 외에 GitHub Issues로도 오케스트레이터를 구동할 수 있습�
 
 ### 코멘트 전달
 
-사용 중인 트래커 설정(`github:` 또는 `linear:`)에 `comment_relay.enabled: true` 를 넣으면, Actor가 실행 중인 이슈에 새로 달린 코멘트가 그 Actor에게 추가 지시로 전달됩니다. GitHub은 저장소 소유자·멤버·협업자의 코멘트를 전달하며 webhook이 **Issue comments** 이벤트를 받아야 합니다. Linear는 워크스페이스 사용자(멤버와 게스트)의 코멘트를 전달하며 **Comment** 이벤트가 필요합니다. Codex는 실행 중인 세션에서 받고, Claude처럼 상태를 유지하지 않는 Actor는 코멘트를 붙여 시도를 다시 시작합니다. Agent Valley 자신의 코멘트(숨은 표식이나 `Symphony:` 머리말), 봇과 연동 앱, 외부 기여자, `ignore_authors`, 수정·삭제된 코멘트, PR 코멘트는 전달하지 않습니다. `ignore_authors` 에는 GitHub 로그인이나 Linear 이메일·사용자 ID·이름을 넣을 수 있으며, Actor가 사람의 토큰으로 코멘트를 남긴다면 그 계정을 넣으세요.
+사용 중인 트래커 설정(`github:` 또는 `linear:`)에 `comment_relay.enabled: true` 를 넣으면, Actor가 실행 중인 이슈에 새로 달린 코멘트가 그 Actor에게 추가 지시로 전달됩니다. GitHub은 저장소 소유자·멤버·협업자의 코멘트를 전달하며 webhook이 **Issue comments** 이벤트를 받아야 합니다. Linear는 워크스페이스 사용자(멤버와 게스트)의 코멘트를 전달하며 **Comment** 이벤트가 필요합니다. Codex, Claude, OpenCode, Antigravity는 실행 중인 세션에서 받고, 그 밖의 단발 실행 Actor는 코멘트를 붙여 시도를 다시 시작합니다. Agent Valley 자신의 코멘트(숨은 표식이나 `Symphony:` 머리말), 봇과 연동 앱, 외부 기여자, `ignore_authors`, 수정·삭제된 코멘트, PR 코멘트는 전달하지 않습니다. `ignore_authors` 에는 GitHub 로그인이나 Linear 이메일·사용자 ID·이름을 넣을 수 있으며, Actor가 사람의 토큰으로 코멘트를 남긴다면 그 계정을 넣으세요.
 
 ### PR 리뷰 대응
 
@@ -413,8 +415,15 @@ OpenTelemetry OTLP HTTP 트레이스와 Prometheus 메트릭이 내장돼 있으
 대시보드에서 실행 중인 Actor를 제어할 수 있습니다 (`POST /api/intervention`):
 
 - `pause` / `resume` — Codex 네이티브 (JSON-RPC)
-- `append_prompt` — Codex / Antigravity ACP 는 네이티브, stateless Claude 는 cancel + 재스폰
+- `append_prompt` — Codex / Antigravity ACP, Claude(다음 도구 호출 시점에 메시지를 읽음), OpenCode(ACP 세션이 진행 중인 단계를 멈추고 메시지를 읽은 뒤 이어서 작업), Antigravity(현재 턴이 끝난 뒤 후속 턴으로 메시지에 답함)는 네이티브, 그 밖의 단발 실행 Actor 는 cancel + 재스폰
 - `abort` — 세션 강제 종료
+
+이슈마다 라이브 **스레드**가 있습니다. Actor의 출력, 툴 호출, 운영자가 보낸 메시지, 그리고 시작·일시정지·실패 같은 진행 표시가 한 흐름으로 쌓입니다. 두 곳에서 지켜보며 답할 수 있습니다.
+
+- **대시보드** — Active Actors에서 Actor를 선택합니다. 드로어가 제어 버튼 위에 스레드를 보여 줍니다. Enter로 메시지를 보내고 Shift+Enter로 줄을 바꿉니다.
+- **터미널** — `bun av attach [issue]`가 스레드를 스트리밍합니다. 한 줄을 입력하면 Actor에게 메시지로 전달되고, `/pause`, `/resume`, `/abort [사유]`, `/quit`을 쓸 수 있습니다. 실행 중인 Actor가 하나뿐이면 이슈 키를 생략할 수 있습니다. `--no-input`은 지켜보기만 하고, `-n`은 처음에 보여 줄 이전 항목 수를 정합니다.
+
+스레드는 이슈 단위라서 시도가 바뀌어도 이어집니다. 실행 도중 메시지를 받을 수 없는 Actor가 메시지를 붙여 다시 시작하면, 스레드에 그 사실이 표시되고 계속 이어집니다. 스레드는 메모리에만 보관하며(최근 이슈 50개, 이슈당 최신 400개 항목) 대시보드를 재시작하면 지워집니다. `GET /api/thread?issue=<key>`가 `/api/status`와 같은 접근 규칙으로 SSE를 제공합니다. 대시보드가 토큰을 요구하면 `av attach`는 환경 변수 `SYMPHONY_DASHBOARD_TOKEN`과 `SYMPHONY_INTERVENTION_TOKEN`을 사용합니다.
 
 제어 명령은 `InterventionBus`를 통과합니다. 인터벤션 토큰이 없으면 로컬 요청만 허용합니다. `SYMPHONY_INTERVENTION_TOKEN`을 설정하면 로컬·원격 요청 모두 일치하는 bearer 토큰 또는 브라우저 세션이 필요합니다. 토큰 설정 시 원격 플래그는 필요하지 않으며, 토큰 없이 `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1`만 설정하면 모든 요청을 거부합니다. [대시보드 접근 설정](./docs/guides/environment-setup.md#dashboard-and-webhook-access)을 참고하세요.
 

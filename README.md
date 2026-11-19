@@ -89,6 +89,7 @@ bun av up                 # Build dashboard, then start background daemon
 bun av down               # Stop background daemon
 bun av status             # Query orchestrator status
 bun av top                # Live actor status monitor
+bun av attach [issue]     # Follow an actor's live thread; message, pause, resume or abort it
 bun av logs               # Tail dashboard logs (-n for line count)
 bun av login              # Verify and save an opaque AV user team token
 bun av logout             # Logout from team
@@ -388,6 +389,7 @@ PixiJS-rendered office scene showing real-time actor status:
 | `/api/webhook/github` | POST   | GitHub webhook receiver (HMAC-SHA256 verified)                                     |
 | `/api/events`         | GET    | SSE stream for real-time dashboard updates                                         |
 | `/api/status`         | GET    | JSON orchestrator status snapshot                                                  |
+| `/api/thread`         | GET    | SSE stream of one issue thread (`?issue=<key>`); dashboard status authentication   |
 | `/api/health`         | GET    | Health check (503 if the orchestrator is unavailable or stopped)                   |
 | `/api/intervention`   | POST   | Live actor intervention; local by default, token-authenticated when configured     |
 | `/api/metrics`        | GET    | Prometheus-format metrics (enabled via `observability.prometheus.enabled`)         |
@@ -406,7 +408,7 @@ Alongside Linear, GitHub Issues can drive the orchestrator. Set `tracker.kind: g
 
 ### Comment relay
 
-With `comment_relay.enabled: true` under the active tracker (`github:` or `linear:`), a new comment on an issue whose actor is running reaches that actor as an added instruction. GitHub relays repository owners, members and collaborators and needs the webhook subscribed to **Issue comments**; Linear relays workspace users (members and guests) and needs **Comment** events. Codex receives the comment in the running session; stateless actors such as Claude restart the attempt with it. Agent Valley's own comments (its hidden marker or the `Symphony:` prefix), bots and integrations, outside contributors, `ignore_authors`, edited or deleted comments and pull request comments are not relayed. `ignore_authors` accepts GitHub logins and Linear emails, user ids or names; add the account actors comment with when it is a person's token.
+With `comment_relay.enabled: true` under the active tracker (`github:` or `linear:`), a new comment on an issue whose actor is running reaches that actor as an added instruction. GitHub relays repository owners, members and collaborators and needs the webhook subscribed to **Issue comments**; Linear relays workspace users (members and guests) and needs **Comment** events. Codex, Claude, OpenCode and Antigravity receive the comment in the running session; other one-shot actors restart the attempt with it. Agent Valley's own comments (its hidden marker or the `Symphony:` prefix), bots and integrations, outside contributors, `ignore_authors`, edited or deleted comments and pull request comments are not relayed. `ignore_authors` accepts GitHub logins and Linear emails, user ids or names; add the account actors comment with when it is a person's token.
 
 ### Pull request review follow-up
 
@@ -428,8 +430,15 @@ Per-issue and per-day token / cost caps prevent runaway actors. Budgets are eval
 Mid-run control from the dashboard via `POST /api/intervention`:
 
 - `pause` / `resume` — Codex native (JSON-RPC)
-- `append_prompt` — native on Codex / Antigravity ACP; cancel + respawn on stateless Claude
+- `append_prompt` — native on Codex / Antigravity ACP, on Claude (reads the message at its next tool step), on OpenCode (its ACP session interrupts the current step, reads the message and carries on) and on Antigravity (answers the message in a follow-up turn once the current one ends); cancel + respawn on the other one-shot actors
 - `abort` — force-kill the session
+
+Each issue has a live **thread**: the actor's output, its tool calls, the messages operators sent and lifecycle markers such as started, paused or failed. Follow it and reply in either place:
+
+- **Dashboard** — select an actor under Active Actors. The drawer shows the thread above the controls; Enter sends a message, Shift+Enter adds a line.
+- **Terminal** — `bun av attach [issue]` streams the thread. Type a line to message the actor, or use `/pause`, `/resume`, `/abort [reason]`, `/quit`. With one actor running the issue key is optional; `--no-input` only follows, and `-n` sets how many earlier entries are shown.
+
+The thread belongs to the issue, so it continues across attempts: when an actor that cannot take a message mid-run restarts with your message, the thread says so and carries on. Threads are kept in memory (the latest 400 entries for each of the 50 most recent issues) and are cleared when the dashboard restarts. `GET /api/thread?issue=<key>` serves them as SSE under the same access rules as `/api/status`; `av attach` reads `SYMPHONY_DASHBOARD_TOKEN` and `SYMPHONY_INTERVENTION_TOKEN` from its environment when the dashboard requires them.
 
 Commands flow through `InterventionBus`. Without a configured intervention token, only local requests are accepted. Setting `SYMPHONY_INTERVENTION_TOKEN` requires a matching bearer token or browser session on every request, including local requests. The remote flag is not needed when a token is configured; setting `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` without a token rejects all requests. See [dashboard access](./docs/guides/environment-setup.md#dashboard-and-webhook-access).
 

@@ -205,21 +205,30 @@ guarantee it can't.
 
 ## 4. Dashboard / Intervention Endpoint Auth (v0.2+)
 
-`/api/status`, `/api/events`, and `/api/intervention` (dashboard-auth.ts)
-are served on a loopback-bound dashboard by default. Public tunnels terminate
+`/api/status`, `/api/events`, `/api/thread`, and `/api/intervention`
+(dashboard-auth.ts) are served on a loopback-bound dashboard by default. Public tunnels terminate
 at a separate webhook-only listener. A `Host` header is attacker-controlled;
 the route's local-request heuristic is a convenience check, not network
 authentication. Configured tokens are enforced for all requests, including
 those with a forged localhost `Host`. Browser login exchanges tokens for
 HttpOnly, SameSite cookies; intervention cookie requests require a matching
-`Origin`. CLI status/top use Bearer authentication:
+`Origin`. CLI status/top/attach use Bearer authentication:
 
-| Env var                                | Endpoint(s)                  | Effect                                                                                                              |
-| -------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `SYMPHONY_DASHBOARD_TOKEN`             | `/api/status`, `/api/events` | When set, every request needs a matching Bearer token or browser session cookie.                                    |
-| `SYMPHONY_ALLOW_REMOTE_STATUS=1`       | `/api/status`, `/api/events` | Requires `SYMPHONY_DASHBOARD_TOKEN`; without it, **all** requests (including local ones) are rejected.              |
-| `SYMPHONY_INTERVENTION_TOKEN`          | `/api/intervention`          | Same pattern as `SYMPHONY_DASHBOARD_TOKEN`, scoped to the intervention endpoint (pause/resume/append_prompt/abort). |
-| `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | `/api/intervention`          | Same pattern as `SYMPHONY_ALLOW_REMOTE_STATUS`, fail-closed without `SYMPHONY_INTERVENTION_TOKEN`.                  |
+| Env var                                | Endpoint(s)                                 | Effect                                                                                                              |
+| -------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `SYMPHONY_DASHBOARD_TOKEN`             | `/api/status`, `/api/events`, `/api/thread` | When set, every request needs a matching Bearer token or browser session cookie.                                    |
+| `SYMPHONY_ALLOW_REMOTE_STATUS=1`       | `/api/status`, `/api/events`, `/api/thread` | Requires `SYMPHONY_DASHBOARD_TOKEN`; without it, **all** requests (including local ones) are rejected.              |
+| `SYMPHONY_INTERVENTION_TOKEN`          | `/api/intervention`                         | Same pattern as `SYMPHONY_DASHBOARD_TOKEN`, scoped to the intervention endpoint (pause/resume/append_prompt/abort). |
+| `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | `/api/intervention`                         | Same pattern as `SYMPHONY_ALLOW_REMOTE_STATUS`, fail-closed without `SYMPHONY_INTERVENTION_TOKEN`.                  |
+
+`/api/thread` streams an issue's thread: actor output, tool-call summaries,
+and operator messages. It is as sensitive as the actor's own output, which
+can quote repository content, so it shares the status scope and is never
+forwarded to the team ledger relay. Threads live only in the orchestrator's
+memory (bounded per issue and in total) and are dropped on restart. Actor
+output is untrusted text: the dashboard renders it as text nodes, and
+`av attach` strips terminal escape sequences and control characters before
+printing (`apps/cli/src/attach-render.ts`).
 
 Policy order per request: (1) remote flag without its token rejects every
 request; (2) a configured token requires valid Bearer or signed cookie;

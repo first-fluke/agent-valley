@@ -167,7 +167,7 @@ Remote dashboard access also needs a reachable bind address and these settings:
 
 | Env var                                | Effect                                                                                                                                                                                        |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SYMPHONY_DASHBOARD_TOKEN=<token>`     | Require a bearer token or browser sign-in for status, events, metrics and team data, including local requests. CLI status/top send the token from their environment.                          |
+| `SYMPHONY_DASHBOARD_TOKEN=<token>`     | Require a bearer token or browser sign-in for status, events, issue threads, metrics and team data, including local requests. CLI status/top/attach send the token from their environment.    |
 | `SYMPHONY_ALLOW_REMOTE_STATUS=1`       | Requires `SYMPHONY_DASHBOARD_TOKEN` even for local requests; without it, every request is rejected.                                                                                           |
 | `SYMPHONY_INTERVENTION_TOKEN=<token>`  | Require a bearer token or browser session for all intervention requests. A valid token authorizes local or remote requests without a remote flag. Use a separate token from the status token. |
 | `SYMPHONY_ALLOW_REMOTE_INTERVENTION=1` | Requires a configured intervention token; without it, every intervention request is rejected. This flag alone does not grant access.                                                          |
@@ -181,6 +181,12 @@ only local requests are accepted. The browser signs in with configured
 tokens at the dashboard and receives short-lived HttpOnly, SameSite cookies.
 Browser mutation requests must include a matching `Origin` header. Do not
 place shared secrets in `NEXT_PUBLIC_*` variables.
+
+`av attach [issue]` follows an issue's live thread from `/api/thread` and
+sends what you type to `/api/intervention`. When the dashboard requires
+tokens, export `SYMPHONY_DASHBOARD_TOKEN` (to read the thread) and
+`SYMPHONY_INTERVENTION_TOKEN` (to message, pause, resume or abort) in the
+shell that runs it.
 
 `/api/webhook` and `/api/webhook/github` verify tracker signatures after
 the webhook-only listener forwards them.
