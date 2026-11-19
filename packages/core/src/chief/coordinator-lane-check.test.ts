@@ -182,3 +182,47 @@ describe("routing a wave failure to repair or to Chief recovery", () => {
     )
   })
 })
+
+describe("a wave with more ready tasks than Actor slots", () => {
+  // Regression: four tasks were ready with three slots; the fourth waited through its siblings' Actor runs,
+  // integration check, reviews and repairs, and would then have cost a wave of its own.
+  it("runs every ready task in the same wave, at most the limit at once, with one integration", async () => {
+    const { mission, ports, hooks, events } = setup(vi.fn(async () => ({ ok: true, output: "PASS" })))
+    const wave: ChiefTask[] = ["a", "b", "c", "d"].map((id) => ({
+      id,
+      title: id,
+      personaId: "worker",
+      instructions: `Work ${id}`,
+      acceptance: [`Verified ${id}`],
+      dependencies: [],
+    }))
+    mission.plan = { tasks: wave }
+    mission.tasks = wave.map((task) => ({ id: task.id, reviewerId: "reviewer", status: "pending", attempts: 0 }))
+    mission.executionPolicy = {
+      maxParallel: 3,
+      maxDurationSec: 3_600,
+      maxRuns: 40,
+      maxRetries: 1,
+      retryDelayMs: 1,
+      autoResume: false,
+    }
+    let active = 0
+    let widest = 0
+    hooks.run = vi.fn(async (_actor, _prompt, _stage, taskId) => {
+      active += 1
+      widest = Math.max(widest, active)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      active -= 1
+      return `Output ${taskId}`
+    })
+    expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
+    expect(widest).toBe(3)
+    expect(mission.tasks.map((task) => task.status)).toEqual(["completed", "completed", "completed", "completed"])
+    expect(events.filter((event) => event.startsWith("integrate:"))).toEqual([
+      "integrate:a",
+      "integrate:b",
+      "integrate:c",
+      "integrate:d",
+    ])
+  })
+})

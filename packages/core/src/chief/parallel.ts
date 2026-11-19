@@ -1,13 +1,21 @@
 import type { ChiefPlan, ChiefTask, ChiefTaskState } from "./types"
 
-/** A dependent task becomes ready only after its predecessors passed review. */
+/**
+ * Every task whose predecessors passed review, in plan order. A wave holds all of them and its Actors start
+ * as slots free up: when the wave was cut to the Actor limit instead, the task left over waited through its
+ * siblings' whole wave (Actor runs, integration check, reviews and every repair) and then cost a wave, a
+ * check and a review of its own.
+ */
+export function readyTasks(plan: ChiefPlan, states: ChiefTaskState[]): ChiefTask[] {
+  const completed = new Set(states.filter((state) => state.status === "completed").map((state) => state.id))
+  return plan.tasks.filter((task) => !completed.has(task.id) && task.dependencies.every((id) => completed.has(id)))
+}
+
+/** The first `limit` ready tasks: the tasks that may hold an Actor slot at the same time. */
 export function readyTaskWave(plan: ChiefPlan, states: ChiefTaskState[], limit: number): ChiefTask[] {
   if (!Number.isInteger(limit) || limit < 1 || limit > 20)
     throw new Error("Use a parallel Actor limit between 1 and 20.")
-  const completed = new Set(states.filter((state) => state.status === "completed").map((state) => state.id))
-  return plan.tasks
-    .filter((task) => !completed.has(task.id) && task.dependencies.every((id) => completed.has(id)))
-    .slice(0, limit)
+  return readyTasks(plan, states).slice(0, limit)
 }
 
 /** Task counts of the dependency waves a plan can run in, in order; a cyclic remainder is left out. */

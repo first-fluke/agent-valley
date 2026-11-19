@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { planWaveOf, planWaveWidths, readyTaskWave, runJoinedWave } from "./parallel"
+import { planWaveOf, planWaveWidths, readyTasks, readyTaskWave, runJoinedWave } from "./parallel"
 import type { ChiefPlan, ChiefTaskState } from "./types"
 
 function barrier() {
@@ -34,6 +34,8 @@ describe("dependency-ready parallel waves", () => {
     ])
     expect(readyTaskWave(plan, [state("first", "completed")], 1).map((entry) => entry.id)).toEqual(["second"])
     expect(() => readyTaskWave(plan, [], 0)).toThrow("between 1 and 20")
+    expect(readyTasks(plan, [state("first", "completed")]).map((entry) => entry.id)).toEqual(["second", "dependent"])
+    expect(readyTasks(plan, []).map((entry) => entry.id)).toEqual(["first", "second"])
   })
 
   it("actually overlaps independent children and returns results in input order", async () => {

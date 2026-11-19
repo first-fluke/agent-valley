@@ -12,7 +12,7 @@ import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
 import { MissionPause, pauseForFailure } from "./execution"
 import { reviewGoalGaps } from "./goal-gap-review"
 import { clearReviewerNoVerdict, handoffActor, noteReviewerNoVerdict } from "./handoff"
-import { readyTaskWave } from "./parallel"
+import { readyTasks, readyTaskWave } from "./parallel"
 import { reviewPrompt, workPrompt } from "./prompts"
 import { settleRepairReview } from "./review-response"
 import { selectTaskReviewer } from "./review-routing"
@@ -234,7 +234,10 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
     // Before the final wave the Chief looks at the goal as a whole; a replan it causes changes the next wave.
     if (await reviewGoalGaps(context)) continue
     const limit = mission.executionPolicy?.maxParallel ?? 1
-    const wave = readyTaskWave(plan, mission.tasks, limit).filter((task) => task.effectScope !== "external")
+    // With isolated workspaces the wave is every ready task; the Actor limit bounds how many run at once.
+    const wave = (
+      ports.parallel && limit > 1 ? readyTasks(plan, mission.tasks) : readyTaskWave(plan, mission.tasks, limit)
+    ).filter((task) => task.effectScope !== "external")
     // A task whose isolated delivery was rejected keeps that delivery mode: its repair must produce a fresh
     // AV-captured changeSet, otherwise the review would compare a direct worktree edit against stale capture.
     const isolatedBefore = (taskId: string) =>

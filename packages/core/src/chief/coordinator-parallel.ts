@@ -206,6 +206,8 @@ export async function performParallelWave(
       )
     },
     ports.signal,
+    // A wave may hold more ready tasks than Actor slots; the rest start as slots free up.
+    Math.max(1, Math.min(pending.length, mission.executionPolicy?.maxParallel ?? pending.length)),
   )
   results.forEach((result, index) => {
     const entry = pending[index]
