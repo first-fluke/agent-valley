@@ -26,15 +26,28 @@ function StandaloneDashboard({ canIntervene }: { canIntervene: boolean }) {
 
   const workspaces = (data?.activeWorkspaces ?? []) as RunningWorkspace[]
 
-  // If the selected attempt's workspace disappears from the live SSE state
-  // (agent finished, failed, or was aborted), close the drawer instead of
-  // leaving it open against a dead attempt.
+  // The drawer follows the issue, not one attempt: when a run restarts (for
+  // example to deliver an operator message) it retargets to the new attempt,
+  // and when the run ends it stays open on the thread with controls disabled.
+  // It closes only when this viewer can no longer intervene at all.
+  const selectedWorkspace = selectedAttempt ? workspaces.find((ws) => ws.key === selectedAttempt.issueKey) : undefined
+  const selectedIsLive = Boolean(selectedAttempt && selectedWorkspace?.attemptId === selectedAttempt.attemptId)
   useEffect(() => {
     if (!selectedAttempt) return
-    const stillActive =
-      canIntervene && status === "open" && workspaces.some((ws) => ws.attemptId === selectedAttempt.attemptId)
-    if (!stillActive) setSelectedAttempt(null)
-  }, [workspaces, selectedAttempt, canIntervene, status])
+    const stillActive = canIntervene && status === "open"
+    if (!stillActive) {
+      setSelectedAttempt(null)
+      return
+    }
+    const nextAttemptId = selectedWorkspace?.attemptId
+    if (nextAttemptId && nextAttemptId !== selectedAttempt.attemptId) {
+      setSelectedAttempt({
+        attemptId: nextAttemptId,
+        issueKey: selectedAttempt.issueKey,
+        agentType: selectedWorkspace?.agentType ?? selectedAttempt.agentType,
+      })
+    }
+  }, [selectedWorkspace, selectedAttempt, canIntervene, status])
 
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-gray-950">
@@ -65,7 +78,7 @@ function StandaloneDashboard({ canIntervene }: { canIntervene: boolean }) {
       )}
       <SystemMetricsPanel metrics={data?.systemMetrics} />
       <ConnectionStatusBar status={status} onReconnect={reconnect} />
-      <InterventionPanel attempt={selectedAttempt} onClose={closeIntervention} />
+      <InterventionPanel attempt={selectedAttempt} onClose={closeIntervention} live={selectedIsLive} />
     </main>
   )
 }

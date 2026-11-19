@@ -7,6 +7,7 @@
  */
 
 import type { InterventionBus } from "@agent-valley/core/orchestrator/intervention-bus"
+import type { IssueThreadReader } from "@agent-valley/core/orchestrator/issue-thread-store"
 
 export interface OrchestratorInstance {
   getStatus: () => Record<string, unknown>
@@ -30,6 +31,8 @@ export interface OrchestratorInstance {
    * the /api/intervention route don't need to stub it out.
    */
   intervention?: InterventionBus
+  /** Per-issue operator/actor threads, read by the /api/thread stream. */
+  threads?: IssueThreadReader
 }
 
 declare global {

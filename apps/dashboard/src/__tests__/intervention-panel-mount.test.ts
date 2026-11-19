@@ -51,8 +51,18 @@ describe("InterventionPanel is mounted on the dashboard page", () => {
     expect(pageSource).not.toMatch(/SYMPHONY_INTERVENTION_TOKEN\s*[:=]\s*["'`]/)
   })
 
-  test("clears the selection when the attempt's workspace drops out of live SSE state", () => {
+  test("clears the selection when the viewer can no longer intervene", () => {
+    expect(pageSource).toMatch(/stillActive = canIntervene && status === "open"/)
     expect(pageSource).toMatch(/stillActive[\s\S]*setSelectedAttempt\(null\)/)
+  })
+
+  test("follows the issue to its next attempt instead of closing when a run restarts", () => {
+    expect(pageSource).toContain("workspaces.find((ws) => ws.key === selectedAttempt.issueKey)")
+    expect(pageSource).toMatch(/nextAttemptId !== selectedAttempt\.attemptId[\s\S]*setSelectedAttempt\(\{/)
+  })
+
+  test("tells the panel whether the selected attempt is still running", () => {
+    expect(pageSource).toContain("live={selectedIsLive}")
   })
 })
 

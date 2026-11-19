@@ -1,19 +1,25 @@
 "use client"
 
 /**
- * InterventionPanel — Drawer UI that lets an operator pause / resume /
- * abort / append-prompt a running agent attempt.
+ * InterventionPanel — Drawer UI that shows an issue's live thread (actor
+ * output, tool calls, operator messages) and lets an operator pause /
+ * resume / abort / message the running attempt.
  *
  * Design: docs/plans/v0-2-bigbang-design.md § 5.7 (C) and § 6.3 (E12).
  *
  * Capability-driven: buttons are disabled when the agent type does not
  * advertise support. Capabilities come from the core agent registry, so the
  * dashboard cannot drift from the port's `CAPABILITY_TABLE`.
+ *
+ * The thread belongs to the issue, not the attempt: it stays readable while
+ * a run restarts or after it ends, with the controls disabled (`live=false`).
  */
 
 import { capabilitiesFor } from "@agent-valley/core/agent-registry"
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { IssueThreadLog } from "@/features/orchestrator/components/issue-thread-log"
+import { useIssueThread } from "@/features/orchestrator/utils/use-issue-thread"
 
 export type InterventionKind = "pause" | "resume" | "append_prompt" | "abort"
 
@@ -26,11 +32,14 @@ export interface ActiveAttempt {
 interface InterventionPanelProps {
   attempt: ActiveAttempt | null
   onClose: () => void
+  /** False while the issue has no running attempt; the thread stays readable. */
+  live?: boolean
   /** Optional override (used by tests). Defaults to the real fetch. */
   post?: (body: { attemptId: string; command: unknown }) => Promise<{ ok: boolean; message?: string }>
 }
 
-export function InterventionPanel({ attempt, onClose, post }: InterventionPanelProps) {
+export function InterventionPanel({ attempt, onClose, live = true, post }: InterventionPanelProps) {
+  const thread = useIssueThread(attempt?.issueKey ?? null)
   const [promptText, setPromptText] = useState("")
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
@@ -38,22 +47,25 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
   const inFlightRef = useRef(false)
-  const attemptIdRef = useRef(attempt?.attemptId)
-  attemptIdRef.current = attempt?.attemptId
+  // The panel is keyed by issue: a run that restarts under a new attempt id
+  // keeps the same thread, draft, and focus.
+  const issueKeyRef = useRef(attempt?.issueKey)
+  issueKeyRef.current = attempt?.issueKey
+  const isOpen = Boolean(attempt)
 
   const caps = useMemo(() => (attempt ? capabilitiesFor(attempt.agentType) : []), [attempt])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset local input state when the selected issue changes
+  useEffect(() => {
+    setPromptText("")
+    setToast(null)
+  }, [attempt?.issueKey])
 
   // Focus management: move focus into the drawer on open, restore it to
   // whatever triggered the drawer (e.g. the Active Actors list item) on
   // close — required so keyboard/screen-reader users don't lose their place.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset local input state when the selected attempt changes
   useEffect(() => {
-    setPromptText("")
-    setToast(null)
-  }, [attempt?.attemptId])
-
-  useEffect(() => {
-    if (!attempt) return
+    if (!isOpen) return
     previouslyFocusedRef.current = document.activeElement as HTMLElement | null
     closeButtonRef.current?.focus()
 
@@ -66,7 +78,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
       document.removeEventListener("keydown", onKeyDown)
       previouslyFocusedRef.current?.focus()
     }
-  }, [attempt, onClose])
+  }, [isOpen, onClose])
 
   useEffect(() => {
     if (!toast) return
@@ -111,7 +123,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
             return { ok: res.ok, message: json.message ?? json.error }
           })
         const result = await doPost({ attemptId: attempt.attemptId, command })
-        if (attemptIdRef.current !== attempt.attemptId) return false
+        if (issueKeyRef.current !== attempt.issueKey) return false
         if (result.ok) {
           setToast({ kind: "ok", text: "Command dispatched" })
         } else {
@@ -119,7 +131,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
         }
         return result.ok
       } catch (err) {
-        if (attemptIdRef.current === attempt.attemptId) {
+        if (issueKeyRef.current === attempt.issueKey) {
           setToast({ kind: "err", text: err instanceof Error ? err.message : "Network error" })
         }
         return false
@@ -133,10 +145,9 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
 
   if (!attempt) return null
 
-  const disabled = (kind: InterventionKind) => busy || !caps.includes(kind)
+  const disabled = (kind: InterventionKind) => busy || !live || !caps.includes(kind)
 
-  const onSubmitAppend = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
+  const submitAppend = () => {
     if (!promptText.trim()) {
       setToast({ kind: "err", text: "Prompt text is required" })
       return
@@ -146,6 +157,19 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
     })
   }
 
+  const onSubmitAppend = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    submitAppend()
+  }
+
+  // Enter sends, Shift+Enter adds a line. An Enter that confirms an IME
+  // composition (Korean, Japanese, Chinese input) must not send.
+  const onPromptKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    if (!disabled("append_prompt")) submitAppend()
+  }
+
   return (
     <aside
       ref={panelRef}
@@ -153,7 +177,7 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
       aria-modal="true"
       aria-label="Actor intervention"
       onKeyDown={onTrapKeyDown}
-      className="fixed top-0 right-0 h-full w-96 max-w-full bg-gray-900/95 border-l border-gray-700 shadow-xl z-50 flex flex-col motion-reduce:transition-none"
+      className="fixed top-0 right-0 h-full w-[28rem] max-w-full bg-gray-900/95 border-l border-gray-700 shadow-xl z-50 flex flex-col motion-reduce:transition-none"
     >
       <header className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
         <div>
@@ -173,7 +197,14 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
         </button>
       </header>
 
-      <section className="flex-1 overflow-y-auto p-4 space-y-4">
+      <IssueThreadLog entries={thread.entries} status={thread.status} />
+
+      <section className="shrink-0 space-y-3 border-t border-gray-700 p-4">
+        {!live && (
+          <p role="status" className="text-xs text-gray-400">
+            No run is active for this issue. Controls return when the next attempt starts.
+          </p>
+        )}
         <div className="flex gap-2">
           <button
             type="button"
@@ -209,23 +240,25 @@ export function InterventionPanel({ attempt, onClose, post }: InterventionPanelP
             id="append-prompt-text"
             value={promptText}
             onChange={(e) => setPromptText(e.target.value)}
+            onKeyDown={onPromptKeyDown}
             disabled={disabled("append_prompt")}
-            rows={5}
+            rows={3}
             className="w-full text-xs rounded bg-gray-800 border border-gray-700 text-gray-100 p-2 disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
-            placeholder="Additional instructions for the running agent..."
+            placeholder="Message the running actor. Enter sends, Shift+Enter adds a line."
           />
           <button
             type="submit"
             disabled={disabled("append_prompt") || !promptText.trim()}
             className="w-full text-xs rounded px-3 py-2 bg-blue-700/40 hover:bg-blue-700/60 text-blue-100 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
           >
-            Send append_prompt
+            Send
           </button>
         </form>
 
         <p className="text-[10px] leading-relaxed text-gray-500">
-          Capabilities are advertised by the core per agent type. Unsupported actions are disabled. Claude is stateless
-          — append_prompt cancels the current run and re-queues with the extra instruction.
+          Unsupported actions are disabled for this agent type. Codex, Claude, OpenCode and Antigravity read a message
+          in the running session; other one-shot CLIs restart the run with your message added, and the thread says so
+          when that happens.
         </p>
       </section>
 

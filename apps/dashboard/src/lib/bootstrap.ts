@@ -179,5 +179,6 @@ async function startOrchestrator(): Promise<OrchestratorInstance> {
     on: (event, handler) => orchestrator.on(event, handler),
     off: (event, handler) => orchestrator.off(event, handler),
     intervention: orchestrator.intervention,
+    threads: orchestrator.threads,
   }
 }
