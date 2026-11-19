@@ -466,3 +466,28 @@ describe("an attempt continued after a failed pre-delivery check", () => {
     expect(rejection.evidence).not.toBe(PRE_DELIVERY_CONTINUED)
   })
 })
+
+describe("a run the coordinator abandoned", () => {
+  // Regression: every operator stop during Actor work was recorded as a failed sample of the only route.
+  it("is no sample of the route's quality", () => {
+    const value = closedPool()
+    const { mission } = value
+    const before = routeEvidence(mission).map((entry) => [entry.actorType, entry.samples, entry.successes])
+    for (const evidence of [
+      "Coordinator process ended before usage could be reconciled; cost remains unknown.",
+      "The local process guard confirmed that the recorded execution and its process group stopped.",
+    ])
+      mission.operations?.runs.push({
+        ...value.rejection,
+        runId: `abandoned-${evidence.length}`,
+        actorType: "qwen",
+        outcome: "failed",
+        evidence,
+      })
+    expect(routeEvidence(mission).map((entry) => [entry.actorType, entry.samples, entry.successes])).toEqual(before)
+    mission.operations?.runs.push({ ...value.rejection, runId: "real-failure", actorType: "qwen", outcome: "failed" })
+    expect(routeEvidence(mission).find((entry) => entry.actorType === "qwen")?.samples).toBe(
+      (before.find((entry) => entry[0] === "qwen")?.[1] as number) + 1,
+    )
+  })
+})

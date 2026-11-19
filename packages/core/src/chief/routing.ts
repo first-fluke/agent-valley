@@ -16,6 +16,17 @@ export const routeKey = (entry: { actorType: string; model?: string }) => `${ent
 const hostSlept = (run: { evidence?: string }) => run.evidence?.startsWith(HOST_SUSPENDED_EVIDENCE) === true
 
 /**
+ * Evidence the framework itself writes for a run it abandoned: the coordinator process ended, or the process
+ * guard confirmed the stopped execution after an operator's interrupt. The run delivered nothing to judge, so
+ * like a call the host slept through it is no sample of the route's quality and no failure of the task on
+ * that route. Counted, every operator stop lowered the only route's success rate until each first dispatch
+ * became a bounded probe.
+ */
+const ABANDONED_BY_COORDINATOR =
+  /^(?:Coordinator process ended before usage could be reconciled|The local process guard confirmed that the recorded execution)/
+export const abandonedByCoordinator = (run: { evidence?: string }) => ABANDONED_BY_COORDINATOR.test(run.evidence ?? "")
+
+/**
  * Evidence of a work run whose attempt went on after the operator's pre-delivery check failed. The run
  * returned, the check rejected its delivery and the same Actor continued in the same workspace, so the
  * continuation carries the attempt's verdict. Left pending, such a run read as an unreviewed routing probe
@@ -58,6 +69,7 @@ export function routeEvidence(mission: Mission): RouteEvidence[] {
       run.nativeOutcome !== "cancelled" &&
       !isNativeAgentTimeout(run.evidence ?? "") &&
       !hostSlept(run) &&
+      !abandonedByCoordinator(run) &&
       !continuedAfterCheck(run)
     ) {
       item.samples += 1
@@ -175,6 +187,7 @@ export function selectWorkActor(
       !cancelled.has(run.runId) &&
       run.nativeOutcome !== "cancelled" &&
       !hostSlept(run) &&
+      !abandonedByCoordinator(run) &&
       !continuedAfterCheck(run),
   )
   if (hasUnreviewedRoutingProbe(mission, taskId, taskRuns))

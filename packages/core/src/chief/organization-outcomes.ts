@@ -18,7 +18,7 @@ import {
 } from "./organization-types"
 import { reviewGatesAreCurrent } from "./review-gate-check"
 import { appendRouteOutcome } from "./route-quality"
-import { continuedAfterCheck } from "./routing"
+import { abandonedByCoordinator, continuedAfterCheck } from "./routing"
 import type { Mission } from "./types"
 
 const evidenceInputSchema = memoryEvidenceSchema.partial({ sha256: true })
@@ -208,7 +208,12 @@ export async function getOrganizationRouteEvidence(
       totalCostUsd: 0,
       successfulDeliverableCostUsd: null,
     }
-    if (!archivedWorkCancellation(run) && !isNativeAgentTimeout(run.evidence ?? "") && !continuedAfterCheck(run)) {
+    if (
+      !archivedWorkCancellation(run) &&
+      !isNativeAgentTimeout(run.evidence ?? "") &&
+      !abandonedByCoordinator(run) &&
+      !continuedAfterCheck(run)
+    ) {
       group.samples++
       appendRouteOutcome(group, { at: run.finishedAt ?? run.startedAt, outcome: run.outcome }, evidenceWindow)
     }
