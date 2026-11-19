@@ -132,10 +132,12 @@ export interface AgentSession {
 
   /**
    * Send a mid-run user message to the agent without restarting.
-   * Supported by Codex (persistent JSON-RPC).
-   * Claude, Antigravity, Cursor, and Grok (all stateless, spawn-per-execute)
-   * do not implement this — it must be handled via cancel + respawn at a
-   * higher layer.
+   * Supported by Codex (persistent JSON-RPC) and by Claude when the run was
+   * started with `options.liveInput` (open stream-json stdin). It rejects when
+   * the message cannot be taken. OpenCode supports it through an ACP session
+   * and Antigravity through stream-json stdin, on the same kind of run.
+   * Cursor, Grok and Kimi (one-shot, spawn-per-execute) do not implement it;
+   * both cases are handled via cancel + respawn at a higher layer.
    */
   sendUserMessage?(text: string): Promise<void>
 }

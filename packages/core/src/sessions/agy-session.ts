@@ -16,12 +16,19 @@
  *
  * Flags verified against `agy --help` (agy v1.1.3). Anything not
  * explicitly confirmed there is called out individually below.
+ *
+ * Later builds (verified on v1.5.12) add structured print mode and an ACP
+ * server. Runs that take operator messages use the former — see
+ * agy-live-run.ts — and an agy without it falls back to the one-shot above.
  */
 
 import type { AgentConfig } from "./agent-session"
+import { AgyLiveRun } from "./agy-live-run"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
+import { readJsonLines } from "./json-lines"
 import { captureExhaustion, exhaustionMessage } from "./native-failure"
 import { BoundedResultText, nativeResultLimitMessage } from "./native-result"
+import { QUEUED_MESSAGE_GRACE_MS } from "./queued-messages"
 
 // ── CLI surface (verified against `agy --help` v1.1.3) ─────────────────────
 
@@ -86,6 +93,16 @@ export const AGY_MODE_PLAN = "plan"
 export const AGY_FLAG_PRINT_TIMEOUT = "--print-timeout"
 
 /**
+ * Live input (`options.liveInput`): structured print mode that keeps stdin open
+ * for operator messages — see agy-live-run.ts for the protocol. `--print=`
+ * supplies the empty prompt the flag requires; the task arrives on stdin.
+ */
+export const AGY_FLAG_PRINT_FROM_STDIN = "--print="
+export const AGY_FLAG_INPUT_FORMAT = "--input-format"
+export const AGY_FLAG_OUTPUT_FORMAT = "--output-format"
+export const AGY_FORMAT_STREAM_JSON = "stream-json"
+
+/**
  * Safety guard on prompt size before it is placed in argv. Linux caps a
  * single argv element at 128KiB (MAX_ARG_STRLEN); this stays well under
  * that (and under macOS's much larger combined ARG_MAX) so a large issue
@@ -108,6 +125,10 @@ export class AgySession extends BaseSession {
   private conversationId: string | null = null
   private tailBuffer = ""
   private finalOutput = new BoundedResultText()
+  /** The live (stream-json) run that is taking messages on stdin, if any. */
+  private liveRun: AgyLiveRun | null = null
+  private stopRequested = false
+  protected queuedMessageGraceMs = QUEUED_MESSAGE_GRACE_MS
 
   async start(config: AgentConfig): Promise<void> {
     this.config = config
@@ -122,6 +143,9 @@ export class AgySession extends BaseSession {
       this.emitError("CRASH", "execute() called before start()", false)
       return
     }
+
+    // Runs that take operator messages keep stdin open; an agy without that mode falls through to one-shot.
+    if (this.config.options?.liveInput === true && (await this.executeLive(this.config, prompt))) return
 
     const promptBytes = Buffer.byteLength(prompt, "utf-8")
     if (promptBytes > AGY_MAX_PROMPT_ARG_BYTES) {
@@ -173,8 +197,19 @@ export class AgySession extends BaseSession {
 
   // ── Args builder ─────────────────────────────────────────────────────────
 
-  private buildArgs(config: AgentConfig, prompt: string): string[] {
-    const args = [AGY_FLAG_PRINT, prompt, AGY_FLAG_SKIP_PERMISSIONS]
+  /** `prompt: null` builds the live form: the task and later messages arrive on stdin. */
+  private buildArgs(config: AgentConfig, prompt: string | null): string[] {
+    const args =
+      prompt === null
+        ? [
+            AGY_FLAG_PRINT_FROM_STDIN,
+            AGY_FLAG_INPUT_FORMAT,
+            AGY_FORMAT_STREAM_JSON,
+            AGY_FLAG_OUTPUT_FORMAT,
+            AGY_FORMAT_STREAM_JSON,
+            AGY_FLAG_SKIP_PERMISSIONS,
+          ]
+        : [AGY_FLAG_PRINT, prompt, AGY_FLAG_SKIP_PERMISSIONS]
 
     const mode = (config.options?.mode as string | undefined) ?? AGY_MODE_ACCEPT_EDITS
     args.push(AGY_FLAG_MODE, mode)
@@ -185,6 +220,94 @@ export class AgySession extends BaseSession {
     if (this.conversationId) args.push(AGY_FLAG_CONVERSATION, this.conversationId)
 
     return args
+  }
+
+  // ── Live input (stream-json) ─────────────────────────────────────────────
+
+  /**
+   * Run the prompt in a process that keeps taking messages on stdin. Returns
+   * true when the run was handled here, false when this agy does not support
+   * the mode and the caller should run one-shot.
+   */
+  private async executeLive(config: AgentConfig, prompt: string): Promise<boolean> {
+    this.tailBuffer = ""
+    this.startedAt = Date.now()
+    this.stopRequested = false
+
+    const spawned = await this.spawnSandboxed({
+      agentType: "antigravity",
+      command: AGY_COMMAND,
+      args: this.buildArgs(config, null),
+      stdio: ["pipe", "pipe", "pipe"],
+    })
+    if (!spawned) return true
+    const proc = this.process
+    if (!proc?.stdout) {
+      this.emitError("CRASH", "agy process has no stdout", false)
+      return true
+    }
+
+    const run = new AgyLiveRun(proc.stdin, {
+      model: config.model,
+      graceMs: this.queuedMessageGraceMs,
+      events: {
+        output: (chunk) => this.emitTextChunk(chunk),
+        toolUse: (tool, args) => this.emit({ type: "toolUse", tool, args }),
+        fileChange: (path, changeType) => this.emit({ type: "fileChange", path, changeType }),
+        activity: () => this.emit({ type: "heartbeat", timestamp: new Date().toISOString() }),
+        complete: (result) => {
+          this.emit({ type: "complete", result: { exitCode: 0, durationMs: this.elapsedMs(), ...result } })
+          // The process only exits once stdin closes.
+          proc.stdin?.end()
+        },
+        failed: (message, recoverable) => {
+          this.emitError("CRASH", message, recoverable)
+          proc.stdin?.end()
+        },
+      },
+    })
+    this.liveRun = run
+    // A prompt that cannot be written means the process is already gone; its exit reports the failure.
+    run.send(prompt).catch(() => {})
+    const stderrExhaustion = captureExhaustion(proc.stderr)
+    const flush = readJsonLines(proc.stdout, (event) => run.handleEvent(event))
+    const { exitCode: code } = await waitForStreamCompletion(proc)
+    flush()
+    this.liveRun = null
+
+    if (run.processExited(code) || this.terminalEventReceived) return true
+    // A usage error before any stream event: this agy predates stream-json input.
+    if (!run.sawEvent && !this.stopRequested && code !== null && code !== 0) return false
+    this.emitError(
+      code === null ? "TIMEOUT" : "CRASH",
+      stderrExhaustion() ??
+        exhaustionMessage(this.tailBuffer) ??
+        (code === 0
+          ? "agy exited without a result event. Update agy (`agy update`) and retry."
+          : `agy exited with code ${code ?? "unknown"}`),
+      true,
+    )
+    return true
+  }
+
+  /** Deliver an operator message to the running process. Rejects when it cannot be taken. */
+  async sendUserMessage(text: string): Promise<void> {
+    if (!this.liveRun) {
+      throw new Error(
+        "agy session is not accepting live input (the run already ended or is running one-shot). Restart the run with the message instead.",
+      )
+    }
+    await this.liveRun.send(text)
+  }
+
+  override async cancel(): Promise<void> {
+    this.stopRequested = true
+    await super.cancel()
+  }
+
+  override async kill(): Promise<void> {
+    this.stopRequested = true
+    await super.kill()
   }
 
   // ── Stream parser ───────────────────────────────────────────────────────

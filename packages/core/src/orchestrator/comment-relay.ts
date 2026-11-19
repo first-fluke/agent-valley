@@ -9,8 +9,9 @@
  * are dropped: comment text is untrusted input (docs/harness/SAFETY.md §3),
  * and relaying our own messages would feed the actor back into itself.
  *
- * Stateless actors (claude, ...) receive the comment through the bus's
- * cancel + retry fallback, so a relayed comment restarts their attempt.
+ * Codex, Claude, OpenCode and Antigravity take the comment in the running session. Other one-shot
+ * actors receive it through the bus's cancel + retry fallback, so a relayed
+ * comment restarts their attempt.
  */
 
 import type { ParsedWebhookEvent } from "../domain/parsed-webhook-event"
