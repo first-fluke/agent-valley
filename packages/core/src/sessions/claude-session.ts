@@ -7,19 +7,40 @@
  *
  * Note: Claude Code is NOT a persistent server. Each execute() spawns a new process.
  * The "session" manages process lifecycle and event normalization.
+ *
+ * Live input (`options.liveInput`): stdin stays open as an NDJSON stream
+ * (`--input-format stream-json`), so `sendUserMessage()` reaches the running
+ * process. Claude picks a queued message up at its next tool boundary, or as a
+ * follow-up turn when the current one has already ended. The wire format is
+ * the Agent SDK's streaming-input protocol (SDKUserMessage in,
+ * SDKUserMessageReplay and SDKResultMessage out):
+ * https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode
  */
 
+import { randomUUID } from "node:crypto"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion } from "./native-failure"
 import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
+import { QUEUED_MESSAGE_GRACE_MS, QueuedMessages } from "./queued-messages"
+
+type TokenUsage = { input: number; output: number; model: string }
 
 export class ClaudeSession extends BaseSession {
   protected filesChanged: string[] = []
   protected readonly vendor: string = "claude"
   private started = false
   protected nativeError: string | undefined
+  private liveInput = false
+  protected queuedMessageGraceMs = QUEUED_MESSAGE_GRACE_MS
+  /** Messages written to stdin, and the turns that ended while one was still waiting. */
+  private readonly queue = new QueuedMessages(
+    () => this.queuedMessageGraceMs,
+    () => this.completeRun("", {}),
+  )
+  /** Usage of the turns held in the queue; Claude reports it per turn. */
+  private heldUsage: TokenUsage | undefined
 
   async start(config: AgentConfig): Promise<void> {
     this.config = config
@@ -45,7 +66,16 @@ export class ClaudeSession extends BaseSession {
       args.push("--effort", effort)
     }
 
+    if (this.liveInputRequested()) {
+      args.push("--input-format", "stream-json", "--replay-user-messages")
+    }
+
     return args
+  }
+
+  /** Subclasses reuse this transport for other CLIs, which only take a one-shot stdin prompt. */
+  private liveInputRequested(): boolean {
+    return this.vendor === "claude" && this.config?.options?.liveInput === true
   }
 
   protected resetNativeState(): void {}
@@ -64,6 +94,9 @@ export class ClaudeSession extends BaseSession {
     this.nativeError = undefined
     this.resetNativeState()
     this.startedAt = Date.now()
+    this.liveInput = this.liveInputRequested()
+    this.queue.reset()
+    this.heldUsage = undefined
 
     const args = this.buildArgs()
     // Containment for --dangerously-skip-permissions comes from the OS
@@ -76,11 +109,40 @@ export class ClaudeSession extends BaseSession {
       command: this.vendor,
       args,
       stdio: ["pipe", "pipe", "pipe"],
-      prompt,
+      prompt: this.liveInput ? undefined : prompt,
     })
     if (!spawned) return
+    // A prompt that cannot be written means the process is already gone; its exit reports the failure.
+    if (this.liveInput) this.writeUserMessage(prompt).catch(() => {})
 
     await this.readStream()
+  }
+
+  /** Deliver an operator message to the running process. Rejects when it cannot be taken. */
+  async sendUserMessage(text: string): Promise<void> {
+    if (!this.liveInput || this.terminalEventReceived) {
+      throw new Error(
+        `${this.vendor} session is not accepting live input (the run already ended or started without options.liveInput). Restart the run with the message instead.`,
+      )
+    }
+    await this.writeUserMessage(text)
+  }
+
+  private async writeUserMessage(text: string): Promise<void> {
+    const uuid = randomUUID()
+    const message = {
+      type: "user",
+      uuid,
+      message: { role: "user", content: [{ type: "text", text }] },
+      parent_tool_use_id: null,
+    }
+    await this.queue.write(this.process?.stdin, uuid, message, this.vendor)
+  }
+
+  /** A live process only exits once stdin closes; a one-shot process already has it closed. */
+  private closeLiveInput(): void {
+    this.queue.activity()
+    if (this.liveInput) this.process?.stdin?.end()
   }
 
   override isAlive(): boolean {
@@ -97,6 +159,9 @@ export class ClaudeSession extends BaseSession {
     const flush = readJsonLines(proc.stdout, (event) => this.handleEvent(event))
     const { exitCode: code } = await waitForStreamCompletion(proc)
     flush()
+    this.queue.activity()
+    // The process ended cleanly before taking the queued message; the finished turn still stands.
+    if (code === 0 && this.queue.holding) this.completeRun("", {})
     this.nativeError ??= stderrExhaustion()
     this.finalizeNativeExit(code)
   }
@@ -117,8 +182,18 @@ export class ClaudeSession extends BaseSession {
   protected handleEvent(event: unknown): void {
     if (typeof event !== "object" || event === null) return
     const e = event as Record<string, unknown>
+    // Any event after a held result means Claude is still working through the queue.
+    this.queue.activity()
 
     switch (e.type) {
+      case "user":
+        // Claude echoes a stdin message at the moment it takes it off the queue.
+        if (this.liveInput && e.isReplay === true) {
+          this.queue.taken(typeof e.uuid === "string" ? e.uuid : undefined)
+          this.emit({ type: "heartbeat", timestamp: new Date().toISOString() })
+        }
+        break
+
       case "assistant": {
         const msg = e.message as Record<string, unknown> | undefined
         const content = msg?.content as Array<Record<string, unknown>> | undefined
@@ -167,7 +242,6 @@ export class ClaudeSession extends BaseSession {
 
       case "result": {
         const result = typeof e.result === "string" ? e.result : ""
-        const durationMs = (e.duration_ms as number | undefined) ?? this.elapsedMs()
         const isError = e.is_error === true
 
         if (isError) {
@@ -179,21 +253,14 @@ export class ClaudeSession extends BaseSession {
               String(e.subtype ?? "Claude execution failed. Check the agent output and retry."),
             true,
           )
+          this.closeLiveInput()
+        } else if (this.liveInput && (this.queue.pending || Number(e.queued_turn_count) > 0)) {
+          // A message is queued behind this turn: Claude answers it in a follow-up
+          // turn with its own result, so the run is not finished yet.
+          this.heldUsage = sumUsage(this.heldUsage, this.extractTokenUsage(e))
+          this.queue.hold(result)
         } else {
-          if (result.length > MAX_NATIVE_RESULT_LENGTH) {
-            this.emitError("CRASH", nativeResultLimitMessage(this.vendor), false)
-            break
-          }
-          this.emit({
-            type: "complete",
-            result: {
-              exitCode: 0,
-              output: result,
-              durationMs,
-              filesChanged: this.filesChanged,
-              tokenUsage: this.extractTokenUsage(e),
-            },
-          })
+          this.completeRun(result, e)
         }
         break
       }
@@ -203,6 +270,32 @@ export class ClaudeSession extends BaseSession {
         this.emit({ type: "heartbeat", timestamp: new Date().toISOString() })
         break
     }
+  }
+
+  /** Finish the run with this turn's result plus any turns held back before it. */
+  private completeRun(result: string, resultEvent: Record<string, unknown>): void {
+    const followedUp = this.queue.holding
+    const output = [...this.queue.release(), result].filter(Boolean).join("\n\n")
+    const tokenUsage = sumUsage(this.heldUsage, this.extractTokenUsage(resultEvent))
+    this.heldUsage = undefined
+    if (output.length > MAX_NATIVE_RESULT_LENGTH) {
+      this.emitError("CRASH", nativeResultLimitMessage(this.vendor), false)
+    } else {
+      this.emit({
+        type: "complete",
+        result: {
+          exitCode: 0,
+          output,
+          // duration_ms covers one turn; a run with follow-up turns is timed end to end.
+          durationMs: followedUp
+            ? this.elapsedMs()
+            : ((resultEvent.duration_ms as number | undefined) ?? this.elapsedMs()),
+          filesChanged: this.filesChanged,
+          tokenUsage,
+        },
+      })
+    }
+    this.closeLiveInput()
   }
 
   protected extractTokenUsage(
@@ -222,4 +315,10 @@ export class ClaudeSession extends BaseSession {
       model,
     }
   }
+}
+
+/** Claude reports usage per turn, so a run with follow-up turns adds them up. */
+function sumUsage(a: TokenUsage | undefined, b: TokenUsage | undefined): TokenUsage | undefined {
+  if (!a || !b) return a ?? b
+  return { input: a.input + b.input, output: a.output + b.output, model: b.model }
 }
