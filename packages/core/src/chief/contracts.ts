@@ -48,6 +48,15 @@ export interface Review {
 }
 
 /** The operator's recorded decision that a success criterion stays unmet in this mission. */
+/** One goal review before a final wave: `key` names the delivered and remaining tasks it was taken for. */
+export interface GoalGapReview {
+  at: string
+  key: string
+  verdict: "covered" | "gaps" | "no-verdict"
+  summary: string
+  findings: string[]
+}
+
 export interface CriterionWaiver {
   at: string
   criterion: string

@@ -136,6 +136,18 @@ export const missionSchema = z
     gateReviews: z.array(gateReviewSchema).max(96).optional(),
     gateReviewRefreshes: z.number().int().min(0).max(11).optional(),
     finalReview: reviewSchema.optional(),
+    goalGapReviews: z
+      .array(
+        z.strictObject({
+          at: text,
+          key: text,
+          verdict: z.enum(["covered", "gaps", "no-verdict"]),
+          summary: text,
+          findings: z.array(text).max(40),
+        }),
+      )
+      .max(8)
+      .optional(),
     verification: verificationSchema.optional(),
     history: z.array(z.strictObject({ at: text, stage: text, message: text, taskId: id.optional() })),
     operatorNotes: z
