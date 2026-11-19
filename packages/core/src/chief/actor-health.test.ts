@@ -85,6 +85,18 @@ describe("Actor route cooldown", () => {
     })
   })
 
+  it("does not cool a route for runs the operator's interrupt stopped", () => {
+    // Regression: an operator interrupted two parallel Actors a few seconds after dispatch; both runs were
+    // settled by the process guard, counted as two consecutive route failures and idled the mission for
+    // thirty minutes.
+    const evidence = "The local process guard confirmed that the recorded execution and its process group stopped."
+    const mission = setup([run("stopped-a", 0, { evidence }), run("stopped-b", 10, { evidence })])
+    expect(actorRouteHealth(mission, route, start + 2_000)).toMatchObject({
+      state: "ready",
+      consecutiveFailures: 0,
+    })
+  })
+
   it("still cools a route after a genuine provider transport failure", () => {
     const mission = setup([run("crash", 0, { evidence: "Agent exited with code 1: ECONNRESET" })])
     expect(actorRouteHealth(mission, route, start + 2_000)).toMatchObject({
