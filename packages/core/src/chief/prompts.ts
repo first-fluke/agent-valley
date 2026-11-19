@@ -176,13 +176,26 @@ function waveOf(mission: Mission, task: ChiefTask): { peers: string[]; dependent
   return planWaveOf(mission.plan?.tasks ?? [], task.id)
 }
 
+/**
+ * The one wave task that updates an earlier task's test when the wave replaced what it asserts. Deferring it
+ * to the integrating task left every integration check of a wave failing: a contract task asserted a
+ * placeholder, the first lane replaced the behaviour, and four checks in a row failed on a file no lane
+ * could edit. One owner keeps the file from being merged twice; tasks that already passed are out.
+ */
+function supersededTestOwner(mission: Mission, task: ChiefTask, peers: string[]): string {
+  const open = [task.id, ...peers]
+    .filter((id) => mission.tasks.find((state) => state.id === id)?.status !== "completed")
+    .sort()
+  return open[0] ?? task.id
+}
+
 export function waveRepairRule(mission: Mission, task: ChiefTask): string | undefined {
   const { peers, dependents } = waveOf(mission, task)
   if (!peers.length) return undefined
   const later = dependents.length
     ? `the later task that integrates this wave (${dependents.join(", ")})`
     : "the Chief Director"
-  return `Concurrent wave: ${peers.join(", ")} run at the same time as this task in separate workspaces, and the deliveries are merged afterwards. This limits the repair ownership rule above: edit only the files this assignment owns. A file that another wave task owns or also has to change cannot be merged twice, so do not edit it; when a failure needs such a change, report the file and the exact change needed for ${later} instead. A failure located in another wave task's files is that task's to repair.`
+  return `Concurrent wave: ${peers.join(", ")} run at the same time as this task in separate workspaces, and the deliveries are merged afterwards. This limits the repair ownership rule above: edit only the files this assignment owns. A file that another wave task owns or also has to change cannot be merged twice, so do not edit it; when a failure needs such a change, report the file and the exact change needed for ${later} instead. A failure located in another wave task's files is that task's to repair. One exception: when a review finding assigns this task a test delivered by an earlier, completed task whose expected value this wave replaced, update exactly that expectation in that test and nothing else in the file.`
 }
 
 export function waveReviewRule(mission: Mission, task: ChiefTask): string | undefined {
@@ -191,7 +204,15 @@ export function waveReviewRule(mission: Mission, task: ChiefTask): string | unde
   const shared = dependents.length
     ? `belongs to the later task that integrates this wave (${dependents.join(", ")}): record it in the summary and do not block this task on it`
     : `is repaired by the first of ${[task.id, ...peers].sort().join(", ")} only`
-  return `Wave ownership: this task was delivered in one wave with ${peers.join(", ")}, and integrationCheck ran once on their combined tree. This limits the rule above. Hold this task responsible only for failures caused by or located in the files of its own changeSet and assignment. A failure located in another wave task's files is that task's finding: name that task in the summary and do not ask this task's Actor to edit those files. A failure that needs a change to a file outside every wave task's assignment, such as shared wiring, registration or manifests, ${shared}.`
+  const owner = supersededTestOwner(mission, task, peers)
+  const superseded = dependents.length
+    ? ` One such failure is not deferred, because every integration check of the wave fails until it is repaired: a test delivered by an earlier, completed task that fails only because this wave deliberately replaced the behaviour it asserts, such as a placeholder or default result the wave was assigned to change. It is repaired now by ${owner} only, whichever wave task replaced the behaviour: ${
+        owner === task.id
+          ? "make it a finding for this task, naming the test, the superseded expectation and the new one"
+          : "name it in the summary and do not make it a finding for this task"
+      }.`
+    : ""
+  return `Wave ownership: this task was delivered in one wave with ${peers.join(", ")}, and integrationCheck ran once on their combined tree. This limits the rule above. Hold this task responsible only for failures caused by or located in the files of its own changeSet and assignment. A failure located in another wave task's files is that task's finding: name that task in the summary and do not ask this task's Actor to edit those files. A failure that needs a change to a file outside every wave task's assignment, such as shared wiring, registration or manifests, ${shared}.${superseded}`
 }
 
 const OPERATOR_NOTES_RULE =

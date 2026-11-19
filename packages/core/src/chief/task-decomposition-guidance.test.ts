@@ -11,6 +11,7 @@ describe("task decomposition guidance", () => {
     expect(guidance).toContain("Up to 3 ready tasks run at once")
     expect(guidance).toContain("disjoint owned paths")
     expect(guidance).toContain("can never edit the same file")
+    expect(guidance).toContain("assert only behaviour that stays true after the wave has delivered")
     expect(guidance).toContain("name that delivered file or interface")
     expect(taskDecompositionGuidance(mission(3), "replan")).toContain("Up to 3 ready tasks run at once")
   })

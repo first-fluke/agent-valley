@@ -73,12 +73,34 @@ describe("ownership inside a concurrent wave", () => {
     )
   })
 
+  it("has one open wave task update an earlier task's test that the wave superseded", () => {
+    // Regression: a contract task asserted a placeholder result, the first lane replaced the behaviour, and
+    // every integration check of the wave failed on that test because its repair was deferred to the
+    // integrating task while no lane could edit the file.
+    const { mission, task, state, peer } = waveFixture()
+    mission.tasks = [state, { id: peer.id, reviewerId: "reviewer", status: "reviewing", attempts: 1 }]
+    const [first, second] = [task, peer].sort((a, b) => a.id.localeCompare(b.id))
+    if (!first || !second) throw new Error("Expected two wave tasks")
+    expect(waveReviewRule(mission, first)).toContain(`It is repaired now by ${first.id} only`)
+    expect(waveReviewRule(mission, first)).toContain("make it a finding for this task")
+    expect(waveReviewRule(mission, second)).toContain(`It is repaired now by ${first.id} only`)
+    expect(waveReviewRule(mission, second)).toContain("do not make it a finding for this task")
+    expect(waveRepairRule(mission, first)).toContain("update exactly that expectation in that test")
+    // A wave task that already passed review cannot repair it: ownership moves to the next open task.
+    const passed = mission.tasks.find((entry) => entry.id === first.id)
+    if (!passed) throw new Error("Expected task state")
+    passed.status = "completed"
+    expect(waveReviewRule(mission, second)).toContain(`It is repaired now by ${second.id} only`)
+    expect(waveReviewRule(mission, second)).toContain("make it a finding for this task")
+  })
+
   it("assigns shared failures to one wave task when no later task integrates the wave", () => {
     const { mission, task } = waveFixture(false)
     expect(waveReviewRule(mission, task)).toContain(
       `is repaired by the first of ${[task.id, "task-swift"].sort().join(", ")} only`,
     )
     expect(waveRepairRule(mission, task)).toContain("for the Chief Director instead")
+    expect(waveReviewRule(mission, task)).not.toContain("It is repaired now by")
   })
 
   it("leaves a task that runs alone under the ordinary repair ownership rule", () => {
