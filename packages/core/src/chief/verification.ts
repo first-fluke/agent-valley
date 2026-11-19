@@ -92,6 +92,23 @@ export interface GoalVerificationOptions {
    * bound inputs are unchanged is not executed again; the caller guarantees the workspace is identical.
    */
   reuse?: readonly CheckEvidence[]
+  /** How often a command that exited non-zero is run again on the unchanged workspace. Defaults to none. */
+  commandReruns?: number
+}
+
+export const VERIFICATION_RERUNS_ENV = "AV_VERIFICATION_RERUNS"
+
+/**
+ * A command that fails once and passes when run again on byte-identical inputs has shown a nondeterministic
+ * test, not a defect of the delivery. Without a second run that single failure reopened a finished task for
+ * a repair that had nothing to repair and cost a whole round of Actor run, integration check and review.
+ * The operator sets 0 to keep every failure final.
+ */
+export function verificationReruns(source: NodeJS.ProcessEnv = process.env): number {
+  const raw = source[VERIFICATION_RERUNS_ENV]?.trim()
+  if (!raw) return 1
+  const value = Number(raw)
+  return Number.isInteger(value) && value >= 0 && value <= 3 ? value : 1
 }
 
 function checkDigest(check: GoalVerificationCheck): string {
@@ -229,32 +246,47 @@ async function inspectCheck(
         outputSha256: earlier.outputSha256,
         inputs,
       }
-    const result = await (options.executeCommand ?? executeVerificationCommand)(check.program, check.args, {
-      cwd: root,
-      timeoutMs: options.timeoutMs ?? check.timeoutMs,
-      maxOutputBytes: MAX_VERIFICATION_OUTPUT_BYTES,
-      signal: options.signal,
-      onSpawned: options.onSpawned,
-    })
-    if (
-      typeof result.stdout !== "string" ||
-      typeof result.stderr !== "string" ||
-      (result.exitCode !== null && !Number.isInteger(result.exitCode)) ||
-      Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > MAX_VERIFICATION_OUTPUT_BYTES
-    )
-      throw new Error("Verification command returned malformed or oversized output. Rerun its bounded process.")
-    const after = await verificationCommandInputs(root, check.program, check.args, budget)
-    if (JSON.stringify(inputs) !== JSON.stringify(after))
-      throw new Error("Verification test inputs changed during execution. Stop concurrent writers and rerun tests.")
+    const run = async () => {
+      const result = await (options.executeCommand ?? executeVerificationCommand)(check.program, check.args, {
+        cwd: root,
+        timeoutMs: options.timeoutMs ?? check.timeoutMs,
+        maxOutputBytes: MAX_VERIFICATION_OUTPUT_BYTES,
+        signal: options.signal,
+        onSpawned: options.onSpawned,
+      })
+      if (
+        typeof result.stdout !== "string" ||
+        typeof result.stderr !== "string" ||
+        (result.exitCode !== null && !Number.isInteger(result.exitCode)) ||
+        Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > MAX_VERIFICATION_OUTPUT_BYTES
+      )
+        throw new Error("Verification command returned malformed or oversized output. Rerun its bounded process.")
+      const after = await verificationCommandInputs(root, check.program, check.args, budget)
+      if (JSON.stringify(inputs) !== JSON.stringify(after))
+        throw new Error("Verification test inputs changed during execution. Stop concurrent writers and rerun tests.")
+      return result
+    }
+    let result = await run()
+    // Only a process that ran to a non-zero exit is run again: a timeout or a kill would cost its full budget twice.
+    const earlierFailures: string[] = []
+    for (let rerun = 0; rerun < (options.commandReruns ?? 0); rerun++) {
+      if (result.exitCode === null || result.exitCode === 0 || options.signal?.aborted) break
+      earlierFailures.push(`exit ${result.exitCode}: ${commandFailureDetail(result.stdout, result.stderr)}`)
+      result = await run()
+    }
     const passed = result.exitCode === 0 && (check.stdoutIncludes ?? []).every((text) => result.stdout.includes(text))
+    const nondeterministic =
+      passed && earlierFailures.length > 0
+        ? ` NONDETERMINISTIC: it failed ${earlierFailures.length} earlier run(s) on this unchanged workspace and is not a defect of this delivery; stabilise the named test in a later change. Earlier failure: ${earlierFailures[0]?.slice(0, 900)}`
+        : ""
     return {
       passed,
       summary: checkSummary(
         passed,
         result.exitCode !== 0
-          ? `Process exited ${result.exitCode ?? "without an exit code"}. Repair the explicit test or Git check. ${commandFailureDetail(result.stdout, result.stderr)}`
+          ? `Process exited ${result.exitCode ?? "without an exit code"}${earlierFailures.length > 0 ? ` in each of ${earlierFailures.length + 1} runs` : ""}. Repair the explicit test or Git check. ${commandFailureDetail(result.stdout, result.stderr)}`
           : passed
-            ? "Explicit command exited zero and its required output assertions passed."
+            ? `Explicit command exited zero and its required output assertions passed.${nondeterministic}`
             : "Process exited zero but required stdout assertions are missing.",
       ),
       exitCode: result.exitCode,

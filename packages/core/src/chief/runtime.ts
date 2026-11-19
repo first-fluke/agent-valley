@@ -43,7 +43,7 @@ import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
 import type { ChiefPorts, ChiefRunContext, ChiefStage, Mission, Persona } from "./types"
 import { finishOperatingRun, markOperatingRunUnknown } from "./usage"
-import { executeGoalVerification } from "./verification"
+import { executeGoalVerification, verificationReruns } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
 import { operationCacheStore, retainWorkspaceCaches } from "./workspace-cache"
 import { releaseWorkspaceScratch } from "./workspace-scratch"
@@ -174,6 +174,7 @@ export class ChiefRuntime {
           timeoutMs: mission.timeoutSec * 1_000,
           signal: signal,
           onSpawned: (pid, detached) => active.spawned(pid, detached),
+          commandReruns: verificationReruns(),
           ...(reuse ? { reuse } : {}),
         })
         if (!mission.goalVerification.ok || !mission.verifyCommand.trim()) return mission.goalVerification
