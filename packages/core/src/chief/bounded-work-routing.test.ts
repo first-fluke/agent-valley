@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { degradedWorkRoute } from "./bounded-work-routing"
 import type { OperatingRun, RouteEvidence, RouteOutcome, RoutingCandidate } from "./operations"
 import { operationsEvidence } from "./operations-report"
-import { routeEvidence, routeKey, selectWorkActor } from "./routing"
+import { closeContinuedWorkRun, PRE_DELIVERY_CONTINUED, routeEvidence, routeKey, selectWorkActor } from "./routing"
 import { routingCancellationFixture } from "./routing-cancellation.fixture"
 
 function closedPool() {
@@ -429,5 +429,40 @@ describe("degraded route ordering", () => {
       ),
     ).toBeUndefined()
     expect(select([record("codex", 5)], [])).toBeUndefined()
+  })
+})
+
+describe("an attempt continued after a failed pre-delivery check", () => {
+  // Regression: a contract task's first run was a bounded probe; its pre-delivery check failed, the
+  // continuation was refused as "an unreviewed bounded routing probe", and the mission spent a Chief
+  // recovery round and restarted the task from scratch.
+  it("is routed again on the same probe and is not counted as a second sample", () => {
+    const value = closedPool()
+    const { mission, worker } = value
+    const before = routeEvidence(mission)
+    const first = selectWorkActor(mission, worker, "onboarding")
+    const returned = recordProbe(value, first, "returned-before-check", "pending")
+    returned.executionState = "settled"
+    expect(() => selectWorkActor(mission, worker, "onboarding")).toThrow("unreviewed bounded routing probe")
+
+    closeContinuedWorkRun(mission, "onboarding")
+    expect(returned.outcome).toBe("rejected")
+    expect(returned.evidence).toBe(PRE_DELIVERY_CONTINUED)
+    const again = selectWorkActor(mission, worker, "onboarding")
+    expect(routeKey({ actorType: again.actor.agentType, model: again.actor.model })).toBe(
+      routeKey({ actorType: first.actor.agentType, model: first.actor.model }),
+    )
+    expect(again.reason).toBe(first.reason)
+    expect(routeEvidence(mission).map((entry) => [entry.actorType, entry.samples, entry.successes])).toEqual(
+      before.map((entry) => [entry.actorType, entry.samples, entry.successes]),
+    )
+  })
+
+  it("leaves a reviewed or still running run as it is", () => {
+    const value = closedPool()
+    const { mission, rejection } = value
+    closeContinuedWorkRun(mission, "onboarding")
+    expect(rejection.outcome).toBe("rejected")
+    expect(rejection.evidence).not.toBe(PRE_DELIVERY_CONTINUED)
   })
 })

@@ -5,6 +5,7 @@ import { classifyFailure, MissionPause } from "./execution"
 import { runJoinedWave } from "./parallel"
 import { ParallelIntegrationConflict } from "./parallel-workspace"
 import { workPrompt } from "./prompts"
+import { closeContinuedWorkRun } from "./routing"
 import type { ChiefPorts, ChiefStage, ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
 
 export interface ParallelWaveHooks {
@@ -73,6 +74,9 @@ export async function settlePreDeliveryCheck(options: {
       `Pre-delivery check failed in the workspace of ${taskId} (${round}/${LANE_CHECK_ROUNDS}); its Actor continues there with the output. ${checked.output.slice(0, 1_200)}`,
       taskId,
     )
+    // The returned run is closed by the check; otherwise it reads as an unreviewed routing probe and its
+    // own continuation is refused, which once cost a Chief recovery round and a restart from scratch.
+    closeContinuedWorkRun(mission, taskId)
     output = await rerun(laneCheckFeedback(output, checked.output))
   }
   return output

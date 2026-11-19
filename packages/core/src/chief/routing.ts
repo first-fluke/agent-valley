@@ -15,6 +15,26 @@ export const routeKey = (entry: { actorType: string; model?: string }) => `${ent
  */
 const hostSlept = (run: { evidence?: string }) => run.evidence?.startsWith(HOST_SUSPENDED_EVIDENCE) === true
 
+/**
+ * Evidence of a work run whose attempt went on after the operator's pre-delivery check failed. The run
+ * returned, the check rejected its delivery and the same Actor continued in the same workspace, so the
+ * continuation carries the attempt's verdict. Left pending, such a run read as an unreviewed routing probe
+ * and blocked its own continuation; counted, it would be a second sample for one attempt.
+ */
+export const PRE_DELIVERY_CONTINUED =
+  "Pre-delivery check failed; the Actor continued this attempt in the same workspace."
+
+export const continuedAfterCheck = (run: { evidence?: string }) =>
+  run.evidence?.startsWith(PRE_DELIVERY_CONTINUED) === true
+
+/** Closes the returned half of an attempt before its Actor is sent back to repair the pre-delivery check. */
+export function closeContinuedWorkRun(mission: Mission, taskId: string): void {
+  const run = mission.operations?.runs.findLast((entry) => entry.stage === "work" && entry.taskId === taskId)
+  if (run?.outcome !== "pending" || run.executionState !== "settled") return
+  run.outcome = "rejected"
+  run.evidence = PRE_DELIVERY_CONTINUED
+}
+
 /** Include unsuccessful attempts in successful-deliverable cost; unknown costs stay unknown. */
 export function routeEvidence(mission: Mission): RouteEvidence[] {
   const evidence = new Map<string, RouteEvidence>()
@@ -37,7 +57,8 @@ export function routeEvidence(mission: Mission): RouteEvidence[] {
       !cancelled.has(run.runId) &&
       run.nativeOutcome !== "cancelled" &&
       !isNativeAgentTimeout(run.evidence ?? "") &&
-      !hostSlept(run)
+      !hostSlept(run) &&
+      !continuedAfterCheck(run)
     ) {
       item.samples += 1
       appendRouteOutcome(item, { at: run.finishedAt ?? run.startedAt, outcome: run.outcome }, window)
@@ -153,7 +174,8 @@ export function selectWorkActor(
       run.taskId === taskId &&
       !cancelled.has(run.runId) &&
       run.nativeOutcome !== "cancelled" &&
-      !hostSlept(run),
+      !hostSlept(run) &&
+      !continuedAfterCheck(run),
   )
   if (hasUnreviewedRoutingProbe(mission, taskId, taskRuns))
     throw new Error(
