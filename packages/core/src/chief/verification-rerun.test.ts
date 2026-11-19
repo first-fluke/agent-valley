@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { executeGoalVerification, verificationReruns } from "./verification"
+import { readVerificationFile, verificationBudget, verificationRoot } from "./verification-files"
 
 const roots: string[] = []
 async function workspace(): Promise<string> {
@@ -81,5 +82,40 @@ describe("verification of a nondeterministic command", () => {
     expect(verificationReruns({ AV_VERIFICATION_RERUNS: "0" })).toBe(0)
     expect(verificationReruns({ AV_VERIFICATION_RERUNS: "2" })).toBe(2)
     expect(verificationReruns({ AV_VERIFICATION_RERUNS: "many" })).toBe(1)
+  })
+
+  it("charges an input once however often the same content is read, and again when it changes", async () => {
+    const root = await verificationRoot(await workspace())
+    const budget = { ...verificationBudget(), remaining: 20 }
+    for (let read = 0; read < 5; read++) await readVerificationFile(root, "harness.test.js", budget)
+    expect(budget.remaining).toBe(20 - "test fixture".length)
+    await writeFile(join(root, "harness.test.js"), "changed fixture!")
+    await expect(readVerificationFile(root, "harness.test.js", budget)).rejects.toThrow("evidence budget")
+    // A caller without the ledger keeps the per-read charge.
+    const plain = { remaining: 20 }
+    await writeFile(join(root, "harness.test.js"), "test fixture")
+    await readVerificationFile(root, "harness.test.js", plain)
+    await expect(readVerificationFile(root, "harness.test.js", plain)).rejects.toThrow("evidence budget")
+  })
+
+  it("keeps later checks inside the evidence allowance after a rerun", async () => {
+    const root = await workspace()
+    await writeFile(join(root, "harness.test.js"), Buffer.alloc(4_000_000, "a"))
+    const five = {
+      version: 1,
+      criteria: ["one", "two", "three", "four", "five"].map((criterion) => ({
+        criterion,
+        checks: [{ kind: "command", program: "node", args: ["--test", "harness.test.js"], timeoutMs: 120_000 }],
+      })),
+    }
+    const executeCommand = vi.fn().mockResolvedValueOnce(failed).mockResolvedValue(passed)
+    const result = await executeGoalVerification(five, root, {
+      successCriteria: ["one", "two", "three", "four", "five"],
+      executeCommand,
+      commandReruns: 1,
+    })
+    expect(executeCommand).toHaveBeenCalledTimes(6)
+    expect(result.ok).toBe(true)
+    expect(result.output).not.toContain("evidence budget")
   })
 })

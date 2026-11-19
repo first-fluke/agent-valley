@@ -7,6 +7,21 @@ import { safeVerificationPath } from "./verification-contract"
 export const MAX_VERIFICATION_FILE_BYTES = 4_194_304
 export const MAX_VERIFICATION_TOTAL_BYTES = 33_554_432
 
+/**
+ * The evidence allowance of one verification. Each command binds its inputs before and after it runs, so a
+ * Cargo workspace was read six times by three commands and a 5 MB workspace used 30 MB of the 32 MB
+ * allowance; one more read failed every later check for a workspace nobody had made larger. Content
+ * already charged under the same path is therefore read again without a second charge.
+ */
+export interface VerificationBudget {
+  remaining: number
+  charged?: Map<string, string>
+}
+
+export function verificationBudget(): VerificationBudget {
+  return { remaining: MAX_VERIFICATION_TOTAL_BYTES, charged: new Map() }
+}
+
 export async function verificationRoot(path: string): Promise<string> {
   const info = await lstat(path)
   if (info.isSymbolicLink() || !info.isDirectory())
@@ -39,13 +54,14 @@ export async function verificationFilePath(root: string, name: string): Promise<
 export async function readVerificationFile(
   root: string,
   name: string,
-  budget: { remaining: number },
+  budget: VerificationBudget,
 ): Promise<{ bytes: Buffer; sha256: string }> {
   const target = await verificationFilePath(root, name)
   const file = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const before = await file.stat()
-    if (!before.isFile() || before.size > MAX_VERIFICATION_FILE_BYTES || before.size > budget.remaining)
+    const known = budget.charged?.has(name) ?? false
+    if (!before.isFile() || before.size > MAX_VERIFICATION_FILE_BYTES || (!known && before.size > budget.remaining))
       throw new Error(`Verification file ${name} exceeds the bounded evidence budget. Use a smaller evidence file.`)
     const buffer = Buffer.alloc(before.size + 1)
     let count = 0
@@ -59,7 +75,6 @@ export async function readVerificationFile(
     const pathInfo = await lstat(await verificationFilePath(root, name))
     if (
       bytes.length > MAX_VERIFICATION_FILE_BYTES ||
-      bytes.length > budget.remaining ||
       before.size !== after.size ||
       before.mtimeMs !== after.mtimeMs ||
       before.ctimeMs !== after.ctimeMs ||
@@ -67,8 +82,14 @@ export async function readVerificationFile(
       after.ino !== pathInfo.ino
     )
       throw new Error(`Verification file ${name} changed during inspection. Stop concurrent writers and retry.`)
-    budget.remaining -= bytes.length
-    return { bytes, sha256: createHash("sha256").update(bytes).digest("hex") }
+    const sha256 = createHash("sha256").update(bytes).digest("hex")
+    if (budget.charged?.get(name) !== sha256) {
+      if (bytes.length > budget.remaining)
+        throw new Error(`Verification file ${name} exceeds the bounded evidence budget. Use a smaller evidence file.`)
+      budget.remaining -= bytes.length
+      budget.charged?.set(name, sha256)
+    }
+    return { bytes, sha256 }
   } finally {
     await file.close()
   }

@@ -15,12 +15,7 @@ import {
   validateGoalVerificationContract,
   verificationCommandTestPaths,
 } from "./verification-contract"
-import {
-  jsonPointerValue,
-  MAX_VERIFICATION_TOTAL_BYTES,
-  readVerificationFile,
-  verificationRoot,
-} from "./verification-files"
+import { jsonPointerValue, readVerificationFile, verificationBudget, verificationRoot } from "./verification-files"
 
 export type {
   VerificationCommandExecutor,
@@ -355,7 +350,7 @@ export async function executeGoalVerification(
   if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1))
     throw new Error("Verification timeout must be a positive bounded duration.")
   const root = await verificationRoot(workspaceRoot)
-  const budget = { remaining: MAX_VERIFICATION_TOTAL_BYTES }
+  const budget = verificationBudget()
   const evidence: GoalVerificationResult["evidence"] = []
   for (const criterion of contract.criteria) {
     const checks: CheckEvidence[] = []
@@ -416,7 +411,7 @@ export async function executeCommandChecks(
       if (check.kind === "command") commands.set(JSON.stringify([check.program, check.args]), check)
   if (!commands.size) return undefined
   const root = await verificationRoot(workspaceRoot)
-  const budget = { remaining: MAX_VERIFICATION_TOTAL_BYTES }
+  const budget = verificationBudget()
   const lines: string[] = []
   const evidence: CheckEvidence[] = []
   let ok = true
