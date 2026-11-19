@@ -27,8 +27,8 @@
  *   -m/--model <provider/model>   format is "provider/model", e.g.
  *                           "anthropic/claude-sonnet-5"
  *   --agent <name>, -c/--continue, -s/--session <id>   not used here (this
- *                           adapter is one-shot per execute(), like
- *                           claude/grok/kimi/cursor's stateless mode)
+ *                           path is one-shot per execute(); runs that take
+ *                           operator messages use `opencode acp` instead)
  *   --pure                  runs without external plugins — DELIBERATELY
  *                           NEVER PASSED. oma links `.opencode/plugins/oma/`
  *                           + `.opencode/agents/` into the project, and
@@ -105,8 +105,9 @@
  * confirmed schema.
  */
 
+import { type AcpAgentSpec, AcpCapableSession } from "./acp-session"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, waitForStreamCompletion } from "./base-session"
+import { waitForStreamCompletion } from "./base-session"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion, exhaustionMessage, nativeErrorMessage } from "./native-failure"
 import { BoundedResultText, MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
@@ -137,7 +138,7 @@ const EDIT_TOOL_HINTS = ["edit", "str_replace", "patch"]
 const AUTH_FAILURE_PATTERN =
   /not authenticated|no provider|unauthorized|missing.*api.?key|no credentials|paid_model_auth_required|need to sign in to use this model|run\s+`?(?:opencode|kilo) auth`?/i
 
-export class OpencodeSession extends BaseSession {
+export class OpencodeSession extends AcpCapableSession {
   protected readonly vendorType: "opencode" | "kilo" = "opencode"
   protected readonly vendorCommand: string = OPENCODE_COMMAND
   protected readonly vendorLabel: string = "OpenCode"
@@ -182,6 +183,9 @@ export class OpencodeSession extends BaseSession {
     this.explicitResult = undefined
     this.explicitTokenUsage = undefined
     this.startedAt = Date.now()
+
+    // Runs that take operator messages hold an ACP session open instead of the one-shot below.
+    if (this.vendorType === "opencode" && (await this.executeOverAcp(prompt, this.acpSpec()))) return
 
     // `opencode run <message>` — message is a positional argv element, not
     // interpolated into a shell string (spawn() uses an argv array), so
@@ -235,13 +239,7 @@ export class OpencodeSession extends BaseSession {
     const exitCode = code ?? -1
     if (exitCode !== 0) {
       if (AUTH_FAILURE_PATTERN.test(this.rawTail)) {
-        this.emitError(
-          "AUTH_FAILED",
-          `${this.vendorCommand} is not authenticated (no configured provider/credentials detected).\n` +
-            `  Fix: run \`${this.authCommandHint}\` to configure a provider, or set the provider API key before starting Agent Valley.\n` +
-            `  Location: ${this.authLocationHint}, or the orchestrator process environment.`,
-          false,
-        )
+        this.emitError("AUTH_FAILED", this.authHelp(), false)
         return
       }
       this.emitError(
@@ -265,6 +263,19 @@ export class OpencodeSession extends BaseSession {
         tokenUsage: this.explicitTokenUsage,
       },
     })
+  }
+
+  private acpSpec(): AcpAgentSpec {
+    const { vendorType: agentType, vendorCommand: command, vendorLabel: label } = this
+    return { agentType, command, label, args: ["acp"], auth: [AUTH_FAILURE_PATTERN, this.authHelp()] }
+  }
+
+  private authHelp(): string {
+    return (
+      `${this.vendorCommand} is not authenticated (no configured provider/credentials detected).\n` +
+      `  Fix: run \`${this.authCommandHint}\` to configure a provider, or set the provider API key before starting Agent Valley.\n` +
+      `  Location: ${this.authLocationHint}, or the orchestrator process environment.`
+    )
   }
 
   private appendRawTail(chunk: string): void {
