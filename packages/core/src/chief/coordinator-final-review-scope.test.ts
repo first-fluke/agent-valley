@@ -239,6 +239,25 @@ describe("a success criterion no repair reaches", () => {
   const finalReviews = (value: ReturnType<typeof fixture>) =>
     value.runAgent.mock.calls.filter((call) => call[3] === "final-review").length
 
+  it("records the repeated criterion unmet and delivers when the operator chose that policy", async () => {
+    // Regression: a finished mission waited 22 hours for the decision the operator had already made twice.
+    const value = fixture()
+    const finished = await completeMission(value, [task("task-1"), task("task-2")])
+    alwaysFailFinal(value)
+    process.env.AV_REPEATED_FINAL_REVIEW = "record-unmet"
+    try {
+      const result = await coordinate(finished, value.ports)
+      expect(result.status).toBe("completed")
+      expect(result.criterionWaivers?.map((waiver) => waiver.criterion)).toEqual(finalCriteria(result))
+      expect(result.criterionWaivers?.[0]?.reason).toContain("The suite still takes longer than the stated limit")
+      expect(result.finalReview?.passed).toBe(true)
+      expect(result.finalReview?.criteria?.every((entry) => !entry.passed && entry.waived)).toBe(true)
+      expect(result.history.filter((event) => event.stage === "repair-scope")).toHaveLength(1)
+    } finally {
+      delete process.env.AV_REPEATED_FINAL_REVIEW
+    }
+  })
+
   it("repairs once, then stops for the operator when the same criterion fails again", async () => {
     const value = fixture()
     const finished = await completeMission(value, [task("task-1"), task("task-2")])

@@ -5,7 +5,14 @@ import { ReadOnlyViolation } from "./coordinator-run"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
 import { finalReviewRepairScope, selectRepairTaskId } from "./coordinator-state"
 import { MissionPause, pauseForFailure, recordPause } from "./execution"
-import { blockingCriteria, finalCriteria } from "./goal-evidence"
+import {
+  blockingCriteria,
+  finalCriteria,
+  REPEATED_FINAL_REVIEW_ENV,
+  recordRepeatedCriteriaUnmet,
+  repeatedFinalReviewPolicy,
+  validateFinalReview,
+} from "./goal-evidence"
 import { reviewPrompt } from "./prompts"
 import { fallbackReport } from "./reports"
 import { reviewGatesAreCurrent } from "./review-gate-check"
@@ -114,11 +121,22 @@ export async function approveMission(context: CoordinatorContext): Promise<Stage
       const numbered = finalCriteria(mission)
         .map((criterion, index) => (failing.includes(criterion) ? `${index + 1}. ${criterion.slice(0, 200)}` : ""))
         .filter(Boolean)
-      throw new MissionPause(
-        `The final review failed again on the same success criteria after a repair: ${numbered.join(" | ")}. No further repair is started automatically. Resume with --retry to repair once more, or record that a criterion stays unmet in this mission with --waive-criterion <number> --waive-reason <text>.`,
-        "budget",
+      if (repeatedFinalReviewPolicy() !== "record-unmet")
+        throw new MissionPause(
+          `The final review failed again on the same success criteria after a repair: ${numbered.join(" | ")}. No further repair is started automatically. Resume with --retry to repair once more, or record that a criterion stays unmet in this mission with --waive-criterion <number> --waive-reason <text>.`,
+          "budget",
+        )
+      // A paused mission waited for the operator; one waited 22 hours for the decision the operator had
+      // already made twice. Under this policy the criteria are recorded unmet with the findings as reason.
+      recordRepeatedCriteriaUnmet(mission, failing, mission.finalReview.findings)
+      mission.finalReview = validateFinalReview(mission.finalReview, mission)
+      await save(
+        "criterion-waived",
+        `The final review failed again on the same success criteria after a repair: ${numbered.join(" | ")}. Under the operator's ${REPEATED_FINAL_REVIEW_ENV}=record-unmet policy they are recorded as unmet in this mission and its verified work is delivered; the findings are kept as the reason.`,
       )
     }
+  }
+  if (!mission.finalReview.passed) {
     const reason = mission.finalReview.findings.join("; ")
     await requestRepair(reason, finalReviewRepairScope(mission, mission.finalReview))
     return { kind: "next", stage: "tasks" }

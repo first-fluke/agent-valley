@@ -16,6 +16,34 @@ export function waivedCriteria(mission: Mission): Map<string, string> {
   return new Map((mission.criterionWaivers ?? []).map((waiver) => [waiver.criterion, waiver.reason]))
 }
 
+export const REPEATED_FINAL_REVIEW_ENV = "AV_REPEATED_FINAL_REVIEW"
+
+/**
+ * What happens when the final review fails again on the same criteria after a repair. `pause` (the default)
+ * waits for the operator; `record-unmet` records those criteria as unmet in this mission, with the review's
+ * findings as the reason, so the verified work is delivered and the findings can become the next goal.
+ */
+export function repeatedFinalReviewPolicy(source: NodeJS.ProcessEnv = process.env): "pause" | "record-unmet" {
+  return source[REPEATED_FINAL_REVIEW_ENV]?.trim() === "record-unmet" ? "record-unmet" : "pause"
+}
+
+export function recordRepeatedCriteriaUnmet(
+  mission: Mission,
+  criteria: readonly string[],
+  findings: readonly string[],
+): void {
+  const at = new Date().toISOString()
+  const reason =
+    `Recorded unmet under the operator's ${REPEATED_FINAL_REVIEW_ENV}=record-unmet policy: the final review failed on this criterion again after a repair. Its findings: ${findings.join(" ")}`.slice(
+      0,
+      1_000,
+    )
+  mission.criterionWaivers = [
+    ...(mission.criterionWaivers ?? []).filter((waiver) => !criteria.includes(waiver.criterion)),
+    ...criteria.map((criterion) => ({ at, criterion, reason })),
+  ]
+}
+
 /** Unmet criteria that still hold the mission open: every failed assessment the operator did not waive. */
 export function blockingCriteria(review: Review | undefined): string[] {
   return (review?.criteria ?? []).filter((entry) => !entry.passed && !entry.waived).map((entry) => entry.criterion)
