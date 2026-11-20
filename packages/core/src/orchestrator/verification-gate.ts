@@ -41,7 +41,7 @@ const MAX_TIMEOUT_SEC = 86_400
  */
 function buildVerifyEnv(extraEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return {
-    PATH: process.env.PATH,
+    PATH: process.env.PATH ?? process.env.Path,
     HOME: process.env.HOME,
     NODE_ENV: process.env.NODE_ENV,
     LANG: "C.UTF-8",
@@ -59,6 +59,16 @@ function buildVerifyEnv(extraEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
       "SCCACHE_CACHE_SIZE",
       "SCCACHE_IDLE_TIMEOUT",
       "CCACHE_DIR",
+      "USERPROFILE",
+      "LOCALAPPDATA",
+      "APPDATA",
+      "TEMP",
+      "TMP",
+      "SystemRoot",
+      "SYSTEMROOT",
+      "COMSPEC",
+      "ComSpec",
+      "PATHEXT",
     ]),
     ...extraEnv,
   } as NodeJS.ProcessEnv

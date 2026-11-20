@@ -128,7 +128,7 @@ export async function cargoCompilerCacheEnvironment(
   if (source.RUSTC_WRAPPER !== undefined) return {}
   const manifest = await lstat(join(root, "Cargo.toml")).catch(() => undefined)
   if (!manifest?.isFile()) return {}
-  const sccache = await findExecutableOnPath("sccache", source.PATH)
+  const sccache = await findExecutableOnPath("sccache", source.PATH ?? source.Path)
   if (!sccache) return {}
   return {
     RUSTC_WRAPPER: sccache,
