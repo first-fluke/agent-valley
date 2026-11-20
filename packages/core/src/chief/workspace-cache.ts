@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { lstat, mkdir, readdir, rename, rm, rmdir } from "node:fs/promises"
+import { lstat, mkdir, readdir, readFile, rename, rm, rmdir } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
 import { promisify } from "node:util"
 import { clearedGitEnvironment } from "../util/git-environment"
@@ -39,8 +39,52 @@ export async function workspaceCachePaths(
     const entries = value.split(",").map((entry) => entry.trim().replace(/\/+$/, ""))
     return [...new Set(entries.filter(validCachePath))]
   }
+  const paths: string[] = []
   const cargo = await lstat(join(workspace, "Cargo.toml")).catch(() => undefined)
-  return cargo?.isFile() ? ["target/debug", "target/release"] : []
+  if (cargo?.isFile()) paths.push("target/debug", "target/release")
+  const nodeCaches = await jsWorkspaceCachePaths(workspace)
+  paths.push(...nodeCaches)
+  return [...new Set(paths.filter(validCachePath))]
+}
+
+async function jsWorkspaceCachePaths(workspace: string): Promise<string[]> {
+  const manifestPath = join(workspace, "package.json")
+  const manifestStat = await lstat(manifestPath).catch(() => undefined)
+  if (!manifestStat?.isFile() || manifestStat.size > 256_000) return []
+  const caches = ["node_modules"]
+  try {
+    const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      workspaces?: unknown
+    }
+    const rawPatterns = Array.isArray(parsed.workspaces)
+      ? parsed.workspaces
+      : parsed.workspaces &&
+          typeof parsed.workspaces === "object" &&
+          Array.isArray((parsed.workspaces as { packages?: unknown }).packages)
+        ? (parsed.workspaces as { packages: unknown[] }).packages
+        : []
+    for (const pattern of rawPatterns) {
+      if (typeof pattern !== "string") continue
+      const normalized = pattern.trim().replace(/\/+/g, "/").replace(/^\.\//, "").replace(/\/+$/, "")
+      if (!normalized || normalized.startsWith("!")) continue
+      if (normalized.endsWith("/*")) {
+        const prefix = normalized.slice(0, -2)
+        if (!validCachePath(prefix)) continue
+        const entries = await readdir(join(workspace, prefix), { withFileTypes: true }).catch(() => [])
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue
+          const memberPkg = await lstat(join(workspace, prefix, entry.name, "package.json")).catch(() => undefined)
+          if (memberPkg?.isFile()) caches.push(`${prefix}/${entry.name}/node_modules`)
+        }
+      } else if (!normalized.includes("*") && validCachePath(normalized)) {
+        const memberPkg = await lstat(join(workspace, normalized, "package.json")).catch(() => undefined)
+        if (memberPkg?.isFile()) caches.push(`${normalized}/node_modules`)
+      }
+    }
+  } catch {
+    // Malformed package.json still keeps root node_modules seeding safe.
+  }
+  return caches
 }
 
 /** The volume holding `path` is APFS, read from the mount table entry of its device. */
@@ -118,7 +162,8 @@ export async function seedWorkspaceCaches(options: {
         await rm(destination, { recursive: true, force: true })
       }
     }
-    if (seeded.length) await (options.prune ?? pruneCarriedArtifacts)(options.workspace).catch(() => undefined)
+    if (seeded.some((entry) => entry.path === "target" || entry.path.startsWith("target/")))
+      await (options.prune ?? pruneCarriedArtifacts)(options.workspace).catch(() => undefined)
   } catch {
     // A cache is an optimization; the workspace stays usable without it.
   }

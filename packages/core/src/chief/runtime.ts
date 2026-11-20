@@ -10,6 +10,7 @@ import {
   type SkillMatrixDeps,
 } from "../oma/skill-matrix-adapter"
 import { runVerificationGate } from "../orchestrator/verification-gate"
+import { cargoCompilerCacheEnvironment } from "./cargo-toolchain"
 import { releaseContinuousBuildOutputs } from "./continuous-workspace"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
@@ -41,7 +42,7 @@ import {
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
-import type { ChiefPorts, ChiefRunContext, ChiefStage, Mission, Persona } from "./types"
+import type { ChiefPorts, ChiefRunContext, ChiefStage, IntegrationCheckContext, Mission, Persona } from "./types"
 import { finishOperatingRun, markOperatingRunUnknown } from "./usage"
 import { executeGoalVerification, verificationReruns } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
@@ -83,9 +84,9 @@ export class ChiefRuntime {
       verify: (mission) => withMissionDeadline(mission, this.signal, (signal) => this.verifyMission(mission, signal)),
       ...(integrationCheckEnabled()
         ? {
-            integrationCheck: (mission: Mission) =>
+            integrationCheck: (mission: Mission, context?: IntegrationCheckContext) =>
               withMissionDeadline(mission, this.signal, (signal) =>
-                runIntegrationCheck(mission, this.store.processGuard(mission.id), signal),
+                runIntegrationCheck(mission, this.store.processGuard(mission.id), signal, process.env, context),
               ),
           }
         : {}),
@@ -348,7 +349,11 @@ export class ChiefRuntime {
         model: persona.model,
         timeoutMs: mission.timeoutSec * 1_000,
         prompt,
-        env: { ...resolveToolEnvironment(mission.toolEnvKeys), AGENT_VALLEY_MANAGED_RUN: "1" },
+        env: {
+          ...(await cargoCompilerCacheEnvironment(workspace.path)),
+          ...resolveToolEnvironment(mission.toolEnvKeys),
+          AGENT_VALLEY_MANAGED_RUN: "1",
+        },
         signal,
         stage,
       })

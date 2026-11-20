@@ -108,6 +108,18 @@ export interface ChiefRunContext {
   beforeDispatch?: (claim: () => void) => Promise<void>
 }
 
+export interface IntegrationCheckContext {
+  /** Code tasks whose integrated deliveries are being checked in this wave. */
+  taskIds: readonly string[]
+  /**
+   * Sorted union of AV-computed changed relative paths across `taskIds`.
+   * Undefined when any target lacks an AV changeSet, signaling runners to run the full suite.
+   */
+  changedFiles?: readonly string[]
+  /** Code tasks in this mission that have not yet completed outside the current wave (0 on final wave). */
+  openCodeTasks: number
+}
+
 export interface ChiefPorts {
   /** The native runtime admits the actual route before reserving a model call. */
   deferredDispatchAdmission?: boolean
@@ -137,7 +149,10 @@ export interface ChiefPorts {
    * Run the verification contract's command checks on the integrated tree between task waves. The result is
    * evidence for task reviewers, never a completion verdict. Undefined when there is nothing to run.
    */
-  integrationCheck?(mission: Mission): Promise<{ ok: boolean; output: string } | undefined>
+  integrationCheck?(
+    mission: Mission,
+    context?: IntegrationCheckContext,
+  ): Promise<{ ok: boolean; output: string } | undefined>
   /**
    * Run the operator's quick pre-delivery command in the workspace an Actor just returned from (its isolated
    * wave workspace or the mission workspace), before the work waits for an integration check and a review.

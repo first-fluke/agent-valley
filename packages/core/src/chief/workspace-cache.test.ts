@@ -187,3 +187,40 @@ describe("sibling mission workspaces", () => {
     ])
   })
 })
+
+describe("JS/TS workspace cache detection", () => {
+  it("detects root and workspace member node_modules alongside Cargo targets", async () => {
+    await writeFile(join(workspace, "Cargo.toml"), "[workspace]\n")
+    await writeFile(
+      join(workspace, "package.json"),
+      JSON.stringify({ name: "mixed", workspaces: ["apps/*", "packages/shared"] }),
+    )
+    await mkdir(join(workspace, "apps/desktop"), { recursive: true })
+    await writeFile(join(workspace, "apps/desktop/package.json"), JSON.stringify({ name: "desktop" }))
+    await mkdir(join(workspace, "packages/shared"), { recursive: true })
+    await writeFile(join(workspace, "packages/shared/package.json"), JSON.stringify({ name: "shared" }))
+
+    expect(await workspaceCachePaths(workspace, undefined)).toEqual([
+      "target/debug",
+      "target/release",
+      "node_modules",
+      "apps/desktop/node_modules",
+      "packages/shared/node_modules",
+    ])
+  })
+
+  it("skips Cargo artifact pruning when only non-target caches were seeded", async () => {
+    const prune = vi.fn(async () => {})
+    await writeFile(join(workspace, ".gitignore"), "node_modules/\ntarget/\n")
+    await cache(source, "node_modules", "pkg")
+    const seeded = await seedWorkspaceCaches({
+      workspace,
+      sources: [source],
+      paths: ["node_modules"],
+      clone: copy,
+      prune,
+    })
+    expect(seeded).toEqual([{ path: "node_modules", source }])
+    expect(prune).not.toHaveBeenCalled()
+  })
+})

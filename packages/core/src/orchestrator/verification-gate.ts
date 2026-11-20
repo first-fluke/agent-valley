@@ -48,7 +48,18 @@ function buildVerifyEnv(extraEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     NO_COLOR: "1",
     FORCE_COLOR: "0",
     // Preserve the agent's own tool env so wrappers like `npx`/`bun` resolve.
-    ...pickEnv(process.env, ["NODE_PATH", "BUN_INSTALL", "BUN_VERSION", "npm_config_user_agent"]),
+    ...pickEnv(process.env, [
+      "NODE_PATH",
+      "BUN_INSTALL",
+      "BUN_VERSION",
+      "npm_config_user_agent",
+      "RUSTC_WRAPPER",
+      "CARGO_INCREMENTAL",
+      "SCCACHE_DIR",
+      "SCCACHE_CACHE_SIZE",
+      "SCCACHE_IDLE_TIMEOUT",
+      "CCACHE_DIR",
+    ]),
     ...extraEnv,
   } as NodeJS.ProcessEnv
 }
