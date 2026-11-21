@@ -72,6 +72,16 @@ describe("Actor route cooldown", () => {
     })
   })
 
+  it("does not cool a route when the host's OAuth access token expired during the call", () => {
+    const evidence =
+      "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue."
+    const mission = setup([run("expired", 0, { evidence })])
+    expect(actorRouteHealth(mission, route, start + 2_000)).toMatchObject({
+      state: "ready",
+      consecutiveFailures: 0,
+    })
+  })
+
   it("does not cool a route for a call the host slept through", () => {
     const mission = setup([
       run("asleep", 0, {
