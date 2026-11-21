@@ -116,8 +116,10 @@ async function findExecutableOnPath(name: string, pathEnv: string | undefined): 
 }
 
 /**
- * Enable `sccache` automatically for Cargo workspaces when installed on PATH and not disabled,
- * so isolated Actor clones and checks share compiled crate artifacts across different worktree paths.
+ * Enable `sccache` automatically for unsandboxed host-side Cargo verification commands
+ * (`lane-check`, `integration-check`, `verification-command`) when installed on PATH and not disabled.
+ * Never pass this into sandboxed Actor sessions: an `sccache` daemon spawned inside an OS sandbox
+ * cannot write to other workspaces or the host cache directory.
  */
 export async function cargoCompilerCacheEnvironment(
   root: string,

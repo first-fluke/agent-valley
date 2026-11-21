@@ -10,7 +10,6 @@ import {
   type SkillMatrixDeps,
 } from "../oma/skill-matrix-adapter"
 import { runVerificationGate } from "../orchestrator/verification-gate"
-import { cargoCompilerCacheEnvironment } from "./cargo-toolchain"
 import { releaseContinuousBuildOutputs } from "./continuous-workspace"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
@@ -350,8 +349,9 @@ export class ChiefRuntime {
         model: persona.model,
         timeoutMs: mission.timeoutSec * 1_000,
         prompt,
+        // Do not inject sccache into sandboxed Actor runs: an sccache daemon spawned inside an Actor's
+        // OS sandbox inherits that single worktree's write boundary and breaks later host/workspace builds.
         env: {
-          ...(await cargoCompilerCacheEnvironment(workspace.path)),
           ...resolveToolEnvironment(mission.toolEnvKeys),
           AGENT_VALLEY_MANAGED_RUN: "1",
         },

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -224,6 +224,35 @@ describe("chief runtime boundaries", () => {
       networkAllowlist: [],
     }))
     expect(await runtime.ports().runAgent(worker, "Perform assigned work.", mission, "work")).toBe("1")
+  })
+
+  it("does not pass sccache or RUSTC_WRAPPER into sandboxed Actor runs even in Cargo workspaces", async () => {
+    const binDir = join(root, "fake-bin")
+    await mkdir(binDir, { recursive: true })
+    const fakeSccache = join(binDir, process.platform === "win32" ? "sccache.exe" : "sccache")
+    await writeFile(fakeSccache, "#!/bin/sh\nexit 0\n")
+    if (process.platform !== "win32") await chmod(fakeSccache, 0o755)
+    await writeFile(join(root, "Cargo.toml"), "[workspace]\n")
+
+    vi.stubEnv("PATH", `${binDir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`)
+    vi.stubEnv("RUSTC_WRAPPER", fakeSccache)
+    vi.stubEnv("SCCACHE_DIR", join(root, "sccache"))
+    try {
+      vi.mocked(planSandboxedSpawn).mockImplementation(async () => ({
+        command: process.execPath,
+        args: [
+          "-e",
+          "process.stdin.resume(); process.stdin.on('end',()=>process.stdout.write(JSON.stringify({type:'result',is_error:false,result:JSON.stringify({wrapper:process.env.RUSTC_WRAPPER??null,inc:process.env.CARGO_INCREMENTAL??null,dir:process.env.SCCACHE_DIR??null})})+'\\n'))",
+        ],
+        sandboxed: false,
+        platform: process.platform,
+        networkAllowlist: [],
+      }))
+      const result = JSON.parse(await runtime.ports().runAgent(worker, "Perform assigned work.", mission, "work"))
+      expect(result).toEqual({ wrapper: null, inc: null, dir: null })
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it("adds only a selected skill's real content to the launched Actor prompt", async () => {
