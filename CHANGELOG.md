@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.1](https://github.com/first-fluke/agent-valley/compare/v4.17.0...v4.17.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **chief:** keep sccache out of sandboxed Actor sessions ([#83](https://github.com/first-fluke/agent-valley/issues/83)) ([ac13bb0](https://github.com/first-fluke/agent-valley/commit/ac13bb0ca696d55726b58876738fcc08b2017c08))
+
 ## [4.17.0](https://github.com/first-fluke/agent-valley/compare/v4.16.6...v4.17.0) (2026-11-21)
 
 
