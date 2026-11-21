@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.4](https://github.com/first-fluke/agent-valley/compare/v4.17.3...v4.17.4) (2026-11-21)
+
+
+### Bug Fixes
+
+* **chief:** keep expired oauth tokens out of the provider cooldown ([4d6353b](https://github.com/first-fluke/agent-valley/commit/4d6353b40c7fa77b0a36b6eebe1ead8374dae2f5))
+
 ## [4.17.3](https://github.com/first-fluke/agent-valley/compare/v4.17.2...v4.17.3) (2026-11-21)
 
 
