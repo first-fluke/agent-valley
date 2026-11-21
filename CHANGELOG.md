@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.3](https://github.com/first-fluke/agent-valley/compare/v4.17.2...v4.17.3) (2026-11-21)
+
+
+### Bug Fixes
+
+* **cli:** accept large help output in native auth probes ([560e933](https://github.com/first-fluke/agent-valley/commit/560e93326796fa919e1515fcea8740e3d2890a96))
+
 ## [4.17.2](https://github.com/first-fluke/agent-valley/compare/v4.17.1...v4.17.2) (2026-11-21)
 
 
