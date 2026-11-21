@@ -57,7 +57,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
         response = await run(reviewer, prompt, "review", task.id)
         review = settleRepairReview(
           parseReview(response),
-          state.review,
+          state.review ?? state.previousReview,
           state.changeSet?.files.map((file) => file.path),
         )
       } catch (error) {

@@ -39,6 +39,7 @@ export function assignTaskStates(
         ? { parallel: previous.parallel }
         : {}),
       ...(previous?.review && !preserveWork ? { review: previous.review } : {}),
+      ...(previous?.previousReview && !previous.review ? { previousReview: previous.previousReview } : {}),
       ...(previous?.effectState ? { effectState: previous.effectState } : {}),
     }
   })

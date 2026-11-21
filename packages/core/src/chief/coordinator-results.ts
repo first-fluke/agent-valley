@@ -26,7 +26,11 @@ export function applyPlanningResult(
 
 export function applyWorkResult(task: ChiefTask, state: ChiefTaskState, output: string): void {
   state.output = output.slice(-32_000)
-  delete state.review
+  if (state.review) {
+    if (!state.review.passed) state.previousReview = state.review
+    else delete state.previousReview
+    delete state.review
+  }
   // The AV-computed delta described an earlier integrated delivery; a new Actor attempt replaces it.
   // Parallel integration recomputes it after this call. A direct attempt has none.
   delete state.changeSet
@@ -57,6 +61,7 @@ export function applyTaskReviewResult(
   review: Review,
 ): asserts state is ChiefTaskState & { review: Review } {
   state.review = review
+  delete state.previousReview
   recordTaskVerdict(mission, state.id, review.passed, review.summary)
   state.fingerprint = mission.fingerprint
 }
