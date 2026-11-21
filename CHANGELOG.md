@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.2](https://github.com/first-fluke/agent-valley/compare/v4.17.1...v4.17.2) (2026-11-21)
+
+
+### Bug Fixes
+
+* **chief:** preserve previousReview across repairs so repair-review boundary applies ([#85](https://github.com/first-fluke/agent-valley/issues/85)) ([47f9e0f](https://github.com/first-fluke/agent-valley/commit/47f9e0fc1f7861ad10c703cb58cb48dd6988290d))
+
 ## [4.17.1](https://github.com/first-fluke/agent-valley/compare/v4.17.0...v4.17.1) (2026-11-21)
 
 
