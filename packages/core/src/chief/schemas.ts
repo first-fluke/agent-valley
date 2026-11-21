@@ -12,14 +12,16 @@ export {
 
 import {
   advisoryReviewSchema,
+  goalBriefSchema,
   refineChiefWaitSchedule,
   reviewSchema,
+  skillDescriptorSchema,
   supervisionSchema,
   taskStateSchema,
   verificationSchema,
 } from "./mission-state-schema"
 
-export { reviewSchema } from "./mission-state-schema"
+export { goalBriefSchema, reviewSchema } from "./mission-state-schema"
 
 import { isAbsolute } from "node:path"
 import { z } from "zod"
@@ -58,29 +60,7 @@ const counter = z.number().int().min(0)
 export { actorSchema } from "./actor-contract"
 export const personaSchema = actorSchema
 
-export const goalBriefSchema = z.strictObject({
-  interpretation: text,
-  assumptions: z.array(text).max(20),
-  successCriteria: z
-    .array(text)
-    .min(1)
-    .max(20)
-    .refine((criteria) => new Set(criteria).size === criteria.length, "Success criteria must be unique."),
-})
-
-const skillDescriptorSchema = z.strictObject({
-  name: z.string().regex(/^oma-[a-z0-9][a-z0-9-]{0,123}$/),
-  description: z.string().trim().min(1).max(1_000),
-  path: text.refine(isAbsolute, "Skill paths must be absolute verified SKILL.md paths."),
-  agents: z
-    .array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/))
-    .max(100)
-    .optional(),
-})
-
-export const planSchema = z.strictObject({
-  tasks: z.array(actorTaskSchema).min(1).max(48),
-})
+export const planSchema = z.strictObject({ tasks: z.array(actorTaskSchema).min(1).max(48) })
 
 export const missionSchema = z
   .strictObject({

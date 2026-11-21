@@ -41,14 +41,35 @@ const MAX_TIMEOUT_SEC = 86_400
  */
 function buildVerifyEnv(extraEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return {
-    PATH: process.env.PATH,
+    PATH: process.env.PATH ?? process.env.Path,
     HOME: process.env.HOME,
     NODE_ENV: process.env.NODE_ENV,
     LANG: "C.UTF-8",
     NO_COLOR: "1",
     FORCE_COLOR: "0",
     // Preserve the agent's own tool env so wrappers like `npx`/`bun` resolve.
-    ...pickEnv(process.env, ["NODE_PATH", "BUN_INSTALL", "BUN_VERSION", "npm_config_user_agent"]),
+    ...pickEnv(process.env, [
+      "NODE_PATH",
+      "BUN_INSTALL",
+      "BUN_VERSION",
+      "npm_config_user_agent",
+      "RUSTC_WRAPPER",
+      "CARGO_INCREMENTAL",
+      "SCCACHE_DIR",
+      "SCCACHE_CACHE_SIZE",
+      "SCCACHE_IDLE_TIMEOUT",
+      "CCACHE_DIR",
+      "USERPROFILE",
+      "LOCALAPPDATA",
+      "APPDATA",
+      "TEMP",
+      "TMP",
+      "SystemRoot",
+      "SYSTEMROOT",
+      "COMSPEC",
+      "ComSpec",
+      "PATHEXT",
+    ]),
     ...extraEnv,
   } as NodeJS.ProcessEnv
 }

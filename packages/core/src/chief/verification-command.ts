@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { realpath } from "node:fs/promises"
 import { join, relative, sep } from "node:path"
-import { cargoVerificationEnvironment } from "./cargo-toolchain"
+import { cargoCompilerCacheEnvironment, cargoVerificationEnvironment } from "./cargo-toolchain"
 import { cargoVerificationInputs } from "./cargo-verification"
 import { safeVerificationCommand, verificationCommandTestPaths } from "./verification-contract"
 import { readVerificationFile } from "./verification-files"
@@ -83,7 +83,13 @@ export const executeVerificationCommand: VerificationCommandExecutor = async (pr
   if (options.signal?.aborted)
     throw new Error("Verification interrupted. Resume the mission to rerun its evidence checks.")
   const startedAt = performance.now()
-  const env = program === "cargo" ? await cargoVerificationEnvironment(options.cwd, process.env) : { ...process.env }
+  const env =
+    program === "cargo"
+      ? {
+          ...(await cargoVerificationEnvironment(options.cwd, process.env)),
+          ...(await cargoCompilerCacheEnvironment(options.cwd, process.env)),
+        }
+      : { ...process.env }
   return new Promise((resolveCommand, rejectCommand) => {
     if (options.signal?.aborted) {
       rejectCommand(new Error("Verification interrupted. Resume the mission to rerun its evidence checks."))

@@ -1,13 +1,18 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { coordinate } from "./coordinator"
+import { recordIntegrationCheck } from "./coordinator-integration"
 import { fixture, passed, rejected } from "./goal-supervision.fixture"
 import { INTEGRATION_CHECK_RULE } from "./prompts"
 import {
   combinedIntegrationResult,
+  INTEGRATION_CHANGED_FILES_FILE_ENV,
+  INTEGRATION_OPEN_TASKS_ENV,
+  INTEGRATION_TASK_IDS_ENV,
   integrationCheckCommand,
+  integrationCheckContextEnv,
   integrationCheckEnabled,
   integrationEvidenceFor,
   operatorIntegrationResult,
@@ -227,5 +232,104 @@ describe("verification reuses integration evidence from the identical workspace"
   it("accepts a workspace test run that reports every failing binary", () => {
     expect(safeVerificationCommand("cargo", ["test", "--workspace", "--no-fail-fast"])).toBe(true)
     expect(safeVerificationCommand("cargo", ["test", "--workspace", "--no-run"])).toBe(false)
+  })
+})
+
+describe("integration check wave context", () => {
+  it("passes changedFiles, taskIds and openCodeTasks when every target has an AV changeSet", async () => {
+    const { mission, ports } = codeFixture()
+    mission.plan = {
+      tasks: [
+        {
+          id: "task-1",
+          title: "first",
+          personaId: "worker",
+          instructions: "first",
+          acceptance: ["done"],
+          dependencies: [],
+        },
+        {
+          id: "task-2",
+          title: "second",
+          personaId: "worker",
+          instructions: "second",
+          acceptance: ["done"],
+          dependencies: ["task-1"],
+        },
+      ],
+    }
+    const sha = "a".repeat(64)
+    const tree = "b".repeat(40)
+    mission.tasks = [
+      {
+        id: "task-1",
+        reviewerId: "reviewer",
+        status: "reviewing",
+        attempts: 1,
+        output: "done",
+        changeSet: {
+          version: 1,
+          inputTree: tree,
+          deliveryTree: tree,
+          files: [
+            { path: "crates/arc-cli/src/lib.rs", status: "modified", size: 10, sha256: sha },
+            { path: "crates/arc-core/src/lib.rs", status: "modified", size: 12, sha256: sha },
+          ],
+          diff: "",
+          diffTruncated: false,
+        },
+      },
+      { id: "task-2", reviewerId: "reviewer", status: "pending", attempts: 0 },
+    ]
+    const firstTask = mission.tasks[0]
+    if (!firstTask) throw new Error("Expected task-1")
+    const check = vi.fn(async () => ({ ok: true, output: "ok" }))
+    ports.integrationCheck = check
+    await recordIntegrationCheck(mission, ports, [firstTask], async () => {})
+    expect(check).toHaveBeenCalledWith(mission, {
+      taskIds: ["task-1"],
+      changedFiles: ["crates/arc-cli/src/lib.rs", "crates/arc-core/src/lib.rs"],
+      openCodeTasks: 1,
+    })
+
+    // Final code wave: task-1 completed, task-2 has no changeSet (direct worktree edit) -> omit changedFiles
+    firstTask.status = "completed"
+    const secondTask = {
+      id: "task-2",
+      reviewerId: "reviewer",
+      status: "reviewing" as const,
+      attempts: 1,
+      output: "direct",
+    }
+    mission.tasks[1] = secondTask
+    await recordIntegrationCheck(mission, ports, [secondTask], async () => {})
+    expect(check).toHaveBeenLastCalledWith(mission, {
+      taskIds: ["task-2"],
+      openCodeTasks: 0,
+    })
+  })
+
+  it("writes changed files to .agent-valley/integration-checks and exposes context env", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "av-integration-ctx-"))
+    roots.push(rootDir)
+    const env = await integrationCheckContextEnv(
+      rootDir,
+      {
+        taskIds: ["task-1", "task-2"],
+        changedFiles: ["crates/arc-core/src/lib.rs", "crates/arc-cli/src/main.rs"],
+        openCodeTasks: 2,
+      },
+      new Date("2026-11-21T00:00:00.000Z"),
+    )
+    expect(env[INTEGRATION_TASK_IDS_ENV]).toBe("task-1,task-2")
+    expect(env[INTEGRATION_OPEN_TASKS_ENV]).toBe("2")
+    const filePath = env[INTEGRATION_CHANGED_FILES_FILE_ENV]
+    if (!filePath) throw new Error("Expected AV_INTEGRATION_CHANGED_FILES_FILE")
+    expect(filePath).toContain(".agent-valley/integration-checks/2026-11-21T00-00-00-000Z.changed-files.txt")
+    expect(await readFile(filePath, "utf8")).toBe("crates/arc-core/src/lib.rs\ncrates/arc-cli/src/main.rs\n")
+
+    const fallback = await integrationCheckContextEnv(rootDir, { taskIds: ["task-3"], openCodeTasks: 0 })
+    expect(fallback[INTEGRATION_CHANGED_FILES_FILE_ENV]).toBeUndefined()
+    expect(fallback[INTEGRATION_OPEN_TASKS_ENV]).toBe("0")
   })
 })

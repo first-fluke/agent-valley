@@ -100,3 +100,38 @@ export async function cargoVerificationEnvironment(
     RUSTUP_TOOLCHAIN: selected.name,
   }
 }
+
+export const CARGO_SCCACHE_ENV = "AV_CARGO_SCCACHE"
+const sccacheDisabled = new Set(["0", "off", "false", "no"])
+
+async function findExecutableOnPath(name: string, pathEnv: string | undefined): Promise<string | undefined> {
+  if (!pathEnv) return undefined
+  const suffix = process.platform === "win32" ? ".exe" : ""
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue
+    const candidate = join(dir, `${name}${suffix}`)
+    if (await executable(candidate)) return candidate
+  }
+  return undefined
+}
+
+/**
+ * Enable `sccache` automatically for Cargo workspaces when installed on PATH and not disabled,
+ * so isolated Actor clones and checks share compiled crate artifacts across different worktree paths.
+ */
+export async function cargoCompilerCacheEnvironment(
+  root: string,
+  source: NodeJS.ProcessEnv = process.env,
+): Promise<Record<string, string>> {
+  const toggle = source[CARGO_SCCACHE_ENV]?.trim().toLowerCase()
+  if (toggle && sccacheDisabled.has(toggle)) return {}
+  if (source.RUSTC_WRAPPER !== undefined) return {}
+  const manifest = await lstat(join(root, "Cargo.toml")).catch(() => undefined)
+  if (!manifest?.isFile()) return {}
+  const sccache = await findExecutableOnPath("sccache", source.PATH ?? source.Path)
+  if (!sccache) return {}
+  return {
+    RUSTC_WRAPPER: sccache,
+    ...(source.CARGO_INCREMENTAL === undefined ? { CARGO_INCREMENTAL: "0" } : {}),
+  }
+}

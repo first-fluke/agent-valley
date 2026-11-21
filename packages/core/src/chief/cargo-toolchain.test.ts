@@ -291,3 +291,41 @@ describe("Cargo verification spawn boundary", () => {
     expect(spawn).not.toHaveBeenCalled()
   })
 })
+
+describe("cargoCompilerCacheEnvironment", () => {
+  it("enables sccache automatically for Cargo workspaces when installed on PATH", async () => {
+    const { root: ws } = await fixture()
+    const binDir = join(ws, "fake-bin")
+    await mkdir(binDir, { recursive: true })
+    const sccachePath = join(binDir, process.platform === "win32" ? "sccache.exe" : "sccache")
+    await writeFile(sccachePath, "#!/bin/sh\nexit 0\n")
+    await chmod(sccachePath, 0o755)
+
+    // Without Cargo.toml -> disabled
+    expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir })).toEqual({})
+
+    // With Cargo.toml -> sets RUSTC_WRAPPER and CARGO_INCREMENTAL=0
+    await writeFile(join(ws, "Cargo.toml"), "[workspace]\n")
+    expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir })).toEqual({
+      RUSTC_WRAPPER: sccachePath,
+      CARGO_INCREMENTAL: "0",
+    })
+
+    // Also resolves mixed-case `Path` used on Windows environments
+    expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { Path: binDir })).toEqual({
+      RUSTC_WRAPPER: sccachePath,
+      CARGO_INCREMENTAL: "0",
+    })
+
+    // Preserves explicit CARGO_INCREMENTAL and respects explicit RUSTC_WRAPPER or AV_CARGO_SCCACHE=off
+    expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir, CARGO_INCREMENTAL: "1" })).toEqual({
+      RUSTC_WRAPPER: sccachePath,
+    })
+    expect(
+      await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir, RUSTC_WRAPPER: "/custom/wrapper" }),
+    ).toEqual({})
+    expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir, AV_CARGO_SCCACHE: "off" })).toEqual(
+      {},
+    )
+  })
+})

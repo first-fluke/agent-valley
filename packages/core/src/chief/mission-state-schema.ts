@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path"
 import { z } from "zod"
 import type { ExecutionState, MissionSupervision } from "./contracts"
 import { taskChangeSetSchema, taskWorktreeRecordSchema } from "./parallel-contract"
@@ -123,3 +124,23 @@ export function refineChiefWaitSchedule(
         "Saved Chief wait schedule does not match its decision. Restore the original wait checkpoint without resetting its budget.",
     })
 }
+
+export const goalBriefSchema = z.strictObject({
+  interpretation: text,
+  assumptions: z.array(text).max(20),
+  successCriteria: z
+    .array(text)
+    .min(1)
+    .max(20)
+    .refine((criteria) => new Set(criteria).size === criteria.length, "Success criteria must be unique."),
+})
+
+export const skillDescriptorSchema = z.strictObject({
+  name: z.string().regex(/^oma-[a-z0-9][a-z0-9-]{0,123}$/),
+  description: z.string().trim().min(1).max(1_000),
+  path: text.refine(isAbsolute, "Skill paths must be absolute verified SKILL.md paths."),
+  agents: z
+    .array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/))
+    .max(100)
+    .optional(),
+})

@@ -33,6 +33,22 @@ const SAFE_ENV_KEYS = [
   "GIT_COMMITTER_EMAIL",
   "NODE_ENV",
   "BUN_ENV",
+  "RUSTC_WRAPPER",
+  "CARGO_INCREMENTAL",
+  "SCCACHE_DIR",
+  "SCCACHE_CACHE_SIZE",
+  "SCCACHE_IDLE_TIMEOUT",
+  "CCACHE_DIR",
+  "USERPROFILE",
+  "LOCALAPPDATA",
+  "APPDATA",
+  "TEMP",
+  "TMP",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "COMSPEC",
+  "ComSpec",
+  "PATHEXT",
 ]
 
 /** Credential names only; callers cannot mutate the session environment allowlist. */

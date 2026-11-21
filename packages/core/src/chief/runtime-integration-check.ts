@@ -1,10 +1,11 @@
-import { mkdir, readdir, rm } from "node:fs/promises"
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { runVerificationGate, type VerificationGateResult } from "../orchestrator/verification-gate"
 import { fingerprintWorkspace } from "../workspace/fingerprint"
 import type { ActiveMissionProcess } from "./active-process"
+import { cargoCompilerCacheEnvironment } from "./cargo-toolchain"
 import { finishLocalProcess } from "./local-runner"
-import type { Mission } from "./types"
+import type { IntegrationCheckContext, Mission } from "./types"
 import { type CheckEvidence, executeCommandChecks } from "./verification"
 import { assertMissionWorkspace } from "./workspace"
 import { directorySizes, growthReport, growthThresholdBytes, STORAGE_NOTE_PREFIX } from "./workspace-growth"
@@ -12,6 +13,9 @@ import { releaseWorkspaceScratch, scratchNote } from "./workspace-scratch"
 
 export const INTEGRATION_CHECK_ENV = "AV_INTEGRATION_CHECK"
 export const INTEGRATION_CHECK_COMMAND_ENV = "AV_INTEGRATION_CHECK_COMMAND"
+export const INTEGRATION_CHANGED_FILES_FILE_ENV = "AV_INTEGRATION_CHANGED_FILES_FILE"
+export const INTEGRATION_TASK_IDS_ENV = "AV_INTEGRATION_TASK_IDS"
+export const INTEGRATION_OPEN_TASKS_ENV = "AV_INTEGRATION_OPEN_TASKS"
 
 /**
  * The operator's own gate command for the integrated tree, for example
@@ -66,6 +70,39 @@ export async function integrationCheckLog(workspacePath: string, now: Date = new
   }
 }
 
+/**
+ * Forward wave scope to an operator's integration check via `extraEnv` without exposing orchestrator secrets.
+ * When AV captured a changeSet for every task under review, changed relative paths are written to a file under
+ * `.agent-valley/integration-checks` so language-specific runners can scope mid-cycle checks safely.
+ */
+export async function integrationCheckContextEnv(
+  workspacePath: string,
+  context: IntegrationCheckContext | undefined,
+  now: Date = new Date(),
+): Promise<Record<string, string>> {
+  if (!context) return {}
+  const env: Record<string, string> = {
+    [INTEGRATION_TASK_IDS_ENV]: context.taskIds.join(","),
+    [INTEGRATION_OPEN_TASKS_ENV]: String(context.openCodeTasks),
+  }
+  if (context.changedFiles !== undefined) {
+    try {
+      const directory = join(workspacePath, ".agent-valley", "integration-checks")
+      await mkdir(directory, { recursive: true })
+      const earlier = (await readdir(directory)).filter((name) => name.endsWith(".changed-files.txt")).sort()
+      for (const name of earlier.slice(0, Math.max(0, earlier.length - (CHECK_LOGS_KEPT - 1))))
+        await rm(join(directory, name), { force: true })
+      const filePath = join(directory, `${now.toISOString().replace(/[:.]/g, "-")}.changed-files.txt`)
+      const body = context.changedFiles.length ? `${context.changedFiles.join("\n")}\n` : ""
+      await writeFile(filePath, body, { encoding: "utf8", mode: 0o600 })
+      env[INTEGRATION_CHANGED_FILES_FILE_ENV] = filePath
+    } catch {
+      // Omit the file path on error so the runner falls back to a full-workspace check.
+    }
+  }
+  return env
+}
+
 export const LANE_CHECK_COMMAND_ENV = "AV_LANE_CHECK_COMMAND"
 export const LANE_CHECK_TIMEOUT_ENV = "AV_LANE_CHECK_TIMEOUT_SEC"
 
@@ -89,9 +126,11 @@ export async function runLaneCheck(
   const command = laneCheckCommand(source)
   if (!command) return undefined
   const seconds = Number(source[LANE_CHECK_TIMEOUT_ENV])
+  const cacheEnv = await cargoCompilerCacheEnvironment(workspacePath, source)
   const result = await runVerificationGate({ ...mission.workspace, path: workspacePath }, command, {
     timeoutSec: Number.isFinite(seconds) && seconds > 0 ? seconds : 900,
     signal,
+    ...(Object.keys(cacheEnv).length ? { extraEnv: cacheEnv } : {}),
   })
   const verdict = result.ok
     ? "PASS"
@@ -153,6 +192,7 @@ export async function runIntegrationCheck(
   active: ActiveMissionProcess,
   signal?: AbortSignal,
   source: NodeJS.ProcessEnv = process.env,
+  context?: IntegrationCheckContext,
 ): Promise<{ ok: boolean; output: string } | undefined> {
   const command = integrationCheckCommand(source)
   if (!command && !mission.verificationContract) return undefined
@@ -161,7 +201,7 @@ export async function runIntegrationCheck(
   const cleared = scratchNote(await releaseWorkspaceScratch(mission.workspace.path, source))
   const threshold = growthThresholdBytes(source)
   const before = threshold > 0 ? await directorySizes(mission.workspace.path) : undefined
-  const result = await checkIntegratedTree(mission, active, command, signal, source)
+  const result = await checkIntegratedTree(mission, active, command, signal, source, context)
   if (!result) return result
   const growth = before ? growthReport(before, await directorySizes(mission.workspace.path), threshold) : undefined
   // Storage findings lead, where the reviewer's excerpt starts; one line so the history can quote it.
@@ -178,17 +218,24 @@ async function checkIntegratedTree(
   command: string | undefined,
   signal: AbortSignal | undefined,
   source: NodeJS.ProcessEnv,
+  context?: IntegrationCheckContext,
 ): Promise<{ ok: boolean; output: string } | undefined> {
   active.begin("verify")
   try {
     const operator = async () => {
       const logPath = await integrationCheckLog(mission.workspace.path)
+      const [cacheEnv, contextEnv] = await Promise.all([
+        cargoCompilerCacheEnvironment(mission.workspace.path, source),
+        integrationCheckContextEnv(mission.workspace.path, context),
+      ])
+      const extraEnv = { ...cacheEnv, ...contextEnv }
       return operatorIntegrationResult(
         command ?? "",
         await runVerificationGate(mission.workspace, command ?? "", {
           timeoutSec: mission.timeoutSec,
           signal,
           onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
+          ...(Object.keys(extraEnv).length ? { extraEnv } : {}),
           ...(logPath ? { outputFile: logPath } : {}),
         }),
         logPath,

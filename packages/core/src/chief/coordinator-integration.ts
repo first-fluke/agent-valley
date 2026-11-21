@@ -1,6 +1,6 @@
 import { CODE_SKILL } from "./coordinator-state"
 import { MissionPause } from "./execution"
-import type { ChiefPorts, ChiefTaskState, Mission } from "./types"
+import type { ChiefPorts, ChiefTaskState, IntegrationCheckContext, Mission } from "./types"
 import { STORAGE_NOTE_PREFIX } from "./workspace-growth"
 
 /** A passing check that left output behind still says so in the mission history. */
@@ -31,9 +31,22 @@ export async function recordIntegrationCheck(
   const targets = states.filter((state) => state.output !== undefined && !state.integrationCheck && codeTask(state))
   const first = targets[0]
   if (!first) return
+  const targetIds = new Set(targets.map((state) => state.id))
+  const openCodeTasks = mission.tasks.filter(
+    (state) => !targetIds.has(state.id) && codeTask(state) && state.status !== "completed",
+  ).length
+  const allHaveChangeSet = targets.every((state) => state.changeSet !== undefined)
+  const changedFiles = allHaveChangeSet
+    ? [...new Set(targets.flatMap((state) => state.changeSet?.files.map((file) => file.path) ?? []))].sort()
+    : undefined
+  const context: IntegrationCheckContext = {
+    taskIds: targets.map((state) => state.id),
+    ...(changedFiles !== undefined ? { changedFiles } : {}),
+    openCodeTasks,
+  }
   let result: { ok: boolean; output: string } | undefined
   try {
-    result = await ports.integrationCheck(mission)
+    result = await ports.integrationCheck(mission, context)
   } catch (error) {
     if (ports.signal?.aborted || error instanceof MissionPause) throw error
     await save(
