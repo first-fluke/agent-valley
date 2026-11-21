@@ -6,6 +6,52 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.0](https://github.com/first-fluke/agent-valley/compare/v4.16.6...v4.17.0) (2026-11-21)
+
+
+### Features
+
+* **chief:** check an actor's workspace before its work waits for the wave ([f39f116](https://github.com/first-fluke/agent-valley/commit/f39f116653e5c12724cced1d5e191299c207a9d6))
+* **chief:** forward integration wave scope and share build caches ([#82](https://github.com/first-fluke/agent-valley/issues/82)) ([d3385bd](https://github.com/first-fluke/agent-valley/commit/d3385bd63f2c5e5be53e6c0238c5208931ee1d12))
+* **chief:** let a dependent start beside its predecessor's repair ([5afe936](https://github.com/first-fluke/agent-valley/commit/5afe9364b4f7e6c49d972a2a7bcda5277da04ef6))
+* **chief:** let the operator deliver past a repeated final-review failure ([988da74](https://github.com/first-fluke/agent-valley/commit/988da74fbd0e8275623e90f4fface00bb1ebb2b2))
+* **chief:** let the operator waive a success criterion ([b1207e8](https://github.com/first-fluke/agent-valley/commit/b1207e8a5aa761638acab89a949eca18260a8884))
+* **chief:** review the goal before the final wave ([7f84431](https://github.com/first-fluke/agent-valley/commit/7f84431ee19009cef79315f22adc73d079bf1412))
+* **cli:** add av attach to follow and message a running actor ([ce79921](https://github.com/first-fluke/agent-valley/commit/ce79921bfe05178c015d7e2e25e4f3c4ec462fc4))
+* **core:** deliver operator messages to a running claude session ([215e3ac](https://github.com/first-fluke/agent-valley/commit/215e3ac896a08c4544da2e968b42a7db0786df3c))
+* **core:** keep antigravity stdin open for operator messages ([bfba766](https://github.com/first-fluke/agent-valley/commit/bfba76612a03df9409df09ad2d3ce12813505116))
+* **core:** record actor activity in per-issue threads ([4ff0992](https://github.com/first-fluke/agent-valley/commit/4ff0992fa3e2f003035e9e1a8d7f1f64fad72ce7))
+* **core:** run opencode over acp for live operator messages ([a78506d](https://github.com/first-fluke/agent-valley/commit/a78506df08a2c21f32ce929e23ade935b3c00d53))
+* **dashboard:** show the live issue thread in the intervention drawer ([cc3c02c](https://github.com/first-fluke/agent-valley/commit/cc3c02c86bc14158b1cc4330db109dbf8a891205))
+
+
+### Bug Fixes
+
+* **chief:** charge a verification input once per content ([a4a2f88](https://github.com/first-fluke/agent-valley/commit/a4a2f881158013d7a735fd9d372ddc9878630650))
+* **chief:** do not count an abandoned run as a route failure ([406671d](https://github.com/first-fluke/agent-valley/commit/406671d254244947b9dad74a3f7234cf425e20fb))
+* **chief:** enforce the repair-review boundary instead of asking for it ([435a203](https://github.com/first-fluke/agent-valley/commit/435a20398d5636d76c01ab235f44f2bf563032f4))
+* **chief:** keep a route healthy after runs an interrupt stopped ([bb28916](https://github.com/first-fluke/agent-valley/commit/bb28916bb7817eab8c7114f1817a576c2ec3d1fe))
+* **chief:** keep a task's route after a call the host slept through ([dd20928](https://github.com/first-fluke/agent-valley/commit/dd20928ab8091d245cf8e11b7d936363d7cc8371))
+* **chief:** keep the complete output of an integration check ([0fcf0dc](https://github.com/first-fluke/agent-valley/commit/0fcf0dc80c57f25fbaa0561aafb8fa959528eb0b))
+* **chief:** let an attempt continue after a failed pre-delivery check ([8701f93](https://github.com/first-fluke/agent-valley/commit/8701f93eebe84d3df468b59105e91d17b1e2413c))
+* **chief:** repair a rejected task whatever its findings quote ([5d907b1](https://github.com/first-fluke/agent-valley/commit/5d907b19ced60527fc1af0b75f228be5f21886f4))
+* **chief:** repair a superseded earlier test inside the wave ([5c1a59a](https://github.com/first-fluke/agent-valley/commit/5c1a59af4184a935df0cc1e1b3d17edee54efb5c))
+* **chief:** rerun a failed verification command before reopening work ([1670f0a](https://github.com/first-fluke/agent-valley/commit/1670f0a711bfb191224159711c177f58108871f0))
+* **chief:** run every ready task in one wave ([ade3e6d](https://github.com/first-fluke/agent-valley/commit/ade3e6d2415263c7498b6cc971f4869f3f189645))
+* **chief:** run the pre-delivery check for a task that works alone ([e34482c](https://github.com/first-fluke/agent-valley/commit/e34482c3eb23b0a08071ccf031407542009d8ac9))
+* **chief:** tell the planner what a dependency level costs ([e04ef66](https://github.com/first-fluke/agent-valley/commit/e04ef668ea37505e0dcdb7728bccc0038b88e44b))
+* **chief:** treat a waived criterion as settled once the mission completes ([b68c05f](https://github.com/first-fluke/agent-valley/commit/b68c05fb9c77af6f5fc953d2e1fd7eb45475ecda))
+
+
+### Documentation
+
+* describe issue threads, av attach and live message delivery ([b808461](https://github.com/first-fluke/agent-valley/commit/b80846110cd75e0b91ea906aae61bf09b2226e2f))
+
+
+### Tests
+
+* **chief:** expect followUps in the task review examples ([6e090d7](https://github.com/first-fluke/agent-valley/commit/6e090d7e0cef0d73a09a7b9f77bc25b87200ad00))
+
 ## [4.16.6](https://github.com/first-fluke/agent-valley/compare/v4.16.5...v4.16.6) (2026-11-17)
 
 
