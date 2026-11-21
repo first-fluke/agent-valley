@@ -22,6 +22,9 @@ export type { AgentAvailability, AgentReadiness, AuthProbeOptions, AuthProbeResu
 
 const PROBE_TIMEOUT_MS = 5_000
 const MAX_OUTPUT_BYTES = 16_384
+// Help text is only searched for a subcommand name, and it grows with every CLI release: Claude Code 2.1
+// prints 22 KiB, which the status limit rejected, so an authenticated Claude was never reported ready.
+const MAX_HELP_OUTPUT_BYTES = 262_144
 const MAX_AUTH_FILE_BYTES = 1_048_576
 type AuthEvidence = Pick<AgentAvailability, "readiness" | "reason" | "authStatusProbe">
 type JsonRecord = Record<string, unknown>
@@ -296,7 +299,12 @@ function localAuth(agent: AgentType, deps: DiscoveryDeps): AuthEvidence | null {
   return null
 }
 
-async function boundedProbe(path: string, args: readonly string[], deps: DiscoveryDeps): Promise<AuthProbeResult> {
+async function boundedProbe(
+  path: string,
+  args: readonly string[],
+  deps: DiscoveryDeps,
+  maxOutputBytes = MAX_OUTPUT_BYTES,
+): Promise<AuthProbeResult> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -304,7 +312,7 @@ async function boundedProbe(path: string, args: readonly string[], deps: Discove
       deps.probe(path, args, {
         env: deps.env,
         timeoutMs: PROBE_TIMEOUT_MS,
-        maxOutputBytes: MAX_OUTPUT_BYTES,
+        maxOutputBytes,
         signal: controller.signal,
       }),
       new Promise<never>((_, reject) => {
@@ -314,7 +322,7 @@ async function boundedProbe(path: string, args: readonly string[], deps: Discove
         }, PROBE_TIMEOUT_MS)
       }),
     ])
-    if (Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > MAX_OUTPUT_BYTES) {
+    if (Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > maxOutputBytes) {
       throw new Error("Authentication status output exceeded the limit")
     }
     return result
@@ -334,13 +342,13 @@ async function nativeAuth(agent: AgentType, path: string, deps: DiscoveryDeps): 
   // Check installed subcommands first: older CLIs can interpret unknown commands as prompts.
   const command = agent === "claude" ? "auth" : agent === "codex" ? "login" : "status"
   const probeDeps: DiscoveryDeps = { ...deps, env: buildAgentEnv(agent, {}, deps.env) }
-  const help = await boundedProbe(path, ["--help"], probeDeps)
+  const help = await boundedProbe(path, ["--help"], probeDeps, MAX_HELP_OUTPUT_BYTES)
   if (help.exitCode !== 0 || !new RegExp(`^\\s*${command}\\b`, "m").test(help.stdout)) {
     return unknown(agent, "Installed CLI does not advertise its authentication status command")
   }
   const args = agent === "cursor" ? ["status"] : [command, "status"]
   if (agent !== "cursor") {
-    const subHelp = await boundedProbe(path, [command, "--help"], probeDeps)
+    const subHelp = await boundedProbe(path, [command, "--help"], probeDeps, MAX_HELP_OUTPUT_BYTES)
     if (subHelp.exitCode !== 0 || !/^\s*status\b/m.test(subHelp.stdout)) {
       return unknown(agent, "Installed CLI does not advertise its authentication status command")
     }
@@ -377,10 +385,10 @@ export async function supportsNativeLoginCommand(
   deps.env = buildAgentEnv(agent, {}, deps.env)
   try {
     const command = agent === "claude" || agent === "opencode" || agent === "kilo" ? "auth" : "login"
-    const help = await boundedProbe(path, ["--help"], deps)
+    const help = await boundedProbe(path, ["--help"], deps, MAX_HELP_OUTPUT_BYTES)
     if (help.exitCode !== 0 || !new RegExp(`^\\s*${command}\\b`, "m").test(help.stdout)) return false
     if (command === "auth") {
-      const subHelp = await boundedProbe(path, ["auth", "--help"], deps)
+      const subHelp = await boundedProbe(path, ["auth", "--help"], deps, MAX_HELP_OUTPUT_BYTES)
       return subHelp.exitCode === 0 && /^\s*login\b/m.test(subHelp.stdout)
     }
     return true

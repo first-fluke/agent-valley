@@ -443,6 +443,20 @@ api_key = "${SECRET}"
     expect(probe).toHaveBeenCalledTimes(3)
   })
 
+  it("accepts help text larger than the status limit and keeps the status limit for the status probe", async () => {
+    const limits: Record<string, number> = {}
+    const probe: DiscoveryDeps["probe"] = vi.fn(async (_path, args, options) => {
+      limits[args.join(" ")] = options.maxOutputBytes
+      if (args.join(" ") === "--help")
+        return { exitCode: 0, stdout: `Commands:\n  auth  Manage authentication\n${"x".repeat(22_000)}`, stderr: "" }
+      if (args.join(" ") === "auth --help")
+        return { exitCode: 0, stdout: "Commands:\n  status  Show status", stderr: "" }
+      return { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), stderr: "" }
+    })
+    expect((await availability("claude", {}, { probe })).readiness).toBe("ready")
+    expect(limits).toEqual({ "--help": 262_144, "auth --help": 262_144, "auth status": 16_384 })
+  })
+
   it("does not run auth commands when installed help does not advertise them", async () => {
     const probe = vi.fn(async () => ({ exitCode: 0, stdout: "Commands:\n  exec Run a prompt", stderr: "" }))
     expect((await availability("codex", {}, { probe })).readiness).toBe("unknown")
@@ -469,7 +483,7 @@ api_key = "${SECRET}"
     const probe: DiscoveryDeps["probe"] = vi.fn((_path, _args, options) => {
       signal = options.signal
       expect(options.timeoutMs).toBe(5_000)
-      expect(options.maxOutputBytes).toBe(16_384)
+      expect(options.maxOutputBytes).toBe(262_144)
       return new Promise<AuthProbeResult>(() => {})
     })
     const pending = availability("codex", {}, { probe })
