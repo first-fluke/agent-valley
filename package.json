@@ -1,6 +1,6 @@
 {
   "name": "agent-valley",
-  "version": "4.16.6",
+  "version": "4.17.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.2",
