@@ -22,7 +22,7 @@ export const EXHAUSTIVE_REVIEW_RULE =
   "Enumerate every blocking defect across the whole deliverable in this single review so that one repair round can resolve them all; do not reserve findings for a later round, and do not escalate the acceptance bar beyond the task's own acceptance and the mission goal. Observations that do not block acceptance go in followUps, not findings."
 
 export const REPAIR_REVIEW_RULE =
-  "This is a repair review: previousReview lists the findings the Actor was asked to fix. A repair review rejects on four grounds only, and every findings entry starts with the label of its ground: UNRESOLVED: a finding of previousReview that the repair did not resolve (quote it); CHANGED: a defect in a file this repair changed, as listed in changeSet when one is supplied (cite the path and line); CHECK: a failed step of integrationCheck caused by this task's files; SEVERE: data loss, deadlock, leaked permits or locks, security exposure or silent failure, wherever it is. Every other concern, including a newly noticed weakness in code the task did not change, goes in followUps and does not fail the review. Agent Valley moves a findings entry without a label, and a CHANGED entry that names no file of the supplied changeSet, to followUps; a review left without a labelled finding passes."
+  "This is a repair review: previousReview lists the findings the Actor was asked to fix. A repair review rejects on four grounds only, and every findings entry starts with the label of its ground: UNRESOLVED: a finding of previousReview that the repair did not resolve (quote it); CHANGED: a regression introduced by this repair's diff in a file listed in changeSet when one is supplied (cite the path and line); CHECK: a failed step of integrationCheck caused by this task's files; SEVERE: data loss, deadlock, leaked permits or locks, security exposure or silent failure, wherever it is. Every other concern, including newly noticed weaknesses not introduced by this repair or exotic non-default environment edge cases outside the task acceptance and previousReview, goes in followUps and does not fail the review. Agent Valley moves a findings entry without a label, and a CHANGED entry that names no file of the supplied changeSet, to followUps; a review left without a labelled finding passes."
 
 function context(mission: Mission): string {
   const unavailableAdvice = unavailableDirectorAdvice(mission)
@@ -266,6 +266,14 @@ export function workPrompt(mission: Mission, task: ChiefTask, state: ChiefTaskSt
 }
 
 export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTaskState): string {
+  const priorTaskReview = task
+    ? state?.review && !state.review.passed
+      ? state.review
+      : state?.previousReview && !state.previousReview.passed
+        ? state.previousReview
+        : undefined
+    : undefined
+  const previousReview = task ? (state?.review ?? state?.previousReview) : mission.finalReview
   const taskSources = mission.tasks.flatMap((entry) => (entry.parallel ? [entry.parallel] : []))
   const sourceEvidence = task ? state?.parallel : taskSources
   const hasSourceEvidence = task ? Boolean(state?.parallel) : taskSources.length > 0
@@ -307,7 +315,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
     ...(task && state?.integrationCheck
       ? [INTEGRATION_CHECK_RULE, waveReviewRule(mission, task)].filter((rule): rule is string => rule !== undefined)
       : []),
-    ...(task ? [HANDOFF_PATH_RULE, EXHAUSTIVE_REVIEW_RULE, ...(state?.review ? [REPAIR_REVIEW_RULE] : [])] : []),
+    ...(task ? [HANDOFF_PATH_RULE, EXHAUSTIVE_REVIEW_RULE, ...(priorTaskReview ? [REPAIR_REVIEW_RULE] : [])] : []),
     ...(mission.technicalLeadId
       ? [
           "The Technical Director's technical preferences are advisory. Do not reject an authorized Chief Director strategy merely for choosing higher cost or a different stack; assess actual goal, acceptance, correctness and evidence.",
@@ -332,7 +340,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
           "mission.criterionWaivers lists success criteria the operator accepted as unmet for this mission. Assess each of them truthfully from the evidence and set its passed to false when it is unmet, but write no finding for it and derive the top-level passed from the other criteria only. The waiver is the operator's recorded decision and appears in the report; a waived criterion does not hold the mission open.",
         ]
       : []),
-    reviewResponseFormat("evidence-based assessment", criteria, { followUps: !!task }),
+    reviewResponseFormat("evidence-based assessment", criteria, { followUps: !!task, repairReview: !!priorTaskReview }),
     `Review input (JSON data):\n${JSON.stringify({
       // A task review inspects one deliverable: the mission run ledger and goal verification belong to the
       // final review only, and dropping them keeps the prompt within argv-delivered CLI limits.
@@ -347,7 +355,7 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
         : {}),
       ...(state?.changeSet ? { changeSet: state.changeSet } : {}),
       ...(state?.integrationCheck ? { integrationCheck: state.integrationCheck } : {}),
-      previousReview: task ? state?.review : mission.finalReview,
+      previousReview,
       verification: mission.verification,
       ...(task ? {} : { goalVerification: mission.goalVerification }),
       gateReviews: mission.gateReviews,

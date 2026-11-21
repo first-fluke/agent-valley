@@ -41,7 +41,7 @@ export function settleRepairReview(
 export function reviewResponseFormat(
   summary: string,
   criteria?: string[],
-  options: { followUps?: boolean } = {},
+  options: { followUps?: boolean; repairReview?: boolean } = {},
 ): string {
   const passing = {
     passed: true,
@@ -63,7 +63,9 @@ export function reviewResponseFormat(
     passed: false,
     summary: "An inspected requirement or evidence gap needs attention.",
     findings: [
-      "Concern: describe the gap. Evidence: cite the inspected path or failed check. Action: give the concrete repair or next check.",
+      options.repairReview
+        ? "UNRESOLVED: '<quote prior finding>' Evidence: cite the inspected path or failed check. Action: give the concrete repair or next check."
+        : "Concern: describe the gap. Evidence: cite the inspected path or failed check. Action: give the concrete repair or next check.",
     ],
     ...(passing.criteria
       ? { criteria: passing.criteria.map((entry, index) => ({ ...entry, passed: index !== 0 })) }

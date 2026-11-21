@@ -36,6 +36,7 @@ export const taskStateSchema = z.strictObject({
   repairRound: counter.optional(),
   output: z.string().max(32_000).optional(),
   review: reviewSchema.optional(),
+  previousReview: reviewSchema.optional(),
   fingerprint: text.optional(),
   effectState: z.enum(["not-started", "running", "unknown", "completed"]).optional(),
   parallel: taskWorktreeRecordSchema.optional(),
