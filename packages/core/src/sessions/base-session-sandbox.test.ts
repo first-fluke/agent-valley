@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentConfig } from "./agent-session"
-import { BaseSession, waitForExit } from "./base-session"
+import { BaseSession, buildAgentEnv, waitForExit } from "./base-session"
 import * as sandbox from "./sandbox"
 
 class EnvironmentSession extends BaseSession {
@@ -68,5 +68,30 @@ describe("BaseSession sandbox environment composition", () => {
     const plannedEnvironment = planner.mock.calls[0]?.[0].env
     expect(plannedEnvironment?.CODEX_HOME).toBe(childEnvironment.CODEX_HOME)
     expect(plannedEnvironment?.UNFORWARDED_HOST_SETTING).toBeUndefined()
+  })
+
+  it("does not forward host compiler-cache daemon vars into sandboxed agent sessions", () => {
+    const env = buildAgentEnv(
+      "claude",
+      {},
+      {
+        PATH: "/usr/bin",
+        USERPROFILE: "C:\\Users\\dev",
+        RUSTC_WRAPPER: "/opt/homebrew/bin/sccache",
+        CARGO_INCREMENTAL: "0",
+        SCCACHE_DIR: "/tmp/sccache",
+        SCCACHE_CACHE_SIZE: "10G",
+        SCCACHE_IDLE_TIMEOUT: "600",
+        CCACHE_DIR: "/tmp/ccache",
+      },
+    )
+    expect(env.PATH).toBe("/usr/bin")
+    expect(env.USERPROFILE).toBe("C:\\Users\\dev")
+    expect(env.RUSTC_WRAPPER).toBeUndefined()
+    expect(env.CARGO_INCREMENTAL).toBeUndefined()
+    expect(env.SCCACHE_DIR).toBeUndefined()
+    expect(env.SCCACHE_CACHE_SIZE).toBeUndefined()
+    expect(env.SCCACHE_IDLE_TIMEOUT).toBeUndefined()
+    expect(env.CCACHE_DIR).toBeUndefined()
   })
 })
