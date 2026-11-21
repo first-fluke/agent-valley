@@ -268,6 +268,7 @@ export abstract class BaseSession implements AgentSession {
     }
 
     this.sandboxPlatform = plan.sandboxed ? plan.platform : null
+    await this.beforeSpawn(plan, env)
     this.process = spawn(plan.command, plan.args, {
       detached: process.platform !== "win32",
       cwd: this.config.workspacePath,
@@ -283,6 +284,12 @@ export abstract class BaseSession implements AgentSession {
     }
     return true
   }
+
+  /** Host-side preparation a vendor needs once the sandbox plan is known; runs before the process starts. */
+  protected async beforeSpawn(
+    _plan: Awaited<ReturnType<typeof planSandboxedSpawn>>,
+    _env: NodeJS.ProcessEnv,
+  ): Promise<void> {}
 
   /** OS process id of the spawned child, when known. */
   get pid(): number | undefined {

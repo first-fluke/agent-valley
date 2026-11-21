@@ -20,10 +20,12 @@
 import { randomUUID } from "node:crypto"
 import type { AgentConfig } from "./agent-session"
 import { BaseSession, waitForStreamCompletion } from "./base-session"
+import { type ClaudeLoginKeeper, keepClaudeLoginFresh } from "./claude-login"
 import { readJsonLines } from "./json-lines"
 import { captureExhaustion } from "./native-failure"
 import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-result"
 import { QUEUED_MESSAGE_GRACE_MS, QueuedMessages } from "./queued-messages"
+import type { SandboxSpawnPlan } from "./sandbox"
 
 type TokenUsage = { input: number; output: number; model: string }
 
@@ -41,6 +43,8 @@ export class ClaudeSession extends BaseSession {
   )
   /** Usage of the turns held in the queue; Claude reports it per turn. */
   private heldUsage: TokenUsage | undefined
+  /** Refreshes the stored subscription login from the host while a Seatbelt session runs. */
+  private loginKeeper: ClaudeLoginKeeper | undefined
 
   async start(config: AgentConfig): Promise<void> {
     this.config = config
@@ -111,11 +115,28 @@ export class ClaudeSession extends BaseSession {
       stdio: ["pipe", "pipe", "pipe"],
       prompt: this.liveInput ? undefined : prompt,
     })
-    if (!spawned) return
+    if (!spawned) return this.stopLoginKeeper()
     // A prompt that cannot be written means the process is already gone; its exit reports the failure.
     if (this.liveInput) this.writeUserMessage(prompt).catch(() => {})
 
-    await this.readStream()
+    try {
+      await this.readStream()
+    } finally {
+      this.stopLoginKeeper()
+    }
+  }
+
+  /** A Seatbelt session cannot store a refreshed login in the keychain; see claude-login.ts. */
+  protected override async beforeSpawn(plan: SandboxSpawnPlan, env: NodeJS.ProcessEnv): Promise<void> {
+    this.stopLoginKeeper()
+    if (this.vendor !== "claude" || !plan.sandboxed || plan.platform !== "darwin") return
+    this.loginKeeper = keepClaudeLoginFresh(env)
+    await this.loginKeeper.ready
+  }
+
+  private stopLoginKeeper(): void {
+    this.loginKeeper?.stop()
+    this.loginKeeper = undefined
   }
 
   /** Deliver an operator message to the running process. Rejects when it cannot be taken. */

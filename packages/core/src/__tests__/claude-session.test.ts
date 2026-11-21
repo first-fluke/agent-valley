@@ -10,6 +10,7 @@ import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { AgentEvent } from "../sessions/agent-session"
+import * as loginModule from "../sessions/claude-login"
 import { MAX_NATIVE_RESULT_LENGTH } from "../sessions/native-result"
 import * as sandboxModule from "../sessions/sandbox"
 
@@ -320,5 +321,30 @@ describe("ClaudeSession — streaming output", () => {
     expect(errors).toEqual([
       expect.objectContaining({ error: expect.objectContaining({ message: expect.stringContaining("256000") }) }),
     ])
+  })
+
+  test("keeps the stored login fresh from the host only while a Seatbelt session runs", async () => {
+    writeMockClaude([JSON.stringify({ type: "result", result: "done", is_error: false })])
+    const stop = vi.fn()
+    const keep = vi.spyOn(loginModule, "keepClaudeLoginFresh").mockReturnValue({ ready: Promise.resolve(), stop })
+    const { ClaudeSession } = await import("../sessions/claude-session")
+
+    const unsandboxed = new ClaudeSession()
+    await unsandboxed.start({ type: "claude", timeout: 30, workspacePath: "/tmp" })
+    await unsandboxed.execute("test")
+    expect(keep).not.toHaveBeenCalled()
+
+    vi.spyOn(sandboxModule, "planSandboxedSpawn").mockImplementation(async (request) => ({
+      command: request.command,
+      args: request.args,
+      sandboxed: true,
+      platform: "darwin",
+      networkAllowlist: [],
+    }))
+    const sandboxed = new ClaudeSession()
+    await sandboxed.start({ type: "claude", timeout: 30, workspacePath: "/tmp" })
+    await sandboxed.execute("test")
+    expect(keep).toHaveBeenCalledTimes(1)
+    expect(stop).toHaveBeenCalledTimes(1)
   })
 })
