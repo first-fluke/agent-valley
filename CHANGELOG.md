@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.5](https://github.com/first-fluke/agent-valley/compare/v4.17.4...v4.17.5) (2026-11-21)
+
+
+### Bug Fixes
+
+* **sessions:** refresh the claude login outside the seatbelt sandbox ([9d36efa](https://github.com/first-fluke/agent-valley/commit/9d36efa13a5f1d54105e76a305183a75360bd476))
+
 ## [4.17.4](https://github.com/first-fluke/agent-valley/compare/v4.17.3...v4.17.4) (2026-11-21)
 
 
