@@ -39,6 +39,7 @@ import {
   runIntegrationCheck,
   runLaneCheck,
 } from "./runtime-integration-check"
+import { awaitRun, stopRun } from "./runtime-run-handle"
 import { discoverMissionSkills, loadMissionSkillBodies, prepareMissionSkills, validateMissionSkills } from "./skills"
 import type { MissionStore } from "./store"
 import { resolveToolEnvironment } from "./tool-environment"
@@ -123,7 +124,7 @@ export class ChiefRuntime {
   }
 
   async close(): Promise<void> {
-    const results = await Promise.allSettled([...this.runs].map((run) => this.stopRun(run)))
+    const results = await Promise.allSettled([...this.runs].map((run) => stopRun(run)))
     const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))
     if (failures.length)
       throw new AggregateError(
@@ -367,7 +368,7 @@ export class ChiefRuntime {
         )
       }
       this.runs.add(run)
-      const completed = this.observeAttempt(attempt, await this.awaitRun(run, attempt, signal))
+      const completed = this.observeAttempt(attempt, await awaitRun(run, attempt, signal))
       if (
         !completed.finishedAt ||
         !Number.isFinite(Date.parse(completed.finishedAt)) ||
@@ -425,7 +426,7 @@ export class ChiefRuntime {
             : new Error("Order interrupted. Resume the saved mission to continue.")
     }
     try {
-      if (run) await this.stopRun(run)
+      if (run) await stopRun(run)
     } catch (error) {
       failed = true
       markOperatingRunUnknown(entry, error instanceof Error ? error.message : String(error))
@@ -457,58 +458,5 @@ export class ChiefRuntime {
         { outcomeUnknown: true },
       )
     return observed
-  }
-
-  private async stopRun(run: RunHandle): Promise<void> {
-    if (!run.isAlive()) {
-      await this.joinRun(run)
-      return
-    }
-    if (run.executionCapabilities.cancellation === "unsupported")
-      throw new Error("Runtime cannot confirm cancellation. Reconcile the execution before resuming.")
-    await run.cancel()
-    if (run.executionCapabilities.cancellation !== "confirmed")
-      throw new Error(
-        "Runtime accepted cancellation without confirming completion. Reconcile the execution before resuming.",
-      )
-    await this.joinRun(run)
-  }
-
-  private async joinRun(run: RunHandle): Promise<void> {
-    try {
-      await run.result
-    } catch (error) {
-      if (error instanceof AgentRunError && error.outcomeUnknown) throw error
-    }
-  }
-
-  private async awaitRun(run: RunHandle, attempt: RunAttempt, signal?: AbortSignal): Promise<RunAttempt> {
-    if (!signal) return run.result
-    let abort: (() => void) | undefined
-    const interrupted = new Promise<never>((_resolve, reject) => {
-      abort = () => {
-        void this.stopRun(run).then(
-          () =>
-            reject(
-              signal.reason instanceof MissionPause
-                ? signal.reason
-                : new Error("Order interrupted. Resume the saved mission to continue."),
-            ),
-          (error) =>
-            reject(
-              new AgentRunError(error instanceof Error ? error.message : String(error), attempt, {
-                outcomeUnknown: true,
-              }),
-            ),
-        )
-      }
-      signal.addEventListener("abort", abort, { once: true })
-      if (signal.aborted) abort()
-    })
-    try {
-      return await Promise.race([run.result, interrupted])
-    } finally {
-      if (abort) signal.removeEventListener("abort", abort)
-    }
   }
 }
