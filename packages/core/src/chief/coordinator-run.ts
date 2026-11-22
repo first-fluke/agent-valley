@@ -11,6 +11,7 @@ import {
   recordHandoffReview,
   refreshFreeModelRoute,
 } from "./handoff"
+import { withRoutedModel } from "./routing"
 import type { ChiefPorts, ChiefStage, Mission, Persona } from "./types"
 
 export class ReadOnlyViolation extends Error {}
@@ -220,13 +221,15 @@ export function createMissionRun(
     }
     for (;;) {
       const probedType = selected.agentType
-      const probeKey = JSON.stringify([selected.agentType, selected.model ?? null])
+      // The gate judges the route this run will request: an Actor without a model takes its CLI's routing model.
+      const gate = withRoutedModel(mission, selected)
+      const probeKey = JSON.stringify([gate.agentType, gate.model ?? null])
       const pending = probes.get(probeKey)
       if (pending) {
         await pending
         if (await shareProbe(probedType)) continue
       }
-      const health = actorRouteHealth(mission, { actorType: selected.agentType, model: selected.model })
+      const health = actorRouteHealth(mission, { actorType: gate.agentType, model: gate.model })
       const exhausted = mission.handoff?.exhaustedAgents?.some((vendor) => vendor === selected.agentType) ?? false
       // The first run to reach a probe route owns it; siblings await its terminal result above.
       const owner = (health.consecutiveFailures > 0 || exhausted) && !probes.has(probeKey)

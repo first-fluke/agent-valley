@@ -288,6 +288,37 @@ describe("native cooldown admission and routing", () => {
     ).toEqual([])
   })
 
+  it("runs parallel work at once on the candidate's model while the same CLI's default cools down", async () => {
+    if (!mission.operations || !mission.operatingPolicy?.routing) throw new Error("Missing routing")
+    actor().agentType = "codex"
+    mission.operations.runs = [failure("codex", 1_000)]
+    mission.operatingPolicy.routing.candidates = [
+      { actorType: "codex", model: "second-model", inputPerMillionUsd: 2, outputPerMillionUsd: 2 },
+    ]
+    let release: () => void = () => {}
+    let announce: () => void = () => {}
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const bothSpawned = new Promise<void>((resolve) => {
+      announce = resolve
+    })
+    let started = 0
+    const { spawn, run } = adapter(async (input) => {
+      started += 1
+      if (started === 2) announce()
+      await pending
+      return completed(input)
+    })
+    const both = Promise.all([run(actor(), "Lane A", "work", "lane-a"), run(actor(), "Lane B", "work", "lane-b")])
+    // Before the gate judged the routed model, the second lane waited for the first to finish.
+    await bothSpawned
+    expect(spawn).toHaveBeenCalledTimes(2)
+    release()
+    await both
+    expect(actorRouteHealth(mission, { actorType: "codex" })).toMatchObject({ state: "cooling" })
+  })
+
   it("records native success when AV rejects the OMA receipt rather than cooling a functioning CLI", async () => {
     mission.oma = true
     vi.spyOn(worktreeLifecycle, "runCommand").mockResolvedValue({
