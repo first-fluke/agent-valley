@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.7](https://github.com/first-fluke/agent-valley/compare/v4.17.6...v4.17.7) (2026-11-22)
+
+
+### Bug Fixes
+
+* **chief:** judge the probe gate on the model a run will request ([191298d](https://github.com/first-fluke/agent-valley/commit/191298d53b928894517cc1a00daa3d08eb7867c8))
+
 ## [4.17.6](https://github.com/first-fluke/agent-valley/compare/v4.17.5...v4.17.6) (2026-11-22)
 
 
