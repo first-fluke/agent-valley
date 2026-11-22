@@ -284,7 +284,16 @@ export async function runOperation(
           },
           new Date(dependencies.now?.() ?? Date.now()).toISOString(),
         )
-      if (options.retry || decisionBudgetKeys.some((key) => options[key] !== undefined)) {
+      const budgetChange = decisionBudgetKeys.some((key) => options[key] !== undefined)
+      // A finished child has nothing left to retry: the resume only has to accept it.
+      const finishedChild =
+        options.retry && !budgetChange && operation.currentMissionId
+          ? await new MissionStore(join(root, ".agent-valley", "missions"))
+              .load(operation.currentMissionId)
+              .then((child) => child.status === "completed")
+              .catch(() => false)
+          : false
+      if (!finishedChild && (options.retry || budgetChange)) {
         if (operation.currentMissionId || !operation.decisionId)
           throw new Error(
             "Operation resume budget reconciliation applies only to an active decision checkpoint. Adjust the current child's budget with av order --resume <child-id>.",
@@ -303,8 +312,7 @@ export async function runOperation(
           const priorExecution = { ...executionState(decision) }
           const adjustments: OrderOptions = { resume: decision.id }
           for (const key of decisionBudgetKeys) if (options[key] !== undefined) adjustments[key] = options[key]
-          if (decisionBudgetKeys.some((key) => options[key] !== undefined))
-            applyResumeOptions(decision, undefined, adjustments)
+          if (budgetChange) applyResumeOptions(decision, undefined, adjustments)
           if (options.retry) {
             decision.status = priorStatus
             Object.assign(executionState(decision), {

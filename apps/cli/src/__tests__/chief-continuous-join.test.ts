@@ -170,6 +170,30 @@ describe("continuous operation joins a live child", () => {
     expect(runMission).not.toHaveBeenCalled()
   })
 
+  it("accepts a finished child when the operator resumes with --retry", async () => {
+    const { parent, child } = await seed()
+    await completeChild(child)
+    const runMission = vi.fn()
+    const decide = vi.fn()
+
+    const result = await runOperation(undefined, { resume: parent.id, retry: true }, root, { runMission, decide })
+
+    expect(result).toMatchObject({ phase: "completed", completedCycles: 1 })
+    expect(result.currentMissionId).toBeUndefined()
+    expect(result.history.map((entry) => entry.missionId)).toEqual([child.id])
+    expect(runMission).not.toHaveBeenCalled()
+    expect(decide).not.toHaveBeenCalled()
+  })
+
+  it("still refuses --retry on the operation while its child is unresolved", async () => {
+    const { parent, child } = await seed()
+
+    await expect(runOperation(undefined, { resume: parent.id, retry: true }, root, {})).rejects.toThrow(
+      "applies only to an active decision checkpoint",
+    )
+    expect(await missions.load(child.id)).toEqual(child)
+  })
+
   it("cancels only the joining parent and leaves the live owner's child byte-for-byte unchanged", async () => {
     const { parent, child } = await seed()
     const childPath = join(root, ".agent-valley", "missions", `${child.id}.json`)
