@@ -6,6 +6,17 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.9](https://github.com/first-fluke/agent-valley/compare/v4.17.8...v4.17.9) (2026-11-22)
+
+
+### Bug Fixes
+
+* **chief:** act on blockers a final wave returns before its checks ([d909ba0](https://github.com/first-fluke/agent-valley/commit/d909ba04faa1d8b469de69e2818d4598399becbf))
+* **chief:** carry committed symbolic links into the baseline ([08cd535](https://github.com/first-fluke/agent-valley/commit/08cd535573288c447b8c9d1776def01f34be4be9))
+* **chief:** let a provider exhaustion record lapse ([6d4d071](https://github.com/first-fluke/agent-valley/commit/6d4d07182c403513f7d6f7767be70a033b5882a7))
+* **chief:** re-pin a fast-forward past unrelated local edits ([ebf4ad6](https://github.com/first-fluke/agent-valley/commit/ebf4ad6b3fc8e6c999d820e3419d11187b1b2423))
+* **sessions:** say once per session how the claude login is kept ([3d16e04](https://github.com/first-fluke/agent-valley/commit/3d16e048726ea6f057740cc0f60846b76616f476))
+
 ## [4.17.8](https://github.com/first-fluke/agent-valley/compare/v4.17.7...v4.17.8) (2026-11-22)
 
 
