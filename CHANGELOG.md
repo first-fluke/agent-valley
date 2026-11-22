@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.8](https://github.com/first-fluke/agent-valley/compare/v4.17.7...v4.17.8) (2026-11-22)
+
+
+### Bug Fixes
+
+* **chief:** let an operation resume with --retry accept a finished child ([1fa47db](https://github.com/first-fluke/agent-valley/commit/1fa47dbab642a7b35f31a7bb02866c67dc7803af))
+
 ## [4.17.7](https://github.com/first-fluke/agent-valley/compare/v4.17.6...v4.17.7) (2026-11-22)
 
 
