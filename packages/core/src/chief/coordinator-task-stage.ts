@@ -14,6 +14,7 @@ import { reviewGoalGaps } from "./goal-gap-review"
 import { clearReviewerNoVerdict, handoffActor, noteReviewerNoVerdict } from "./handoff"
 import { readyTasks, readyTaskWave } from "./parallel"
 import { reviewPrompt, workPrompt } from "./prompts"
+import { reviewReturnedFindings } from "./returned-findings-review"
 import { settleRepairReview } from "./review-response"
 import { selectTaskReviewer } from "./review-routing"
 import { parseReview } from "./schemas"
@@ -254,6 +255,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
         review: taskReview,
         fatal: protectedFailure,
         serialize,
+        returned: (tasks) => reviewReturnedFindings(context, tasks),
       })
       // Resolve real failures first; a rejected sibling's old probe wait must not hide them.
       const primary = failures.filter(

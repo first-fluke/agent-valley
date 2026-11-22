@@ -48,7 +48,10 @@ export interface Review {
 }
 
 /** The operator's recorded decision that a success criterion stays unmet in this mission. */
-/** One goal review before a final wave: `key` names the delivered and remaining tasks it was taken for. */
+/**
+ * One goal review before a final wave: `key` names the delivered and remaining tasks it was taken for. A key
+ * that starts with `returned:` is the Chief's look at what a final wave returned, before its integrated check.
+ */
 export interface GoalGapReview {
   at: string
   key: string

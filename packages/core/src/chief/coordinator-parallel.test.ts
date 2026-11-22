@@ -102,6 +102,37 @@ describe("parallel Chief task coordination", () => {
     expect(mission.tasks.every((state) => state.status === "completed" && state.attempts === 1)).toBe(true)
   })
 
+  // Regression: a QA task of a final wave recorded two blocking defects; the wave still ran its 53-minute
+  // integrated check and both reviews before the final review sent the owning lane to repair.
+  it("skips the integrated check and the reviews when the caller sends tasks to repair for what the wave returned", async () => {
+    const { mission, ports, wave, parallel, hooks, events } = setup()
+    ports.integrationCheck = vi.fn(async () => ({ ok: true, output: "checked" })) as never
+    hooks.returned = vi.fn(async (tasks: ChiefTask[]) => {
+      events.push(`returned:${tasks.map((task) => task.id).join(",")}`)
+      // The repair the caller requests resets the tasks, including their workspace records.
+      for (const state of mission.tasks) delete state.parallel
+      return true
+    })
+
+    expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
+
+    expect(events.indexOf("returned:a,b")).toBeGreaterThan(events.indexOf("integrate:b"))
+    expect(hooks.review).not.toHaveBeenCalled()
+    expect(ports.integrationCheck).not.toHaveBeenCalled()
+    expect(parallel.dispose).toHaveBeenCalledTimes(2)
+  })
+
+  it("goes on to the reviews when nothing the wave returned needs a repair", async () => {
+    const { mission, ports, wave, hooks, events } = setup()
+    hooks.returned = vi.fn(async () => false)
+
+    expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
+
+    expect(hooks.returned).toHaveBeenCalledOnce()
+    expect(events.filter((event) => event.startsWith("review:"))).toEqual(["review:a", "review:b"])
+    expect(mission.tasks.every((state) => state.status === "completed")).toBe(true)
+  })
+
   it("resumes checkpointed output without running or preparing either Actor again", async () => {
     const { mission, ports, wave, parallel, hooks } = setup()
     for (const state of mission.tasks) {

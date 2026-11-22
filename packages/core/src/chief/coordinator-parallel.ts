@@ -21,6 +21,11 @@ export interface ParallelWaveHooks {
   fatal?(error: unknown): boolean
   /** Shared mission-state mutex; review Actor calls overlap, but checkpoints and outcomes stay serialized. */
   serialize?<T>(fn: () => Promise<T> | T): Promise<T>
+  /**
+   * Called once the wave's outputs are integrated and before its integrated check and reviews. True means the
+   * caller already sent tasks to repair for what the outputs report, so the check and the reviews are skipped.
+   */
+  returned?(tasks: ChiefTask[]): Promise<boolean>
 }
 export interface ParallelWaveFailure {
   taskId: string
@@ -252,17 +257,6 @@ export async function performParallelWave(
   }
   if ([...failures.values()].some((failure) => hooks.fatal?.(failure.error)))
     return wave.flatMap((task) => failures.get(task.id) ?? [])
-  try {
-    await recordIntegrationCheck(
-      mission,
-      ports,
-      integrated.map((entry) => entry.state),
-      save,
-    )
-  } catch (error) {
-    for (const entry of integrated) fail(entry.task.id, error, "review")
-    return wave.flatMap((task) => failures.get(task.id) ?? [])
-  }
   // Integrated edits live in the mission workspace, its patch receipt, and retained Git evidence refs,
   // so the Actor repository (including its build output) is redundant whether review passed or not.
   // Callers run inside serialize(), so the retention checkpoint uses rawSave.
@@ -274,6 +268,27 @@ export async function performParallelWave(
         taskId,
       )
     })
+  if (hooks.returned && integrated.length && !failures.size) {
+    // The repair resets the tasks it names, so their workspace records are taken before it runs.
+    const records = integrated.flatMap(({ task, state }) =>
+      state.parallel ? [{ id: task.id, record: state.parallel }] : [],
+    )
+    if (await hooks.returned(integrated.map((entry) => entry.task))) {
+      for (const { id, record } of records) await serialize(() => release(id, record))
+      return []
+    }
+  }
+  try {
+    await recordIntegrationCheck(
+      mission,
+      ports,
+      integrated.map((entry) => entry.state),
+      save,
+    )
+  } catch (error) {
+    for (const entry of integrated) fail(entry.task.id, error, "review")
+    return wave.flatMap((task) => failures.get(task.id) ?? [])
+  }
   // Reviews are read-only inspections of the integrated worktree: overlap them up to the parallel limit,
   // while every mission-state mutation and checkpoint stays on the shared serialized queue.
   const reviewLimit = Math.max(1, mission.executionPolicy?.maxParallel ?? 1)

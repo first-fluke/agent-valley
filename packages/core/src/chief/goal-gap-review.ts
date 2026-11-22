@@ -59,7 +59,9 @@ export async function reviewGoalGaps(
   if (!remaining) return false
   const key = goalGapReviewKey(mission, remaining)
   const earlier = mission.goalGapReviews ?? []
-  if (earlier.length >= MAX_GOAL_GAP_REVIEWS || earlier.some((entry) => entry.key === key)) return false
+  // Looks at what a final wave returned share the list under their own key prefix and do not count here.
+  const own = earlier.filter((entry) => !entry.key.startsWith("returned:"))
+  if (own.length >= MAX_GOAL_GAP_REVIEWS || own.some((entry) => entry.key === key)) return false
   const ids = remaining.map((task) => task.id).join(", ")
   const record = (entry: Omit<GoalGapReview, "at" | "key">) => {
     mission.goalGapReviews = [...earlier, { at: new Date().toISOString(), key, ...entry }]
