@@ -6,6 +6,14 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.17.6](https://github.com/first-fluke/agent-valley/compare/v4.17.5...v4.17.6) (2026-11-22)
+
+
+### Bug Fixes
+
+* **chief:** run reviews on the routing candidate's model ([5426881](https://github.com/first-fluke/agent-valley/commit/542688178c98d2a54a3d67b609ad0b18c4583971))
+* **chief:** treat a model-named usage limit as provider exhaustion ([cfcb6fc](https://github.com/first-fluke/agent-valley/commit/cfcb6fc70baca7f245f674346242a6399c04d6a2))
+
 ## [4.17.5](https://github.com/first-fluke/agent-valley/compare/v4.17.4...v4.17.5) (2026-11-21)
 
 
