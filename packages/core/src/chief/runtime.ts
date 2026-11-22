@@ -23,7 +23,7 @@ import {
   prepareTaskWorktree,
   releaseAppliedTaskWorktrees,
 } from "./parallel-workspace"
-import { selectWorkActor, workActorCandidates } from "./routing"
+import { selectWorkActor, withRoutedModel, workActorCandidates } from "./routing"
 import { admitNativeDispatch } from "./runtime-admission"
 import {
   intermediateVerifyCommand,
@@ -305,6 +305,7 @@ export class ChiefRuntime {
       route = selectWorkActor(mission, requestedPersona, context?.taskId, compatibleRoutes)
       persona = route.actor
     }
+    persona = withRoutedModel(mission, persona)
     this.onStage(stage, persona)
     if (route)
       prompt += `\n\nActual work route: ${JSON.stringify({ actorType: persona.agentType, model: persona.model ?? "native default", reason: route.reason })}. This route does not alter the user's Chief Director choice or acceptance contract.`

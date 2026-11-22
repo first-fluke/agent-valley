@@ -96,6 +96,20 @@ export function routeEvidence(mission: Mission): RouteEvidence[] {
   return [...evidence.values()]
 }
 
+/**
+ * An automatic Actor names no model, so its CLI default decides. When the operator gave that CLI a model in
+ * chief.routing.candidates, reviews and consultations use it as work runs already do: on 2026-11-22 work ran on
+ * the configured model while every review still asked for the CLI default, whose allowance was spent.
+ * The operator's own Chief Director choice is left as configured.
+ */
+export function withRoutedModel(mission: Mission, actor: Persona): Persona {
+  if (actor.model || actor.id === mission.chiefId) return actor
+  const model = mission.operatingPolicy?.routing?.candidates.find(
+    (candidate) => candidate.actorType === actor.agentType,
+  )?.model
+  return model ? { ...actor, model } : actor
+}
+
 function readyWorkCandidates(mission: Mission): RoutingCandidate[] {
   const ready = mission.operatingPolicy?.readyActors ?? mission.availableAgents ?? []
   const exhausted = unavailableProviders(mission.handoff)

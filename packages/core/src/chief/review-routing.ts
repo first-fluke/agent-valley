@@ -2,7 +2,7 @@ import { availableActorRoutes } from "./actor-availability"
 import { actorRouteHealth } from "./actor-health"
 import { MissionPause } from "./execution"
 import { unavailableProviders } from "./handoff-contract"
-import { latestWorkRun } from "./routing"
+import { latestWorkRun, withRoutedModel } from "./routing"
 import type { ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
 
 function addReviewer(mission: Mission, vendor: string, model?: string): Persona {
@@ -25,8 +25,9 @@ function addReviewer(mission: Mission, vendor: string, model?: string): Persona 
 }
 
 export function selectTaskReviewer(mission: Mission, task: ChiefTask, state: ChiefTaskState, gateId?: string): Persona {
-  const configured = mission.personas.find((actor) => actor.id === state.reviewerId)
-  if (!configured) throw new Error("Restore the configured task reviewer before resuming.")
+  const recorded = mission.personas.find((actor) => actor.id === state.reviewerId)
+  if (!recorded) throw new Error("Restore the configured task reviewer before resuming.")
+  const configured = withRoutedModel(mission, recorded)
   const policy = mission.operatingPolicy
   if (!policy || policy.reviewVendor === "off") {
     availableActorRoutes(mission, [{ actorType: configured.agentType, model: configured.model }])
@@ -46,6 +47,7 @@ export function selectTaskReviewer(mission: Mission, task: ChiefTask, state: Chi
     )
   const pool = [configured, ...mission.personas.filter((actor) => actor.id !== configured.id)]
     .filter((actor) => actor.id !== task.personaId && ready.includes(actor.agentType))
+    .map((actor) => withRoutedModel(mission, actor))
     .map((actor) => ({ actorType: actor.agentType, model: actor.model, actor: actor as Persona | undefined }))
   for (const vendor of ready)
     if (!pool.some((entry) => entry.actorType === vendor)) {
