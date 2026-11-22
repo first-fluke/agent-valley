@@ -251,6 +251,24 @@ function localAuth(agent: AgentType, deps: DiscoveryDeps): AuthEvidence | null {
     }
     return missing(agent, "Codex authentication file has no complete credentials")
   }
+  if (agent === "grok") {
+    // Grok Build keeps one login per issuer in auth.json; a login with a refresh token renews itself.
+    const value = readState(join(deps.home, ".grok", "auth.json"), deps)
+    if (value === null) return null
+    const logins = Object.values(record(value)).map(record)
+    const usable = logins.some(
+      (login) =>
+        nonempty(login.key) &&
+        (nonempty(login.refresh_token) ||
+          login.expires_at === undefined ||
+          Date.parse(String(login.expires_at)) > deps.now()),
+    )
+    if (usable) return { readiness: "ready", reason: "Grok native login found" }
+    return missing(
+      agent,
+      logins.some((login) => nonempty(login.key)) ? "Grok login has expired" : "Grok authentication file has no login",
+    )
+  }
   if (agent === "claude") {
     const home = nonempty(deps.env.CLAUDE_CONFIG_DIR) ? deps.env.CLAUDE_CONFIG_DIR : join(deps.home, ".claude")
     const value = readState(join(home, ".credentials.json"), deps)
