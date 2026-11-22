@@ -92,10 +92,8 @@ export async function synchronizeContinuousBaselineWithSource(
     const before = baseImages.get(path) ?? null
     const after = headImages.get(path) ?? null
     if (same(before, after)) continue
-    if (before?.mode === "120000" || after?.mode === "120000")
-      throw new Error(
-        `Source integration refuses symbolic link ${JSON.stringify(path)}. Preserve it and use regular product files before retrying.`,
-      )
+    // A link the operator committed or removed is carried as a tree entry like any other image: this
+    // direction only writes the operation's own snapshot, never through a link into the source.
     const existing = baselineImages.get(path) ?? null
     if (same(existing, after)) continue
     if (!same(existing, before)) contested.push({ path, after })

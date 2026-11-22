@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -120,5 +120,29 @@ describe("continuous baseline source sync", () => {
 
     if (!synced) throw new Error("expected a synchronized baseline")
     expect(await readFile(join(synced.path, "product.txt"), "utf8")).toBe("Operator rewrite\n")
+  })
+  it("carries a link the operator committed or removed into the baseline", async () => {
+    await symlink("product.txt", join(root, "retired-link.txt"))
+    await git(["add", "--", "retired-link.txt"])
+    await commit("add a link")
+    const operation = operationFixture({
+      repositoryRoot: root,
+      sourceIntegrationPolicy: await prepareSourceIntegration(root, "operation"),
+    })
+    const initial = await prepareContinuousBaseline(root, operation.id, root)
+    await rm(join(root, "retired-link.txt"))
+    await symlink("other.txt", join(root, "added-link.txt"))
+    await git(["add", "-A", "--", "retired-link.txt", "added-link.txt"])
+    await commit("replace the link")
+    const head = (await git(["rev-parse", "HEAD"])).trim()
+    operation.baseline = initial
+    operation.sourceIntegrationPolicy = { mode: "worktree", branch: "main", head }
+
+    const synced = await synchronizeContinuousBaselineWithSource(operation, initial)
+
+    if (!synced) throw new Error("expected a synchronized baseline")
+    expect(await readlink(join(synced.path, "added-link.txt"))).toBe("other.txt")
+    await expect(lstat(join(synced.path, "retired-link.txt"))).rejects.toMatchObject({ code: "ENOENT" })
+    expect(await readFile(join(synced.path, "product.txt"), "utf8")).toBe("Initial product\n")
   })
 })
