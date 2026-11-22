@@ -139,12 +139,28 @@ export function keepClaudeLoginFresh(env: NodeJS.ProcessEnv, deps: ClaudeLoginDe
     timer = setTimeout(() => void pass().catch(() => {}), Math.min(delayMs, MAX_TIMER_MS))
     timer.unref?.()
   }
+  // Said once per session, so a log shows whether this session's login is being kept and until when.
+  let announced = false
+  const announce = (message: string, fields: Record<string, string>) => {
+    if (!announced) logger.info("claude-login", message, fields)
+    announced = true
+  }
   const pass = async (): Promise<void> => {
     if (stopped) return
     const expiry = await claudeLoginExpiry(env, deps)
-    if (expiry === null || stopped) return
+    if (stopped) return
+    if (expiry === null)
+      return announce("No stored Claude login expiry could be read; the host does not refresh this session's login", {
+        keychainService: claudeKeychainService(env),
+      })
     const wait = expiry - REFRESH_LEAD_MS - deps.now()
-    if (wait > 0) return arm(wait)
+    if (wait > 0) {
+      announce("Keeping the Claude login of this sandboxed session ahead of its expiry", {
+        expiresAt: new Date(expiry).toISOString(),
+        refreshAt: new Date(expiry - REFRESH_LEAD_MS).toISOString(),
+      })
+      return arm(wait)
+    }
     if (!(await refreshClaudeLogin(env, deps))) failures += 1
     // The next pass reads the new expiry; a failed refresh is tried again, three times at most.
     if (!stopped && failures < MAX_FAILED_REFRESHES) arm(RECHECK_MS)
