@@ -202,6 +202,8 @@ verify:
 #   #   candidates:
 #   #     - actor_type: codex
 #   #       # Supply input_per_million_usd/output_per_million_usd from your own pricing.
+#   #     - actor_type: grok
+#   #       skills: [oma-qa]      # Reserved for Actors whose every skill is listed here
 #   # Optional extra checks; each gate reviews every task before verification.
 #   # review_gates:
 #   #   - id: security

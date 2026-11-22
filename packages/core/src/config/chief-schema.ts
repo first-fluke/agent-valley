@@ -38,6 +38,11 @@ export const chiefConfigSchema = z.strictObject({
           z.strictObject({
             actor_type: z.string().min(1).max(128),
             model: z.string().min(1).max(256).optional(),
+            skills: z
+              .array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/))
+              .min(1)
+              .max(30)
+              .optional(),
             input_per_million_usd: price,
             output_per_million_usd: price,
           }),
@@ -108,6 +113,7 @@ export function chiefOperatingPolicy(
           candidates: config.routing.candidates.map((item) => ({
             actorType: item.actor_type,
             model: item.model,
+            skills: item.skills,
             inputPerMillionUsd: item.input_per_million_usd,
             outputPerMillionUsd: item.output_per_million_usd,
           })),

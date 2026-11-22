@@ -30,7 +30,11 @@ chief:
         # Supply input_per_million_usd/output_per_million_usd from your pricing.
       - actor_type: claude
         model: your-escalation-model
+      - actor_type: grok
+        skills: [oma-qa] # Reserved for Actors whose every skill is listed
 ```
+
+A candidate with `skills` is reserved: only an Actor whose skills are all in that list uses it, and that Actor starts there ahead of price and measured cost. An independent QA Actor carrying only `oma-qa` therefore runs on another vendor than the engineers whose work it judges. A rejected delivery is repaired on the reserved route. A run that could not finish, an exhausted allowance or a vendor that is not ready sends the Actor to the shared candidates. Actors with no skills, or with any skill outside the list, never use a reserved candidate.
 
 Task review selects a different ready vendor from the actual worker when available. `require` blocks work without such a reviewer; `prefer` records same-vendor fallbacks. Supplied rosters remain, with a review Actor added if needed. Final review remains the Chief Director's responsibility. New orders discover readiness; resume preserves it.
 

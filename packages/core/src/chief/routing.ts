@@ -110,11 +110,22 @@ export function withRoutedModel(mission: Mission, actor: Persona): Persona {
   return model ? { ...actor, model } : actor
 }
 
-function readyWorkCandidates(mission: Mission): RoutingCandidate[] {
+/**
+ * A candidate that names skills is reserved for the Actors whose every skill it names, so an independent QA
+ * Actor can run on another vendor than the engineers whose work it judges. Such an Actor starts on its
+ * reserved route and falls back to the shared ones; every other Actor never sees the route.
+ */
+const reservedFor = (candidate: RoutingCandidate, actor: Persona) =>
+  actor.skills.length > 0 && actor.skills.every((skill) => candidate.skills?.includes(skill))
+
+function readyWorkCandidates(mission: Mission, actor: Persona): RoutingCandidate[] {
   const ready = mission.operatingPolicy?.readyActors ?? mission.availableAgents ?? []
   const exhausted = unavailableProviders(mission.handoff)
   const candidates = (mission.operatingPolicy?.routing?.candidates ?? []).filter(
-    (candidate) => ready.includes(candidate.actorType) && !exhausted.has(candidate.actorType),
+    (candidate) =>
+      ready.includes(candidate.actorType) &&
+      !exhausted.has(candidate.actorType) &&
+      (!candidate.skills || reservedFor(candidate, actor)),
   )
   if (candidates.length || !exhausted.size) return candidates
   // An authenticated exhaustion fallback also remains available to subsequent tasks.
@@ -138,7 +149,7 @@ export function workActorCandidates(
   const routing = mission.operatingPolicy?.routing
   if (!routing || actor.id === mission.chiefId || (!mission.availableAgents && (actor.model || preserveExplicit)))
     return [{ actorType: actor.agentType, model: actor.model }]
-  return readyWorkCandidates(mission)
+  return readyWorkCandidates(mission, actor)
 }
 
 export function selectWorkActor(
@@ -156,7 +167,7 @@ export function selectWorkActor(
     availableActorRoutes(mission, [{ actorType: actor.agentType, model: actor.model }])
     return { actor, reason: "Preserved the configured Actor and explicit model." }
   }
-  const candidates = readyWorkCandidates(mission)
+  const candidates = readyWorkCandidates(mission, actor)
   if (!candidates.length)
     throw new Error(
       "No configured work routing candidate is ready. Install/login a candidate CLI or update chief.routing.candidates in av.yaml.",
@@ -192,7 +203,8 @@ export function selectWorkActor(
     )
     .sort((a, b) => a.evidence.successfulDeliverableCostUsd - b.evidence.successfulDeliverableCostUsd)
   const measured = qualified.at(0)
-  const initial = measured?.candidate ?? [...eligible].sort((a, b) => routePrice(a) - routePrice(b)).at(0)
+  const reserved = eligible.find((candidate) => candidate.skills)
+  const initial = reserved ?? measured?.candidate ?? [...eligible].sort((a, b) => routePrice(a) - routePrice(b)).at(0)
   const cancelled = cancelledWorkRunProofs(mission)
   const taskRuns = (mission.operations?.runs ?? []).filter(
     (run) =>
@@ -213,7 +225,9 @@ export function selectWorkActor(
     const run = taskRuns[i]
     if (!run) continue
     if (run.outcome === "passed") break
-    if (run.outcome === "failed" || run.outcome === "rejected") failed.add(routeKey(run))
+    // A rejected delivery is repaired on the reserved route; only a run that could not finish leaves it.
+    if (run.outcome === "failed" || (run.outcome === "rejected" && !(reserved && routeKey(run) === routeKey(reserved))))
+      failed.add(routeKey(run))
   }
   const ordered = [
     ...(initial ? [initial] : []),
@@ -260,11 +274,13 @@ export function selectWorkActor(
   }
   const reason = failed.size
     ? `Escalated after ${failed.size} actually rejected/failed route(s) for this task.`
-    : measured
-      ? `Selected observed successful-deliverable cost after ${measured.evidence.samples} real samples.`
-      : Number.isFinite(routePrice(selected))
-        ? "No qualifying measured route; selected the lowest configured input/output price sum (not a measured run cost)."
-        : "No qualifying measured cost or complete prices; selected configured candidate order with unknown cost."
+    : reserved
+      ? `Selected the route reserved for the skills ${JSON.stringify(reserved.skills)}.`
+      : measured
+        ? `Selected observed successful-deliverable cost after ${measured.evidence.samples} real samples.`
+        : Number.isFinite(routePrice(selected))
+          ? "No qualifying measured route; selected the lowest configured input/output price sum (not a measured run cost)."
+          : "No qualifying measured cost or complete prices; selected configured candidate order with unknown cost."
   return { actor: { ...actor, agentType: selected.actorType, model: selected.model }, reason }
 }
 

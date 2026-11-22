@@ -5,10 +5,13 @@ import { type ReviewGate, reviewGatesSchema } from "./review-gates"
 const actorType = z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/)
 const text = z.string().trim().min(1).max(2_000)
 const amount = z.number().finite().nonnegative()
+const skillName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/)
 
 export const routingCandidateSchema = z.strictObject({
   actorType,
   model: text.optional(),
+  /** Reserves the route for Actors whose every skill is named here; other Actors never use it. */
+  skills: z.array(skillName).min(1).max(30).optional(),
   inputPerMillionUsd: amount.optional(),
   outputPerMillionUsd: amount.optional(),
 })
