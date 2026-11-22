@@ -21,6 +21,7 @@ import {
   verifiedMissionEvidence,
 } from "./continuous-recovery"
 import { assertExecutionDeadline, classifyFailure, MissionPause } from "./execution"
+import { recordExhaustion } from "./provider-exhaustion"
 import { interruptionPause, isServiceShutdown } from "./service-shutdown"
 import type { Mission } from "./types"
 
@@ -70,13 +71,7 @@ export async function runContinuousOperation(
     const health = mergeProviderHealthSnapshots(operation.actorHealth ?? [], aggregateProviderHealth(child))
     // A usage-exhausted provider stays exhausted across the next children; rediscovering it costs each
     // child a failed probe, a cooldown wait and a handoff before the first review can run.
-    const exhausted = [...(operation.exhaustedProviders ?? [])]
-    for (const agentType of child.handoff?.exhaustedAgents ?? []) {
-      const index = exhausted.findIndex((entry) => entry.agentType === agentType)
-      const entry = { agentType, at: now() }
-      if (index === -1) exhausted.push(entry)
-      else exhausted[index] = entry
-    }
+    const exhausted = recordExhaustion(operation.exhaustedProviders ?? [], child, now())
     const changed =
       JSON.stringify(health) !== JSON.stringify(operation.actorHealth ?? []) ||
       JSON.stringify(exhausted) !== JSON.stringify(operation.exhaustedProviders ?? [])
