@@ -10,7 +10,7 @@ export function classifyAgentExhaustion(reason: string): AgentExhaustion | undef
   )
     return "context"
   if (
-    /\busage limit (?:is )?(?:reached|exceeded)|\binsufficient (?:quota|credits?)\b|\b(?:credit balance|credits?) (?:is |are )?(?:too )?(?:low|exhausted|depleted)|\bout of credits\b|\b(?:hit|reached) (?:your |the )?(?:usage |subscription |weekly |monthly |daily )limit\b|\b(?:you(?:'|’)ve|you have) hit your limit\b|\bquota (?:is )?(?:exceeded|exhausted)|\b(?:usage|subscription) allowance (?:is )?(?:exhausted|depleted)\b/i.test(
+    /\busage limit (?:is )?(?:reached|exceeded)|\binsufficient (?:quota|credits?)\b|\b(?:credit balance|credits?) (?:is |are )?(?:too )?(?:low|exhausted|depleted)|\bout of credits\b|\b(?:hit|reached) (?:your |the )?(?:usage |subscription |weekly |monthly |daily )limit\b|\b(?:you(?:'|’)ve|you have) hit your (?!rate\b)(?:[\w.]+ ){0,3}limit\b|\bquota (?:is )?(?:exceeded|exhausted)|\b(?:usage|subscription) allowance (?:is )?(?:exhausted|depleted)\b/i.test(
       normalized,
     )
   )

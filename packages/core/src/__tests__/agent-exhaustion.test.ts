@@ -23,6 +23,8 @@ describe("classifyAgentExhaustion", () => {
     "You are out of credits",
     "You've hit your usage limit. Try again later.",
     "You've hit your limit · resets 5pm",
+    "You've hit your Fable limit · resets Nov 28 at 12pm (Australia/Sydney). Switch to another model to continue.",
+    "rate_limit: You've hit your Opus 5.5 limit",
     "Quota exceeded for this account",
     "Subscription allowance depleted",
   ])("recognizes provider allowance exhaustion: %s", (reason) => {
@@ -34,6 +36,7 @@ describe("classifyAgentExhaustion", () => {
     "429 Too many tokens per minute",
     "rate_limit_exceeded",
     "Rate limit reached for requests per minute",
+    "You've hit your rate limit. Retry in 20 seconds.",
     "Invalid API token",
     "Expired token; log in again",
     "error_max_turns: Reached max turns",
