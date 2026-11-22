@@ -194,6 +194,54 @@ describe("continuous verified source worktree integration", () => {
     expect(await readFile(join(root, "product.txt"), "utf8")).toBe("Verified product\n")
   })
 
+  it("re-pins a fast-forward that leaves an uncommitted operator edit alone", async () => {
+    const { operation, previous } = await fixture()
+    const next = await accepted(previous, (path) => writeFile(join(path, "product.txt"), "Verified product\n"))
+    await writeFile(join(root, "local.yaml"), "kept out of every commit\n")
+    await writeFile(join(root, "direct.txt"), "Operator direct commit\n")
+    await git(["add", "--", "direct.txt"])
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "operator committed a file of their own",
+    ])
+    const head = (await git(["rev-parse", "HEAD"])).trim()
+
+    const summary = await integrateContinuousSource(operation, previous, next)
+
+    expect(summary.phase).toBe("applied")
+    expect(operation.sourceIntegrationPolicy).toMatchObject({ mode: "worktree", head })
+    expect(await readFile(join(root, "local.yaml"), "utf8")).toBe("kept out of every commit\n")
+  })
+
+  it("keeps the pause for a fast-forward that touches an uncommitted path", async () => {
+    const { operation, previous } = await fixture()
+    const next = await accepted(previous, (path) => writeFile(join(path, "product.txt"), "Verified product\n"))
+    await writeFile(join(root, "direct.txt"), "Operator direct commit\n")
+    await git(["add", "--", "direct.txt"])
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "operator committed a file of their own",
+    ])
+    await writeFile(join(root, "direct.txt"), "Edited again after the commit\n")
+
+    await expect(integrateContinuousSource(operation, previous, next)).rejects.toThrow("branch or HEAD moved")
+    expect(await readFile(join(root, "product.txt"), "utf8")).toBe("Initial product\n")
+  })
+
   it("recognizes a completed apply whose final receipt save was interrupted", async () => {
     const { operation, previous } = await fixture()
     const next = await accepted(previous, (path) => writeFile(join(path, "product.txt"), "Verified product\n"))

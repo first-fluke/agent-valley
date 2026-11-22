@@ -1,5 +1,5 @@
 import { lstat, readFile, realpath } from "node:fs/promises"
-import { resolve } from "node:path"
+import { join, resolve } from "node:path"
 import { codeDeliveryPath } from "./code-delivery-contract"
 import { parallelGit } from "./parallel-git"
 
@@ -44,5 +44,62 @@ export function productPath(path: string): boolean {
           part === "AGENTS.md" ||
           part === ".agent-vally",
       )
+  )
+}
+
+/** Paths a cycle's source application wrote into the worktree; undefined when its receipt cannot be read. */
+export async function appliedSourcePaths(
+  root: string,
+  operationId: string,
+  missionId?: string,
+): Promise<string[] | undefined> {
+  if (!missionId) return []
+  try {
+    const saved = await regularFile(
+      join(root, ".agent-valley", "operations", operationId, "source-integrations", missionId, "integration.json"),
+    )
+    if (!saved) return undefined
+    const receipt = JSON.parse(saved.toString("utf8")) as Record<string, unknown>
+    return [receipt.sourceChanges, receipt.changes].flatMap((changes) =>
+      Array.isArray(changes)
+        ? changes.flatMap((change) => (typeof change?.path === "string" ? [change.path] : []))
+        : [],
+    )
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A same-branch fast-forward that proves nothing is left to reconcile: no uncommitted path was touched
+ * by the moved commits or written by the last applied cycle. What stays uncommitted is then an edit the
+ * operator keeps to themselves (a local config file), which a clean-worktree rule would mistake for an
+ * applied cycle that was never committed.
+ */
+export async function sourceFastForward(
+  root: string,
+  saved: { branch: string; head: string },
+  current: { branch: string; head: string },
+  applied: string[] | undefined,
+): Promise<boolean> {
+  if (current.branch !== saved.branch) return false
+  const forward = await parallelGit(root, ["merge-base", "--is-ancestor", saved.head, current.head]).then(
+    () => true,
+    () => false,
+  )
+  if (!forward) return false
+  const listed = (out: string) => out.split("\0").filter(Boolean)
+  const uncommitted = listed(await parallelGit(root, ["status", "--porcelain", "--no-renames", "-z"])).map((entry) =>
+    entry.slice(3),
+  )
+  if (!uncommitted.length) return true
+  if (!applied) return false
+  const owned = [
+    ...applied,
+    ...listed(await parallelGit(root, ["diff", "--name-only", "--no-renames", "-z", saved.head, current.head])),
+  ]
+  // Status names an untracked directory once, with a trailing slash, for everything under it.
+  return !uncommitted.some((path) =>
+    owned.some((other) => other === path || (path.endsWith("/") && other.startsWith(path))),
   )
 }

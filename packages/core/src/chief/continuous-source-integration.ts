@@ -7,7 +7,13 @@ import { codeDeliveryPath } from "./code-delivery-contract"
 import { integrateContentTransaction } from "./content-transaction"
 import { type ContinuousBaseline, type Operation, operationIdSchema } from "./continuous-contract"
 import { gitignoreProjectionSchema, projectContinuousGitignore } from "./continuous-gitignore"
-import { productPath, regularFile, sourceRoot } from "./continuous-source-helpers"
+import {
+  appliedSourcePaths,
+  productPath,
+  regularFile,
+  sourceFastForward,
+  sourceRoot,
+} from "./continuous-source-helpers"
 import { validateContinuousBaseline } from "./continuous-workspace"
 import { parallelDeliverySchema } from "./parallel-contract"
 import { captureParallelBaseline, parallelGit, parallelTreeImages, writeParallelJson } from "./parallel-git"
@@ -202,15 +208,11 @@ export async function integrateContinuousSource(
       signal?.throwIfAborted()
       const current = await prepareSourceIntegration(root, operation.id)
       if (current.branch === policy.branch && current.head === policy.head) return
-      // An operator who committed the already-applied worktree leaves a clean same-branch fast-forward;
-      // re-pin to it instead of pausing the cycle. Anything else still needs explicit reconciliation.
+      // An operator who committed the already-applied worktree leaves a same-branch fast-forward with
+      // nothing of that cycle uncommitted; re-pin to it instead of pausing the cycle. Anything else
+      // still needs explicit reconciliation.
       if (
-        current.branch === policy.branch &&
-        !(await parallelGit(root, ["status", "--porcelain"])).trim() &&
-        (await parallelGit(root, ["merge-base", "--is-ancestor", policy.head, current.head]).then(
-          () => true,
-          () => false,
-        ))
+        await sourceFastForward(root, policy, current, await appliedSourcePaths(root, operation.id, previous.missionId))
       ) {
         policy.head = current.head
         return

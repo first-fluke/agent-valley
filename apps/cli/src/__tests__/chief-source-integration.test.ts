@@ -340,6 +340,31 @@ describe("continuous source integration policy and resume", () => {
     expect(proof.completedAt).toBe(completedAt)
   })
 
+  it("automatically re-pins when only an operator edit outside the applied cycle stays uncommitted", async () => {
+    const { operation } = await fixture()
+    await resumeSourceIntegration(operation, "worktree", root)
+    await writeFile(join(root, "other.txt"), "Local operator edit\n")
+    await git(["add", "product.txt"])
+    await git([
+      "-c",
+      "user.name=AV test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "operator accepted source",
+    ])
+    const head = (await git(["rev-parse", "HEAD"])).trim()
+
+    await resumeSourceIntegration(operation, undefined, root)
+
+    expect(operation.sourceIntegrationPolicy).toEqual({ mode: "worktree", branch: "main", head })
+    expect(operation.phase).not.toBe("paused")
+    expect(await readFile(join(root, "other.txt"), "utf8")).toBe("Local operator edit\n")
+  })
+
   it("keeps the pause on ordinary resume for a clean non-fast-forward move", async () => {
     const { operation } = await fixture()
     await resumeSourceIntegration(operation, "worktree", root)
