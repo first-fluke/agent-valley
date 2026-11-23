@@ -98,6 +98,37 @@ describe("the goal review before the final wave", () => {
     expect(run).toHaveBeenCalledTimes(1)
   })
 
+  // Regression: a goal that capped its own task count left no plan that also added one task per finding;
+  // the Chief stopped, and the resumed mission started its final wave with the findings unowned.
+  it("asks for recovery again when the Chief stopped on the findings and the mission is resumed", async () => {
+    const mission = beforeFinalWave()
+    const { context: input, requestRecovery, run } = context(mission, async () => gaps)
+    expect(await reviewGoalGaps(input, on)).toBe(true)
+    mission.supervision?.decisions.push({
+      round: 1,
+      at: new Date().toISOString(),
+      action: "stop",
+      reason: "No plan meets the task limit.",
+      fingerprint: "delivered",
+    })
+    expect(await reviewGoalGaps(input, on)).toBe(true)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(requestRecovery).toHaveBeenCalledTimes(2)
+    const reason = requestRecovery.mock.calls[1]?.[0] ?? ""
+    expect(reason).toContain("src/exec/context.rs:36")
+    expect(reason).toContain("group parts into fewer tasks")
+    expect(reason).toContain("never a reason to stop")
+    mission.supervision?.decisions.push({
+      round: 2,
+      at: new Date().toISOString(),
+      action: "repair",
+      reason: "The finding does not hold.",
+      fingerprint: "delivered",
+    })
+    expect(await reviewGoalGaps(input, on)).toBe(false)
+    expect(requestRecovery).toHaveBeenCalledTimes(2)
+  })
+
   it("starts the final wave when the goal is covered, when disabled and when the review gives no verdict", async () => {
     const coveredMission = beforeFinalWave()
     const first = context(coveredMission, async () => covered)

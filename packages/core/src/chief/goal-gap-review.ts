@@ -61,8 +61,17 @@ export async function reviewGoalGaps(
   const earlier = mission.goalGapReviews ?? []
   // Looks at what a final wave returned share the list under their own key prefix and do not count here.
   const own = earlier.filter((entry) => !entry.key.startsWith("returned:"))
-  if (own.length >= MAX_GOAL_GAP_REVIEWS || own.some((entry) => entry.key === key)) return false
   const ids = remaining.map((task) => task.id).join(", ")
+  const same = own.findLast((entry) => entry.key === key)
+  // The Chief stopped on these findings and the operator resumed: the plan is unchanged, so they still have
+  // no owner. The final wave used to start as if the review had passed, and only the final review said so.
+  const stop = mission.supervision?.decisions.at(-1)
+  if (same?.verdict === "gaps" && stop?.action === "stop" && stop.at >= same.at) {
+    await save("goal-review", `The goal review before ${ids} still stands after the Chief's stop; asking again.`)
+    await requestRecovery(goalGapRecovery(ids, same.findings))
+    return true
+  }
+  if (own.length >= MAX_GOAL_GAP_REVIEWS || same) return false
   const record = (entry: Omit<GoalGapReview, "at" | "key">) => {
     mission.goalGapReviews = [...earlier, { at: new Date().toISOString(), key, ...entry }]
   }
@@ -85,8 +94,15 @@ export async function reviewGoalGaps(
   record({ verdict: review.passed ? "covered" : "gaps", summary: review.summary, findings: review.findings })
   await save("goal-review", review.summary)
   if (review.passed) return false
-  await requestRecovery(
-    `Goal review before the final wave: the delivered work and the remaining tasks (${ids}) leave parts of the goal without an owner. ${review.findings.join("; ")} Replan so that a task ahead of the remaining tasks delivers each part, one task per independent part, keeping every delivered task and the remaining tasks as they are. When a finding does not hold, keep the plan and say why in the reason.`,
-  )
+  await requestRecovery(goalGapRecovery(ids, review.findings))
   return true
+}
+
+/**
+ * One new task per part is the shape that keeps the wave wide, but it is a preference: a goal that limits
+ * its own task count once left the Chief no plan that met both rules, and it stopped a nine-hour mission
+ * with six accepted tasks instead of giving three findings an owner.
+ */
+function goalGapRecovery(ids: string, findings: readonly string[]): string {
+  return `Goal review before the final wave: the delivered work and the remaining tasks (${ids}) leave parts of the goal without an owner. ${findings.join("; ")} Replan so that every part has an owner before the mission ends, keeping every delivered task as it is. Prefer a task ahead of the remaining tasks for each independent part. When a limit in the goal or the plan leaves no room for that many tasks, group parts into fewer tasks, and when no further task is allowed, add the parts to the instructions and acceptance of a remaining task: such a limit is never a reason to stop or to leave a part unowned. When a finding does not hold, keep the plan and say why in the reason.`
 }
