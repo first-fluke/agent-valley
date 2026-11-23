@@ -6,6 +6,19 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.18.0](https://github.com/first-fluke/agent-valley/compare/v4.17.9...v4.18.0) (2026-11-23)
+
+
+### Features
+
+* **chief:** reserve a work route for an actor's skills ([be6be50](https://github.com/first-fluke/agent-valley/commit/be6be50bd014920e053077420d5bf4f04fc125bd))
+
+
+### Bug Fixes
+
+* **chief:** retry an interrupted child from its operation ([e18a4b5](https://github.com/first-fluke/agent-valley/commit/e18a4b56d82847c1ce6e0faa0e5f959048c9a9db))
+* **cli:** recognize a saved grok login as ready ([2337461](https://github.com/first-fluke/agent-valley/commit/23374617ef6769ac9f3403d034527aec17bf5480))
+
 ## [4.17.9](https://github.com/first-fluke/agent-valley/compare/v4.17.8...v4.17.9) (2026-11-22)
 
 
