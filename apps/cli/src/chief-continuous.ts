@@ -223,6 +223,8 @@ export interface ContinuousRunDependencies {
   now?: ContinuousOperationPorts["now"]
   observeContainers?: ContinuousOperationPorts["observeContainers"]
   integrateSource?: ContinuousOperationPorts["integrateSource"]
+  /** Resumes a child the operator interrupted, as that child's own pause tells them to. */
+  retryMission?: (missionId: string, signal: AbortSignal) => Promise<unknown>
 }
 
 /** The operation lock covers selection and acceptance; existing supervisors own child lifecycle and interruption. */
@@ -258,6 +260,7 @@ export async function runOperation(
         "--charter-supersede retracts earlier amendments alongside your correction. Add --charter-append <text>.",
       )
     let operation: ContinuousOperation
+    let interruptedChild: string | undefined
     if (options.resume) {
       if (options.deliver && options.sourceIntegration === "worktree")
         throw new Error("Use either --source-integration worktree or --deliver, not both.")
@@ -285,15 +288,18 @@ export async function runOperation(
           new Date(dependencies.now?.() ?? Date.now()).toISOString(),
         )
       const budgetChange = decisionBudgetKeys.some((key) => options[key] !== undefined)
-      // A finished child has nothing left to retry: the resume only has to accept it.
-      const finishedChild =
+      const child =
         options.retry && !budgetChange && operation.currentMissionId
           ? await new MissionStore(join(root, ".agent-valley", "missions"))
               .load(operation.currentMissionId)
-              .then((child) => child.status === "completed")
-              .catch(() => false)
-          : false
-      if (!finishedChild && (options.retry || budgetChange)) {
+              .catch(() => undefined)
+          : undefined
+      // A finished child has nothing left to retry: the resume only has to accept it.
+      const finishedChild = child?.status === "completed"
+      // The operator's stop tells them to resume with --retry, and the operation is the ID they hold: on
+      // 2026-11-23 it refused that flag here and, without it, refused the interrupted child.
+      if (child?.status === "paused" && child.execution?.failureKind === "interrupted") interruptedChild = child.id
+      if (!finishedChild && !interruptedChild && (options.retry || budgetChange)) {
         if (operation.currentMissionId || !operation.decisionId)
           throw new Error(
             "Operation resume budget reconciliation applies only to an active decision checkpoint. Adjust the current child's budget with av order --resume <child-id>.",
@@ -378,9 +384,20 @@ export async function runOperation(
     await reportProgress(operation)
     console.log(`Operation ${id}\nCharter: ${operation.charter}\nResume: av order --resume ${id}`)
     const missions = new MissionStore(join(root, ".agent-valley", "missions"))
+    if (interruptedChild)
+      await (
+        dependencies.retryMission ??
+        ((missionId, signal) =>
+          superviseOrder(
+            undefined,
+            { resume: missionId, once: true, retry: true, ...(options.service ? { service: true } : {}) },
+            root,
+            { signal },
+          ))
+      )(interruptedChild, controller.signal)
     return await runContinuousOperation(operation, {
       signal: controller.signal,
-      ...(options.retry ? { retryDecision: true } : {}),
+      ...(options.retry && !interruptedChild ? { retryDecision: true } : {}),
       ...(dependencies.now ? { now: dependencies.now } : {}),
       observeContainers:
         dependencies.observeContainers ??

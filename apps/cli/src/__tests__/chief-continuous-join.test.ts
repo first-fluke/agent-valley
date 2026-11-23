@@ -185,6 +185,33 @@ describe("continuous operation joins a live child", () => {
     expect(decide).not.toHaveBeenCalled()
   })
 
+  it("retries a child the operator interrupted when the operation resumes with --retry", async () => {
+    const { parent, child } = await seed()
+    const interrupted = structuredClone(child)
+    if (!interrupted.execution || !interrupted.operations?.runs[0]) throw new Error("Missing fixture execution")
+    interrupted.execution.failureKind = "interrupted"
+    interrupted.operations.runs[0].executionState = "settled"
+    await missions.save(interrupted)
+    await releaseOwner?.()
+    releaseOwner = undefined
+    const retryMission = vi.fn(async () => {
+      await completeChild(interrupted)
+    })
+    const runMission = vi.fn()
+    const decide = vi.fn()
+
+    const result = await runOperation(undefined, { resume: parent.id, retry: true }, root, {
+      retryMission,
+      runMission,
+      decide,
+    })
+
+    expect(retryMission).toHaveBeenCalledExactlyOnceWith(child.id, expect.any(AbortSignal))
+    expect(result).toMatchObject({ phase: "completed", completedCycles: 1 })
+    expect(runMission).not.toHaveBeenCalled()
+    expect(decide).not.toHaveBeenCalled()
+  })
+
   it("still refuses --retry on the operation while its child is unresolved", async () => {
     const { parent, child } = await seed()
 
