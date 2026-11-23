@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.18.1](https://github.com/first-fluke/agent-valley/compare/v4.18.0...v4.18.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **chief:** carry open findings past a task with spent repairs ([8c56844](https://github.com/first-fluke/agent-valley/commit/8c56844defd26241177a8767c1f93660b90ecf5c))
+
 ## [4.18.0](https://github.com/first-fluke/agent-valley/compare/v4.17.9...v4.18.0) (2026-11-23)
 
 
