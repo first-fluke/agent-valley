@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.18.4](https://github.com/first-fluke/agent-valley/compare/v4.18.3...v4.18.4) (2026-11-23)
+
+
+### Bug Fixes
+
+* **chief:** hand the operation build cache to the next child ([1797cce](https://github.com/first-fluke/agent-valley/commit/1797cce6a239bbeb55525217c361832c5813ce69))
+
 ## [4.18.3](https://github.com/first-fluke/agent-valley/compare/v4.18.2...v4.18.3) (2026-11-23)
 
 
