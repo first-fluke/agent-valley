@@ -113,6 +113,24 @@ export function boundedWorkRoute(
 }
 
 /**
+ * A rejected delivery is repaired inside the task's repair budget. Once every route of the pool had
+ * delivered work that review rejected, the next repair used to wait for a Chief decision that only
+ * restated the review: one integration task spent two of its twelve recovery rounds that way. The repair
+ * now goes to the route whose rejection is oldest, so the routes keep taking turns. A route that could
+ * not finish its run stays closed until the Chief decides.
+ */
+export function rejectedRepairRoute(
+  candidates: RoutingCandidate[],
+  taskRuns: OperatingRun[],
+  routeKey: (route: { actorType: string; model?: string }) => string,
+): RoutingCandidate | undefined {
+  const runs = taskRuns.slice(taskRuns.findLastIndex((run) => run.outcome === "passed") + 1)
+  const latest = (candidate: RoutingCandidate) => runs.findLastIndex((run) => routeKey(run) === routeKey(candidate))
+  if (candidates.some((candidate) => runs[latest(candidate)]?.outcome !== "rejected")) return
+  return [...candidates].sort((a, b) => latest(a) - latest(b)).at(0)
+}
+
+/**
  * Below-threshold evidence is not a mission failure. Once every probe is spent, keep working on the
  * best measured ready route that has not already failed this task; callers pass only those routes.
  */

@@ -247,17 +247,18 @@ export function selectWorkActor(
     const taskState = taskId === undefined ? undefined : mission.tasks.find((entry) => entry.id === taskId)
     const repairRound = taskState?.repairRound ?? 0
     // The coordinator increments repairRound before dispatching each authorized local repair.
-    if (
-      only &&
-      failed.has(routeKey(only)) &&
-      taskState &&
-      taskState.status !== "completed" &&
-      repairRound >= 1 &&
-      repairRound <= mission.maxRepairs
-    )
+    const repairing =
+      taskState && taskState.status !== "completed" && repairRound >= 1 && repairRound <= mission.maxRepairs
+    if (only && failed.has(routeKey(only)) && repairing)
       return {
         actor: { ...actor, agentType: only.actorType, model: only.model },
         reason: "Repairing on the only configured route.",
+      }
+    const turn = repairing ? rejectedRepairRoute(compatible, taskRuns, routeKey) : undefined
+    if (turn)
+      return {
+        actor: { ...actor, agentType: turn.actorType, model: turn.model },
+        reason: "Repairing on the route whose rejected delivery is oldest; review rejected every configured route.",
       }
     const remaining = compatible.filter((candidate) => !failed.has(routeKey(candidate)))
     const degraded = degradedWorkRoute(mission, taskId, remaining, evidence, taskRuns, window, routeKey)
@@ -302,5 +303,10 @@ export function recordTaskVerdict(mission: Mission, taskId: string, passed: bool
   run.fingerprint = mission.fingerprint
 }
 
-import { boundedWorkRoute, degradedWorkRoute, hasUnreviewedRoutingProbe } from "./bounded-work-routing"
+import {
+  boundedWorkRoute,
+  degradedWorkRoute,
+  hasUnreviewedRoutingProbe,
+  rejectedRepairRoute,
+} from "./bounded-work-routing"
 import { unavailableProviders } from "./handoff-contract"

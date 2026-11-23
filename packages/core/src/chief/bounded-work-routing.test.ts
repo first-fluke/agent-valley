@@ -174,7 +174,7 @@ describe("bounded routing in a closed measured pool", () => {
       const value = closedPool()
       value.mission.operations?.runs.push(
         { ...value.rejection, runId: "qwen-failed", actorType: "qwen" },
-        { ...value.rejection, runId: "codex-failed", actorType: "codex" },
+        { ...value.rejection, runId: "codex-failed", actorType: "codex", outcome: "failed" },
       )
       expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
         "Every configured routing candidate failed this task",
@@ -205,7 +205,7 @@ describe("bounded routing in a closed measured pool", () => {
       const value = closedPool()
       value.mission.operations?.runs.push(
         { ...value.rejection, runId: "qwen-failed", actorType: "qwen" },
-        { ...value.rejection, runId: "codex-failed", actorType: "codex" },
+        { ...value.rejection, runId: "codex-failed", actorType: "codex", outcome: "failed" },
       )
       if (!value.mission.supervision) throw new Error("Expected Chief supervision")
       value.mission.supervision.rounds = 1
@@ -338,7 +338,7 @@ describe("repair on the only configured route", () => {
     expect(selected.reason).toBe("Repairing on the only configured route.")
   })
 
-  it("keeps the Chief decision path when several ready candidates failed this task", () => {
+  it("keeps the Chief decision path when one of several ready candidates could not finish", () => {
     const value = singleRoutePool()
     const routing = value.mission.operatingPolicy?.routing
     if (!routing || !value.mission.operatingPolicy) throw new Error("Expected the saved routing policy")
@@ -347,7 +347,12 @@ describe("repair on the only configured route", () => {
       { actorType: "codex", inputPerMillionUsd: 1, outputPerMillionUsd: 1 },
       { actorType: "qwen", inputPerMillionUsd: 2, outputPerMillionUsd: 2 },
     ]
-    value.mission.operations?.runs.push({ ...value.rejection, runId: "codex-failed", actorType: "codex" })
+    value.mission.operations?.runs.push({
+      ...value.rejection,
+      runId: "codex-failed",
+      actorType: "codex",
+      outcome: "failed",
+    })
     expect(() => selectWorkActor(value.mission, value.worker, "onboarding")).toThrow(
       "Every configured routing candidate failed this task",
     )
@@ -366,7 +371,7 @@ describe("degraded routing below the measured minimum", () => {
 
   it("still fails honestly once every ready route failed this task", () => {
     const { mission, worker, rejection } = spentPool()
-    mission.operations?.runs.push({ ...rejection, runId: "qwen-failed", actorType: "qwen" })
+    mission.operations?.runs.push({ ...rejection, runId: "qwen-failed", actorType: "qwen", outcome: "failed" })
     expect(() => selectWorkActor(mission, worker, "onboarding")).toThrow(
       "Every configured routing candidate failed this task",
     )
