@@ -1,5 +1,6 @@
 import { refreshActorCooldown } from "./actor-availability"
 import { actorRouteHealth } from "./actor-health"
+import { carryOpenFindings } from "./carried-findings"
 import { recordIntegrationCheck } from "./coordinator-integration"
 import {
   ParallelTaskReviewRejected,
@@ -107,6 +108,11 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
     }
     throw new Error(`Review for ${task.id} produced no verdict on every available reviewer route.`)
   }
+  const carryFindings = async (taskId: string) => {
+    const carried = carryOpenFindings(mission, taskId)
+    if (carried) await save("task-carried", carried, taskId)
+    return carried !== undefined
+  }
   const performTask = async (task: ChiefTask, state: ChiefTaskState) => {
     while (state.status !== "completed") {
       checkAbort()
@@ -196,6 +202,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
         return
       }
       if ((state.repairRound ?? 0) >= mission.maxRepairs) {
+        if (await carryFindings(task.id)) continue
         if (mission.supervision) {
           await requestRecovery(
             `Task ${task.id} exhausted local repairs after independent review: ${state.review?.findings.join("; ")}`,
@@ -216,6 +223,8 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
   while (mission.tasks.some((state) => state.status !== "completed")) {
     const plan = mission.plan
     if (!plan) throw new Error("No task can run. Restore an acyclic plan with complete dependency state.")
+    // A wave can leave several tasks with spent repairs; none of them takes another Actor run first.
+    for (const state of [...mission.tasks]) await carryFindings(state.id)
     const pendingReview = plan.tasks.find((task) => {
       const state = mission.tasks.find((entry) => entry.id === task.id)
       return (
@@ -289,7 +298,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
         if ((state.repairRound ?? 0) < mission.maxRepairs) {
           state.repairRound = (state.repairRound ?? 0) + 1
           await save("repair", failure.reason, failure.taskId)
-        } else {
+        } else if (!(await carryFindings(failure.taskId))) {
           await requestRecovery(failure.reason, failure.taskId)
           break
         }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { executionPolicySchema } from "./contracts"
 import { coordinate } from "./coordinator"
-import { brief, fixture, passed, plan } from "./goal-supervision.fixture"
+import { brief, fixture, passed, plan, rejected } from "./goal-supervision.fixture"
 import type { TaskWorktreeRecord } from "./parallel-workspace"
 import type { Mission } from "./types"
 
@@ -112,5 +112,51 @@ describe("concurrent independent task reviews through the coordinator", () => {
     expect(mission.status).toBe("completed")
     expect(value.ports.parallel.prepare).toHaveBeenCalledWith(expect.anything(), "a", 2)
     expect(value.ports.parallel.integrate).toHaveBeenCalledTimes(1)
+  })
+
+  it("carries the findings of a task whose repairs are spent to the task that builds on it", async () => {
+    const value = fixture()
+    const task = plan.tasks[0]
+    if (!task) throw new Error("Expected a fixture task")
+    value.mission.maxRepairs = 1
+    value.mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 2 })
+    value.mission.plan = {
+      tasks: [
+        { ...task, id: "a" },
+        { ...task, id: "b", dependencies: ["a"] },
+      ],
+    }
+    value.mission.tasks = [
+      { id: "a", reviewerId: "reviewer", status: "pending", attempts: 1, repairRound: 1 },
+      { id: "b", reviewerId: "reviewer", status: "pending", attempts: 0 },
+    ]
+    value.mission.goalBrief = brief
+    if (value.mission.supervision)
+      value.mission.supervision.originalAcceptance = value.mission.plan.tasks.flatMap((entry) => entry.acceptance)
+    value.mission.history.push({
+      at: new Date().toISOString(),
+      stage: "parallel-review-rejected",
+      taskId: "a",
+      message: "Task a failed independent review: stale contract. Actor edits retained at /private/actor-a.",
+    })
+    value.ports.parallel = {
+      prepare: vi.fn(async (_mission, taskId, attempt) => record(value.mission, taskId, attempt)),
+      integrate: vi.fn(async () => {}),
+      dispose: vi.fn(async () => {}),
+    }
+    let reviews = 0
+    const base = value.runAgent.getMockImplementation()
+    value.runAgent.mockImplementation(async (...args) => {
+      if (args[3] === "review") return ++reviews === 1 ? rejected : passed
+      if (!base) throw new Error("Missing fixture Actor implementation")
+      return base(...args)
+    })
+    const mission = await coordinate(value.mission, value.ports)
+    expect(mission.status).toBe("completed")
+    expect(value.runAgent.mock.calls.some((call) => call[3] === "supervise")).toBe(false)
+    expect(value.ports.parallel.prepare).toHaveBeenCalledTimes(1)
+    expect(mission.tasks.find((state) => state.id === "a")?.carriedTo).toBe("b")
+    expect(mission.plan?.tasks.find((entry) => entry.id === "b")?.acceptance.at(-1)).toContain("Carried from a")
+    expect(mission.history.some((event) => event.stage === "task-carried" && event.taskId === "a")).toBe(true)
   })
 })

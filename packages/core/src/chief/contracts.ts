@@ -76,6 +76,8 @@ export interface ChiefTaskState {
   review?: Review
   /** Prior failed review preserved across a repair attempt so reviewPrompt and settleRepairReview enforce the repair boundary. */
   previousReview?: Review
+  /** The later task that took over this task's open review findings once its local repairs were spent. */
+  carriedTo?: string
   fingerprint?: string
   effectState?: "not-started" | "running" | "unknown" | "completed"
   parallel?: TaskWorktreeRecord

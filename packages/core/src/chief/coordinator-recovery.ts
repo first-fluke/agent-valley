@@ -1,4 +1,5 @@
 import { AgentRunError } from "../domain/ports/agent-runner"
+import { carryOpenFindings } from "./carried-findings"
 import type { createMissionRun } from "./coordinator-run"
 import {
   assertExecutionDeadline,
@@ -44,6 +45,13 @@ export function createChiefRecovery(mission: Mission, ports: ChiefPorts, hooks: 
         taskId,
       )
       throw pause
+    }
+    // Findings left after the last local repair move to a later task instead of costing a recovery round.
+    const carried = taskId ? carryOpenFindings(mission, taskId) : undefined
+    if (carried) {
+      delete supervision.pendingRecovery
+      await hooks.save("task-carried", carried, taskId)
+      return
     }
     supervision.pendingRecovery = { reason: reason.slice(-32_000), ...(taskId ? { taskId } : {}) }
     await hooks.save("recovery-requested", reason, taskId)

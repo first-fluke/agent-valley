@@ -181,7 +181,7 @@ function checkEvidence(mission: Mission): string[] {
     `Chief Director 최종 리뷰: ${mission.finalReview ? (mission.finalReview.passed && mission.finalReview.findings.length === 0 ? "통과" : "실패") : "미실행"}${mission.finalReview ? ` / ${mission.finalReview.summary}` : ""}`,
     ...mission.tasks.map(
       (task) =>
-        `${task.id}: 상태 ${task.status}, 시도 ${task.attempts}회, 독립 리뷰 ${task.review ? (task.review.passed && task.review.findings.length === 0 ? "통과" : "실패") : "미실행"} / 리뷰어 ${task.reviewerId}`,
+        `${task.id}: 상태 ${task.status}, 시도 ${task.attempts}회, 독립 리뷰 ${task.carriedTo ? `미해결 항목을 ${task.carriedTo}로 이월` : task.review ? (task.review.passed && task.review.findings.length === 0 ? "통과" : "실패") : "미실행"} / 리뷰어 ${task.reviewerId}`,
     ),
     // Concerns a reviewer recorded without failing the task: visible to the operator, never a repair.
     ...mission.tasks
