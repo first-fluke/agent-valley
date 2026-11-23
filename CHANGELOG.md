@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.18.3](https://github.com/first-fluke/agent-valley/compare/v4.18.2...v4.18.3) (2026-11-23)
+
+
+### Bug Fixes
+
+* **chief:** repair rejected work without a recovery round ([8c0c251](https://github.com/first-fluke/agent-valley/commit/8c0c2515be5a601ea57264c6251a58440006fd06))
+
 ## [4.18.2](https://github.com/first-fluke/agent-valley/compare/v4.18.1...v4.18.2) (2026-11-23)
 
 
