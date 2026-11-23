@@ -135,6 +135,28 @@ describe("operation build cache", () => {
     ).toEqual([{ path: "target/debug", source }])
   })
 
+  it("moves the cache out of a handover source and clones from every other source", async () => {
+    const store = join(directory, "build-cache")
+    await cache(store, "target/debug", "from store")
+    await cache(source, "target/release", "from mission")
+    const seeded = await seedWorkspaceCaches({
+      workspace,
+      sources: [store, source],
+      paths: ["target/debug", "target/release"],
+      handover: [store],
+      clone: copy,
+      prune: async () => {},
+    })
+    expect(seeded).toEqual([
+      { path: "target/debug", source: store },
+      { path: "target/release", source },
+    ])
+    expect(await readFile(join(workspace, "target/debug/deps/artifact"), "utf8")).toBe("from store")
+    expect(await exists(join(store, "target/debug"))).toBe(false)
+    expect(await readFile(join(source, "target/release/deps/artifact"), "utf8")).toBe("from mission")
+    expect(copy).toHaveBeenCalledTimes(1)
+  })
+
   it("moves a finished workspace's caches into the store and replaces the previous copy", async () => {
     const store = join(directory, "build-cache")
     await cache(store, "target/debug", "older child")

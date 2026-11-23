@@ -169,6 +169,8 @@ export async function runOrder(
         await seedWorkspaceCaches({
           workspace: workspace.path,
           sources: [...(store ? [store] : []), ...(await siblingMissionWorkspaces(workspace.path))],
+          // The child returns the cache to the store when it completes, so the store keeps no second copy.
+          handover: store ? [store] : [],
         })
       }
       if (!codeDelivery) await prepareMissionSkills(config.workspace, workspace.path)

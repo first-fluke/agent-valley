@@ -133,13 +133,20 @@ async function ignoredDirectory(workspace: string, path: string): Promise<boolea
 /**
  * Seed missing build caches of a new workspace from the first source that has them. A cold workspace
  * otherwise rebuilds every dependency per task attempt. Stale entries are harmless: the build tool
- * revalidates its own cache. Seeding never fails workspace preparation.
+ * revalidates its own cache. Seeding never fails workspace preparation. A `handover` source gives its
+ * directory away; any other source keeps it and the workspace gets a copy-on-write clone.
  */
 export async function seedWorkspaceCaches(options: {
   workspace: string
   /** Candidate workspaces, most preferred first. */
   sources: readonly string[]
   paths?: readonly string[]
+  /**
+   * Sources that only hold a cache for the next workspace. Their directory is moved, not cloned: a clone
+   * left in place stops sharing blocks as soon as the new workspace rebuilds, and one operation then kept
+   * 26 GB of unused build output beside a 70 GB workspace until the volume ran out during a check.
+   */
+  handover?: readonly string[]
   clone?: CloneTree
   prune?: (workspace: string) => Promise<void>
 }): Promise<CacheSeed[]> {
@@ -156,7 +163,13 @@ export async function seedWorkspaceCaches(options: {
       if (!source || !(await ignoredDirectory(options.workspace, path))) continue
       try {
         await mkdir(dirname(destination), { recursive: true })
-        await (options.clone ?? copyOnWriteClone)(join(source, path), destination)
+        const moved =
+          options.handover?.includes(source) &&
+          (await rename(join(source, path), destination).then(
+            () => true,
+            () => false,
+          ))
+        if (!moved) await (options.clone ?? copyOnWriteClone)(join(source, path), destination)
         seeded.push({ path, source })
       } catch {
         await rm(destination, { recursive: true, force: true })
