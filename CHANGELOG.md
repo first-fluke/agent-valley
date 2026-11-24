@@ -6,6 +6,20 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.19.0](https://github.com/first-fluke/agent-valley/compare/v4.18.4...v4.19.0) (2026-11-24)
+
+
+### Features
+
+* **chief:** reclaim applied parallel Actor workspaces after wave integration ([#100](https://github.com/first-fluke/agent-valley/issues/100)) ([5a04bb3](https://github.com/first-fluke/agent-valley/commit/5a04bb3332c0098868ceb7b33bff7af3fd15a7db))
+* **chief:** reuse verified command evidence across doc-only repairs and operator integration checks ([#102](https://github.com/first-fluke/agent-valley/issues/102)) ([78baecb](https://github.com/first-fluke/agent-valley/commit/78baecb64832f64a766963fed046ca27386fa1c5))
+
+
+### Bug Fixes
+
+* **chief:** judge a rerun verification command test by test ([5ed53cf](https://github.com/first-fluke/agent-valley/commit/5ed53cfed2e4e07c2343aeb1f5aec65b6635a173))
+* **chief:** match delivered file ownership in finalReviewRepairScope ([#101](https://github.com/first-fluke/agent-valley/issues/101)) ([0e9a2f0](https://github.com/first-fluke/agent-valley/commit/0e9a2f034f263cac601a635abf39a91fb47fab0f))
+
 ## [4.18.4](https://github.com/first-fluke/agent-valley/compare/v4.18.3...v4.18.4) (2026-11-23)
 
 
