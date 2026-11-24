@@ -32,6 +32,16 @@ const failed = {
   stderr: "error: test failed, to rerun pass `-p arc-daemon --test traffic_native_tools`",
 }
 const passed = { exitCode: 0, stdout: "test result: ok. 10 passed; 0 failed", stderr: "" }
+/** One failing libtest binary, as `cargo test --no-fail-fast` prints it. */
+function cargoRun(verdicts: Record<string, "ok" | "FAILED">) {
+  const lines = Object.entries(verdicts).map(([name, verdict]) => `test ${name} ... ${verdict}`)
+  const failures = Object.values(verdicts).filter((verdict) => verdict === "FAILED").length
+  return {
+    exitCode: 101,
+    stdout: `running ${lines.length} tests\n${lines.join("\n")}\n\ntest result: FAILED. ${lines.length - failures} passed; ${failures} failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s\n`,
+    stderr: "error: 1 target failed:\n    `-p arc-daemon --test traffic_native_tools`\n",
+  }
+}
 
 describe("verification of a nondeterministic command", () => {
   it("passes a command that fails once and passes again on the unchanged workspace, and names the failure", async () => {
@@ -58,6 +68,39 @@ describe("verification of a nondeterministic command", () => {
     })
     expect(executeCommand).toHaveBeenCalledTimes(2)
     expect(result.ok).toBe(false)
+    expect(result.output).toContain("in each of 2 runs")
+  })
+
+  it("passes a command whose runs each fail in a test that passed in the other run, and names those tests", async () => {
+    const executeCommand = vi
+      .fn()
+      .mockResolvedValueOnce(cargoRun({ cmake_pairs: "FAILED", go_pairs: "ok", attribution: "ok" }))
+      .mockResolvedValueOnce(cargoRun({ cmake_pairs: "ok", go_pairs: "FAILED", attribution: "FAILED" }))
+    const result = await executeGoalVerification(contract, await workspace(), {
+      successCriteria,
+      executeCommand,
+      commandReruns: 1,
+    })
+    expect(executeCommand).toHaveBeenCalledTimes(2)
+    expect(result.ok).toBe(true)
+    const check = result.evidence[0]?.checks[0]
+    expect(check?.exitCode).toBe(101)
+    expect(check?.nondeterministic).toEqual(["attribution", "cmake_pairs", "go_pairs"])
+    expect(check?.summary).toContain("NONDETERMINISTIC: attribution, cmake_pairs, go_pairs")
+  })
+
+  it("fails a command when one test fails in every run although the other failures differ", async () => {
+    const executeCommand = vi
+      .fn()
+      .mockResolvedValueOnce(cargoRun({ cmake_pairs: "FAILED", go_pairs: "FAILED", attribution: "ok" }))
+      .mockResolvedValueOnce(cargoRun({ cmake_pairs: "ok", go_pairs: "FAILED", attribution: "FAILED" }))
+    const result = await executeGoalVerification(contract, await workspace(), {
+      successCriteria,
+      executeCommand,
+      commandReruns: 1,
+    })
+    expect(result.ok).toBe(false)
+    expect(result.evidence[0]?.checks[0]?.nondeterministic).toBeUndefined()
     expect(result.output).toContain("in each of 2 runs")
   })
 

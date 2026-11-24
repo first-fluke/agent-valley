@@ -16,6 +16,7 @@ import {
   verificationCommandTestPaths,
 } from "./verification-contract"
 import { jsonPointerValue, readVerificationFile, verificationBudget, verificationRoot } from "./verification-files"
+import { nondeterministicTests } from "./verification-nondeterminism"
 
 export type {
   VerificationCommandExecutor,
@@ -35,6 +36,8 @@ const checkEvidenceSchema = z.strictObject({
   sha256: digest.optional(),
   outputSha256: digest.optional(),
   exitCode: z.number().int().nullable().optional(),
+  /** Tests that failed in one run and passed in another: the command passed although every run exited non-zero. */
+  nondeterministic: z.array(z.string().min(1).max(400)).min(1).max(40).optional(),
   inputs: z.array(inputSchema).max(MAX_CARGO_VERIFICATION_INPUTS).optional(),
 })
 
@@ -192,7 +195,9 @@ export function validateGoalVerificationResult(
         (check.kind !== "command" && observed.path !== check.path) ||
         (observed.passed && check.kind !== "command" && !observed.sha256) ||
         (observed.passed && check.kind === "file" && check.sha256 !== undefined && check.sha256 !== observed.sha256) ||
-        (observed.passed && check.kind === "command" && (observed.exitCode !== 0 || !observed.outputSha256))
+        (observed.passed &&
+          check.kind === "command" &&
+          ((observed.exitCode !== 0 && !observed.nondeterministic?.length) || !observed.outputSha256))
       )
         throw new Error(
           "Verification check lacks bound file or process evidence. Rerun it against the actual worktree.",
@@ -264,12 +269,18 @@ async function inspectCheck(
     let result = await run()
     // Only a process that ran to a non-zero exit is run again: a timeout or a kill would cost its full budget twice.
     const earlierFailures: string[] = []
+    const failedRuns: (typeof result)[] = []
     for (let rerun = 0; rerun < (options.commandReruns ?? 0); rerun++) {
       if (result.exitCode === null || result.exitCode === 0 || options.signal?.aborted) break
       earlierFailures.push(`exit ${result.exitCode}: ${commandFailureDetail(result.stdout, result.stderr)}`)
+      failedRuns.push(result)
       result = await run()
     }
-    const passed = result.exitCode === 0 && (check.stdoutIncludes ?? []).every((text) => result.stdout.includes(text))
+    // Every run failed, each in other tests: no test failed twice, so none is a defect of this delivery.
+    const unstable = result.exitCode === 0 ? undefined : nondeterministicTests([...failedRuns, result])
+    const passed =
+      (result.exitCode === 0 || unstable !== undefined) &&
+      (check.stdoutIncludes ?? []).every((text) => result.stdout.includes(text))
     const nondeterministic =
       passed && earlierFailures.length > 0
         ? ` NONDETERMINISTIC: it failed ${earlierFailures.length} earlier run(s) on this unchanged workspace and is not a defect of this delivery; stabilise the named test in a later change. Earlier failure: ${earlierFailures[0]?.slice(0, 900)}`
@@ -278,13 +289,16 @@ async function inspectCheck(
       passed,
       summary: checkSummary(
         passed,
-        result.exitCode !== 0
-          ? `Process exited ${result.exitCode ?? "without an exit code"}${earlierFailures.length > 0 ? ` in each of ${earlierFailures.length + 1} runs` : ""}. Repair the explicit test or Git check. ${commandFailureDetail(result.stdout, result.stderr)}`
-          : passed
-            ? `Explicit command exited zero and its required output assertions passed.${nondeterministic}`
-            : "Process exited zero but required stdout assertions are missing.",
+        passed && unstable
+          ? `Explicit command exited ${result.exitCode} in each of ${failedRuns.length + 1} runs, but no test failed in every run: each failing test passed in another run on this unchanged workspace. NONDETERMINISTIC: ${unstable.slice(0, 12).join(", ")}${unstable.length > 12 ? ` and ${unstable.length - 12} more` : ""}. They are not defects of this delivery; stabilise them in a later change.`
+          : result.exitCode !== 0
+            ? `Process exited ${result.exitCode ?? "without an exit code"}${earlierFailures.length > 0 ? ` in each of ${earlierFailures.length + 1} runs` : ""}. Repair the explicit test or Git check. ${commandFailureDetail(result.stdout, result.stderr)}`
+            : passed
+              ? `Explicit command exited zero and its required output assertions passed.${nondeterministic}`
+              : "Process exited zero but required stdout assertions are missing.",
       ),
       exitCode: result.exitCode,
+      ...(passed && unstable ? { nondeterministic: unstable.slice(0, 40).map((name) => name.slice(0, 400)) } : {}),
       outputSha256: createHash("sha256").update(JSON.stringify(result)).digest("hex"),
       inputs,
     }
