@@ -50,7 +50,10 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
   const generateReport = createMissionReporter(mission, ports, run, persona, fatal)
   const requestRecovery = createChiefRecovery(mission, ports, { run, persona, save, checkAbort })
   const requestRepair = async (reason: string, scope?: string | ReadonlySet<string> | null) => {
-    const targetTaskId = typeof scope === "string" ? scope : selectRepairTaskId(mission, reason)
+    const selectedTargetId = typeof scope === "string" ? scope : selectRepairTaskId(mission, reason)
+    const scopedIds = scope && typeof scope !== "string" ? [...scope] : []
+    const targetTaskId =
+      scopedIds.length > 0 ? (scopedIds.find((id) => id === selectedTargetId) ?? scopedIds[0]) : selectedTargetId
     // A final review that names no task (null scope) repairs the selected target alone; approved siblings stay.
     const resetTaskIds =
       typeof scope === "string" || scope === null ? (targetTaskId ? new Set([targetTaskId]) : undefined) : scope
@@ -64,7 +67,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
       )
     }
     mission.repairRound = (mission.repairRound ?? 0) + 1
-    if (scope === null)
+    if (scope === null) {
       mission.history.push({
         at: new Date().toISOString(),
         stage: "repair-scope",
@@ -73,6 +76,14 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
           ? `The final review named no specific task; ${targetTaskId} is repaired and other approved tasks keep their delivered work.`
           : "The final review named no specific task; every task approval is reset for repair.",
       })
+    } else if (scopedIds.length > 0) {
+      mission.history.push({
+        at: new Date().toISOString(),
+        stage: "repair-scope",
+        ...(scopedIds.length === 1 ? { taskId: scopedIds[0] } : {}),
+        message: `Final review repair scope matched ${scopedIds.join(", ")}; other approved tasks keep their delivered work.`,
+      })
+    }
     // Preserve rejection evidence in prompts; a scoped final-review repair resets only the named tasks and dependents.
     resetTaskApprovals(mission, { keepReviews: true, ...(resetTaskIds ? { resetTaskIds } : {}), targetTaskId })
     await save("repair", reason, targetTaskId)

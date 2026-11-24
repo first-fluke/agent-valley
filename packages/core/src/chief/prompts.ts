@@ -329,6 +329,11 @@ export function reviewPrompt(mission: Mission, task?: ChiefTask, state?: ChiefTa
         ]
       : []),
     "Return actionable findings for the Actor to repair. A passing review must have no unresolved findings.",
+    ...(!task
+      ? [
+          "When rejecting, cite the responsible task id(s) or exact delivered file path(s) in findings so repair targets the owning task.",
+        ]
+      : []),
     "Keep the complete JSON response under 8,000 characters; prioritize actionable blockers.",
     ...(criteria
       ? [
