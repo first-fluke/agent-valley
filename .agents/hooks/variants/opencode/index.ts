@@ -3,8 +3,11 @@
  *
  * SSOT source. `oma emit --target opencode-package` ships this file as the
  * package `main`/`exports` next to the bridge (`./oma.ts`) and the handler
- * entries it spawns. It is NOT part of the per-project install, which keeps
- * registering `./plugins/oma/oma.ts` directly.
+ * entries it spawns. The opencode per-project / global install also copies it
+ * to `plugins/oma/index.ts`: OpenCode 2.x rejects the configured
+ * `./plugins/oma/oma.ts` file path and loads that auto-discovered directory
+ * through this entry instead, while 1.x keeps loading `oma.ts` (its
+ * discovery is flat, so the nested entry is never loaded twice).
  *
  * Two plugin contracts coexist in the family, and a package plugin must
  * satisfy whichever host imports it:
@@ -36,6 +39,8 @@
  *                                  a throw rejects the call, as in v1)
  *   session "experimental.idle"  → event session.idle (persistent-mode re-entry
  *                                  through ctx.session.prompt)
+ *   tool "execute.after"         → "tool.execute.after" (skill-route; completed
+ *                                  calls only, `input` passed as `args`)
  */
 
 import legacy from "./oma.ts";
@@ -119,6 +124,15 @@ export default {
         { tool: typeof event.tool === "string" ? event.tool : undefined },
         { args: input as { command?: string } },
       );
+    });
+
+    await ctx.tool.hook("execute.after", async (event) => {
+      if (event.status !== "completed") return;
+      await hooks["tool.execute.after"]({
+        tool: typeof event.tool === "string" ? event.tool : undefined,
+        sessionID: sessionIDOf(event),
+        args: event.input,
+      });
     });
 
     await ctx.session.hook("experimental.idle", async (event) => {
