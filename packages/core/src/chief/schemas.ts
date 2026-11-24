@@ -51,6 +51,7 @@ import {
   integrationEvidenceSchema,
   validateGoalVerificationContract,
   validateGoalVerificationResult,
+  verificationBaselineSchema,
 } from "./verification"
 
 const id = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/)
@@ -155,6 +156,7 @@ export const missionSchema = z
       .optional(),
     goalVerification: goalVerificationResultSchema.optional(),
     integrationEvidence: integrationEvidenceSchema.optional(),
+    verificationBaseline: verificationBaselineSchema.optional(),
     executionPolicy: executionPolicySchema.optional(),
     execution: executionStateSchema.optional(),
     handoff: handoffStateSchema.optional(),

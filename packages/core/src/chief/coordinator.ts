@@ -45,6 +45,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     resetTaskApprovals(mission, { preserveUnfinished: true })
     delete mission.finalReview
     delete mission.verification
+    delete mission.verificationBaseline
   }
   const run = createMissionRun(mission, ports, assertContract, checkAbort, checkpoint.persist)
   const generateReport = createMissionReporter(mission, ports, run, persona, fatal)

@@ -134,6 +134,7 @@ export function applyRecovery(mission: Mission, response: SupervisionResponse): 
   delete mission.gateReviews
   delete mission.verification
   delete mission.goalVerification
+  delete mission.verificationBaseline
   delete mission.observationStartedAt
   delete mission.report
 }

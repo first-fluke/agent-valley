@@ -1,12 +1,22 @@
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { isAbsolute, join, resolve } from "node:path"
+import { z } from "zod"
 import { runVerificationGate, type VerificationGateResult } from "../orchestrator/verification-gate"
 import { fingerprintWorkspace } from "../workspace/fingerprint"
 import type { ActiveMissionProcess } from "./active-process"
 import { cargoCompilerCacheEnvironment } from "./cargo-toolchain"
 import { finishLocalProcess } from "./local-runner"
 import type { IntegrationCheckContext, Mission } from "./types"
-import { type CheckEvidence, executeCommandChecks } from "./verification"
+import {
+  type CheckEvidence,
+  checkDigest,
+  executeCommandChecks,
+  type GoalVerificationCheck,
+  safeVerificationCommand,
+  validateGoalVerificationContract,
+} from "./verification"
+import { verificationCommandInputs } from "./verification-command"
+import { verificationBudget, verificationRoot } from "./verification-files"
 import { assertMissionWorkspace } from "./workspace"
 import { directorySizes, growthReport, growthThresholdBytes, STORAGE_NOTE_PREFIX } from "./workspace-growth"
 import { releaseWorkspaceScratch, scratchNote } from "./workspace-scratch"
@@ -14,8 +24,26 @@ import { releaseWorkspaceScratch, scratchNote } from "./workspace-scratch"
 export const INTEGRATION_CHECK_ENV = "AV_INTEGRATION_CHECK"
 export const INTEGRATION_CHECK_COMMAND_ENV = "AV_INTEGRATION_CHECK_COMMAND"
 export const INTEGRATION_CHANGED_FILES_FILE_ENV = "AV_INTEGRATION_CHANGED_FILES_FILE"
+export const INTEGRATION_EVIDENCE_FILE_ENV = "AV_INTEGRATION_EVIDENCE_FILE"
 export const INTEGRATION_TASK_IDS_ENV = "AV_INTEGRATION_TASK_IDS"
 export const INTEGRATION_OPEN_TASKS_ENV = "AV_INTEGRATION_OPEN_TASKS"
+
+const MAX_OPERATOR_EVIDENCE_BYTES = 512 * 1024
+
+export const operatorCommandEvidenceSchema = z.strictObject({
+  program: z.enum(["git", "node", "bun", "cargo"]),
+  args: z.array(z.string().min(1).max(1_024)).min(1).max(30),
+  cwd: z.string().min(1).max(2_048),
+  passed: z.literal(true),
+  exitCode: z.literal(0),
+  outputSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  summary: z.string().trim().min(1).max(2_000).optional(),
+})
+
+export const operatorIntegrationEvidenceSchema = z.strictObject({
+  version: z.literal(1),
+  checks: z.array(operatorCommandEvidenceSchema).min(1).max(40),
+})
 
 /**
  * The operator's own gate command for the integrated tree, for example
@@ -172,6 +200,86 @@ export function reusableEvidence(
   return { fingerprint: after, checkedAt: now.toISOString(), checks: checks.slice(0, 40) }
 }
 
+/** A file path under `.agent-valley/integration-checks/` where an operator runner can write command evidence. */
+export async function integrationEvidenceFilePath(
+  workspacePath: string,
+  now: Date = new Date(),
+): Promise<string | undefined> {
+  try {
+    const directory = join(workspacePath, ".agent-valley", "integration-checks")
+    await mkdir(directory, { recursive: true })
+    const earlier = (await readdir(directory)).filter((name) => name.endsWith(".evidence.json")).sort()
+    for (const name of earlier.slice(0, Math.max(0, earlier.length - (CHECK_LOGS_KEPT - 1))))
+      await rm(join(directory, name), { force: true })
+    return join(directory, `${now.toISOString().replace(/[:.]/g, "-")}.evidence.json`)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Validate operator-supplied command evidence from `AV_INTEGRATION_EVIDENCE_FILE`.
+ * Fails closed (returns `undefined`) on any schema error, cwd mismatch, unsafe argv, or fingerprint drift.
+ */
+export async function readOperatorIntegrationEvidence(
+  evidenceFilePath: string,
+  contractInput: unknown,
+  successCriteria: string[],
+  workspacePath: string,
+  beforeFingerprint: string,
+  afterFingerprint: string,
+  now: Date = new Date(),
+): Promise<Mission["integrationEvidence"]> {
+  if (beforeFingerprint !== afterFingerprint) return undefined
+  try {
+    const raw = await readFile(evidenceFilePath, "utf8")
+    if (Buffer.byteLength(raw, "utf8") > MAX_OPERATOR_EVIDENCE_BYTES) return undefined
+    const parsed = operatorIntegrationEvidenceSchema.safeParse(JSON.parse(raw))
+    if (!parsed.success) return undefined
+    const contract = validateGoalVerificationContract(contractInput, successCriteria)
+    const commands = new Map<string, Extract<GoalVerificationCheck, { kind: "command" }>>()
+    for (const criterion of contract.criteria) {
+      for (const check of criterion.checks) {
+        if (check.kind === "command") commands.set(JSON.stringify([check.program, check.args]), check)
+      }
+    }
+    if (!commands.size) return undefined
+    const workspaceRealpath = await realpath(workspacePath)
+    const root = await verificationRoot(workspacePath)
+    const budget = verificationBudget()
+    const seen = new Set<string>()
+    const checks: CheckEvidence[] = []
+    for (const entry of parsed.data.checks) {
+      if (!safeVerificationCommand(entry.program, entry.args)) return undefined
+      const cwdPath = isAbsolute(entry.cwd) ? entry.cwd : resolve(workspacePath, entry.cwd)
+      const resolvedCwd = await realpath(cwdPath).catch(() => undefined)
+      if (!resolvedCwd || resolvedCwd !== workspaceRealpath) return undefined
+      const check = commands.get(JSON.stringify([entry.program, entry.args]))
+      if (!check) continue
+      const checkSha256 = checkDigest(check)
+      if (seen.has(checkSha256)) continue
+      seen.add(checkSha256)
+      const inputs = await verificationCommandInputs(root, check.program, check.args, budget)
+      checks.push({
+        checkSha256,
+        kind: "command",
+        passed: true,
+        summary: (
+          entry.summary ??
+          `PASS: Operator integration check ran ${entry.program} ${entry.args.join(" ")} and exited zero.`
+        ).slice(0, 2_000),
+        exitCode: 0,
+        outputSha256: entry.outputSha256,
+        inputs,
+      })
+    }
+    if (!checks.length) return undefined
+    return { fingerprint: afterFingerprint, checkedAt: now.toISOString(), checks: checks.slice(0, 40) }
+  } catch {
+    return undefined
+  }
+}
+
 /** Passing command evidence of the integration check, only while the workspace is byte-identical to that run. */
 export async function integrationEvidenceFor(
   mission: Mission,
@@ -222,28 +330,64 @@ async function checkIntegratedTree(
 ): Promise<{ ok: boolean; output: string } | undefined> {
   active.begin("verify")
   try {
+    delete mission.integrationEvidence
     const operator = async () => {
       const logPath = await integrationCheckLog(mission.workspace.path)
+      const evidenceFilePath = mission.verificationContract
+        ? await integrationEvidenceFilePath(mission.workspace.path)
+        : undefined
+      const beforeOperator = evidenceFilePath
+        ? await fingerprintWorkspace(mission.workspace.path).catch(() => undefined)
+        : undefined
       const [cacheEnv, contextEnv] = await Promise.all([
         cargoCompilerCacheEnvironment(mission.workspace.path, source),
         integrationCheckContextEnv(mission.workspace.path, context),
       ])
-      const extraEnv = { ...cacheEnv, ...contextEnv }
-      return operatorIntegrationResult(
-        command ?? "",
-        await runVerificationGate(mission.workspace, command ?? "", {
-          timeoutSec: mission.timeoutSec,
-          signal,
-          onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
-          ...(Object.keys(extraEnv).length ? { extraEnv } : {}),
-          ...(logPath ? { outputFile: logPath } : {}),
-        }),
-        logPath,
-      )
+      const extraEnv: Record<string, string> = {
+        ...cacheEnv,
+        ...contextEnv,
+        ...(evidenceFilePath && beforeOperator ? { [INTEGRATION_EVIDENCE_FILE_ENV]: evidenceFilePath } : {}),
+      }
+      const gateResult = await runVerificationGate(mission.workspace, command ?? "", {
+        timeoutSec: mission.timeoutSec,
+        signal,
+        onSpawned: (pid) => active.spawned(pid, process.platform !== "win32"),
+        ...(Object.keys(extraEnv).length ? { extraEnv } : {}),
+        ...(logPath ? { outputFile: logPath } : {}),
+      })
+      if (gateResult.ok && evidenceFilePath && beforeOperator && mission.verificationContract) {
+        const afterOperator = await fingerprintWorkspace(mission.workspace.path).catch(() => undefined)
+        if (afterOperator && beforeOperator === afterOperator) {
+          const operatorEvidence = await readOperatorIntegrationEvidence(
+            evidenceFilePath,
+            mission.verificationContract,
+            mission.goalBrief?.successCriteria ?? [],
+            mission.workspace.path,
+            beforeOperator,
+            afterOperator,
+          )
+          if (operatorEvidence) {
+            if (mission.integrationEvidence && mission.integrationEvidence.fingerprint === afterOperator) {
+              const seen = new Set(mission.integrationEvidence.checks.map((entry) => entry.checkSha256))
+              const merged = [
+                ...mission.integrationEvidence.checks,
+                ...operatorEvidence.checks.filter((entry) => !seen.has(entry.checkSha256)),
+              ]
+              mission.integrationEvidence = {
+                fingerprint: afterOperator,
+                checkedAt: operatorEvidence.checkedAt,
+                checks: merged.slice(0, 40),
+              }
+            } else {
+              mission.integrationEvidence = operatorEvidence
+            }
+          }
+        }
+      }
+      return operatorIntegrationResult(command ?? "", gateResult, logPath)
     }
     // Alone, the operator's command is the project's whole cheap gate and replaces the contract's commands.
     if (command && (source[INTEGRATION_CHECK_ENV] !== "1" || !mission.verificationContract)) return await operator()
-    delete mission.integrationEvidence
     const before = await fingerprintWorkspace(mission.workspace.path)
     const contract = await executeCommandChecks(mission.verificationContract, mission.workspace.path, {
       successCriteria: mission.goalBrief?.successCriteria ?? [],

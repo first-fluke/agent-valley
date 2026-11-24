@@ -24,7 +24,12 @@ import type { PreparedOmaActor } from "./oma-actor"
 import type { ChiefOperatingPolicy, ChiefOperations } from "./operations"
 import type { OrganizationContext } from "./organization-types"
 import type { SkillDescriptor } from "./skills"
-import type { GoalVerificationContract, GoalVerificationResult, IntegrationEvidence } from "./verification"
+import type {
+  GoalVerificationContract,
+  GoalVerificationResult,
+  IntegrationEvidence,
+  VerificationBaseline,
+} from "./verification"
 
 // Compatibility surface: consumers can keep importing leaf types from
 // `chief/types`, while feature modules depend on `chief/contracts` directly.
@@ -87,6 +92,8 @@ export interface Mission {
   goalVerification?: GoalVerificationResult
   /** Passing contract commands from the latest integration check; see `IntegrationEvidence`. */
   integrationEvidence?: IntegrationEvidence
+  /** Passing contract commands from the latest fully passing goal verification; see `VerificationBaseline`. */
+  verificationBaseline?: VerificationBaseline
   executionPolicy?: ExecutionPolicy
   execution?: ExecutionState
   handoff?: HandoffState
