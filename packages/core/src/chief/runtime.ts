@@ -13,7 +13,7 @@ import { runVerificationGate } from "../orchestrator/verification-gate"
 import { releaseContinuousBuildOutputs } from "./continuous-workspace"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
-import { fingerprintWorkspace } from "./fingerprint"
+import { fingerprintWorkspace, workspaceFileManifest } from "./fingerprint"
 import { HOST_SUSPENDED_EVIDENCE, isHostSleepArtefact } from "./host-suspension"
 import { createLocalMissionRunner, finishLocalProcess } from "./local-runner"
 import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
@@ -45,6 +45,7 @@ import { resolveToolEnvironment } from "./tool-environment"
 import type { ChiefPorts, ChiefRunContext, ChiefStage, IntegrationCheckContext, Mission, Persona } from "./types"
 import { finishOperatingRun, markOperatingRunUnknown } from "./usage"
 import { executeGoalVerification, verificationReruns } from "./verification"
+import { buildVerificationBaseline, docOnlyRepairReuse, saveVerificationBaselineManifest } from "./verification-reuse"
 import { assertMissionWorkspace } from "./workspace"
 import { operationCacheStore, retainWorkspaceCaches } from "./workspace-cache"
 import { releaseWorkspaceScratch } from "./workspace-scratch"
@@ -176,8 +177,11 @@ export class ChiefRuntime {
     active.begin("verify")
     try {
       if (mission.verificationContract) {
-        // Commands that passed in the integration check on this identical workspace are not run again.
-        const reuse = await integrationEvidenceFor(mission)
+        // Commands that passed in the integration check on this identical workspace, or in the previous
+        // passing verification when only documentation files changed since then, are not run again.
+        const integrationReuse = await integrationEvidenceFor(mission)
+        const docReuse = integrationReuse ? undefined : await docOnlyRepairReuse(mission, mission.verificationContract)
+        const reuse = integrationReuse ?? docReuse?.checks
         mission.goalVerification = await executeGoalVerification(mission.verificationContract, mission.workspace.path, {
           successCriteria: mission.goalBrief?.successCriteria ?? [],
           expectedContractSha256: mission.verificationContractSha256,
@@ -186,7 +190,25 @@ export class ChiefRuntime {
           onSpawned: (pid, detached) => active.spawned(pid, detached),
           commandReruns: verificationReruns(),
           ...(reuse ? { reuse } : {}),
+          ...(docReuse ? { reuseReason: docReuse.reuseReason } : {}),
         })
+        if (docReuse) {
+          mission.history.push({
+            at: new Date().toISOString(),
+            stage: "verify-reuse",
+            message: `Reused ${docReuse.checks.length} verified command check(s) after doc-only changes (${docReuse.changedDocPaths.slice(0, 5).join(", ")}${docReuse.changedDocPaths.length > 5 ? `, +${docReuse.changedDocPaths.length - 5} more` : ""}); file checks re-executed fresh.`,
+          })
+        }
+        if (mission.goalVerification.ok) {
+          const manifest = await workspaceFileManifest(mission.workspace.path).catch(() => undefined)
+          if (manifest) {
+            const baseline = buildVerificationBaseline(mission.goalVerification, manifest.fingerprint)
+            if (baseline) {
+              mission.verificationBaseline = baseline
+              await saveVerificationBaselineManifest(mission.workspace.path, manifest)
+            }
+          }
+        }
         if (!mission.goalVerification.ok || !mission.verifyCommand.trim()) return mission.goalVerification
         await finishLocalProcess(active)
         active.begin("operator-verify")

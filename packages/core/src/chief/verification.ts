@@ -27,7 +27,7 @@ export * from "./verification-contract"
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const inputSchema = z.strictObject({ path: z.string().min(1).max(1_024), sha256: digest })
-const checkEvidenceSchema = z.strictObject({
+export const checkEvidenceSchema = z.strictObject({
   checkSha256: digest,
   kind: z.enum(["file", "json", "command"]),
   passed: z.boolean(),
@@ -73,6 +73,18 @@ export const integrationEvidenceSchema = z.strictObject({
 })
 export type IntegrationEvidence = z.infer<typeof integrationEvidenceSchema>
 
+/**
+ * Passing command evidence from the most recent fully passing goal verification, bound to its
+ * workspace fingerprint and contract SHA-256 so doc-only repairs can skip redundant command reruns.
+ */
+export const verificationBaselineSchema = z.strictObject({
+  fingerprint: z.string().min(1).max(200),
+  contractSha256: digest,
+  checkedAt: z.string().datetime(),
+  checks: z.array(checkEvidenceSchema).min(1).max(40),
+})
+export type VerificationBaseline = z.infer<typeof verificationBaselineSchema>
+
 export interface GoalVerificationOptions {
   successCriteria: string[]
   expectedContractSha256?: string
@@ -90,6 +102,8 @@ export interface GoalVerificationOptions {
    * bound inputs are unchanged is not executed again; the caller guarantees the workspace is identical.
    */
   reuse?: readonly CheckEvidence[]
+  /** Optional explanation recorded in reused command check summaries. */
+  reuseReason?: string
   /** How often a command that exited non-zero is run again on the unchanged workspace. Defaults to none. */
   commandReruns?: number
 }
@@ -109,7 +123,7 @@ export function verificationReruns(source: NodeJS.ProcessEnv = process.env): num
   return Number.isInteger(value) && value >= 0 && value <= 3 ? value : 1
 }
 
-function checkDigest(check: GoalVerificationCheck): string {
+export function checkDigest(check: GoalVerificationCheck): string {
   return createHash("sha256").update(JSON.stringify(check)).digest("hex")
 }
 
@@ -240,7 +254,8 @@ async function inspectCheck(
         passed: true,
         summary: checkSummary(
           true,
-          "Explicit command exited zero in the integration check on this identical workspace; its evidence is reused.",
+          options.reuseReason ??
+            "Explicit command exited zero in the integration check on this identical workspace; its evidence is reused.",
         ),
         exitCode: 0,
         outputSha256: earlier.outputSha256,
