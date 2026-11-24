@@ -181,7 +181,32 @@ export function resetTaskApprovals(
   }
 }
 
-/** Derive a final-review repair scope from the task ids its findings name, plus their transitive dependents. */
+function normalizeRepoPath(path: string): string {
+  return path
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^(?:\.\/)+/, "")
+}
+
+function extractReferencedPaths(text: string): Set<string> {
+  const paths = new Set<string>()
+  for (const raw of text.split(/[\s"'`()[\]{}<>,;=]+/)) {
+    if (!raw) continue
+    const stripped = raw
+      .replace(/[.:!?]+$/, "")
+      .replace(/#L\d+(?:C\d+)?(?:-L?\d+(?:C\d+)?)?$/i, "")
+      .replace(/:\d+(?:[:-]\d+)*$/, "")
+      .replace(/[.:!?]+$/, "")
+    const normalized = normalizeRepoPath(stripped)
+    if (normalized) paths.add(normalized)
+  }
+  return paths
+}
+
+/**
+ * Derive a final-review repair scope from the task ids or delivered file paths
+ * its findings name, plus their transitive dependents.
+ */
 export function finalReviewRepairScope(mission: Mission, review: Review): ReadonlySet<string> | null {
   const tasks = mission.plan?.tasks ?? []
   const findings = review.findings.join("\n")
@@ -189,6 +214,22 @@ export function finalReviewRepairScope(mission: Mission, review: Review): Readon
   for (const task of tasks) {
     const escaped = task.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     if (new RegExp(`(?<![a-zA-Z0-9_-])${escaped}(?![a-zA-Z0-9_-])`).test(findings)) scope.add(task.id)
+  }
+  const referencedPaths = extractReferencedPaths(findings)
+  if (referencedPaths.size > 0) {
+    const planTaskIds = new Set(tasks.map((task) => task.id))
+    for (const state of mission.tasks ?? []) {
+      if (!planTaskIds.has(state.id)) continue
+      const deliveredFiles = state.changeSet?.files ?? []
+      if (
+        deliveredFiles.some((file) => {
+          const normalized = normalizeRepoPath(file.path)
+          return normalized.length > 0 && referencedPaths.has(normalized)
+        })
+      ) {
+        scope.add(state.id)
+      }
+    }
   }
   if (!scope.size) return null
   for (;;) {

@@ -55,7 +55,7 @@ function failThenPassFinal(value: ReturnType<typeof fixture>, findings: string[]
   value.verify.mockImplementation(async () => ({ ok: true, output: "verified" }))
 }
 
-function completed(id: string, index: number): ChiefTaskState {
+function completed(id: string, index: number, paths: string[] = []): ChiefTaskState {
   return {
     id,
     reviewerId: "reviewer",
@@ -64,12 +64,28 @@ function completed(id: string, index: number): ChiefTaskState {
     output: `output ${index}`,
     review: { passed: true, summary: "passed", findings: [] },
     fingerprint: `fingerprint-${index}`,
+    ...(paths.length > 0
+      ? {
+          changeSet: {
+            version: 1,
+            inputTree: "a".repeat(40),
+            deliveryTree: "b".repeat(40),
+            files: paths.map((path) => ({ path, status: "modified" as const, size: 10, sha256: "c".repeat(64) })),
+            diff: "",
+            diffTruncated: false,
+          },
+        }
+      : {}),
   }
 }
 
 describe("final-review repair scope derivation", () => {
-  const mission = (tasks: ChiefTask[]): Mission => ({ ...fixture().mission, plan: { tasks } })
-  const review = (findings: string[]): Review => ({ passed: false, summary: "findings", findings })
+  const mission = (tasks: ChiefTask[], states: ChiefTaskState[] = []): Mission => ({
+    ...fixture().mission,
+    plan: { tasks },
+    tasks: states,
+  })
+  const review = (findings: string[], summary = "findings"): Review => ({ passed: false, summary, findings })
 
   it("includes a named task and its transitive dependents", () => {
     const tasks = [task("task-1"), task("task-2"), task("task-3", ["task-2"]), task("task-4", ["task-3"])]
@@ -83,7 +99,60 @@ describe("final-review repair scope derivation", () => {
     expect([...(scope ?? [])]).toEqual(["task-6"])
   })
 
-  it("returns null when no task id is named", () => {
+  it("matches delivered changeSet file ownership with normalized paths and includes transitive dependents", () => {
+    const tasks = [task("implement"), task("independent-qa"), task("integration", ["independent-qa"])]
+    const states = [
+      completed("implement", 1, ["src/app.ts"]),
+      completed("independent-qa", 2, ["docs/qa/report.md"]),
+      completed("integration", 3, ["src/index.ts"]),
+    ]
+    for (const finding of [
+      "Overstated assertion in docs/qa/report.md",
+      "Overstated assertion in `./docs/qa/report.md:42`.",
+      "Overstated assertion in (docs\\qa\\report.md#L10-L20)",
+      "Overstated assertion in 'docs/qa/report.md:10:5': fix it.",
+    ]) {
+      const scope = finalReviewRepairScope(mission(tasks, states), review([finding]))
+      expect([...(scope ?? [])].sort()).toEqual(["independent-qa", "integration"])
+    }
+  })
+
+  it("matches multiple owning tasks when findings cite files from different tasks", () => {
+    const tasks = [task("independent-qa"), task("docs-sync"), task("unrelated"), task("release", ["docs-sync"])]
+    const states = [
+      completed("independent-qa", 1, ["docs/qa/report.md"]),
+      completed("docs-sync", 2, ["docs/architecture.md"]),
+      completed("unrelated", 3, ["src/unrelated.ts"]),
+      completed("release", 4, ["CHANGELOG.md"]),
+    ]
+    const scope = finalReviewRepairScope(
+      mission(tasks, states),
+      review(["`docs/qa/report.md:12` and `./docs/architecture.md#L5` both contain stale claims."]),
+    )
+    expect([...(scope ?? [])].sort()).toEqual(["docs-sync", "independent-qa", "release"])
+  })
+
+  it("does not false-positive on substring paths, unrelated prose, or review.summary", () => {
+    const tasks = [task("independent-qa"), task("integration")]
+    const states = [
+      completed("independent-qa", 1, ["docs/qa/report.md"]),
+      completed("integration", 2, ["src/index.ts"]),
+    ]
+    expect(
+      finalReviewRepairScope(
+        mission(tasks, states),
+        review(
+          [
+            "The report is incomplete.",
+            "See other/docs/qa/report.md and docs/qa/report.md.bak and report.md for details.",
+          ],
+          "src/index.ts passed all checks",
+        ),
+      ),
+    ).toBeNull()
+  })
+
+  it("returns null when no task id or delivered file is named", () => {
     const tasks = [task("task-1"), task("task-2")]
     expect(finalReviewRepairScope(mission(tasks), review(["The configured-target obligation remains"]))).toBeNull()
   })
@@ -220,6 +289,42 @@ describe("final-review repair through the coordinator", () => {
     expect(byId.get("task-2")).toMatchObject({ status: "completed", attempts: 2, output: "Repaired task-2" })
     expect(byId.get("task-3")).toMatchObject({ status: "completed", attempts: 2, output: "Repaired task-3" })
     expect(result.history.some((event) => event.stage === "task-preserved" && event.taskId === "task-1")).toBe(true)
+  })
+
+  it("repairs the file-owning task instead of falling back when the final review cites its delivered path", async () => {
+    const value = fixture()
+    const tasks = [task("implement"), task("independent-qa"), task("integration")]
+    const finished = await completeMission(value, tasks)
+    const qaState = finished.tasks.find((state) => state.id === "independent-qa")
+    if (!qaState) throw new Error("Expected independent-qa task state")
+    qaState.changeSet = {
+      version: 1,
+      inputTree: "a".repeat(40),
+      deliveryTree: "b".repeat(40),
+      files: [{ path: "docs/qa/report.md", status: "modified", size: 42, sha256: "c".repeat(64) }],
+      diff: "",
+      diffTruncated: false,
+    }
+    value.snapshots.length = 0
+    failThenPassFinal(value, ["Overstated assertion in `./docs/qa/report.md:42` must be corrected."])
+    const result = await coordinate(finished, value.ports)
+
+    expect(result.status).toBe("completed")
+    const byId = new Map(result.tasks.map((state) => [state.id, state]))
+    expect(byId.get("implement")).toMatchObject({ status: "completed", attempts: 1 })
+    expect(byId.get("independent-qa")).toMatchObject({
+      status: "completed",
+      attempts: 2,
+      output: "Repaired independent-qa",
+    })
+    expect(byId.get("integration")).toMatchObject({ status: "completed", attempts: 1 })
+    const preserved = result.history.filter((event) => event.stage === "task-preserved").map((event) => event.taskId)
+    expect(preserved.sort()).toEqual(["implement", "integration"])
+    const scopeEvents = result.history.filter((event) => event.stage === "repair-scope")
+    expect(scopeEvents).toHaveLength(1)
+    expect(scopeEvents[0]).toMatchObject({ taskId: "independent-qa" })
+    expect(scopeEvents[0]?.message).toContain("independent-qa")
+    expect(scopeEvents[0]?.message).not.toContain("named no specific task")
   })
 })
 
