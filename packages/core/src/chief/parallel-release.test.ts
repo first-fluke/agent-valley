@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -139,5 +139,69 @@ describe("completed mission Actor storage release", () => {
     vi.stubEnv("AV_MIN_FREE_DISK_GIB", String(1024 ** 3))
     await expect(prepareTaskWorktree(mission, "next", 1)).rejects.toThrow("av gc --apply")
     await missing(applied.path)
+  })
+
+  it("refuses to traverse or delete symlinked parallel workspaces directories or entries", async () => {
+    const outside = join(directory, "outside")
+    await mkdir(outside, { recursive: true })
+    await writeFile(join(outside, "keep.txt"), "do not delete\n")
+
+    const parallelDir = join(mission.workspace.path, ".agent-valley", "parallel")
+    await mkdir(parallelDir, { recursive: true })
+    await symlink(outside, join(parallelDir, "workspaces"))
+    await expect(releaseAppliedTaskWorktrees(mission)).rejects.toThrow("symlink")
+    expect(await readFile(join(outside, "keep.txt"), "utf8")).toBe("do not delete\n")
+  })
+
+  it("reports symlinked applied workspace entries via onError without deleting the symlink target", async () => {
+    const applied = await prepareTaskWorktree(mission, "symlinked", 1)
+    await writeFile(join(applied.path, "a.txt"), "Applied\n")
+    await integrateTaskWorktree(mission, applied)
+
+    const outside = join(directory, "outside-target")
+    await mkdir(outside, { recursive: true })
+    await writeFile(join(outside, "keep.txt"), "must remain\n")
+    await rm(applied.path, { recursive: true, force: true })
+    await symlink(outside, applied.path)
+
+    const errors: Array<{ path: string; message: string }> = []
+    const result = await releaseAppliedTaskWorktrees(mission, {
+      onError: (path, error) => {
+        errors.push({ path, message: error instanceof Error ? error.message : String(error) })
+      },
+    })
+
+    expect(result.released).toEqual([])
+    expect(result.retained).toEqual([applied.path])
+    expect(errors).toHaveLength(1)
+    expect(errors[0]?.path).toBe(applied.path)
+    expect(errors[0]?.message).toContain("symlink")
+    expect(await readFile(join(outside, "keep.txt"), "utf8")).toBe("must remain\n")
+  })
+
+  it("allows post-integration resume and disposal after mid-mission reclamation", async () => {
+    const applied = await prepareTaskWorktree(mission, "wave-a", 1)
+    await writeFile(join(applied.path, "a.txt"), "Wave A\n")
+    await mkdir(join(applied.path, "target", "debug"), { recursive: true })
+    await writeFile(join(applied.path, "target", "debug", "artifact.bin"), "heavy build output")
+    await integrateTaskWorktree(mission, applied)
+
+    const pending = await prepareTaskWorktree(mission, "wave-b", 1)
+    await writeFile(join(pending.path, "b.txt"), "Wave B\n")
+    await collectTaskDelivery(mission, pending)
+
+    // Mid-mission reclamation removes applied workspace + build artifacts while keeping unapplied wave-b.
+    const reclaimed = await releaseAppliedTaskWorktrees(mission)
+    expect(reclaimed.released).toEqual([applied.path])
+    expect(reclaimed.retained).toEqual([pending.path])
+    await missing(applied.path)
+    expect(await readFile(join(pending.path, "b.txt"), "utf8")).toBe("Wave B\n")
+
+    // Idempotent re-integration (resume) and disposal after review continue to work without the clone.
+    const resumed = await integrateTaskWorktree(mission, applied)
+    expect(resumed.alreadyApplied).toBe(true)
+    expect(resumed.changeSet?.files.map((file) => file.path)).toEqual(["a.txt"])
+    expect(await disposeTaskWorktree(applied)).toBe(true)
+    expect(await releaseAppliedTaskWorktrees(mission)).toEqual({ released: [], retained: [pending.path] })
   })
 })

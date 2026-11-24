@@ -467,4 +467,61 @@ describe("parallel Chief task coordination", () => {
       "review:b",
     ])
   })
+
+  it("reclaims applied workspaces immediately after integration and checkpointing, before integrationCheck and review", async () => {
+    const { mission, ports, wave, parallel, hooks, events } = setup()
+    const worker = mission.personas.find((persona) => persona.id === "worker")
+    if (worker) worker.skills = ["oma-backend"]
+    parallel.reclaimApplied = vi.fn(async () => {
+      events.push("reclaim-applied")
+      return { released: ["/private/actor-a", "/private/actor-b"], retained: [] }
+    })
+    ports.integrationCheck = vi.fn(async () => {
+      events.push("integration-check")
+      return { ok: true, output: "ok" }
+    })
+    hooks.review = vi.fn(async (task, state) => {
+      events.push(`review:${task.id}`)
+      state.review = { passed: true, summary: "Passed", findings: [] }
+    })
+
+    expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
+    expect(parallel.reclaimApplied).toHaveBeenCalledTimes(1)
+    const reclaimIndex = events.indexOf("reclaim-applied")
+    const checkIndex = events.indexOf("integration-check")
+    const firstReviewIndex = events.indexOf("review:a")
+    expect(reclaimIndex).toBeGreaterThan(-1)
+    expect(checkIndex).toBeGreaterThan(reclaimIndex)
+    expect(firstReviewIndex).toBeGreaterThan(checkIndex)
+  })
+
+  it("treats mid-mission reclaimApplied errors as non-fatal and records parallel-retained warnings", async () => {
+    const { mission, ports, wave, parallel, hooks } = setup()
+    parallel.reclaimApplied = vi.fn(async () => ({
+      released: ["/private/actor-a"],
+      retained: ["/private/actor-b"],
+      errors: [{ path: "/private/actor-b", message: "EBUSY: resource busy or locked" }],
+    }))
+
+    expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
+    expect(
+      mission.history.some(
+        (event) =>
+          event.stage === "parallel-retained" &&
+          event.message.includes("/private/actor-b") &&
+          event.message.includes("EBUSY"),
+      ),
+    ).toBe(true)
+
+    const second = setup()
+    second.parallel.reclaimApplied = vi.fn(async () => {
+      throw new Error("EACCES: permission denied")
+    })
+    expect(await performParallelWave(second.mission, second.ports, second.wave, second.hooks)).toEqual([])
+    expect(
+      second.mission.history.some(
+        (event) => event.stage === "parallel-retained" && event.message.includes("EACCES: permission denied"),
+      ),
+    ).toBe(true)
+  })
 })
