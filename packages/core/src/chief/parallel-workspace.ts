@@ -429,17 +429,21 @@ export async function collectTaskChangeSet(
  */
 export async function releaseAppliedTaskWorktrees(
   mission: Mission,
-  options: { keep?: ReadonlySet<string>; apply?: boolean } = {},
+  options: { keep?: ReadonlySet<string>; apply?: boolean; onError?: (path: string, error: unknown) => void } = {},
 ): Promise<{ released: string[]; retained: string[] }> {
   const source = await realpath(mission.workspace.path)
   if (!(await lstat(join(source, ".agent-valley", "parallel")).catch(() => undefined)))
     return { released: [], retained: [] }
   const root = await parallelRoot(source)
   const workspaces = join(root, "workspaces")
-  const names = await readdir(workspaces).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return [] as string[]
+  const workspacesStat = await lstat(workspaces).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined
     throw error
   })
+  if (!workspacesStat) return { released: [], retained: [] }
+  if (!workspacesStat.isDirectory() || (await realpath(workspaces)) !== workspaces)
+    throw new Error("Parallel workspaces directory must not redirect through a symlink.")
+  const names = await readdir(workspaces)
   const released: string[] = []
   const retained: string[] = []
   for (const key of names.sort()) {
@@ -463,11 +467,18 @@ export async function releaseAppliedTaskWorktrees(
       continue
     }
     try {
-      assertParallelPath(root, path)
+      assertParallelPath(workspaces, path)
+      const entryStat = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined
+        throw error
+      })
+      if (entryStat?.isSymbolicLink())
+        throw new Error("Refusing to follow or remove a symlinked parallel Actor workspace.")
       await retainDeliveryEvidence(delivery.data, () => writeParallelJson(receipt, delivery.data))
       await rm(path, { recursive: true, force: true })
       released.push(path)
-    } catch {
+    } catch (error) {
+      options.onError?.(path, error)
       retained.push(path)
     }
   }

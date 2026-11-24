@@ -5,6 +5,7 @@ import { recordIntegrationCheck } from "./coordinator-integration"
 import {
   ParallelTaskReviewRejected,
   performParallelWave,
+  reclaimAppliedParallelWorkspaces,
   settlePreDeliveryCheck,
   waveFailureNeedsRecovery,
 } from "./coordinator-parallel"
@@ -168,6 +169,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
             `Integrated retained work for ${task.id}; independent review remains pending.`,
             task.id,
           )
+          await reclaimAppliedParallelWorkspaces(mission, ports.parallel, save, task.id)
         }
         if (!awaitingReview) await save("work", `Worker returned evidence for ${task.id}.`, task.id)
         await recordIntegrationCheck(mission, ports, [state], save)

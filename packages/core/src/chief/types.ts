@@ -178,6 +178,15 @@ export interface ChiefPorts {
     ): Promise<import("./parallel-contract").TaskWorktreeRecord>
     integrate(mission: Mission, record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
     dispose(record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
+    /**
+     * Reclaim disposable Actor workspaces whose delivery.json status is `"applied"` immediately
+     * after wave integration and checkpointing, leaving delivery receipts and git evidence intact.
+     */
+    reclaimApplied?(mission: Mission): Promise<{
+      released: string[]
+      retained: string[]
+      errors?: Array<{ path: string; message: string }>
+    }>
   }
   /** Release disposable storage (applied Actor repositories, ignored build output) after the mission completes. */
   releaseStorage?(mission: Mission): Promise<void>

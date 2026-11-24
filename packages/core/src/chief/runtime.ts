@@ -111,6 +111,15 @@ export class ChiefRuntime {
         dispose: async (record) => {
           await disposeTaskWorktree(record)
         },
+        reclaimApplied: async (mission) => {
+          const errors: Array<{ path: string; message: string }> = []
+          const result = await releaseAppliedTaskWorktrees(mission, {
+            onError: (path, error) => {
+              errors.push({ path, message: error instanceof Error ? error.message : String(error) })
+            },
+          })
+          return errors.length ? { ...result, errors } : result
+        },
       },
       releaseStorage: async (mission) => {
         await releaseAppliedTaskWorktrees(mission)

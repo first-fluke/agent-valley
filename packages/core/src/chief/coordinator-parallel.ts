@@ -95,6 +95,35 @@ function laneCheckFeedback(previousOutput: string, checkOutput: string): string 
   ].join("\n\n")
 }
 
+/**
+ * Reclaim disposable Actor workspaces whose deliveries are already applied and checkpointed.
+ * Cleanup failures are non-fatal so mid-mission waves proceed and `releaseStorage` retries at completion.
+ */
+export async function reclaimAppliedParallelWorkspaces(
+  mission: Mission,
+  parallel: NonNullable<ChiefPorts["parallel"]>,
+  save: (stage: string, message: string, taskId?: string) => Promise<void>,
+  taskId?: string,
+): Promise<void> {
+  if (!parallel.reclaimApplied) return
+  try {
+    const result = await parallel.reclaimApplied(mission)
+    for (const issue of result.errors ?? []) {
+      await save(
+        "parallel-retained",
+        `Applied Actor workspace was retained at ${issue.path}: ${issue.message}`,
+        taskId,
+      ).catch(() => {})
+    }
+  } catch (error) {
+    await save(
+      "parallel-retained",
+      `Applied Actor workspaces were retained after wave integration: ${error instanceof Error ? error.message : String(error)}`,
+      taskId,
+    ).catch(() => {})
+  }
+}
+
 /** Run one dependency-ready workspace wave. Recovery starts only after this function joins every Actor. */
 export async function performParallelWave(
   mission: Mission,
@@ -257,6 +286,7 @@ export async function performParallelWave(
   }
   if ([...failures.values()].some((failure) => hooks.fatal?.(failure.error)))
     return wave.flatMap((task) => failures.get(task.id) ?? [])
+  if (integrated.length > 0) await reclaimAppliedParallelWorkspaces(mission, parallel, save)
   // Integrated edits live in the mission workspace, its patch receipt, and retained Git evidence refs,
   // so the Actor repository (including its build output) is redundant whether review passed or not.
   // Callers run inside serialize(), so the retention checkpoint uses rawSave.
