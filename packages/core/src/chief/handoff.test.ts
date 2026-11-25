@@ -288,4 +288,35 @@ describe("automatic exhaustion handoff", () => {
       crossVendor: false,
     })
   })
+
+  it("prioritizes eligible routing candidates ahead of unconfigured readyActors and respects skill reservations", async () => {
+    const value = setup()
+    value.mission.operatingPolicy = {
+      reviewVendor: "off",
+      memory: false,
+      readyActors: ["codex", "qwen", "grok", "claude"],
+      routing: {
+        candidates: [
+          { actorType: "codex" },
+          { actorType: "claude", model: "opus" },
+          { actorType: "grok", skills: ["oma-qa"] },
+        ],
+        minSamples: 3,
+        minSuccessRate: 0.5,
+        evidenceWindow: 10,
+      },
+    }
+    value.discover.mockResolvedValue(["codex", "qwen", "grok", "claude"])
+    value.runAgent.mockRejectedValueOnce(new Error("usage_limit_reached")).mockResolvedValue("ok")
+    const contract = createMissionContract(value.mission)
+    const run = createMissionRun(value.mission, value.ports, contract.assert, () => {})
+    const backendActor = { ...value.actor, id: "backend-actor", skills: ["oma-backend"] }
+
+    expect(await run(backendActor, "Work", "work", "onboarding")).toBe("ok")
+    expect(value.runAgent.mock.calls[1]?.[0]).toMatchObject({
+      id: "backend-actor",
+      agentType: "claude",
+      model: "opus",
+    })
+  })
 })

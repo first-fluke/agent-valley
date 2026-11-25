@@ -41,6 +41,17 @@ const computerUseTools = [
   "zoom",
 ].map((name) => `computer_use__${name}`)
 
+function syntheticApiError(event: Record<string, unknown>): string | undefined {
+  if (typeof event.result !== "string") return undefined
+  const match = event.result.trim().match(/^\[API Error:\s*([^\]]+)\]$/i)
+  if (!match?.[1]) return undefined
+  const usage = event.usage as Record<string, unknown> | undefined
+  const input = typeof usage?.input_tokens === "number" ? usage.input_tokens : 0
+  const output = typeof usage?.output_tokens === "number" ? usage.output_tokens : 0
+  if (usage !== undefined && (input !== 0 || output !== 0)) return undefined
+  return match[1].trim()
+}
+
 /** Qwen Code's documented Claude-compatible JSONL envelopes, with Qwen usage/error semantics.
  * https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/
  * Wire source: QwenLM/qwen-code packages/cli/src/nonInteractive/{types,io/BaseJsonOutputAdapter}.ts
@@ -151,6 +162,24 @@ export class QwenSession extends ClaudeSession {
         },
       })
       return
+    }
+    if (this.resultEvent) {
+      const apiError = syntheticApiError(this.resultEvent)
+      if (apiError !== undefined) {
+        const status = apiError.match(/\b([45]\d{2})\b/)?.[1]
+        this.emit({
+          type: "error",
+          error: {
+            code: "CRASH",
+            message:
+              exhaustionMessage(apiError) ??
+              `Qwen Code reported an API error${status ? ` (HTTP ${status})` : ""}. Check qwen /auth, model access and limits, then retry av order.`,
+            recoverable: false,
+            tokenUsage: this.extractTokenUsage(this.resultEvent),
+          },
+        })
+        return
+      }
     }
     if (code === 0 && this.resultEvent) super.handleEvent(this.resultEvent)
     else if (this.resultEvent)

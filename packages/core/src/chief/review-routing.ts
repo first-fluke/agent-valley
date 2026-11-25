@@ -1,6 +1,7 @@
 import { availableActorRoutes } from "./actor-availability"
 import { actorRouteHealth } from "./actor-health"
 import { MissionPause } from "./execution"
+import { handoffActor } from "./handoff"
 import { unavailableProviders } from "./handoff-contract"
 import { latestWorkRun, withRoutedModel } from "./routing"
 import type { ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
@@ -30,7 +31,10 @@ export function selectTaskReviewer(mission: Mission, task: ChiefTask, state: Chi
   const configured = withRoutedModel(mission, recorded)
   const policy = mission.operatingPolicy
   if (!policy || policy.reviewVendor === "off") {
-    availableActorRoutes(mission, [{ actorType: configured.agentType, model: configured.model }])
+    const effective = withRoutedModel(mission, handoffActor(mission, configured))
+    if (!unavailableProviders(mission.handoff).has(effective.agentType)) {
+      availableActorRoutes(mission, [{ actorType: effective.agentType, model: effective.model }])
+    }
     return configured
   }
   const run = latestWorkRun(mission, task.id)

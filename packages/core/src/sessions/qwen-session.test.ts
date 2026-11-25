@@ -292,4 +292,49 @@ describe("Qwen Code native single-shot session", () => {
     expect(events.some((event) => event.type === "complete")).toBe(false)
     expect(events.find((event) => event.type === "error")?.error.message).toContain("cancelled")
   })
+
+  it("rejects synthetic zero-token API error success envelopes without leaking raw error text", async () => {
+    await run([
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "[API Error: 401 Invalid or unauthorized API key SECRET-leak]",
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 },
+      },
+    ])
+    expect(events.some((event) => event.type === "complete")).toBe(false)
+    const error = events.find((event) => event.type === "error")?.error
+    expect(error).toMatchObject({
+      code: "CRASH",
+      recoverable: false,
+    })
+    expect(error?.message).toContain("HTTP 401")
+    expect(JSON.stringify(events)).not.toContain("SECRET-leak")
+  })
+
+  it("maps synthetic zero-token usage-limit API error envelopes to usage_limit_reached", async () => {
+    await run([
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "[API Error: 429 usage limit exceeded]",
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    ])
+    expect(events.some((event) => event.type === "complete")).toBe(false)
+    expect(events.find((event) => event.type === "error")?.error.message).toContain("usage_limit_reached")
+  })
+
+  it("completes normally when non-zero usage tokens accompany a literal API error string", async () => {
+    await run([
+      {
+        ...SUCCESS,
+        result: "[API Error: 401]",
+      },
+    ])
+    expect(events.some((event) => event.type === "error")).toBe(false)
+    expect(events.find((event) => event.type === "complete")?.result.output).toBe("[API Error: 401]")
+  })
 })

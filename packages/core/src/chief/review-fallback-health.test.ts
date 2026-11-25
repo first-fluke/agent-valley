@@ -130,4 +130,79 @@ describe("fallback reviewer route health", () => {
     const requireState = { ...state, reviewerId: "reviewer" }
     expect(() => selectTaskReviewer(mission, task, requireState)).toThrow("Cross-vendor review is required")
   })
+
+  it("skips cooldown checks when reviewVendor is off and the configured reviewer is already exhausted in handoff", () => {
+    const { mission, task, state } = missionWithTask()
+    mission.operatingPolicy = { reviewVendor: "off", memory: false, readyActors: ["codex", "claude"] }
+    state.reviewerId = "chief"
+    mission.handoff = {
+      exhaustedAgents: ["codex"],
+      routes: {},
+      continuations: {},
+    }
+    mission.operations = {
+      runs: [],
+      reviewDecisions: [],
+      routingEvidence: [
+        {
+          actorType: "codex",
+          samples: 3,
+          successes: 0,
+          totalCostUsd: null,
+          successfulDeliverableCostUsd: null,
+          providerHealth: {
+            consecutiveFailures: 3,
+            lastOutcomeAt: new Date(Date.now() - 60_000).toISOString(),
+            cooldownUntil: new Date(Date.now() + 3_600_000).toISOString(),
+          },
+        },
+      ],
+    }
+
+    const reviewer = selectTaskReviewer(mission, task, state)
+    expect(reviewer.id).toBe("chief")
+  })
+
+  it("checks the effective handoff route rather than the cooling original reviewer when reviewVendor is off", () => {
+    const { mission, task, state } = missionWithTask()
+    mission.operatingPolicy = {
+      reviewVendor: "off",
+      memory: false,
+      readyActors: ["codex", "claude"],
+      routing: {
+        candidates: [{ actorType: "codex" }, { actorType: "claude", model: "opus" }],
+        minSamples: 3,
+        minSuccessRate: 0.5,
+        evidenceWindow: 10,
+      },
+    }
+    state.reviewerId = "chief"
+    mission.handoff = {
+      exhaustedAgents: ["codex"],
+      routes: { chief: { agentType: "claude", model: "opus" } },
+      continuations: {},
+    }
+    mission.operations = {
+      runs: [],
+      reviewDecisions: [],
+      routingEvidence: [
+        {
+          actorType: "codex",
+          samples: 3,
+          successes: 0,
+          totalCostUsd: null,
+          successfulDeliverableCostUsd: null,
+          providerHealth: {
+            consecutiveFailures: 3,
+            lastOutcomeAt: new Date(Date.now() - 60_000).toISOString(),
+            cooldownUntil: new Date(Date.now() + 3_600_000).toISOString(),
+          },
+        },
+      ],
+    }
+
+    const reviewer = selectTaskReviewer(mission, task, state)
+    expect(reviewer.id).toBe("chief")
+    expect(handoffActor(mission, reviewer)).toMatchObject({ agentType: "claude", model: "opus" })
+  })
 })

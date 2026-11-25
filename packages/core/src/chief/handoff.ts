@@ -241,14 +241,15 @@ export async function prepareHandoff(
     }
     if (!blocked.includes(vendor.data)) blocked.push(vendor.data)
   }
-  // Prefer the mission's recorded roster; only fall back to other authenticated CLIs when none of it fits.
+  // Prefer eligible routing candidates ahead of general readyActors, honoring skill reservations.
   const policy = mission.operatingPolicy
-  const roster = [
-    ...new Set([
-      ...(policy?.readyActors ?? []),
-      ...(policy?.routing?.candidates ?? []).map((entry) => entry.actorType),
-    ]),
-  ]
+  const configuredCandidates = (policy?.routing?.candidates ?? [])
+    .filter(
+      (entry) =>
+        !entry.skills || (actor.skills.length > 0 && actor.skills.every((skill) => entry.skills?.includes(skill))),
+    )
+    .map((entry) => entry.actorType)
+  const roster = [...new Set([...configuredCandidates, ...(policy?.readyActors ?? [])])]
   const discovered = ports.discoverReadyAgents ? await ports.discoverReadyAgents() : (policy?.readyActors ?? [])
   ports.signal?.throwIfAborted()
   // Live discovery still decides readiness; the roster only orders the ready vendors.

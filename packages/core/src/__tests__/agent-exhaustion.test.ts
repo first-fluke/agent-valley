@@ -27,6 +27,7 @@ describe("classifyAgentExhaustion", () => {
     "rate_limit: You've hit your Opus 5.5 limit",
     "Quota exceeded for this account",
     "Subscription allowance depleted",
+    "API error (status 402 Payment Required): Grok Build usage balance exhausted",
   ])("recognizes provider allowance exhaustion: %s", (reason) => {
     expect(classifyAgentExhaustion(reason)).toBe("usage")
   })
