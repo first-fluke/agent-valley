@@ -101,9 +101,6 @@ export async function cargoVerificationEnvironment(
   }
 }
 
-export const CARGO_SCCACHE_ENV = "AV_CARGO_SCCACHE"
-const sccacheDisabled = new Set(["0", "off", "false", "no"])
-
 async function findExecutableOnPath(name: string, pathEnv: string | undefined): Promise<string | undefined> {
   if (!pathEnv) return undefined
   const suffix = process.platform === "win32" ? ".exe" : ""
@@ -125,8 +122,6 @@ export async function cargoCompilerCacheEnvironment(
   root: string,
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<Record<string, string>> {
-  const toggle = source[CARGO_SCCACHE_ENV]?.trim().toLowerCase()
-  if (toggle && sccacheDisabled.has(toggle)) return {}
   if (source.RUSTC_WRAPPER !== undefined) return {}
   const manifest = await lstat(join(root, "Cargo.toml")).catch(() => undefined)
   if (!manifest?.isFile()) return {}

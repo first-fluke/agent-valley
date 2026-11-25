@@ -67,6 +67,8 @@ describe("FreellmSession settings resolution", () => {
 
 describe("FreellmSession invocation configuration", () => {
   it("emits AUTH_FAILED when started without credentials", async () => {
+    vi.stubEnv("FREELLM_API_KEY", "")
+    vi.stubEnv("FREELLMAPI_API_KEY", "")
     const session = new FreellmSession()
     const errorHandler = vi.fn()
     session.on("error", errorHandler)

@@ -212,7 +212,8 @@ describe("Chief resumable execution without duplicate work", () => {
       { id: "follow-up", status: "pending" },
     ])
     expect(value.mission.execution?.retries).toBe(1)
-    expect(stages(value.runAgent, "supervise")).toHaveLength(0)
+    expect(value.mission.supervision?.decisions).toHaveLength(0)
+    expect(stages(value.runAgent, "supervise")).toHaveLength(1)
     vi.advanceTimersByTime(1_000)
     expect((await coordinate(value.mission, value.ports)).status).toBe("completed")
     expect(stages(value.runAgent, "work").filter((call) => call[4]?.taskId === "onboarding")).toHaveLength(1)

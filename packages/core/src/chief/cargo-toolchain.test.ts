@@ -317,15 +317,13 @@ describe("cargoCompilerCacheEnvironment", () => {
       CARGO_INCREMENTAL: "0",
     })
 
-    // Preserves explicit CARGO_INCREMENTAL and respects explicit RUSTC_WRAPPER or AV_CARGO_SCCACHE=off
+    // Preserves explicit CARGO_INCREMENTAL and respects explicit RUSTC_WRAPPER (empty string or custom wrapper)
     expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir, CARGO_INCREMENTAL: "1" })).toEqual({
       RUSTC_WRAPPER: sccachePath,
     })
     expect(
       await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir, RUSTC_WRAPPER: "/custom/wrapper" }),
     ).toEqual({})
-    expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir, AV_CARGO_SCCACHE: "off" })).toEqual(
-      {},
-    )
+    expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir, RUSTC_WRAPPER: "" })).toEqual({})
   })
 })

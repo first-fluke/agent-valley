@@ -2,7 +2,6 @@ import type { GoalGapReview } from "./contracts"
 import type { CoordinatorContext } from "./coordinator-stages"
 import { finalReviewRepairScope } from "./coordinator-state"
 import { MissionPause } from "./execution"
-import { goalGapReviewEnabled } from "./goal-gap-review"
 import { returnedFindingsPrompt } from "./prompts"
 import { parseReview } from "./schemas"
 import type { ChiefTask, Mission } from "./types"
@@ -55,10 +54,9 @@ type ReturnedFindingsContext = Pick<
 export async function reviewReturnedFindings(
   context: ReturnedFindingsContext,
   returned: readonly ChiefTask[],
-  source: NodeJS.ProcessEnv = process.env,
 ): Promise<boolean> {
   const { mission, run, persona, save, requestRepair, protectedFailure, checkAbort } = context
-  if (!goalGapReviewEnabled(source) || !finalWaveReturned(mission, returned)) return false
+  if (!finalWaveReturned(mission, returned)) return false
   const key = returnedFindingsKey(mission, returned)
   const earlier = mission.goalGapReviews ?? []
   const looks = earlier.filter((entry) => entry.key.startsWith(RETURNED_FINDINGS_KEY))

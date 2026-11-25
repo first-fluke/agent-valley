@@ -153,7 +153,7 @@ describe("concurrent independent task reviews through the coordinator", () => {
     })
     const mission = await coordinate(value.mission, value.ports)
     expect(mission.status).toBe("completed")
-    expect(value.runAgent.mock.calls.some((call) => call[3] === "supervise")).toBe(false)
+    expect(mission.supervision?.decisions).toHaveLength(0)
     expect(value.ports.parallel.prepare).toHaveBeenCalledTimes(1)
     expect(mission.tasks.find((state) => state.id === "a")?.carriedTo).toBe("b")
     expect(mission.plan?.tasks.find((entry) => entry.id === "b")?.acceptance.at(-1)).toContain("Carried from a")

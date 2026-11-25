@@ -50,6 +50,7 @@ describe("configured Chief review gates", () => {
       "plan",
       "work",
       "review",
+      "supervise",
       "work",
       "review",
       "gate-review",

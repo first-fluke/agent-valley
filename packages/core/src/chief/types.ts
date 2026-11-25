@@ -69,7 +69,7 @@ export interface Mission {
   gateReviews?: GateReview[]
   gateReviewRefreshes?: number
   finalReview?: Review
-  /** The Chief's goal reviews taken before a final wave started (`AV_GOAL_GAP_REVIEW=1`); newest last. */
+  /** The Chief's goal reviews taken before a final wave started; newest last. */
   goalGapReviews?: import("./contracts").GoalGapReview[]
   verification?: Verification
   history: import("./contracts").MissionEvent[]
