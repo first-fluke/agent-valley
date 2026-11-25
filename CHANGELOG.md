@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.19.1](https://github.com/first-fluke/agent-valley/compare/v4.19.0...v4.19.1) (2026-11-25)
+
+
+### Refactors
+
+* **chief:** remove redundant AV_GOAL_GAP_REVIEW and AV_CARGO_SCCACHE rollout flags ([#103](https://github.com/first-fluke/agent-valley/issues/103)) ([5ee966a](https://github.com/first-fluke/agent-valley/commit/5ee966a88c34d76dce026d2088753df3c876f9cb))
+
 ## [4.19.0](https://github.com/first-fluke/agent-valley/compare/v4.18.4...v4.19.0) (2026-11-24)
 
 
