@@ -65,7 +65,6 @@ function context(mission: Mission, answer: () => Promise<string>) {
     },
   }
 }
-const on = { AV_GOAL_GAP_REVIEW: "1" }
 const open = JSON.stringify({
   passed: false,
   summary: "QA names a blocking defect that is still open.",
@@ -95,7 +94,7 @@ describe("the Chief's look at what the final wave returned", () => {
     const { mission, wave } = finalWaveBack()
     const { context: ctx, requestRepair, run } = context(mission, async () => open)
 
-    expect(await reviewReturnedFindings(ctx, wave, on)).toBe(true)
+    expect(await reviewReturnedFindings(ctx, wave)).toBe(true)
 
     expect(run).toHaveBeenCalledOnce()
     const [reason, scope] = requestRepair.mock.calls[0] ?? []
@@ -103,7 +102,7 @@ describe("the Chief's look at what the final wave returned", () => {
     expect([...(scope as ReadonlySet<string>)].sort()).toEqual(["integrate", "lane", "qa"])
     expect(mission.goalGapReviews?.at(-1)).toMatchObject({ verdict: "gaps", key: "returned:integrate#1,qa#1" })
     // The same deliveries are not read twice, for example after a restart.
-    expect(await reviewReturnedFindings(ctx, wave, on)).toBe(false)
+    expect(await reviewReturnedFindings(ctx, wave)).toBe(false)
     expect(run).toHaveBeenCalledOnce()
   })
 
@@ -111,7 +110,7 @@ describe("the Chief's look at what the final wave returned", () => {
     const { mission, wave } = finalWaveBack()
     const { context: ctx, requestRepair } = context(mission, async () => nothing)
 
-    expect(await reviewReturnedFindings(ctx, wave, on)).toBe(false)
+    expect(await reviewReturnedFindings(ctx, wave)).toBe(false)
     expect(requestRepair).not.toHaveBeenCalled()
     expect(mission.goalGapReviews?.at(-1)?.verdict).toBe("covered")
   })
@@ -121,7 +120,7 @@ describe("the Chief's look at what the final wave returned", () => {
     const unowned = JSON.stringify({ passed: false, summary: "Open.", findings: ["Some test is weak."] })
     const { context: ctx, requestRepair } = context(mission, async () => unowned)
 
-    expect(await reviewReturnedFindings(ctx, wave, on)).toBe(false)
+    expect(await reviewReturnedFindings(ctx, wave)).toBe(false)
     expect(requestRepair).not.toHaveBeenCalled()
   })
 
@@ -129,7 +128,7 @@ describe("the Chief's look at what the final wave returned", () => {
     const { mission, wave } = finalWaveBack()
     const { context: ctx, requestRepair } = context(mission, async () => "not json")
 
-    expect(await reviewReturnedFindings(ctx, wave, on)).toBe(false)
+    expect(await reviewReturnedFindings(ctx, wave)).toBe(false)
     expect(requestRepair).not.toHaveBeenCalled()
     expect(mission.goalGapReviews?.at(-1)?.verdict).toBe("no-verdict")
 
@@ -137,14 +136,12 @@ describe("the Chief's look at what the final wave returned", () => {
     const stop = context(paused.mission, async () => {
       throw new MissionPause("Usage exhausted.", "budget")
     })
-    await expect(reviewReturnedFindings(stop.context, paused.wave, on)).rejects.toBeInstanceOf(MissionPause)
+    await expect(reviewReturnedFindings(stop.context, paused.wave)).rejects.toBeInstanceOf(MissionPause)
   })
 
-  it("stays off without the operator's switch and stops after two looks", async () => {
+  it("stops after two looks", async () => {
     const { mission, wave } = finalWaveBack()
     const { context: ctx, run } = context(mission, async () => nothing)
-    expect(await reviewReturnedFindings(ctx, wave, {})).toBe(false)
-    expect(run).not.toHaveBeenCalled()
 
     mission.goalGapReviews = ["returned:a#1", "returned:b#1"].map((key) => ({
       at: "2026-11-22T00:00:00.000Z",
@@ -153,7 +150,7 @@ describe("the Chief's look at what the final wave returned", () => {
       summary: "Earlier look.",
       findings: [],
     }))
-    expect(await reviewReturnedFindings(ctx, wave, on)).toBe(false)
+    expect(await reviewReturnedFindings(ctx, wave)).toBe(false)
     expect(run).not.toHaveBeenCalled()
   })
 
@@ -170,10 +167,11 @@ describe("the Chief's look at what the final wave returned", () => {
       findings: [],
     }))
     const run = vi.fn(async () => nothing)
-    const reviewed = await reviewGoalGaps(
-      { ...context(mission, async () => nothing).context, run: run as never, requestRecovery: vi.fn() as never },
-      on,
-    )
+    const reviewed = await reviewGoalGaps({
+      ...context(mission, async () => nothing).context,
+      run: run as never,
+      requestRecovery: vi.fn() as never,
+    })
     expect(reviewed).toBe(false)
     expect(run).toHaveBeenCalledOnce()
   })

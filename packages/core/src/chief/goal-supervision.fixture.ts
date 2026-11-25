@@ -86,12 +86,14 @@ export function fixture() {
           evidence: "onboarding.ts and passing acceptance check inspected.",
         })),
       })
-    if (stage === "supervise")
+    if (stage === "supervise") {
+      if (_prompt.includes("evidence-based assessment")) return passed
       return JSON.stringify({
         action: "repair",
         reason: "Repair the missing state using recorded evidence.",
         instructions: "Handle the empty-account state and verify onboarding.",
       })
+    }
     if (stage === "report") return JSON.stringify(fallbackReport(value))
     return passed
   })

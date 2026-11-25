@@ -513,7 +513,7 @@ describe("native review failures preserve successful work", () => {
     vi.advanceTimersByTime(1_000)
     const calls = value.runAgent.mock.calls.length
     expect((await coordinate(value.mission, value.ports)).status).toBe("waiting")
-    expect(value.runAgent).toHaveBeenCalledTimes(calls)
+    expect(value.runAgent).toHaveBeenCalledTimes(calls + 1)
     vi.advanceTimersByTime(ACTOR_COOLDOWN_BASE_MS - 1_000)
     expect((await coordinate(value.mission, value.ports)).status).toBe("completed")
     expect(value.runAgent.mock.calls.filter((call) => call[3] === "work")).toHaveLength(2)

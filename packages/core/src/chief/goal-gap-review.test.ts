@@ -54,7 +54,6 @@ function context(mission: Mission, answer: () => Promise<string>) {
     },
   }
 }
-const on = { AV_GOAL_GAP_REVIEW: "1" }
 const gaps = JSON.stringify({
   passed: false,
   summary: "The command path supplies no endpoint facts.",
@@ -87,14 +86,14 @@ describe("the goal review before the final wave", () => {
   it("asks the Chief for recovery with the findings and records the review", async () => {
     const mission = beforeFinalWave()
     const { context: input, requestRecovery, run } = context(mission, async () => gaps)
-    expect(await reviewGoalGaps(input, on)).toBe(true)
+    expect(await reviewGoalGaps(input)).toBe(true)
     expect(run).toHaveBeenCalledTimes(1)
     expect(requestRecovery).toHaveBeenCalledTimes(1)
     expect(requestRecovery.mock.calls[0]?.[0]).toContain("src/exec/context.rs:36")
     expect(requestRecovery.mock.calls[0]?.[0]).toContain("integrate, qa")
     expect(mission.goalGapReviews?.[0]?.verdict).toBe("gaps")
     // The same standing is not reviewed twice, for example after a recovery that kept the plan.
-    expect(await reviewGoalGaps(input, on)).toBe(false)
+    expect(await reviewGoalGaps(input)).toBe(false)
     expect(run).toHaveBeenCalledTimes(1)
   })
 
@@ -103,7 +102,7 @@ describe("the goal review before the final wave", () => {
   it("asks for recovery again when the Chief stopped on the findings and the mission is resumed", async () => {
     const mission = beforeFinalWave()
     const { context: input, requestRecovery, run } = context(mission, async () => gaps)
-    expect(await reviewGoalGaps(input, on)).toBe(true)
+    expect(await reviewGoalGaps(input)).toBe(true)
     mission.supervision?.decisions.push({
       round: 1,
       at: new Date().toISOString(),
@@ -111,7 +110,7 @@ describe("the goal review before the final wave", () => {
       reason: "No plan meets the task limit.",
       fingerprint: "delivered",
     })
-    expect(await reviewGoalGaps(input, on)).toBe(true)
+    expect(await reviewGoalGaps(input)).toBe(true)
     expect(run).toHaveBeenCalledTimes(1)
     expect(requestRecovery).toHaveBeenCalledTimes(2)
     const reason = requestRecovery.mock.calls[1]?.[0] ?? ""
@@ -125,24 +124,20 @@ describe("the goal review before the final wave", () => {
       reason: "The finding does not hold.",
       fingerprint: "delivered",
     })
-    expect(await reviewGoalGaps(input, on)).toBe(false)
+    expect(await reviewGoalGaps(input)).toBe(false)
     expect(requestRecovery).toHaveBeenCalledTimes(2)
   })
 
-  it("starts the final wave when the goal is covered, when disabled and when the review gives no verdict", async () => {
+  it("starts the final wave when the goal is covered and when the review gives no verdict", async () => {
     const coveredMission = beforeFinalWave()
     const first = context(coveredMission, async () => covered)
-    expect(await reviewGoalGaps(first.context, on)).toBe(false)
+    expect(await reviewGoalGaps(first.context)).toBe(false)
     expect(first.requestRecovery).not.toHaveBeenCalled()
     expect(coveredMission.goalGapReviews?.[0]?.verdict).toBe("covered")
 
-    const off = context(beforeFinalWave(), async () => gaps)
-    expect(await reviewGoalGaps(off.context, {})).toBe(false)
-    expect(off.run).not.toHaveBeenCalled()
-
     const silent = beforeFinalWave()
     const prose = context(silent, async () => "I looked at the files and they seem fine.")
-    expect(await reviewGoalGaps(prose.context, on)).toBe(false)
+    expect(await reviewGoalGaps(prose.context)).toBe(false)
     expect(prose.requestRecovery).not.toHaveBeenCalled()
     expect(silent.goalGapReviews?.[0]?.verdict).toBe("no-verdict")
   })
@@ -151,7 +146,7 @@ describe("the goal review before the final wave", () => {
     const paused = context(beforeFinalWave(), async () => {
       throw new MissionPause("Operator stopped mission supervision.", "interrupted")
     })
-    await expect(reviewGoalGaps(paused.context, on)).rejects.toBeInstanceOf(MissionPause)
+    await expect(reviewGoalGaps(paused.context)).rejects.toBeInstanceOf(MissionPause)
   })
 
   it("tells the Chief which tasks remain and what not to report", () => {

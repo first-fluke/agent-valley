@@ -5,13 +5,8 @@ import { goalGapPrompt } from "./prompts"
 import { parseReview } from "./schemas"
 import type { ChiefTask, Mission } from "./types"
 
-export const GOAL_GAP_REVIEW_ENV = "AV_GOAL_GAP_REVIEW"
 /** A replan made for a finding is reviewed once more; after that the final review decides. */
 const MAX_GOAL_GAP_REVIEWS = 2
-
-export function goalGapReviewEnabled(source: NodeJS.ProcessEnv = process.env): boolean {
-  return source[GOAL_GAP_REVIEW_ENV] === "1"
-}
 
 /**
  * The tasks of the final wave while the mission stands right before it: earlier tasks have completed, every
@@ -49,12 +44,8 @@ type GoalGapContext = Pick<
  * Returns true when the Chief found a part of the goal without an owner and a recovery decision changed the
  * plan or its instructions; the caller then selects the next wave again.
  */
-export async function reviewGoalGaps(
-  context: GoalGapContext,
-  source: NodeJS.ProcessEnv = process.env,
-): Promise<boolean> {
+export async function reviewGoalGaps(context: GoalGapContext): Promise<boolean> {
   const { mission, run, persona, save, requestRecovery, protectedFailure, checkAbort } = context
-  if (!goalGapReviewEnabled(source)) return false
   const remaining = finalWaveAhead(mission)
   if (!remaining) return false
   const key = goalGapReviewKey(mission, remaining)
