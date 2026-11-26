@@ -30,6 +30,7 @@ export function createChiefRecovery(mission: Mission, ports: ChiefPorts, hooks: 
     assertNoUncertainExecution(mission)
     const supervision = mission.supervision
     if (!supervision) throw new Error(reason)
+    delete supervision.verificationFailureKey
     hooks.checkAbort()
     assertExecutionDeadline(mission)
     // An unreachable provider leaves the Chief nothing to decide and no way to answer. The failed call is

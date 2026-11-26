@@ -1,4 +1,5 @@
 import type { ChiefTask, Mission, Review } from "./types"
+import type { CheckEvidence } from "./verification"
 
 export class ContractViolation extends Error {}
 
@@ -71,6 +72,8 @@ export function selectRepairTaskId(mission: Mission, reason?: string, taskId?: s
     const matched = [...pool].reverse().find((task) => reason.includes(task.id))
     if (matched) return matched.id
   }
+  const verificationTaskId = selectVerificationRepairTaskId(mission, reason)
+  if (verificationTaskId) return verificationTaskId
   // A verification failure with no task reference is code work: a planning, review or marketing persona
   // appended last cannot repair failing gates, so prefer the latest task owned by a code-capable Actor.
   const codeCapable = (task: ChiefTask) =>
@@ -238,4 +241,97 @@ export function finalReviewRepairScope(mission: Mission, review: Review): Readon
       if (!scope.has(task.id) && task.dependencies.some((id) => scope.has(id))) scope.add(task.id)
     if (scope.size === size) return scope
   }
+}
+
+/**
+ * Derive a verification repair scope from failing non-command (file or json-pointer) checks
+ * and their delivered changeSet file ownership, plus their transitive dependents.
+ * Returns null if ANY command check failed or if no owning task matches the failing paths.
+ */
+export function selectVerificationRepairScope(mission: Mission, _reason?: string): ReadonlySet<string> | null {
+  if (!mission.plan?.tasks.length) return null
+  if (!mission.goalVerification?.evidence?.length) return null
+
+  const failingChecks: CheckEvidence[] = []
+  for (const criterion of mission.goalVerification.evidence) {
+    for (const check of criterion.checks) {
+      if (!check.passed) failingChecks.push(check)
+    }
+  }
+  if (!failingChecks.length) return null
+
+  // If failing checks include ANY command check, fall back to existing selectRepairTaskId behavior
+  if (failingChecks.some((check) => check.kind === "command")) return null
+
+  const failingPaths = new Set<string>()
+  for (const check of failingChecks) {
+    if ((check.kind === "file" || check.kind === "json") && check.path) {
+      const normalized = normalizeRepoPath(check.path)
+      if (normalized) failingPaths.add(normalized)
+    }
+  }
+  if (!failingPaths.size) return null
+
+  const candidates = mission.plan.tasks.filter((task) => task.effectScope !== "external")
+  const pool = candidates.length ? candidates : mission.plan.tasks
+  const poolTaskIds = new Set(pool.map((task) => task.id))
+
+  const matchedTaskIds = new Set<string>()
+  for (const state of mission.tasks ?? []) {
+    if (!poolTaskIds.has(state.id)) continue
+    const deliveredFiles = state.changeSet?.files ?? []
+    if (
+      deliveredFiles.some((file) => {
+        const normalized = normalizeRepoPath(file.path)
+        return normalized.length > 0 && failingPaths.has(normalized)
+      })
+    ) {
+      matchedTaskIds.add(state.id)
+    }
+  }
+
+  // Fallback: uniquely named exact path in task.title / task.description / task.acceptance when changeSet has no match
+  if (!matchedTaskIds.size) {
+    for (const failingPath of failingPaths) {
+      const matchingTasks = pool.filter((task) => {
+        const taskText = [
+          task.title,
+          task.instructions,
+          (task as { description?: string }).description,
+          ...(task.acceptance ?? []),
+        ]
+          .filter(Boolean)
+          .join(" ")
+        const referenced = extractReferencedPaths(taskText)
+        return referenced.has(failingPath)
+      })
+      if (matchingTasks.length === 1 && matchingTasks[0]) {
+        matchedTaskIds.add(matchingTasks[0].id)
+      }
+    }
+  }
+
+  if (!matchedTaskIds.size) return null
+
+  // Include transitive dependents
+  const scope = new Set<string>(matchedTaskIds)
+  const allTasks = mission.plan.tasks
+  for (;;) {
+    const size = scope.size
+    for (const task of allTasks) {
+      if (!scope.has(task.id) && task.dependencies.some((id) => scope.has(id))) {
+        scope.add(task.id)
+      }
+    }
+    if (scope.size === size) break
+  }
+  return scope
+}
+
+export function selectVerificationRepairTaskId(mission: Mission, reason?: string): string | undefined {
+  const scope = selectVerificationRepairScope(mission, reason)
+  if (!scope?.size) return undefined
+  const candidates = mission.plan?.tasks.filter((task) => task.effectScope !== "external") ?? []
+  const pool = candidates.length ? candidates : (mission.plan?.tasks ?? [])
+  return [...pool].reverse().find((task) => scope.has(task.id))?.id ?? [...scope].at(-1)
 }

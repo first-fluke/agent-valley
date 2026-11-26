@@ -70,6 +70,7 @@ export const supervisionSchema = z.strictObject({
   operatorVerifyCommand: z.string().trim().max(32_000).optional(),
   pendingRecovery: z.strictObject({ reason: text, taskId: id.optional() }).optional(),
   finalReviewFailures: z.array(text).max(40).optional(),
+  verificationFailureKey: z.string().trim().max(1_000).optional(),
   decisions: z
     .array(
       z

@@ -25,6 +25,7 @@ import {
   buildVerificationBaseline,
   canReusePriorVerification,
   docOnlyRepairReuse,
+  isContractDocEvidencePath,
   isDocOnlyPath,
   saveVerificationBaselineManifest,
 } from "./verification-reuse"
@@ -88,6 +89,69 @@ describe("isDocOnlyPath", () => {
     "/abs/README.md",
   ])("rejects non-doc or unsafe path %s", (path) => {
     expect(isDocOnlyPath(path)).toBe(false)
+  })
+})
+
+describe("isContractDocEvidencePath", () => {
+  const contractPaths = new Set([
+    ".arc-verify/phase-2-vendor-catalogue/qa.md",
+    ".arc-verify/summary.mdx",
+    "docs/qa-report.md",
+  ])
+
+  it("allows contract-declared markdown evidence paths inside dot-directories", () => {
+    expect(isContractDocEvidencePath(".arc-verify/phase-2-vendor-catalogue/qa.md", contractPaths)).toBe(true)
+    expect(isContractDocEvidencePath(".arc-verify/summary.mdx", contractPaths)).toBe(true)
+    expect(isContractDocEvidencePath("docs/qa-report.md", contractPaths)).toBe(true)
+  })
+
+  it("rejects paths not declared in contractFilePaths", () => {
+    expect(isContractDocEvidencePath(".arc-verify/other.md", contractPaths)).toBe(false)
+  })
+
+  it("rejects non-markdown filenames even if in contractPaths", () => {
+    const withScripts = new Set([".arc-verify/test.sh", ".arc-verify/data.json"])
+    expect(isContractDocEvidencePath(".arc-verify/test.sh", withScripts)).toBe(false)
+    expect(isContractDocEvidencePath(".arc-verify/data.json", withScripts)).toBe(false)
+  })
+
+  it.each([
+    ".git/qa.md",
+    ".github/qa.md",
+    ".gitlab/qa.md",
+    ".circleci/qa.md",
+    ".claude/qa.md",
+    ".codex/qa.md",
+    ".cursor/qa.md",
+    ".agents/qa.md",
+    ".agent-valley/qa.md",
+    ".vscode/qa.md",
+    ".idea/qa.md",
+    ".husky/qa.md",
+    ".config/qa.md",
+    ".cargo/qa.md",
+    ".yarn/qa.md",
+    ".pnpm/qa.md",
+    ".npm/qa.md",
+    ".bun/qa.md",
+    ".venv/qa.md",
+    ".tox/qa.md",
+    ".env/qa.md",
+    ".env.local/qa.md",
+  ])("rejects sensitive dot-directory path %s even if in contractPaths", (path) => {
+    const declared = new Set([path])
+    expect(isContractDocEvidencePath(path, declared)).toBe(false)
+  })
+
+  it("rejects dot-filenames starting with dot", () => {
+    const hidden = new Set([".arc-verify/.hidden.md"])
+    expect(isContractDocEvidencePath(".arc-verify/.hidden.md", hidden)).toBe(false)
+  })
+
+  it("rejects non-doc segments", () => {
+    const testSegment = new Set([".arc-verify/test/qa.md", ".arc-verify/node_modules/qa.md"])
+    expect(isContractDocEvidencePath(".arc-verify/test/qa.md", testSegment)).toBe(false)
+    expect(isContractDocEvidencePath(".arc-verify/node_modules/qa.md", testSegment)).toBe(false)
   })
 })
 
@@ -235,6 +299,191 @@ describe("Part A: doc-only repair verification evidence reuse", () => {
     // 7. Missing baseline manifest on disk forces rerun
     await rm(join(root, ".agent-valley/verification-baselines", `${initialManifest.fingerprint}.json`))
     expect(await docOnlyRepairReuse(mission, parsedContract)).toBeUndefined()
+  })
+
+  it("builds verification baseline even when result.ok is false if all command checks pass", async () => {
+    const root = await gitRepo({
+      "src/app.mjs": "export const ok = true\n",
+      "tests/app.test.mjs": "import test from 'node:test'\ntest('ok', () => {})\n",
+      ".arc-verify/qa.md": "Draft QA report\n",
+    })
+    const contractWithFailingFile = {
+      version: 1 as const,
+      criteria: [
+        {
+          criterion: "Tests pass",
+          checks: [
+            {
+              kind: "command" as const,
+              program: "node" as const,
+              args: ["--test", "tests/app.test.mjs"],
+              timeoutMs: 120_000,
+            },
+          ],
+        },
+        {
+          criterion: "QA report present with PASS",
+          checks: [
+            {
+              kind: "file" as const,
+              path: ".arc-verify/qa.md",
+              minBytes: 4,
+              contains: ["PASS_FINAL_TOKEN"],
+            },
+          ],
+        },
+      ],
+    }
+    const executeCommand = vi.fn(async () => ({ exitCode: 0, stdout: "ok\n", stderr: "" }))
+    const result = await executeGoalVerification(contractWithFailingFile, root, {
+      successCriteria: ["Tests pass", "QA report present with PASS"],
+      executeCommand,
+    })
+    expect(result.ok).toBe(false)
+    expect(result.evidence[0]?.checks[0]?.passed).toBe(true) // command passed
+    expect(result.evidence[1]?.checks[0]?.passed).toBe(false) // file check failed
+
+    const manifest = await workspaceFileManifest(root)
+    const baseline = buildVerificationBaseline(result, manifest.fingerprint)
+    expect(baseline).toBeDefined()
+    expect(baseline?.checks).toHaveLength(1)
+    expect(baseline?.checks[0]?.passed).toBe(true)
+  })
+
+  it("reuses passing command baseline when contract-declared dot-directory markdown file changes (.arc-verify/qa.md)", async () => {
+    const root = await gitRepo({
+      "src/app.mjs": "export const ok = true\n",
+      "tests/app.test.mjs": "import test from 'node:test'\ntest('ok', () => {})\n",
+      ".arc-verify/phase-2/qa.md": "Initial draft\n",
+    })
+    const contract = validateGoalVerificationContract(
+      {
+        version: 1 as const,
+        criteria: [
+          {
+            criterion: "Tests pass",
+            checks: [
+              {
+                kind: "command" as const,
+                program: "node" as const,
+                args: ["--test", "tests/app.test.mjs"],
+                timeoutMs: 120_000,
+              },
+            ],
+          },
+          {
+            criterion: "QA report verified",
+            checks: [
+              {
+                kind: "file" as const,
+                path: ".arc-verify/phase-2/qa.md",
+                minBytes: 4,
+                contains: ["TRF-019"],
+              },
+            ],
+          },
+        ],
+      },
+      ["Tests pass", "QA report verified"],
+    )
+
+    const executeCommand = vi.fn(async () => ({ exitCode: 0, stdout: "ok\n", stderr: "" }))
+    const initialResult = await executeGoalVerification(contract, root, {
+      successCriteria: ["Tests pass", "QA report verified"],
+      executeCommand,
+    })
+    // Initial verification failed because .arc-verify/phase-2/qa.md lacks TRF-019
+    expect(initialResult.ok).toBe(false)
+    expect(executeCommand).toHaveBeenCalledTimes(1)
+
+    // Save baseline from the passing command check
+    const initialManifest = await workspaceFileManifest(root)
+    const baseline = buildVerificationBaseline(initialResult, initialManifest.fingerprint)
+    expect(baseline).toBeDefined()
+    await saveVerificationBaselineManifest(root, initialManifest)
+
+    const { mission } = fixture()
+    mission.workspace.path = root
+    mission.verificationBaseline = baseline
+
+    // Now repair task delivers the fix to .arc-verify/phase-2/qa.md
+    await writeFile(join(root, ".arc-verify/phase-2/qa.md"), "Validated TRF-019 passing\n", "utf8")
+
+    const reuse = await docOnlyRepairReuse(mission, contract)
+    expect(reuse).toBeDefined()
+    expect(reuse?.checks).toHaveLength(1)
+    expect(reuse?.changedDocPaths).toEqual([".arc-verify/phase-2/qa.md"])
+
+    // Second verification reuses command evidence without re-executing node test!
+    const secondResult = await executeGoalVerification(contract, root, {
+      successCriteria: ["Tests pass", "QA report verified"],
+      executeCommand,
+      reuse: reuse?.checks,
+      reuseReason: reuse?.reuseReason,
+    })
+    expect(secondResult.ok).toBe(true)
+    expect(executeCommand).toHaveBeenCalledTimes(1) // Still 1! Not called again!
+    expect(secondResult.evidence[1]?.checks[0]?.passed).toBe(true)
+  })
+
+  it("strictly rejects command reuse if recorded command inputs included the changed file", async () => {
+    const root = await gitRepo({
+      "src/app.mjs": "export const ok = true\n",
+      "tests/app.test.mjs": "import test from 'node:test'\ntest('ok', () => {})\n",
+      ".arc-verify/qa.md": "Initial\n",
+    })
+    const contract = validateGoalVerificationContract(
+      {
+        version: 1 as const,
+        criteria: [
+          {
+            criterion: "Tests pass",
+            checks: [
+              {
+                kind: "command" as const,
+                program: "node" as const,
+                args: ["--test", "tests/app.test.mjs"],
+                timeoutMs: 120_000,
+              },
+            ],
+          },
+          {
+            criterion: "QA report verified",
+            checks: [
+              {
+                kind: "file" as const,
+                path: ".arc-verify/qa.md",
+                minBytes: 4,
+              },
+            ],
+          },
+        ],
+      },
+      ["Tests pass", "QA report verified"],
+    )
+
+    const executeCommand = vi.fn(async () => ({ exitCode: 0, stdout: "ok\n", stderr: "" }))
+    const initialResult = await executeGoalVerification(contract, root, {
+      successCriteria: ["Tests pass", "QA report verified"],
+      executeCommand,
+    })
+    const initialManifest = await workspaceFileManifest(root)
+    const baseline = buildVerificationBaseline(initialResult, initialManifest.fingerprint)
+    if (!baseline?.checks[0]) throw new Error("Expected baseline")
+    // Simulate that the command recorded .arc-verify/qa.md as an input (e.g. include_str!)
+    baseline.checks[0].inputs = [{ path: ".arc-verify/qa.md", sha256: "e".repeat(64) }]
+    await saveVerificationBaselineManifest(root, initialManifest)
+
+    const { mission } = fixture()
+    mission.workspace.path = root
+    mission.verificationBaseline = baseline
+
+    // Change .arc-verify/qa.md
+    await writeFile(join(root, ".arc-verify/qa.md"), "Updated\n", "utf8")
+
+    // docOnlyRepairReuse must NOT claim reuse for the command because its inputs include the changed file!
+    const reuse = await docOnlyRepairReuse(mission, contract)
+    expect(reuse).toBeUndefined()
   })
 })
 

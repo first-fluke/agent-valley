@@ -167,6 +167,8 @@ export interface MissionSupervision {
   pendingRecovery?: { reason: string; taskId?: string }
   /** Success criteria the last final review failed; a repeat after a repair stops for the operator. */
   finalReviewFailures?: string[]
+  /** Verification failure signature from the last verifyMission failure; repeated identical failure escalates to recovery. */
+  verificationFailureKey?: string
 }
 
 // ── Execution policy/state ───────────────────────────────────────────────────
