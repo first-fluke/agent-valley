@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.20.1](https://github.com/first-fluke/agent-valley/compare/v4.20.0...v4.20.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **chief:** route verification repairs by failing path and escalate repeated failures ([#110](https://github.com/first-fluke/agent-valley/issues/110)) ([5829391](https://github.com/first-fluke/agent-valley/commit/582939121ade67c49a35e44ba6a137e9cbf78601))
+
 ## [4.20.0](https://github.com/first-fluke/agent-valley/compare/v4.19.2...v4.20.0) (2026-11-26)
 
 
