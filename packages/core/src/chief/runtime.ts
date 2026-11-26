@@ -18,6 +18,8 @@ import { HOST_SUSPENDED_EVIDENCE, isHostSleepArtefact } from "./host-suspension"
 import { createLocalMissionRunner, finishLocalProcess } from "./local-runner"
 import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
 import {
+  captureWorkspaceTree,
+  collectDirectChangeSet,
   disposeTaskWorktree,
   integrateTaskWorktree,
   prepareTaskWorktree,
@@ -82,6 +84,9 @@ export class ChiefRuntime {
         await assertMissionWorkspace(mission)
         return fingerprintWorkspace(mission.workspace.path)
       },
+      captureWorkspaceTree: (workspacePath: string) => captureWorkspaceTree(workspacePath),
+      collectDirectChangeSet: (workspacePath: string, inputTree: string, deliveryTree?: string) =>
+        collectDirectChangeSet(workspacePath, inputTree, deliveryTree),
       verify: (mission) => withMissionDeadline(mission, this.signal, (signal) => this.verifyMission(mission, signal)),
       ...(integrationCheckEnabled()
         ? {
