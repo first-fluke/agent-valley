@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.20.0](https://github.com/first-fluke/agent-valley/compare/v4.19.2...v4.20.0) (2026-11-26)
+
+
+### Features
+
+* **chief:** capture TaskChangeSet for direct-in-workspace task executions ([#108](https://github.com/first-fluke/agent-valley/issues/108)) ([6d08e56](https://github.com/first-fluke/agent-valley/commit/6d08e560b9e134b3a1cdda6ca86c97e8043ccb44))
+
 ## [4.19.2](https://github.com/first-fluke/agent-valley/compare/v4.19.1...v4.19.2) (2026-11-26)
 
 
