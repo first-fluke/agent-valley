@@ -25,4 +25,6 @@ export interface CoordinatorContext {
   checkAbort(): void
   protectedFailure(error: unknown): boolean
   invalidate(): void
+  /** Verified workspace fingerprint eligible for direct reuse on resume before any work or repair runs. */
+  reusableVerificationFingerprint?: string
 }

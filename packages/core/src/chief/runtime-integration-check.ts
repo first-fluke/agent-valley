@@ -12,6 +12,7 @@ import {
   checkDigest,
   executeCommandChecks,
   type GoalVerificationCheck,
+  isPassingCommandEvidence,
   safeVerificationCommand,
   validateGoalVerificationContract,
 } from "./verification"
@@ -195,7 +196,7 @@ export function reusableEvidence(
   after: string,
   now: Date = new Date(),
 ): Mission["integrationEvidence"] {
-  const checks = result.evidence.filter((entry) => entry.passed && entry.exitCode === 0 && entry.outputSha256)
+  const checks = result.evidence.filter((entry) => isPassingCommandEvidence(entry))
   if (!result.ok || before !== after || !checks.length || checks.length !== result.evidence.length) return undefined
   return { fingerprint: after, checkedAt: now.toISOString(), checks: checks.slice(0, 40) }
 }

@@ -10,16 +10,20 @@ import {
   INTEGRATION_EVIDENCE_FILE_ENV,
   integrationEvidenceFor,
   readOperatorIntegrationEvidence,
+  reusableEvidence,
   runIntegrationCheck,
 } from "./runtime-integration-check"
 import { MissionStore } from "./store"
 import {
   executeGoalVerification,
   goalVerificationContractDigest,
+  isPassingCommandEvidence,
   validateGoalVerificationContract,
+  validateGoalVerificationResult,
 } from "./verification"
 import {
   buildVerificationBaseline,
+  canReusePriorVerification,
   docOnlyRepairReuse,
   isDocOnlyPath,
   saveVerificationBaselineManifest,
@@ -445,5 +449,233 @@ describe("Part B: operator integration check AV_INTEGRATION_EVIDENCE_FILE handof
       const parsed = await readOperatorIntegrationEvidence(evidenceFile, contract, successCriteria, root, fp, fp)
       expect(parsed).toBeUndefined()
     }
+  })
+})
+
+describe("Part C: flaky-rerun passing command evidence in baseline and reuse", () => {
+  const successCriteria = ["Tests pass", "QA report is present"]
+  const contract = {
+    version: 1 as const,
+    criteria: [
+      {
+        criterion: "Tests pass",
+        checks: [
+          {
+            kind: "command" as const,
+            program: "node" as const,
+            args: ["--test", "tests/app.test.mjs"],
+            timeoutMs: 120_000,
+          },
+        ],
+      },
+      {
+        criterion: "QA report is present",
+        checks: [{ kind: "file" as const, path: "docs/qa-report.md", minBytes: 4, contains: ["PASS"] }],
+      },
+    ],
+  }
+
+  function cargoFlakyRun(verdicts: Record<string, "ok" | "FAILED">) {
+    const lines = Object.entries(verdicts).map(([name, verdict]) => `test ${name} ... ${verdict}`)
+    const failures = Object.values(verdicts).filter((verdict) => verdict === "FAILED").length
+    return {
+      exitCode: 101,
+      stdout: `running ${lines.length} tests\n${lines.join("\n")}\n\ntest result: FAILED. ${lines.length - failures} passed; ${failures} failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s\n`,
+      stderr: "error: 1 target failed:\n    `-p arc-daemon --test suite`\n",
+    }
+  }
+
+  it("accepts flaky-rerun passed evidence (exitCode 101 + nondeterministic) in buildVerificationBaseline, docOnlyRepairReuse, reusableEvidence, and executeGoalVerification reuse while preserving metadata", async () => {
+    const root = await gitRepo({
+      "src/app.mjs": "export const ok = true\n",
+      "tests/app.test.mjs": "import test from 'node:test'\ntest('ok', () => {})\n",
+      "docs/qa-report.md": "Initial QA report: PASS\n",
+    })
+    const { mission } = fixture()
+    mission.workspace.path = root
+    mission.verificationContract = contract
+    mission.verificationContractSha256 = goalVerificationContractDigest(contract)
+
+    const executeCommand = vi
+      .fn()
+      .mockResolvedValueOnce(cargoFlakyRun({ flaky_a: "FAILED", flaky_b: "ok" }))
+      .mockResolvedValueOnce(cargoFlakyRun({ flaky_a: "ok", flaky_b: "FAILED" }))
+
+    const firstResult = await executeGoalVerification(contract, root, {
+      successCriteria,
+      executeCommand,
+      commandReruns: 1,
+    })
+    expect(firstResult.ok).toBe(true)
+    expect(executeCommand).toHaveBeenCalledTimes(2)
+    const firstCheck = firstResult.evidence[0]?.checks[0]
+    expect(firstCheck).toMatchObject({
+      kind: "command",
+      passed: true,
+      exitCode: 101,
+      nondeterministic: ["flaky_a", "flaky_b"],
+    })
+    expect(firstCheck && isPassingCommandEvidence(firstCheck)).toBe(true)
+
+    const initialManifest = await workspaceFileManifest(root)
+    const baseline = buildVerificationBaseline(firstResult, initialManifest.fingerprint)
+    expect(baseline).toBeDefined()
+    expect(baseline?.checks).toHaveLength(1)
+    expect(baseline?.checks[0]).toMatchObject({
+      passed: true,
+      exitCode: 101,
+      nondeterministic: ["flaky_a", "flaky_b"],
+    })
+
+    // reusableEvidence also accepts flaky-rerun passing command checks
+    const intEvidence = reusableEvidence(
+      { ok: true, evidence: baseline?.checks ?? [] },
+      initialManifest.fingerprint,
+      initialManifest.fingerprint,
+    )
+    expect(intEvidence?.checks).toHaveLength(1)
+    expect(intEvidence?.checks[0]?.nondeterministic).toEqual(["flaky_a", "flaky_b"])
+
+    // Save baseline and perform a doc-only repair
+    mission.goalVerification = firstResult
+    mission.verification = { ok: true, fingerprint: initialManifest.fingerprint }
+    mission.verificationBaseline = baseline
+    await saveVerificationBaselineManifest(root, initialManifest)
+    await writeFile(join(root, "docs/qa-report.md"), "Updated QA report: PASS\n", "utf8")
+
+    const parsedContract = validateGoalVerificationContract(contract, successCriteria)
+    const reuse = await docOnlyRepairReuse(mission, parsedContract)
+    expect(reuse).toBeDefined()
+    expect(reuse?.checks).toHaveLength(1)
+    expect(reuse?.reuseReason).toContain("passed in the previous passing verification")
+    expect(reuse?.reuseReason).toContain("only documentation files changed")
+
+    // Re-running goal verification reuses the flaky-rerun command without executing it again
+    const secondResult = await executeGoalVerification(contract, root, {
+      successCriteria,
+      executeCommand,
+      reuse: reuse?.checks,
+      reuseReason: reuse?.reuseReason,
+    })
+    expect(executeCommand).toHaveBeenCalledTimes(2)
+    expect(secondResult.ok).toBe(true)
+    expect(() => validateGoalVerificationResult(secondResult, parsedContract)).not.toThrow()
+    expect(secondResult.evidence[0]?.checks[0]).toMatchObject({
+      passed: true,
+      exitCode: 101,
+      nondeterministic: ["flaky_a", "flaky_b"],
+    })
+    expect(secondResult.evidence[0]?.checks[0]?.summary).toContain("NONDETERMINISTIC: flaky_a, flaky_b")
+    expect(secondResult.evidence[0]?.checks[0]?.summary).toContain("only documentation files changed")
+  })
+
+  it("strictly rejects genuine failures and unproven non-zero command checks in buildVerificationBaseline and reusableEvidence", async () => {
+    const root = await gitRepo({
+      "tests/app.test.mjs": "import test from 'node:test'\ntest('ok', () => {})\n",
+      "docs/qa-report.md": "QA report: PASS\n",
+    })
+    const executeCommand = vi.fn(async () => ({ exitCode: 0, stdout: "ok\n", stderr: "" }))
+    const baseResult = await executeGoalVerification(contract, root, { successCriteria, executeCommand })
+    const fp = (await workspaceFileManifest(root)).fingerprint
+
+    // 1. Genuine failure: result.ok === false, check.passed === false, exitCode: 101
+    const failedResult = structuredClone(baseResult)
+    failedResult.ok = false
+    if (failedResult.evidence[0]?.checks[0]) {
+      failedResult.evidence[0].passed = false
+      failedResult.evidence[0].checks[0].passed = false
+      failedResult.evidence[0].checks[0].exitCode = 101
+    }
+    expect(buildVerificationBaseline(failedResult, fp)).toBeUndefined()
+    expect(reusableEvidence({ ok: true, evidence: failedResult.evidence[0]?.checks ?? [] }, fp, fp)).toBeUndefined()
+
+    // 2. Genuine failure: check.passed === false even with exitCode: 0 (e.g. missing stdoutIncludes)
+    const failedZero = structuredClone(baseResult)
+    if (failedZero.evidence[0]?.checks[0]) {
+      failedZero.evidence[0].checks[0].passed = false
+      failedZero.evidence[0].checks[0].exitCode = 0
+    }
+    expect(buildVerificationBaseline(failedZero, fp)).toBeUndefined()
+
+    // 3. Unproven non-zero pass: passed === true, exitCode === 101, but NO nondeterministic verdicts
+    const unprovenNonZero = structuredClone(baseResult)
+    if (unprovenNonZero.evidence[0]?.checks[0]) {
+      unprovenNonZero.evidence[0].checks[0].passed = true
+      unprovenNonZero.evidence[0].checks[0].exitCode = 101
+      delete unprovenNonZero.evidence[0].checks[0].nondeterministic
+    }
+    expect(buildVerificationBaseline(unprovenNonZero, fp)).toBeUndefined()
+    expect(reusableEvidence({ ok: true, evidence: unprovenNonZero.evidence[0]?.checks ?? [] }, fp, fp)).toBeUndefined()
+
+    // 4. Missing outputSha256
+    const missingSha = structuredClone(baseResult)
+    if (missingSha.evidence[0]?.checks[0]) {
+      delete missingSha.evidence[0].checks[0].outputSha256
+    }
+    expect(buildVerificationBaseline(missingSha, fp)).toBeUndefined()
+  })
+
+  it("canReusePriorVerification rejects completed missions, invalid history, or post-verification operator notes", () => {
+    const { mission } = fixture()
+    mission.plan = {
+      tasks: [
+        {
+          id: "onboarding",
+          title: "Onboarding",
+          personaId: "worker",
+          instructions: "Do it",
+          acceptance: ["Works"],
+          dependencies: [],
+        },
+      ],
+    }
+    mission.tasks = [
+      {
+        id: "onboarding",
+        reviewerId: "reviewer",
+        status: "completed",
+        attempts: 1,
+        fingerprint: "change-1",
+        review: { passed: true, summary: "ok", findings: [] },
+      },
+    ]
+    mission.initialFingerprint = "initial"
+    mission.fingerprint = "change-1"
+    mission.verification = { ok: true, output: "PASS", fingerprint: "change-1" }
+    mission.status = "paused"
+    mission.history = [
+      { at: "2026-11-25T21:00:00.000Z", stage: "work", message: "done" },
+      { at: "2026-11-25T22:50:09.000Z", stage: "verify", message: "Verification passed." },
+      { at: "2026-11-25T22:53:13.000Z", stage: "paused", message: "ENOTFOUND" },
+    ]
+
+    expect(canReusePriorVerification(mission, "change-1")).toBe(true)
+
+    // Fingerprint mismatch
+    expect(canReusePriorVerification(mission, "change-2")).toBe(false)
+
+    // Completed mission still re-verifies
+    const completed = structuredClone(mission)
+    completed.status = "completed"
+    expect(canReusePriorVerification(completed, "change-1")).toBe(false)
+
+    // Operator note BEFORE verification is allowed
+    const preNote = structuredClone(mission)
+    preNote.operatorNotes = [{ at: "2026-11-25T20:00:00.000Z", text: "Early note" }]
+    expect(canReusePriorVerification(preNote, "change-1")).toBe(true)
+
+    // Operator note AT or AFTER verification forces re-verify
+    const postNote = structuredClone(mission)
+    postNote.operatorNotes = [{ at: "2026-11-25T22:55:00.000Z", text: "Re-run verification now" }]
+    expect(canReusePriorVerification(postNote, "change-1")).toBe(false)
+
+    const sameMsNote = structuredClone(mission)
+    sameMsNote.operatorNotes = [{ at: "2026-11-25T22:50:09.000Z", text: "Same-ms note" }]
+    expect(canReusePriorVerification(sameMsNote, "change-1")).toBe(false)
+
+    // Repair event after passing verify forces re-verify
+    const afterRepair = structuredClone(mission)
+    afterRepair.history.push({ at: "2026-11-25T22:54:00.000Z", stage: "repair", message: "Repair task" })
+    expect(canReusePriorVerification(afterRepair, "change-1")).toBe(false)
   })
 })

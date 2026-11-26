@@ -19,6 +19,7 @@ export async function reviewMissionGates(context: CoordinatorContext): Promise<S
     context
   const gates = mission.operatingPolicy?.reviewGates ?? []
   if (!gates.length) return { kind: "next", stage: "verification" }
+  delete context.reusableVerificationFingerprint
   if (!mission.plan || mission.tasks.some((state) => state.status !== "completed"))
     throw new Error("Review gates require completed tasks. Restore the saved plan and independent task reviews.")
   // A resumed or repaired mission always obtains fresh gate evidence; checkpoints retain partial results on pause.

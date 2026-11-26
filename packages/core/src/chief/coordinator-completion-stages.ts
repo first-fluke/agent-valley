@@ -17,6 +17,7 @@ import { reviewPrompt } from "./prompts"
 import { fallbackReport } from "./reports"
 import { reviewGatesAreCurrent } from "./review-gate-check"
 import { parseFinalReview } from "./schemas"
+import { canReusePriorVerification } from "./verification-reuse"
 
 export async function verifyMission(context: CoordinatorContext): Promise<StageTransition> {
   const {
@@ -30,6 +31,20 @@ export async function verifyMission(context: CoordinatorContext): Promise<StageT
     requestRecovery,
     requestRepair,
   } = context
+  checkAbort()
+  const reusableFingerprint = context.reusableVerificationFingerprint
+  delete context.reusableVerificationFingerprint
+  if (reusableFingerprint !== undefined) {
+    const current = await ports.fingerprint(mission)
+    if (current === reusableFingerprint && canReusePriorVerification(mission, current)) {
+      mission.fingerprint = current
+      await save(
+        "verify-reused",
+        `Reused passing verification for unchanged workspace fingerprint ${current}; proceeding directly to final review.`,
+      )
+      return { kind: "next", stage: "approval" }
+    }
+  }
   await checkpoint.transition("verifying", "verify", "Running the operator's verification command.")
   checkAbort()
   let result: { ok: boolean; output?: string }

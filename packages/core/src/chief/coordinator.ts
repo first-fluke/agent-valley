@@ -9,6 +9,7 @@ import { executionState, MissionPause, pauseForFailure, recordPause } from "./ex
 import { fallbackReport } from "./reports"
 import { validateMission } from "./schemas"
 import type { ChiefPorts, Mission, Persona } from "./types"
+import { buildVerificationBaseline } from "./verification-reuse"
 
 const bounded = (value: string) => value.slice(-32_000)
 
@@ -42,6 +43,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     (error instanceof MissionPause &&
       (Boolean(error.nextRunAt) || ["budget", "interrupted", "chief-unavailable"].includes(error.kind)))
   const invalidate = () => {
+    delete context.reusableVerificationFingerprint
     resetTaskApprovals(mission, { preserveUnfinished: true })
     delete mission.finalReview
     delete mission.verification
@@ -49,8 +51,13 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
   }
   const run = createMissionRun(mission, ports, assertContract, checkAbort, checkpoint.persist)
   const generateReport = createMissionReporter(mission, ports, run, persona, fatal)
-  const requestRecovery = createChiefRecovery(mission, ports, { run, persona, save, checkAbort })
+  const baseRequestRecovery = createChiefRecovery(mission, ports, { run, persona, save, checkAbort })
+  const requestRecovery: typeof baseRequestRecovery = async (reason, taskId) => {
+    delete context.reusableVerificationFingerprint
+    return baseRequestRecovery(reason, taskId)
+  }
   const requestRepair = async (reason: string, scope?: string | ReadonlySet<string> | null) => {
+    delete context.reusableVerificationFingerprint
     const selectedTargetId = typeof scope === "string" ? scope : selectRepairTaskId(mission, reason)
     const scopedIds = scope && typeof scope !== "string" ? [...scope] : []
     const targetTaskId =
@@ -84,6 +91,16 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
         ...(scopedIds.length === 1 ? { taskId: scopedIds[0] } : {}),
         message: `Final review repair scope matched ${scopedIds.join(", ")}; other approved tasks keep their delivered work.`,
       })
+    }
+    // Preserve any doc-only command baseline before clearing pre-repair passing verification so a later
+    // resume cannot mistake pre-repair verification for post-repair verification.
+    if (mission.verification?.ok) {
+      if (!mission.verificationBaseline && mission.goalVerification?.ok && mission.verification.fingerprint) {
+        const baseline = buildVerificationBaseline(mission.goalVerification, mission.verification.fingerprint)
+        if (baseline) mission.verificationBaseline = baseline
+      }
+      delete mission.verification
+      delete mission.goalVerification
     }
     // Preserve rejection evidence in prompts; a scoped final-review repair resets only the named tasks and dependents.
     resetTaskApprovals(mission, { keepReviews: true, ...(resetTaskIds ? { resetTaskIds } : {}), targetTaskId })
