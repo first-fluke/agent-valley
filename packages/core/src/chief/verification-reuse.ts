@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import { type WorkspaceFileEntry, type WorkspaceManifest, workspaceFileManifest } from "../workspace/fingerprint"
+import { reviewGatesAreCurrent } from "./review-gate-check"
 import type { Mission } from "./types"
 import {
   type CheckEvidence,
@@ -10,8 +11,10 @@ import {
   type GoalVerificationContract,
   type GoalVerificationResult,
   goalVerificationContractDigest,
+  isPassingCommandEvidence,
   safeVerificationPath,
   type VerificationBaseline,
+  validateGoalVerificationResult,
   verificationCommandTestPaths,
 } from "./verification"
 
@@ -188,7 +191,7 @@ export function buildVerificationBaseline(
   for (const criterion of result.evidence) {
     for (const entry of criterion.checks) {
       if (entry.kind !== "command") continue
-      if (!entry.passed || entry.exitCode !== 0 || !entry.outputSha256) return undefined
+      if (!isPassingCommandEvidence(entry)) return undefined
       if (seen.has(entry.checkSha256)) continue
       seen.add(entry.checkSha256)
       checks.push(entry)
@@ -216,12 +219,7 @@ export async function docOnlyRepairReuse(
   const contractSha256 = goalVerificationContractDigest(contract)
   if (baseline.contractSha256 !== contractSha256) return undefined
   if (mission.verificationContractSha256 && mission.verificationContractSha256 !== contractSha256) return undefined
-  if (
-    !baseline.checks.length ||
-    baseline.checks.some(
-      (entry) => entry.kind !== "command" || !entry.passed || entry.exitCode !== 0 || !entry.outputSha256,
-    )
-  ) {
+  if (!baseline.checks.length || baseline.checks.some((entry) => !isPassingCommandEvidence(entry))) {
     return undefined
   }
   const prevManifest = await loadVerificationBaselineManifest(mission.workspace.path, baseline.fingerprint)
@@ -250,8 +248,105 @@ export async function docOnlyRepairReuse(
     return check !== undefined && !commandAffectedByChangedPaths(check, changedPaths)
   })
   if (!reusable.length) return undefined
+  const verb = reusable.every((entry) => entry.exitCode === 0) ? "exited zero" : "passed"
   const reuseReason = changedPaths.length
-    ? `Explicit command exited zero in the previous passing verification and only documentation files changed since then (${changedPaths.slice(0, 5).join(", ")}${changedPaths.length > 5 ? `, +${changedPaths.length - 5} more` : ""}); its evidence is reused.`
-    : "Explicit command exited zero in the previous passing verification on this identical workspace; its evidence is reused."
+    ? `Explicit command ${verb} in the previous passing verification and only documentation files changed since then (${changedPaths.slice(0, 5).join(", ")}${changedPaths.length > 5 ? `, +${changedPaths.length - 5} more` : ""}); its evidence is reused.`
+    : `Explicit command ${verb} in the previous passing verification on this identical workspace; its evidence is reused.`
   return { checks: reusable, changedDocPaths: changedPaths, reuseReason }
+}
+
+const VERIFICATION_INVALIDATING_STAGES = new Set([
+  "plan",
+  "work",
+  "review",
+  "gate-review",
+  "parallel-integrated",
+  "task-completed",
+  "repair",
+  "repair-scope",
+  "recovery-requested",
+  "supervise",
+  "effect-resolved",
+])
+
+function verifiedTimestampMs(mission: Mission): number | undefined {
+  const candidates: number[] = []
+  if (mission.goalVerification?.checkedAt) {
+    const parsed = Date.parse(mission.goalVerification.checkedAt)
+    if (Number.isFinite(parsed)) candidates.push(parsed)
+  }
+  const verifyEvent = mission.history.findLast(
+    (entry) => entry.stage === "verify" && entry.message === "Verification passed.",
+  )
+  if (verifyEvent) {
+    const parsed = Date.parse(verifyEvent.at)
+    if (Number.isFinite(parsed)) candidates.push(parsed)
+  }
+  if (!candidates.length) return undefined
+  return Math.min(...candidates)
+}
+
+/**
+ * Whether a resumed, not-yet-approved mission can skip re-running verification and advance directly to
+ * `approval` (`final-review`): all tasks are completed, verification already passed on this exact workspace
+ * fingerprint, review gates and contract evidence are valid, and no repair, work, or post-verification
+ * operator note invalidated it. Completed missions still re-verify when explicitly re-invoked.
+ */
+export function canReusePriorVerification(mission: Mission, currentFingerprint: string): boolean {
+  if (mission.status === "completed" || mission.finalReview?.passed) return false
+  if (!mission.plan?.tasks.length) return false
+  if (mission.supervision?.pendingRecovery) return false
+  if (mission.tasks.length !== mission.plan.tasks.length) return false
+  if (
+    !mission.tasks.every(
+      (task) =>
+        task.status === "completed" &&
+        Boolean(task.fingerprint?.trim()) &&
+        task.review?.passed === true &&
+        task.effectState !== "running" &&
+        task.effectState !== "unknown",
+    )
+  )
+    return false
+  if (!mission.verification?.ok) return false
+  if (!currentFingerprint.trim() || mission.verification.fingerprint !== currentFingerprint) return false
+  if (mission.initialFingerprint && currentFingerprint === mission.initialFingerprint) return false
+  if (!reviewGatesAreCurrent(mission, currentFingerprint)) return false
+
+  if (mission.verificationMode === "chief" || mission.verificationContract) {
+    if (!mission.verificationContract || !mission.goalVerification?.ok) return false
+    const contractSha = goalVerificationContractDigest(mission.verificationContract)
+    if (
+      (mission.verificationContractSha256 && mission.verificationContractSha256 !== contractSha) ||
+      mission.goalVerification.contractSha256 !== contractSha
+    )
+      return false
+    try {
+      validateGoalVerificationResult(mission.goalVerification, mission.verificationContract)
+    } catch {
+      return false
+    }
+  }
+
+  let lastVerifyPassIndex = -1
+  for (let index = mission.history.length - 1; index >= 0; index -= 1) {
+    const event = mission.history[index]
+    if (event?.stage === "verify" && event.message === "Verification passed.") {
+      lastVerifyPassIndex = index
+      break
+    }
+  }
+  const trailingHistory = lastVerifyPassIndex >= 0 ? mission.history.slice(lastVerifyPassIndex + 1) : mission.history
+  if (trailingHistory.some((event) => VERIFICATION_INVALIDATING_STAGES.has(event.stage))) return false
+
+  if (mission.operatorNotes?.length) {
+    const verifiedAt = verifiedTimestampMs(mission)
+    if (verifiedAt === undefined) return false
+    for (const note of mission.operatorNotes) {
+      const noteAt = Date.parse(note.at)
+      if (!Number.isFinite(noteAt) || noteAt >= verifiedAt) return false
+    }
+  }
+
+  return true
 }

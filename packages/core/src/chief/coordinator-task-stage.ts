@@ -17,6 +17,7 @@ import { clearReviewerNoVerdict, handoffActor, noteReviewerNoVerdict } from "./h
 import { readyTasks, readyTaskWave } from "./parallel"
 import { reviewPrompt, workPrompt } from "./prompts"
 import { reviewReturnedFindings } from "./returned-findings-review"
+import { reviewGatesAreCurrent } from "./review-gate-check"
 import { settleRepairReview } from "./review-response"
 import { selectTaskReviewer } from "./review-routing"
 import { parseReview } from "./schemas"
@@ -223,6 +224,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
   }
   checkAbort()
   while (mission.tasks.some((state) => state.status !== "completed")) {
+    delete context.reusableVerificationFingerprint
     const plan = mission.plan
     if (!plan) throw new Error("No task can run. Restore an acyclic plan with complete dependency state.")
     // A wave can leave several tasks with spent repairs; none of them takes another Actor run first.
@@ -317,6 +319,14 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
     const state = mission.tasks.find((entry) => entry.id === task?.id)
     if (!task || !state) throw new Error("No task can run. Restore an acyclic plan with complete dependency state.")
     await performTask(task, state)
+  }
+  if (
+    context.reusableVerificationFingerprint &&
+    mission.verification?.ok &&
+    mission.verification.fingerprint === context.reusableVerificationFingerprint &&
+    reviewGatesAreCurrent(mission, context.reusableVerificationFingerprint)
+  ) {
+    return { kind: "next", stage: "verification" }
   }
   return { kind: "next", stage: mission.operatingPolicy?.reviewGates?.length ? "review-gates" : "verification" }
 }

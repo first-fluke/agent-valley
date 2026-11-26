@@ -127,6 +127,19 @@ export function checkDigest(check: GoalVerificationCheck): string {
   return createHash("sha256").update(JSON.stringify(check)).digest("hex")
 }
 
+/**
+ * Whether persisted command evidence represents a verified pass: either the command exited zero,
+ * or every failing test across reruns passed in another run on the unchanged workspace (`nondeterministic`).
+ */
+export function isPassingCommandEvidence(entry: CheckEvidence): boolean {
+  return (
+    entry.kind === "command" &&
+    entry.passed &&
+    Boolean(entry.outputSha256) &&
+    (entry.exitCode === 0 || Boolean(entry.nondeterministic?.length))
+  )
+}
+
 const FAILURE_LINE = /FAILED|panicked at|^failures:|^error(?:\[|:)|\(fail\)|AssertionError|assertion .*failed|✗|×/
 
 /**
@@ -209,9 +222,7 @@ export function validateGoalVerificationResult(
         (check.kind !== "command" && observed.path !== check.path) ||
         (observed.passed && check.kind !== "command" && !observed.sha256) ||
         (observed.passed && check.kind === "file" && check.sha256 !== undefined && check.sha256 !== observed.sha256) ||
-        (observed.passed &&
-          check.kind === "command" &&
-          ((observed.exitCode !== 0 && !observed.nondeterministic?.length) || !observed.outputSha256))
+        (observed.passed && check.kind === "command" && !isPassingCommandEvidence(observed))
       )
         throw new Error(
           "Verification check lacks bound file or process evidence. Rerun it against the actual worktree.",
@@ -242,25 +253,29 @@ async function inspectCheck(
     const sha256 = checkDigest(check)
     const earlier = options.reuse?.find(
       (entry) =>
-        entry.kind === "command" &&
+        isPassingCommandEvidence(entry) &&
         entry.checkSha256 === sha256 &&
-        entry.passed &&
-        entry.exitCode === 0 &&
-        !!entry.outputSha256 &&
         JSON.stringify(entry.inputs ?? []) === JSON.stringify(inputs),
     )
-    if (earlier)
+    if (earlier) {
+      const nondeterministic = earlier.nondeterministic?.length ? earlier.nondeterministic : undefined
+      const nondeterministicNote = nondeterministic
+        ? ` NONDETERMINISTIC: ${nondeterministic.slice(0, 12).join(", ")}${nondeterministic.length > 12 ? ` and ${nondeterministic.length - 12} more` : ""}.`
+        : ""
+      const baseReason =
+        options.reuseReason ??
+        (nondeterministic
+          ? `Explicit command passed via nondeterministic rerun (exit ${earlier.exitCode}) in the integration check on this identical workspace; its evidence is reused.`
+          : "Explicit command exited zero in the integration check on this identical workspace; its evidence is reused.")
       return {
         passed: true,
-        summary: checkSummary(
-          true,
-          options.reuseReason ??
-            "Explicit command exited zero in the integration check on this identical workspace; its evidence is reused.",
-        ),
-        exitCode: 0,
+        summary: checkSummary(true, `${baseReason}${nondeterministicNote}`),
+        exitCode: earlier.exitCode,
+        ...(nondeterministic ? { nondeterministic } : {}),
         outputSha256: earlier.outputSha256,
         inputs,
       }
+    }
     const run = async () => {
       const result = await (options.executeCommand ?? executeVerificationCommand)(check.program, check.args, {
         cwd: root,

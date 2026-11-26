@@ -14,6 +14,7 @@ import { planWaveWidths } from "./parallel"
 import { planPrompt } from "./prompts"
 import { parsePlanningResponse } from "./schemas"
 import { runStructuredStage } from "./structured-stage"
+import { canReusePriorVerification } from "./verification-reuse"
 
 export async function resumeMission(context: CoordinatorContext): Promise<StageTransition> {
   const { mission, ports, operatorGoal, operatorVerify, checkAbort, save } = context
@@ -76,12 +77,15 @@ export async function resumeMission(context: CoordinatorContext): Promise<StageT
     throw new Error(
       `Chief Director stopped before achieving the goal: ${stopped?.reason}. The original goal remains unresolved.`,
     )
+  if (canReusePriorVerification(mission, current)) context.reusableVerificationFingerprint = current
+  else delete context.reusableVerificationFingerprint
   return { kind: "next", stage: "planning" }
 }
 
 export async function planMission(context: CoordinatorContext): Promise<StageTransition> {
   const { mission, ports, contract, checkpoint, run, persona, save, checkAbort, requestRecovery } = context
   if (!mission.plan) {
+    delete context.reusableVerificationFingerprint
     await refreshMissionContainers(mission, ports)
     checkAbort()
     if (mission.containerObservationPolicy?.enabled)
@@ -111,6 +115,7 @@ export async function planMission(context: CoordinatorContext): Promise<StageTra
     )
   }
   if (mission.supervision?.pendingRecovery) {
+    delete context.reusableVerificationFingerprint
     const pending = mission.supervision.pendingRecovery
     await requestRecovery(pending.reason, pending.taskId)
   }
