@@ -6,6 +6,14 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.19.2](https://github.com/first-fluke/agent-valley/compare/v4.19.1...v4.19.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **chief:** prioritize routing candidates and reject zero-token API errors ([f294b3f](https://github.com/first-fluke/agent-valley/commit/f294b3f0b00797d73847a86be92c75ab9ea6814d))
+* **chief:** skip redundant verify on final-review resume and accept flaky-rerun baseline evidence ([#107](https://github.com/first-fluke/agent-valley/issues/107)) ([412eec6](https://github.com/first-fluke/agent-valley/commit/412eec6697aaf3908c5e17643f723528dcfd5440))
+
 ## [4.19.1](https://github.com/first-fluke/agent-valley/compare/v4.19.0...v4.19.1) (2026-11-25)
 
 
