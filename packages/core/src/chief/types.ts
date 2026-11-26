@@ -23,6 +23,7 @@ import type { MetricSourcePolicy } from "./metric-source-policy"
 import type { PreparedOmaActor } from "./oma-actor"
 import type { ChiefOperatingPolicy, ChiefOperations } from "./operations"
 import type { OrganizationContext } from "./organization-types"
+import type { TaskChangeSet } from "./parallel-contract"
 import type { SkillDescriptor } from "./skills"
 import type {
   GoalVerificationContract,
@@ -177,6 +178,20 @@ export interface ChiefPorts {
     mission: Mission,
   ): Promise<{ status: "satisfied" | "waiting" | "failed"; reason: string; nextPollAt?: string }>
   observeContainers?(mission: Mission): Promise<ContainerObservationSnapshot>
+  /**
+   * Capture the git tree SHA of a workspace using a safe temporary index, respecting ignore rules.
+   * Resolves to undefined when the workspace is not a git repository or tree capture fails.
+   */
+  captureWorkspaceTree?(workspacePath: string): Promise<string | undefined>
+  /**
+   * Compute a standard TaskChangeSet between an input tree and the workspace's delivered tree.
+   * Resolves to undefined when diffing or tree capture fails.
+   */
+  collectDirectChangeSet?(
+    workspacePath: string,
+    inputTree: string,
+    deliveryTree?: string,
+  ): Promise<TaskChangeSet | undefined>
   parallel?: {
     prepare(
       mission: Mission,

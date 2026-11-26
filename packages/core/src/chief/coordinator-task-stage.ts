@@ -140,6 +140,14 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
             "unknown-effect",
           )
         if (!awaitingReview && (task.effectScope !== "external" || state.effectState !== "completed")) {
+          let preTaskTree: string | undefined
+          if (task.effectScope !== "external" && ports.captureWorkspaceTree) {
+            try {
+              preTaskTree = await ports.captureWorkspaceTree(mission.workspace.path)
+            } catch {
+              preTaskTree = undefined
+            }
+          }
           const prompt = workPrompt(mission, task, state, persona(task.personaId))
           const first = await run(persona(task.personaId), prompt, "work", task.id)
           // A task that works alone edits the mission workspace; an external effect is never repeated.
@@ -157,6 +165,14 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
                   signal: ports.signal,
                 })
           applyWorkResult(task, state, output)
+          if (preTaskTree && ports.collectDirectChangeSet) {
+            try {
+              const changeSet = await ports.collectDirectChangeSet(mission.workspace.path, preTaskTree)
+              if (changeSet) state.changeSet = changeSet
+            } catch {
+              // fail-closed: leave state.changeSet undefined
+            }
+          }
         }
         if (awaitingReview && state.parallel) {
           if (!ports.parallel)

@@ -1,10 +1,18 @@
-import { describe, expect, it } from "vitest"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
 import { coordinate } from "./coordinator"
 import { finalReviewRepairScope, resetTaskApprovals } from "./coordinator-state"
 import { brief, fixture, passed } from "./goal-supervision.fixture"
 import { fallbackReport } from "./reports"
 import { finalCriteria, validateMission } from "./schemas"
 import type { ChiefTask, ChiefTaskState, Mission, Review } from "./types"
+
+const roots: string[] = []
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+})
 
 function task(id: string, dependencies: string[] = []): ChiefTask {
   return { id, title: id, personaId: "worker", instructions: `Do ${id}`, acceptance: [`${id} done`], dependencies }
@@ -325,6 +333,60 @@ describe("final-review repair through the coordinator", () => {
     expect(scopeEvents[0]).toMatchObject({ taskId: "independent-qa" })
     expect(scopeEvents[0]?.message).toContain("independent-qa")
     expect(scopeEvents[0]?.message).not.toContain("named no specific task")
+  })
+
+  it("matches files delivered by a direct-in-workspace task without manual changeSet injection", async () => {
+    const root = await mkdtemp(join(tmpdir(), "av-direct-scope-"))
+    roots.push(root)
+    const { runCommand } = await import("../workspace/worktree-lifecycle")
+    for (const args of [
+      ["init", "-b", "main"],
+      ["config", "user.name", "AV Test"],
+      ["config", "user.email", "av@example.invalid"],
+    ]) {
+      await runCommand("git", args, { cwd: root })
+    }
+    await writeFile(join(root, ".gitignore"), ".agent-valley/\n")
+    await runCommand("git", ["add", "."], { cwd: root })
+    await runCommand("git", ["commit", "-m", "initial"], { cwd: root })
+
+    const value = fixture()
+    value.mission.workspace.path = root
+    const { captureWorkspaceTree, collectDirectChangeSet } = await import("./parallel-workspace")
+    value.ports.captureWorkspaceTree = captureWorkspaceTree
+    value.ports.collectDirectChangeSet = collectDirectChangeSet
+
+    const tasks = [task("implement"), task("independent-qa")]
+    value.mission.maxRepairs = 3
+    const original = value.runAgent.getMockImplementation()
+    value.runAgent.mockImplementation(async (actor, prompt, m, stage, context) => {
+      if (stage === "plan") return JSON.stringify({ tasks, goalBrief: brief })
+      if (stage === "work") {
+        if (context?.taskId === "independent-qa") {
+          await mkdir(join(root, "docs/qa"), { recursive: true })
+          await writeFile(join(root, "docs/qa/report.md"), "# QA Report\n")
+        } else {
+          await writeFile(join(root, "app.ts"), "export const app = 1;\n")
+        }
+        await original?.(actor, prompt, m, stage, context)
+        return "Work done"
+      }
+      return (await original?.(actor, prompt, m, stage, context)) ?? passed
+    })
+
+    await coordinate(value.mission, value.ports)
+    expect(value.mission.status).toBe("completed")
+
+    const qaState = value.mission.tasks.find((s) => s.id === "independent-qa")
+    expect(qaState?.changeSet).toBeDefined()
+    expect(qaState?.changeSet?.files.map((f) => f.path)).toContain("docs/qa/report.md")
+
+    const scope = finalReviewRepairScope(value.mission, {
+      passed: false,
+      summary: "findings",
+      findings: ["Overstated assertion in `./docs/qa/report.md:42` must be corrected."],
+    })
+    expect([...(scope ?? [])]).toEqual(["independent-qa"])
   })
 })
 

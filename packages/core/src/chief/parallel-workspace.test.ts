@@ -16,6 +16,8 @@ import { retainTaskEvidence, taskEvidenceRefs } from "./parallel-evidence"
 import { parallelGit } from "./parallel-git"
 import {
   captureParallelBaseline,
+  captureWorkspaceTree,
+  collectDirectChangeSet,
   collectTaskDelivery,
   disposeTaskWorktree,
   integrateTaskDelivery,
@@ -674,5 +676,50 @@ describe("task change set schema", () => {
     const legacy = { id: "task-1", reviewerId: "reviewer", status: "completed" as const, attempts: 1 }
     expect(taskStateSchema.parse(legacy)).toEqual(legacy)
     expect(taskStateSchema.parse({ ...legacy, changeSet })).toEqual({ ...legacy, changeSet })
+  })
+})
+
+describe("direct workspace change set capture", () => {
+  it("captures workspace git tree and builds a standard TaskChangeSet for direct edits", async () => {
+    const root = mission.workspace.path
+    const preTree = await captureWorkspaceTree(root)
+    expect(preTree).toMatch(/^[a-f0-9]{40,64}$/)
+    if (!preTree) throw new Error("Expected preTree")
+
+    await writeFile(join(root, "a.txt"), "A direct edit\n")
+    await writeFile(join(root, "new-file.txt"), "Brand new file\n")
+    await rm(join(root, "remove.txt"))
+
+    const postTree = await captureWorkspaceTree(root)
+    expect(postTree).toMatch(/^[a-f0-9]{40,64}$/)
+    expect(postTree).not.toBe(preTree)
+
+    const changeSet = await collectDirectChangeSet(root, preTree, postTree)
+    if (!changeSet) throw new Error("Expected a direct change set")
+
+    expect(changeSet.version).toBe(1)
+    expect(changeSet.inputTree).toBe(preTree)
+    expect(changeSet.deliveryTree).toBe(postTree)
+    const byPath = new Map(changeSet.files.map((file) => [file.path, file]))
+    expect(byPath.get("a.txt")?.status).toBe("modified")
+    expect(byPath.get("new-file.txt")?.status).toBe("added")
+    expect(byPath.get("remove.txt")?.status).toBe("deleted")
+    expect(changeSet.diff).toContain("A direct edit")
+    expect(changeSet.diff).toContain("Brand new file")
+
+    // When deliveryTree is omitted, it captures current workspace state
+    const autoChangeSet = await collectDirectChangeSet(root, preTree)
+    expect(autoChangeSet?.deliveryTree).toBe(postTree)
+    expect(autoChangeSet?.files.map((f) => f.path).sort()).toEqual(["a.txt", "new-file.txt", "remove.txt"])
+  })
+
+  it("fails closed cleanly and returns undefined when workspace is not a git repo or invalid", async () => {
+    const nonGit = await mkdtemp(join(tmpdir(), "non-git-"))
+    try {
+      expect(await captureWorkspaceTree(nonGit)).toBeUndefined()
+      expect(await collectDirectChangeSet(nonGit, "a".repeat(40))).toBeUndefined()
+    } finally {
+      await rm(nonGit, { recursive: true, force: true })
+    }
   })
 })

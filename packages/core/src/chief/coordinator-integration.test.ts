@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { coordinate } from "./coordinator"
 import { recordIntegrationCheck } from "./coordinator-integration"
-import { fixture, passed, rejected } from "./goal-supervision.fixture"
+import { brief, fixture, passed, rejected } from "./goal-supervision.fixture"
 import { INTEGRATION_CHECK_RULE } from "./prompts"
 import {
   combinedIntegrationResult,
@@ -18,6 +18,7 @@ import {
   operatorIntegrationResult,
   reusableEvidence,
 } from "./runtime-integration-check"
+import type { IntegrationCheckContext } from "./types"
 import { executeCommandChecks, executeGoalVerification, safeVerificationCommand } from "./verification"
 
 const roots: string[] = []
@@ -331,5 +332,224 @@ describe("integration check wave context", () => {
     const fallback = await integrationCheckContextEnv(rootDir, { taskIds: ["task-3"], openCodeTasks: 0 })
     expect(fallback[INTEGRATION_CHANGED_FILES_FILE_ENV]).toBeUndefined()
     expect(fallback[INTEGRATION_OPEN_TASKS_ENV]).toBe("0")
+  })
+
+  it("captures direct-in-workspace changeSet and forwards changedFiles to recordIntegrationCheck when openCodeTasks > 0", async () => {
+    const root = await mkdtemp(join(tmpdir(), "av-direct-integration-"))
+    roots.push(root)
+    const { runCommand } = await import("../workspace/worktree-lifecycle")
+    for (const args of [
+      ["init", "-b", "main"],
+      ["config", "user.name", "AV Test"],
+      ["config", "user.email", "av@example.invalid"],
+    ]) {
+      await runCommand("git", args, { cwd: root })
+    }
+    await writeFile(join(root, ".gitignore"), ".agent-valley/\n")
+    await writeFile(join(root, "onboarding.ts"), "export const onboarding = false;\n")
+    await runCommand("git", ["add", "."], { cwd: root })
+    await runCommand("git", ["commit", "-m", "initial"], { cwd: root })
+
+    const { mission, ports, runAgent } = codeFixture()
+    mission.workspace.path = root
+    const { captureWorkspaceTree, collectDirectChangeSet } = await import("./parallel-workspace")
+    ports.captureWorkspaceTree = captureWorkspaceTree
+    ports.collectDirectChangeSet = collectDirectChangeSet
+
+    const tasks = [
+      {
+        id: "task-1",
+        title: "first",
+        personaId: "worker",
+        instructions: "first",
+        acceptance: ["done"],
+        dependencies: [],
+      },
+      {
+        id: "task-2",
+        title: "second",
+        personaId: "worker",
+        instructions: "second",
+        acceptance: ["done"],
+        dependencies: ["task-1"],
+      },
+    ]
+
+    const check = vi.fn(async (_m, context?: IntegrationCheckContext) => {
+      if (context?.changedFiles) {
+        const env = await integrationCheckContextEnv(root, context)
+        expect(env[INTEGRATION_CHANGED_FILES_FILE_ENV]).toBeDefined()
+      }
+      return { ok: true, output: "ok" }
+    })
+    ports.integrationCheck = check
+
+    const original = runAgent.getMockImplementation()
+    runAgent.mockImplementation(async (...args) => {
+      if (args[3] === "plan") return JSON.stringify({ tasks, goalBrief: brief })
+      if (args[3] === "work") {
+        if (args[4]?.taskId === "task-1") {
+          await writeFile(join(root, "onboarding.ts"), "export const onboarding = true;\n")
+        } else if (args[4]?.taskId === "task-2") {
+          await writeFile(join(root, "feature.ts"), "export const feature = true;\n")
+        }
+      }
+      return (await original?.(...args)) ?? passed
+    })
+
+    await coordinate(mission, ports)
+    expect(mission.status).toBe("completed")
+
+    // Task 1 check: openCodeTasks is 1, changedFiles is ["onboarding.ts"]
+    expect(check).toHaveBeenCalledWith(mission, {
+      taskIds: ["task-1"],
+      changedFiles: ["onboarding.ts"],
+      openCodeTasks: 1,
+    })
+    const task1State = mission.tasks.find((s) => s.id === "task-1")
+    expect(task1State?.changeSet?.files).toEqual([
+      expect.objectContaining({ path: "onboarding.ts", status: "modified" }),
+    ])
+
+    // Task 2 check: openCodeTasks is 0, changedFiles is ["feature.ts"]
+    expect(check).toHaveBeenLastCalledWith(mission, {
+      taskIds: ["task-2"],
+      changedFiles: ["feature.ts"],
+      openCodeTasks: 0,
+    })
+    const task2State = mission.tasks.find((s) => s.id === "task-2")
+    expect(task2State?.changeSet?.files).toEqual([expect.objectContaining({ path: "feature.ts", status: "added" })])
+  })
+
+  it("omits changedFiles on fallback when changeSet capture is unavailable or fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "av-direct-integration-fallback-"))
+    roots.push(root)
+    const { runCommand } = await import("../workspace/worktree-lifecycle")
+    for (const args of [
+      ["init", "-b", "main"],
+      ["config", "user.name", "AV Test"],
+      ["config", "user.email", "av@example.invalid"],
+    ]) {
+      await runCommand("git", args, { cwd: root })
+    }
+    await writeFile(join(root, ".gitignore"), ".agent-valley/\n")
+    await writeFile(join(root, "onboarding.ts"), "export const onboarding = false;\n")
+    await runCommand("git", ["add", "."], { cwd: root })
+    await runCommand("git", ["commit", "-m", "initial"], { cwd: root })
+
+    const { mission, ports, runAgent } = codeFixture()
+    mission.workspace.path = root
+    // ChangeSet capture unavailable
+    delete ports.captureWorkspaceTree
+    delete ports.collectDirectChangeSet
+
+    const tasks = [
+      {
+        id: "task-1",
+        title: "first",
+        personaId: "worker",
+        instructions: "first",
+        acceptance: ["done"],
+        dependencies: [],
+      },
+    ]
+
+    const check = vi.fn(async () => ({ ok: true, output: "ok" }))
+    ports.integrationCheck = check
+
+    const original = runAgent.getMockImplementation()
+    runAgent.mockImplementation(async (...args) => {
+      if (args[3] === "plan") return JSON.stringify({ tasks, goalBrief: brief })
+      if (args[3] === "work") {
+        await writeFile(join(root, "onboarding.ts"), "export const onboarding = true;\n")
+      }
+      return (await original?.(...args)) ?? passed
+    })
+
+    await coordinate(mission, ports)
+    expect(mission.status).toBe("completed")
+    expect(check).toHaveBeenCalledWith(mission, {
+      taskIds: ["task-1"],
+      openCodeTasks: 0,
+    })
+    const taskState = mission.tasks.find((s) => s.id === "task-1")
+    expect(taskState?.changeSet).toBeUndefined()
+  })
+
+  it("updates changeSet cleanly on task repair retry (attempt 2+)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "av-direct-integration-retry-"))
+    roots.push(root)
+    const { runCommand } = await import("../workspace/worktree-lifecycle")
+    for (const args of [
+      ["init", "-b", "main"],
+      ["config", "user.name", "AV Test"],
+      ["config", "user.email", "av@example.invalid"],
+    ]) {
+      await runCommand("git", args, { cwd: root })
+    }
+    await writeFile(join(root, ".gitignore"), ".agent-valley/\n")
+    await writeFile(join(root, "onboarding.ts"), "export const onboarding = false;\n")
+    await runCommand("git", ["add", "."], { cwd: root })
+    await runCommand("git", ["commit", "-m", "initial"], { cwd: root })
+
+    const { mission, ports, runAgent } = codeFixture()
+    mission.workspace.path = root
+    const { captureWorkspaceTree, collectDirectChangeSet } = await import("./parallel-workspace")
+    ports.captureWorkspaceTree = captureWorkspaceTree
+    ports.collectDirectChangeSet = collectDirectChangeSet
+
+    mission.maxRepairs = 1
+    const tasks = [
+      {
+        id: "task-1",
+        title: "first",
+        personaId: "worker",
+        instructions: "first",
+        acceptance: ["done"],
+        dependencies: [],
+      },
+    ]
+
+    const check = vi.fn(async () => ({ ok: true, output: "ok" }))
+    ports.integrationCheck = check
+
+    const original = runAgent.getMockImplementation()
+    let attempt = 0
+    let reviews = 0
+    runAgent.mockImplementation(async (...args) => {
+      if (args[3] === "plan") return JSON.stringify({ tasks, goalBrief: brief })
+      if (args[3] === "work") {
+        attempt += 1
+        if (attempt === 1) {
+          await writeFile(join(root, "onboarding.ts"), "export const onboarding = 1;\n")
+        } else {
+          await writeFile(join(root, "repair.ts"), "export const repair = 1;\n")
+        }
+      }
+      if (args[3] === "review") {
+        reviews += 1
+        return reviews === 1 ? rejected : passed
+      }
+      return (await original?.(...args)) ?? passed
+    })
+
+    await coordinate(mission, ports)
+    expect(mission.status).toBe("completed")
+
+    // Attempt 1 changed onboarding.ts
+    expect(check).toHaveBeenNthCalledWith(1, mission, {
+      taskIds: ["task-1"],
+      changedFiles: ["onboarding.ts"],
+      openCodeTasks: 0,
+    })
+    // Attempt 2 (repair) added repair.ts
+    expect(check).toHaveBeenNthCalledWith(2, mission, {
+      taskIds: ["task-1"],
+      changedFiles: ["repair.ts"],
+      openCodeTasks: 0,
+    })
+    const taskState = mission.tasks.find((s) => s.id === "task-1")
+    expect(taskState?.attempts).toBe(2)
+    expect(taskState?.changeSet?.files).toEqual([expect.objectContaining({ path: "repair.ts", status: "added" })])
   })
 })

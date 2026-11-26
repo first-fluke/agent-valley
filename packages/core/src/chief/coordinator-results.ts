@@ -31,8 +31,8 @@ export function applyWorkResult(task: ChiefTask, state: ChiefTaskState, output: 
     else delete state.previousReview
     delete state.review
   }
-  // The AV-computed delta described an earlier integrated delivery; a new Actor attempt replaces it.
-  // Parallel integration recomputes it after this call. A direct attempt has none.
+  // The AV-computed delta described an earlier delivery; a new Actor attempt replaces it.
+  // Parallel integration or direct changeSet capture recomputes it after this call.
   delete state.changeSet
   // The integrated tree changed with this attempt; its earlier check no longer describes it.
   delete state.integrationCheck
