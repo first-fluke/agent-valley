@@ -96,6 +96,54 @@ export function isDocOnlyPath(path: string): boolean {
   return true
 }
 
+const SENSITIVE_DOT_DIRS = new Set([
+  ".git",
+  ".github",
+  ".gitlab",
+  ".circleci",
+  ".claude",
+  ".codex",
+  ".cursor",
+  ".agents",
+  ".agent-valley",
+  ".vscode",
+  ".idea",
+  ".husky",
+  ".config",
+  ".cargo",
+  ".yarn",
+  ".pnpm",
+  ".npm",
+  ".bun",
+  ".venv",
+  ".tox",
+  ".env",
+])
+
+/**
+ * Checks whether a path inside a dot-directory is an explicitly declared contract file check
+ * for a markdown document (e.g. `.arc-verify/phase-2-vendor-catalogue/qa.md`), excluding sensitive
+ * VCS, CI, agent, editor, runtime, and package manager directories.
+ */
+export function isContractDocEvidencePath(path: string, contractFilePaths: ReadonlySet<string>): boolean {
+  if (!safeVerificationPath(path)) return false
+  const normalized = path
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^(?:\.\/)+/, "")
+  if (!contractFilePaths.has(normalized)) return false
+  const segments = normalized.split("/")
+  for (let index = 0; index < segments.length - 1; index++) {
+    const segment = segments[index]?.toLowerCase()
+    if (!segment || NON_DOC_SEGMENTS.has(segment)) return false
+    if (SENSITIVE_DOT_DIRS.has(segment) || segment.startsWith(".env")) return false
+  }
+  const filename = segments[segments.length - 1]?.toLowerCase() ?? ""
+  if (filename.startsWith(".")) return false
+  if (!filename.endsWith(".md") && !filename.endsWith(".mdx")) return false
+  return true
+}
+
 export interface WorkspaceManifestDiffEntry {
   path: string
   prev?: WorkspaceFileEntry
@@ -185,7 +233,6 @@ export function buildVerificationBaseline(
   result: GoalVerificationResult,
   fingerprint: string,
 ): VerificationBaseline | undefined {
-  if (!result.ok) return undefined
   const seen = new Set<string>()
   const checks: CheckEvidence[] = []
   for (const criterion of result.evidence) {
@@ -231,8 +278,20 @@ export async function docOnlyRepairReuse(
     return undefined
   }
   const changed = diffWorkspaceManifests(prevManifest, currManifest)
+  const contractFilePaths = new Set<string>()
+  for (const criterion of contract.criteria) {
+    for (const check of criterion.checks) {
+      if (check.kind === "file") {
+        const normalized = check.path
+          .trim()
+          .replace(/\\/g, "/")
+          .replace(/^(?:\.\/)+/, "")
+        contractFilePaths.add(normalized)
+      }
+    }
+  }
   for (const entry of changed) {
-    if (!isDocOnlyPath(entry.path)) return undefined
+    if (!isDocOnlyPath(entry.path) && !isContractDocEvidencePath(entry.path, contractFilePaths)) return undefined
     if (entry.prev && !entry.prev.regularNonExec) return undefined
     if (entry.curr && !entry.curr.regularNonExec) return undefined
   }
@@ -243,9 +302,12 @@ export async function docOnlyRepairReuse(
       if (check.kind === "command") contractCommands.set(checkDigest(check), check)
     }
   }
+  const changedSet = new Set(changedPaths)
   const reusable = baseline.checks.filter((entry) => {
     const check = contractCommands.get(entry.checkSha256)
-    return check !== undefined && !commandAffectedByChangedPaths(check, changedPaths)
+    if (!check || commandAffectedByChangedPaths(check, changedPaths)) return false
+    if (entry.inputs?.some((input) => changedSet.has(input.path))) return false
+    return true
   })
   if (!reusable.length) return undefined
   const verb = reusable.every((entry) => entry.exitCode === 0) ? "exited zero" : "passed"

@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto"
 import { ensureCurrentMissionContainers, verifyMissionContainers } from "./coordinator-container"
 import { applyVerificationResult } from "./coordinator-results"
 import { assertCurrentReviewGates } from "./coordinator-review-gates"
 import { ReadOnlyViolation } from "./coordinator-run"
 import type { CoordinatorContext, StageTransition } from "./coordinator-stages"
-import { finalReviewRepairScope, selectRepairTaskId } from "./coordinator-state"
+import { finalReviewRepairScope, selectRepairTaskId, selectVerificationRepairScope } from "./coordinator-state"
 import { MissionPause, pauseForFailure, recordPause } from "./execution"
 import {
   blockingCriteria,
@@ -62,8 +63,47 @@ export async function verifyMission(context: CoordinatorContext): Promise<StageT
   await save("verify", mission.verification.ok ? "Verification passed." : "Verification failed.")
   if (!mission.verification.ok) {
     const reason = mission.verification.output ?? "The operator's verification command failed"
-    await requestRepair(reason, selectRepairTaskId(mission, reason))
+    const repairScope = selectVerificationRepairScope(mission, reason)
+    const targetTaskId =
+      (typeof repairScope === "string"
+        ? repairScope
+        : repairScope instanceof Set && repairScope.size > 0
+          ? selectRepairTaskId(mission, reason, [...repairScope].at(-1))
+          : undefined) ?? selectRepairTaskId(mission, reason)
+
+    let failureKey: string
+    const failingCheckShas = mission.goalVerification?.evidence
+      ? [
+          ...new Set(
+            mission.goalVerification.evidence
+              .flatMap((entry) => entry.checks)
+              .filter((check) => !check.passed)
+              .map((check) => check.checkSha256),
+          ),
+        ].sort()
+      : []
+    if (failingCheckShas.length > 0) {
+      failureKey = `${targetTaskId ?? ""}:${failingCheckShas.join(",")}`.slice(0, 1_000)
+    } else {
+      const outputHash = createHash("sha256").update(reason.trim()).digest("hex")
+      failureKey = `${targetTaskId ?? ""}:${outputHash}`.slice(0, 1_000)
+    }
+
+    if (mission.supervision) {
+      const previousKey = mission.supervision.verificationFailureKey
+      mission.supervision.verificationFailureKey = failureKey
+      if (previousKey && previousKey === failureKey) {
+        delete mission.supervision.verificationFailureKey
+        await requestRecovery(reason, targetTaskId)
+        return { kind: "next", stage: "tasks" }
+      }
+    }
+
+    await requestRepair(reason, repairScope ?? selectRepairTaskId(mission, reason))
     return { kind: "next", stage: "tasks" }
+  }
+  if (mission.supervision?.verificationFailureKey) {
+    delete mission.supervision.verificationFailureKey
   }
   if (!reviewGatesAreCurrent(mission, mission.verification.fingerprint)) {
     if ((mission.gateReviewRefreshes ?? 0) >= mission.maxRepairs + 1) {

@@ -204,7 +204,7 @@ export class ChiefRuntime {
             message: `Reused ${docReuse.checks.length} verified command check(s) after doc-only changes (${docReuse.changedDocPaths.slice(0, 5).join(", ")}${docReuse.changedDocPaths.length > 5 ? `, +${docReuse.changedDocPaths.length - 5} more` : ""}); file checks re-executed fresh.`,
           })
         }
-        if (mission.goalVerification.ok) {
+        if (mission.goalVerification) {
           const manifest = await workspaceFileManifest(mission.workspace.path).catch(() => undefined)
           if (manifest) {
             const baseline = buildVerificationBaseline(mission.goalVerification, manifest.fingerprint)

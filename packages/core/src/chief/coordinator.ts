@@ -48,6 +48,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     delete mission.finalReview
     delete mission.verification
     delete mission.verificationBaseline
+    delete mission.supervision?.verificationFailureKey
   }
   const run = createMissionRun(mission, ports, assertContract, checkAbort, checkpoint.persist)
   const generateReport = createMissionReporter(mission, ports, run, persona, fatal)
@@ -95,7 +96,7 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
     // Preserve any doc-only command baseline before clearing pre-repair passing verification so a later
     // resume cannot mistake pre-repair verification for post-repair verification.
     if (mission.verification?.ok) {
-      if (!mission.verificationBaseline && mission.goalVerification?.ok && mission.verification.fingerprint) {
+      if (!mission.verificationBaseline && mission.goalVerification && mission.verification.fingerprint) {
         const baseline = buildVerificationBaseline(mission.goalVerification, mission.verification.fingerprint)
         if (baseline) mission.verificationBaseline = baseline
       }
