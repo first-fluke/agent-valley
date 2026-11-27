@@ -577,6 +577,37 @@ describe("parallel Chief task coordination", () => {
     expect(parallel.prepare).not.toHaveBeenCalled()
   })
 
+  it("threads active parallelSlots into hooks.run for concurrent waves and omits it for single-slot waves", async () => {
+    const multi = setup()
+    multi.wave.push({
+      id: "c",
+      title: "c",
+      personaId: "worker",
+      instructions: "Work c",
+      acceptance: ["Verified c"],
+      dependencies: [],
+    })
+    multi.mission.tasks.push({ id: "c", reviewerId: "reviewer", status: "pending", attempts: 0 })
+    multi.mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 2 })
+    const multiSlots: Array<number | undefined> = []
+    multi.hooks.run = vi.fn(async (_actor, _prompt, _stage, taskId, context) => {
+      multiSlots.push(context?.parallelSlots)
+      return `Output ${taskId}`
+    })
+    expect(await performParallelWave(multi.mission, multi.ports, multi.wave, multi.hooks)).toEqual([])
+    expect(multiSlots).toEqual([2, 2, 2])
+
+    const single = setup()
+    single.mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 1 })
+    const singleSlots: Array<number | undefined> = []
+    single.hooks.run = vi.fn(async (_actor, _prompt, _stage, taskId, context) => {
+      singleSlots.push(context?.parallelSlots)
+      return `Output ${taskId}`
+    })
+    expect(await performParallelWave(single.mission, single.ports, single.wave, single.hooks)).toEqual([])
+    expect(singleSlots).toEqual([undefined, undefined])
+  })
+
   it("treats mid-mission reclaimApplied errors as non-fatal and records parallel-retained warnings", async () => {
     const { mission, ports, wave, parallel, hooks } = setup()
     parallel.reclaimApplied = vi.fn(async () => ({

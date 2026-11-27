@@ -14,7 +14,7 @@ export interface ParallelWaveHooks {
     prompt: string,
     stage: ChiefStage,
     taskId?: string,
-    context?: { workspace?: Workspace; signal?: AbortSignal },
+    context?: { workspace?: Workspace; signal?: AbortSignal; parallelSlots?: number },
   ): Promise<string>
   save(stage: string, message: string, taskId?: string): Promise<void>
   review(task: ChiefTask, state: ChiefTaskState): Promise<void>
@@ -282,6 +282,9 @@ export async function performParallelWave(
   }
   const pending = prepared.filter(({ state }) => state.output === undefined)
   mission.status = "executing"
+  // A wave may hold more ready tasks than Actor slots; the rest start as slots free up.
+  const workSlots = Math.max(1, Math.min(pending.length, mission.executionPolicy?.maxParallel ?? pending.length))
+  const slotContext = workSlots > 1 ? { parallelSlots: workSlots } : {}
   const results = await runJoinedWave(
     pending,
     async ({ task, state, actor, workspace, previousOutput }, signal) => {
@@ -292,6 +295,7 @@ export async function performParallelWave(
       const first = await hooks.run(actor, prompt, "work", task.id, {
         workspace,
         signal,
+        ...slotContext,
       })
       // Feedback an Actor can act on arrives while it still holds its workspace, not a wave later: a failed
       // pre-delivery check returns to the same Actor without spending a repair round or a review.
@@ -301,7 +305,8 @@ export async function performParallelWave(
         workspacePath: workspace.path,
         taskId: task.id,
         output: first,
-        rerun: (feedback) => hooks.run(actor, `${prompt}\n\n${feedback}`, "work", task.id, { workspace, signal }),
+        rerun: (feedback) =>
+          hooks.run(actor, `${prompt}\n\n${feedback}`, "work", task.id, { workspace, signal, ...slotContext }),
         save,
         signal,
       })
@@ -313,8 +318,7 @@ export async function performParallelWave(
       )
     },
     ports.signal,
-    // A wave may hold more ready tasks than Actor slots; the rest start as slots free up.
-    Math.max(1, Math.min(pending.length, mission.executionPolicy?.maxParallel ?? pending.length)),
+    workSlots,
   )
   results.forEach((result, index) => {
     const entry = pending[index]

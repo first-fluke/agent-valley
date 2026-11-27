@@ -124,6 +124,70 @@ describe("Chief Runtime isolated Actor execution", () => {
     expect(markers.filter((name) => name.endsWith(".active"))).toEqual([])
   })
 
+  it("injects bounded CARGO_BUILD_JOBS into runner.spawn env only for concurrent Cargo work runs without operator override", async () => {
+    const spawnedEnvs: Array<Record<string, string> | undefined> = []
+    const stubRunner = {
+      spawn: vi.fn(
+        async (params: {
+          attemptId: string
+          attempt: { startedAt: string }
+          issue: { identifier: string }
+          workspace: { path: string }
+          env?: Record<string, string>
+        }) => {
+          spawnedEnvs.push(params.env)
+          return {
+            attemptId: params.attemptId,
+            issueKey: params.issue.identifier,
+            result: Promise.resolve({
+              ...params.attempt,
+              id: params.attemptId,
+              issueId: mission.id,
+              workspacePath: params.workspace.path,
+              finishedAt: new Date(Date.parse(params.attempt.startedAt) + 10).toISOString(),
+              exitCode: 0,
+              agentOutput: "ok",
+            }),
+            cancel: async () => {},
+            kill: async () => {},
+            isAlive: () => false,
+            sendMessage: async () => {},
+          }
+        },
+      ),
+    }
+    const localRuntime = new ChiefRuntime(
+      new MissionStore(join(root, ".agent-valley/missions-cargo-jobs")),
+      undefined,
+      undefined,
+      undefined,
+      stubRunner as never,
+    )
+    const ports = localRuntime.ports()
+    vi.stubEnv("CARGO_BUILD_JOBS", undefined)
+
+    // Non-Cargo workspace -> no CARGO_BUILD_JOBS even with parallelSlots=3
+    await ports.runAgent(actor, "Non-Cargo parallel work", mission, "work", { taskId: "t1", parallelSlots: 3 })
+    expect(spawnedEnvs.at(-1)?.CARGO_BUILD_JOBS).toBeUndefined()
+
+    // Cargo workspace with parallelSlots=3 -> bounded CARGO_BUILD_JOBS injected
+    await writeFile(join(root, "Cargo.toml"), "[workspace]\n")
+    await ports.runAgent(actor, "Cargo parallel work", mission, "work", { taskId: "t2", parallelSlots: 3 })
+    expect(spawnedEnvs.at(-1)?.CARGO_BUILD_JOBS).toMatch(/^[1-9]\d*$/)
+
+    // Serial run (parallelSlots=1) -> omitted
+    await ports.runAgent(actor, "Cargo serial work", mission, "work", { taskId: "t3", parallelSlots: 1 })
+    expect(spawnedEnvs.at(-1)?.CARGO_BUILD_JOBS).toBeUndefined()
+
+    // Explicit operator CARGO_BUILD_JOBS -> never overridden
+    vi.stubEnv("CARGO_BUILD_JOBS", "7")
+    await ports.runAgent(actor, "Cargo explicit override", mission, "work", { taskId: "t4", parallelSlots: 3 })
+    expect(spawnedEnvs.at(-1)?.CARGO_BUILD_JOBS).toBeUndefined()
+
+    vi.unstubAllEnvs()
+    await localRuntime.close()
+  })
+
   it("retains deadline budget classification after joining a real typed verification process", async () => {
     await writeFile(join(root, "waiting.test.mjs"), "setInterval(()=>{},1000)")
     mission.verifyCommand = ""

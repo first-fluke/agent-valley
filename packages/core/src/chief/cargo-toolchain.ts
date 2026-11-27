@@ -1,6 +1,6 @@
 import { constants } from "node:fs"
 import { access, lstat, readdir, readFile, stat } from "node:fs/promises"
-import { homedir } from "node:os"
+import { availableParallelism, homedir } from "node:os"
 import { delimiter, isAbsolute, join } from "node:path"
 
 const channelName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
@@ -131,4 +131,23 @@ export async function cargoCompilerCacheEnvironment(
     RUSTC_WRAPPER: sccache,
     ...(source.CARGO_INCREMENTAL === undefined ? { CARGO_INCREMENTAL: "0" } : {}),
   }
+}
+
+/**
+ * Cap Cargo's default per-invocation parallelism when multiple isolated Actors compile concurrently
+ * on the same host, preventing CPU/RAM swap thrashing (e.g. 3 Actors × 8 rustc jobs on an 8-core host).
+ * Leaves single-slot runs, non-Cargo workspaces, and explicit operator `CARGO_BUILD_JOBS` untouched.
+ */
+export async function cargoParallelJobsEnvironment(
+  root: string,
+  parallelSlots: number | undefined,
+  source: NodeJS.ProcessEnv = process.env,
+  cpuCount: number = availableParallelism(),
+): Promise<Record<string, string>> {
+  if (!parallelSlots || !Number.isFinite(parallelSlots) || parallelSlots <= 1) return {}
+  if (source.CARGO_BUILD_JOBS !== undefined) return {}
+  const manifest = await lstat(join(root, "Cargo.toml")).catch(() => undefined)
+  if (!manifest?.isFile()) return {}
+  const cpus = Number.isFinite(cpuCount) && cpuCount >= 1 ? cpuCount : 1
+  return { CARGO_BUILD_JOBS: String(Math.max(1, Math.floor(cpus / Math.floor(parallelSlots)))) }
 }

@@ -327,3 +327,33 @@ describe("cargoCompilerCacheEnvironment", () => {
     expect(await cargoToolchain.cargoCompilerCacheEnvironment(ws, { PATH: binDir, RUSTC_WRAPPER: "" })).toEqual({})
   })
 })
+
+describe("cargoParallelJobsEnvironment", () => {
+  it("sets bounded CARGO_BUILD_JOBS for concurrent Cargo Actor runs and floors at 1", async () => {
+    const { root: ws } = await fixture()
+    await writeFile(join(ws, "Cargo.toml"), "[workspace]\n")
+
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 3, {}, 8)).toEqual({ CARGO_BUILD_JOBS: "2" })
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 2, {}, 8)).toEqual({ CARGO_BUILD_JOBS: "4" })
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 3, {}, 16)).toEqual({ CARGO_BUILD_JOBS: "5" })
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 4, {}, 2)).toEqual({ CARGO_BUILD_JOBS: "1" })
+  })
+
+  it("omits CARGO_BUILD_JOBS on serial single-slot runs, explicit overrides, or non-Cargo workspaces", async () => {
+    const { root: ws } = await fixture()
+
+    // Non-Cargo workspace (no Cargo.toml) -> omitted
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 3, {}, 8)).toEqual({})
+
+    await writeFile(join(ws, "Cargo.toml"), "[workspace]\n")
+
+    // Serial / invalid concurrency -> omitted
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 1, {}, 8)).toEqual({})
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, undefined, {}, 8)).toEqual({})
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 0, {}, 8)).toEqual({})
+
+    // Explicit operator CARGO_BUILD_JOBS is never overridden (including empty string)
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 3, { CARGO_BUILD_JOBS: "6" }, 8)).toEqual({})
+    expect(await cargoToolchain.cargoParallelJobsEnvironment(ws, 3, { CARGO_BUILD_JOBS: "" }, 8)).toEqual({})
+  })
+})
