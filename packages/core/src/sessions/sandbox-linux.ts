@@ -61,11 +61,12 @@
 
 import { existsSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { PROJECT_CONFIG_FILENAME } from "../config/project-config-path"
 import { agentHomeAccess } from "./sandbox-agent-paths"
 import { resolveBinaryPath } from "./sandbox-binary"
 import { linkedWorktreeGitPaths } from "./sandbox-git"
+import { type ToolchainSandboxPaths, toolchainSandboxPaths } from "./sandbox-toolchain-paths"
 import type { SandboxBuildRequest, SandboxCommand } from "./sandbox-types"
 
 const READONLY_ROOTS = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/var"]
@@ -127,14 +128,18 @@ export function buildLinuxSandboxCommand(
 
   const resolvedTmp = canonicalPath(tmp)
   const sharedTmp = SHARED_TMP_PATHS.filter((path) => path !== tmp && canonicalPath(path) !== resolvedTmp)
+  const toolchain = toolchainSandboxPaths("linux", home, req.env ?? process.env)
   const writablePaths = [
-    req.workspacePath,
-    tmp,
-    ...sharedTmp,
-    ...agentPaths.active,
-    `${home}/.cache`,
-    `${home}/.npm`,
-    `${home}/.bun`,
+    ...new Set([
+      req.workspacePath,
+      tmp,
+      ...sharedTmp,
+      ...agentPaths.active,
+      `${home}/.cache`,
+      `${home}/.npm`,
+      `${home}/.bun`,
+      ...toolchain.writableDirs,
+    ]),
   ]
   // NOTE: deliberately no blanket `${home}/.config` entry here — see the
   // module docstring "Credential denylist" section. Agent CLIs this
@@ -145,7 +150,9 @@ export function buildLinuxSandboxCommand(
 
   // Masks come last so even a workspace nested under a protected directory
   // cannot expose host credentials through its later read-write bind.
-  if (existsSync(home)) maskCredentialPaths(args, home, agentPaths.inactive, req.workspacePath)
+  if (existsSync(home)) {
+    maskCredentialPaths(args, home, agentPaths.inactive, req.workspacePath, toolchain, writablePaths)
+  }
 
   args.push("--chdir", req.workspacePath)
   args.push("--")
@@ -174,22 +181,54 @@ export function buildLinuxSandboxCommand(
  * create a bind destination inside a tree that already exists in the
  * mount namespace being built.
  */
-function maskCredentialPaths(args: string[], home: string, inactiveAgentPaths: string[], workspacePath: string): void {
-  const maskDirs = [`${home}/.config/agent-valley`, `${home}/.agent-valley`, `${home}/.ssh`, ...inactiveAgentPaths]
+function isUnderMountedRoot(path: string, mountedRoots: readonly string[]): boolean {
+  const candidates = [path, canonicalPath(path)]
+  return candidates.some((candidate) =>
+    mountedRoots.some((mountedRoot) => candidate === mountedRoot || candidate.startsWith(`${mountedRoot}/`)),
+  )
+}
+
+function maskCredentialPaths(
+  args: string[],
+  home: string,
+  inactiveAgentPaths: string[],
+  workspacePath: string,
+  toolchain: ToolchainSandboxPaths,
+  writablePaths: readonly string[],
+): void {
+  const mountedRoots = [...new Set([home, tmpdir(), ...READONLY_ROOTS, workspacePath, ...writablePaths])]
+    .filter((root) => existsSync(root))
+    .flatMap((root) => [root, canonicalPath(root)])
+
+  const maskDirs = [
+    ...new Set([
+      `${home}/.config/agent-valley`,
+      `${home}/.agent-valley`,
+      `${home}/.ssh`,
+      ...inactiveAgentPaths,
+      ...toolchain.credentialDirs.filter((dir) => {
+        const parent = dirname(dir)
+        return existsSync(parent) && isUnderMountedRoot(parent, mountedRoots)
+      }),
+    ]),
+  ]
   for (const dir of maskDirs) {
     args.push("--tmpfs", dir)
   }
 
-  const maskFiles = [`${home}/.git-credentials`]
-  const mountedRoots = [home, tmpdir(), ...READONLY_ROOTS, workspacePath]
-    .filter((root) => existsSync(root))
-    .flatMap((root) => [root, realpathSync(root)])
+  const maskFiles = [
+    `${home}/.git-credentials`,
+    ...toolchain.credentialFiles.filter((file) => {
+      const parent = dirname(file)
+      return existsSync(parent) && isUnderMountedRoot(parent, mountedRoots)
+    }),
+  ]
   for (const root of new Set([process.cwd(), workspacePath])) {
     if (mountedRoots.some((mountedRoot) => root === mountedRoot || root.startsWith(`${mountedRoot}/`))) {
       maskFiles.push(join(root, PROJECT_CONFIG_FILENAME))
     }
   }
-  for (const file of maskFiles) {
+  for (const file of new Set(maskFiles)) {
     args.push("--ro-bind", "/dev/null", file)
   }
 }
