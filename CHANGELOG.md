@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.22.3](https://github.com/first-fluke/agent-valley/compare/v4.22.2...v4.22.3) (2026-11-27)
+
+
+### Performance
+
+* **chief:** reuse passing integration check on byte-identical no-op waves ([#125](https://github.com/first-fluke/agent-valley/issues/125)) ([837585d](https://github.com/first-fluke/agent-valley/commit/837585d3cfac1e5a5e87330dbbc01c19360643fd))
+
 ## [4.22.2](https://github.com/first-fluke/agent-valley/compare/v4.22.1...v4.22.2) (2026-11-27)
 
 
