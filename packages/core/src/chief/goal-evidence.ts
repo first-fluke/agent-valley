@@ -85,7 +85,11 @@ export function validateFinalReview(review: Review, mission: Mission): Review {
       "Chief goal checks have no actual observations. Run the pinned verification contract before final review.",
     )
   if (mission.goalVerification && mission.verificationContract) {
-    const result = validateGoalVerificationResult(mission.goalVerification, mission.verificationContract)
+    const result = validateGoalVerificationResult(
+      mission.goalVerification,
+      mission.verificationContract,
+      new Set(waived.keys()),
+    )
     for (const observed of result.evidence) {
       const criterion = assessed.find((entry) => entry.criterion === observed.criterion)
       if (!observed.passed && criterion) {

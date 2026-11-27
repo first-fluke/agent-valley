@@ -254,6 +254,7 @@ export function selectVerificationRepairScope(mission: Mission, _reason?: string
 
   const failingChecks: CheckEvidence[] = []
   for (const criterion of mission.goalVerification.evidence) {
+    if (criterion.waived) continue
     for (const check of criterion.checks) {
       if (!check.passed) failingChecks.push(check)
     }

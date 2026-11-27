@@ -14,6 +14,7 @@ import { releaseContinuousBuildOutputs } from "./continuous-workspace"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
 import { fingerprintWorkspace, workspaceFileManifest } from "./fingerprint"
+import { waivedCriteria } from "./goal-evidence"
 import { HOST_SUSPENDED_EVIDENCE, isHostSleepArtefact } from "./host-suspension"
 import { createLocalMissionRunner, finishLocalProcess } from "./local-runner"
 import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
@@ -191,9 +192,10 @@ export class ChiefRuntime {
           successCriteria: mission.goalBrief?.successCriteria ?? [],
           expectedContractSha256: mission.verificationContractSha256,
           timeoutMs: mission.timeoutSec * 1_000,
-          signal: signal,
+          signal,
           onSpawned: (pid, detached) => active.spawned(pid, detached),
           commandReruns: verificationReruns(),
+          waivedCriteria: new Set(waivedCriteria(mission).keys()),
           ...(reuse ? { reuse } : {}),
           ...(docReuse ? { reuseReason: docReuse.reuseReason } : {}),
         })

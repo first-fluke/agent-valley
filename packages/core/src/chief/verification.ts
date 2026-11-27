@@ -51,6 +51,7 @@ export const goalVerificationResultSchema = z.strictObject({
       z.strictObject({
         criterion: z.string().min(1).max(4_000),
         passed: z.boolean(),
+        waived: z.boolean().optional(),
         // Evidence mirrors the contract: one record per contract check, so the limits must match.
         checks: z.array(checkEvidenceSchema).min(1).max(20),
       }),
@@ -106,6 +107,8 @@ export interface GoalVerificationOptions {
   reuseReason?: string
   /** How often a command that exited non-zero is run again on the unchanged workspace. Defaults to none. */
   commandReruns?: number
+  /** Criteria the operator recorded as waived (still inspected and reported unmet, no longer blocking). */
+  waivedCriteria?: ReadonlySet<string>
 }
 
 export const VERIFICATION_RERUNS_ENV = "AV_VERIFICATION_RERUNS"
@@ -197,6 +200,7 @@ export function jsonFailureDetail(
 export function validateGoalVerificationResult(
   input: unknown,
   contract: GoalVerificationContract,
+  waivedCriteria?: ReadonlySet<string>,
 ): GoalVerificationResult {
   const result = goalVerificationResultSchema.parse(input)
   if (
@@ -213,6 +217,10 @@ export function validateGoalVerificationResult(
       evidence.passed !== evidence.checks.every((check) => check.passed)
     )
       throw new Error("Verification evidence omits or changes an original criterion. Rerun all its checks.")
+    if (evidence.waived === true && (evidence.passed || !waivedCriteria?.has(evidence.criterion)))
+      throw new Error(
+        "Verification evidence marks a criterion waived without a matching unmet operator waiver. Restore the saved waiver or rerun verification.",
+      )
     for (const [checkIndex, check] of criterion.checks.entries()) {
       const observed = evidence.checks[checkIndex]
       if (
@@ -237,7 +245,7 @@ export function validateGoalVerificationResult(
       }
     }
   }
-  if (result.ok !== result.evidence.every((entry) => entry.passed))
+  if (result.ok !== result.evidence.every((entry) => entry.passed || entry.waived === true))
     throw new Error("Verification completion must match every actual evidence check.")
   return result
 }
@@ -418,24 +426,27 @@ export async function executeGoalVerification(
       }
       checks.push({ checkSha256: checkDigest(check), kind: check.kind, ...observed })
     }
-    evidence.push({ criterion: criterion.criterion, passed: checks.every((check) => check.passed), checks })
+    const passed = checks.every((check) => check.passed)
+    const waived = !passed && Boolean(options.waivedCriteria?.has(criterion.criterion))
+    evidence.push({ criterion: criterion.criterion, passed, ...(waived ? { waived: true } : {}), checks })
   }
   const output = evidence
-    .map(
-      (entry) =>
-        `${entry.passed ? "PASS" : "FAIL"} ${entry.criterion}\n${entry.checks.map((check) => check.summary).join("\n")}`,
-    )
+    .map((entry) => {
+      const label = entry.passed ? "PASS" : entry.waived ? "WAIVED (UNMET)" : "FAIL"
+      return `${label} ${entry.criterion}\n${entry.checks.map((check) => check.summary).join("\n")}`
+    })
     .join("\n\n")
     .slice(0, 32_000)
   return validateGoalVerificationResult(
     {
-      ok: evidence.every((entry) => entry.passed),
+      ok: evidence.every((entry) => entry.passed || entry.waived === true),
       output,
       contractSha256,
       checkedAt: (options.now?.() ?? new Date()).toISOString(),
       evidence,
     },
     contract,
+    options.waivedCriteria,
   )
 }
 
