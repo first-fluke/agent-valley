@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.22.2](https://github.com/first-fluke/agent-valley/compare/v4.22.1...v4.22.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* **chief:** honor operator criterionWaivers in Chief verification and avoid brittle count pins ([#123](https://github.com/first-fluke/agent-valley/issues/123)) ([cfbd17d](https://github.com/first-fluke/agent-valley/commit/cfbd17d16c4f74f7288d365dd9ee980d8f52b912))
+
 ## [4.22.1](https://github.com/first-fluke/agent-valley/compare/v4.22.0...v4.22.1) (2026-11-27)
 
 
