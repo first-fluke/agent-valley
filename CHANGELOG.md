@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.22.4](https://github.com/first-fluke/agent-valley/compare/v4.22.3...v4.22.4) (2026-11-27)
+
+
+### Bug Fixes
+
+* **chief:** protect terminal pauses, allow handoff retry and deprioritize routes ([#127](https://github.com/first-fluke/agent-valley/issues/127)) ([094a77f](https://github.com/first-fluke/agent-valley/commit/094a77f841e7cbeb2cb84a1eddee8a3d20598f52))
+
 ## [4.22.3](https://github.com/first-fluke/agent-valley/compare/v4.22.2...v4.22.3) (2026-11-27)
 
 
