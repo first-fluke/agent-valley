@@ -18,6 +18,7 @@ import {
   operatorIntegrationResult,
   reusableEvidence,
 } from "./runtime-integration-check"
+import { validateMission } from "./schemas"
 import type { IntegrationCheckContext } from "./types"
 import { executeCommandChecks, executeGoalVerification, safeVerificationCommand } from "./verification"
 
@@ -551,5 +552,225 @@ describe("integration check wave context", () => {
     const taskState = mission.tasks.find((s) => s.id === "task-1")
     expect(taskState?.attempts).toBe(2)
     expect(taskState?.changeSet?.files).toEqual([expect.objectContaining({ path: "repair.ts", status: "added" })])
+  })
+})
+
+describe("no-op wave integration check reuse", () => {
+  const emptyChangeSet = {
+    version: 1 as const,
+    inputTree: "a".repeat(40),
+    deliveryTree: "a".repeat(40),
+    files: [],
+    diff: "",
+    diffTruncated: false,
+  }
+
+  function twoCodeTasksMission() {
+    const { mission, ports } = codeFixture()
+    mission.plan = {
+      tasks: [
+        {
+          id: "task-1",
+          title: "first",
+          personaId: "worker",
+          instructions: "first",
+          acceptance: ["done"],
+          dependencies: [],
+        },
+        {
+          id: "task-2",
+          title: "second",
+          personaId: "worker",
+          instructions: "second",
+          acceptance: ["done"],
+          dependencies: ["task-1"],
+        },
+      ],
+    }
+    mission.tasks = [
+      { id: "task-1", reviewerId: "reviewer", status: "completed", attempts: 1, output: "done" },
+      { id: "task-2", reviewerId: "reviewer", status: "reviewing", attempts: 1, output: "done" },
+    ]
+    return { mission, ports }
+  }
+
+  it("reuses a passing final-wave integration check on a subsequent no-op repair wave with identical fingerprint", async () => {
+    const { mission, ports } = twoCodeTasksMission()
+    const fp = "f".repeat(64)
+    ports.fingerprint = vi.fn(async () => fp)
+    const check = vi.fn(async () => ({ ok: true, output: "cargo test --workspace\nPASS: all 404 tests" }))
+    ports.integrationCheck = check
+    const history: string[] = []
+    const save = async (_stage: string, message: string) => {
+      history.push(message)
+    }
+
+    // 1. Final-wave integration check passes (openCodeTasks === 0)
+    const task2 = mission.tasks[1]
+    if (!task2) throw new Error("Expected task-2")
+    await recordIntegrationCheck(mission, ports, [task2], save)
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(mission.lastPassingIntegrationCheck).toMatchObject({
+      fingerprint: fp,
+      openCodeTasks: 0,
+      output: "cargo test --workspace\nPASS: all 404 tests",
+    })
+
+    // Seed integrationEvidence to verify reuse preserves it untouched
+    const existingEvidence = {
+      fingerprint: fp,
+      checkedAt: "2026-11-27T00:00:00.000Z",
+      checks: [
+        {
+          checkSha256: "1".repeat(64),
+          kind: "command" as const,
+          passed: true,
+          summary: "PASS",
+          exitCode: 0,
+          outputSha256: "2".repeat(64),
+        },
+      ],
+    }
+    mission.integrationEvidence = existingEvidence
+
+    // 2. Final-review repair wave runs task-1 as a no-op (empty changeSet) on identical fingerprint (openCodeTasks === 0)
+    task2.status = "completed"
+    mission.tasks[0] = {
+      id: "task-1",
+      reviewerId: "reviewer",
+      status: "reviewing",
+      attempts: 2,
+      output: "no-op repair",
+      changeSet: emptyChangeSet,
+    }
+    await recordIntegrationCheck(mission, ports, [mission.tasks[0]], save)
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(mission.tasks[0].integrationCheck?.ok).toBe(true)
+    expect(mission.tasks[0].integrationCheck?.output).toContain(
+      "Reused passing integration check for unchanged workspace.",
+    )
+    expect(mission.tasks[0].integrationCheck?.output).toContain("PASS: all 404 tests")
+    expect(mission.integrationEvidence).toBe(existingEvidence)
+    expect(history.at(-1)).toContain("Reused passing integration check on unchanged workspace before review of task-1.")
+
+    // 3. Also reuses when a prior final-wave check (openCodeTasks === 0) precedes a mid-cycle no-op wave (openCodeTasks === 1)
+    task2.status = "pending"
+    mission.tasks[0] = { ...mission.tasks[0], integrationCheck: undefined }
+    await recordIntegrationCheck(mission, ports, [mission.tasks[0]], save)
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(mission.tasks[0]?.integrationCheck?.ok).toBe(true)
+  })
+
+  it("does NOT reuse a mid-cycle check (openCodeTasks > 0) for a final-wave no-op task (openCodeTasks === 0)", async () => {
+    const { mission, ports } = twoCodeTasksMission()
+    const fp = "e".repeat(64)
+    ports.fingerprint = vi.fn(async () => fp)
+    const check = vi.fn(async () => ({ ok: true, output: "scoped pass" }))
+    ports.integrationCheck = check
+
+    // Mid-cycle wave: task-1 reviewing while task-2 is pending -> openCodeTasks === 1
+    mission.tasks[0] = { id: "task-1", reviewerId: "reviewer", status: "reviewing", attempts: 1, output: "mid" }
+    mission.tasks[1] = { id: "task-2", reviewerId: "reviewer", status: "pending", attempts: 0 }
+    await recordIntegrationCheck(mission, ports, [mission.tasks[0]], async () => {})
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(mission.lastPassingIntegrationCheck?.openCodeTasks).toBe(1)
+
+    // Final wave: task-1 completed, task-2 no-op -> openCodeTasks === 0 -> MUST run full check!
+    mission.tasks[0].status = "completed"
+    mission.tasks[1] = {
+      id: "task-2",
+      reviewerId: "reviewer",
+      status: "reviewing",
+      attempts: 1,
+      output: "no-op final",
+      changeSet: emptyChangeSet,
+    }
+    await recordIntegrationCheck(mission, ports, [mission.tasks[1]], async () => {})
+    expect(check).toHaveBeenCalledTimes(2)
+    expect(mission.lastPassingIntegrationCheck?.openCodeTasks).toBe(0)
+  })
+
+  it("does NOT reuse when workspace fingerprint changed or changeSet is missing", async () => {
+    const { mission, ports } = twoCodeTasksMission()
+    let currentFp = "1".repeat(64)
+    ports.fingerprint = vi.fn(async () => currentFp)
+    const check = vi.fn(async () => ({ ok: true, output: "pass" }))
+    ports.integrationCheck = check
+
+    const task2 = mission.tasks[1]
+    if (!task2) throw new Error("Expected task-2")
+    await recordIntegrationCheck(mission, ports, [task2], async () => {})
+    expect(check).toHaveBeenCalledTimes(1)
+
+    // Fingerprint drifted -> must re-run even with empty changeSet
+    currentFp = "2".repeat(64)
+    delete task2.integrationCheck
+    task2.changeSet = emptyChangeSet
+    await recordIntegrationCheck(mission, ports, [task2], async () => {})
+    expect(check).toHaveBeenCalledTimes(2)
+
+    // Missing changeSet (changedFiles === undefined) -> must re-run even on identical fingerprint
+    delete task2.integrationCheck
+    delete task2.changeSet
+    await recordIntegrationCheck(mission, ports, [task2], async () => {})
+    expect(check).toHaveBeenCalledTimes(3)
+  })
+
+  it("clears lastPassingIntegrationCheck on failure and never reuses a failed check", async () => {
+    const { mission, ports } = twoCodeTasksMission()
+    const fp = "3".repeat(64)
+    ports.fingerprint = vi.fn(async () => fp)
+    const check = vi
+      .fn<NonNullable<typeof ports.integrationCheck>>()
+      .mockResolvedValueOnce({ ok: true, output: "initial pass" })
+      .mockResolvedValueOnce({ ok: false, output: "regression failed" })
+      .mockResolvedValueOnce({ ok: true, output: "recovered pass" })
+    ports.integrationCheck = check
+
+    const task2 = mission.tasks[1]
+    if (!task2) throw new Error("Expected task-2")
+    await recordIntegrationCheck(mission, ports, [task2], async () => {})
+    expect(mission.lastPassingIntegrationCheck?.fingerprint).toBe(fp)
+
+    // Subsequent check fails (no changeSet so it runs) -> clears lastPassingIntegrationCheck
+    mission.tasks[1] = { ...task2, integrationCheck: undefined }
+    await recordIntegrationCheck(mission, ports, [mission.tasks[1]], async () => {})
+    expect(mission.tasks[1]?.integrationCheck?.ok).toBe(false)
+    expect(mission.lastPassingIntegrationCheck).toBeUndefined()
+
+    // Next no-op wave must NOT reuse because lastPassingIntegrationCheck was cleared
+    mission.tasks[1] = { ...mission.tasks[1], integrationCheck: undefined, changeSet: emptyChangeSet }
+    await recordIntegrationCheck(mission, ports, [mission.tasks[1]], async () => {})
+    expect(check).toHaveBeenCalledTimes(3)
+    expect(mission.lastPassingIntegrationCheck?.fingerprint).toBe(fp)
+  })
+
+  it("validates lastPassingIntegrationCheck in validateMission and rejects invalid shapes", () => {
+    const { mission } = codeFixture()
+    mission.lastPassingIntegrationCheck = {
+      fingerprint: "a".repeat(64),
+      openCodeTasks: 0,
+      at: "2026-11-27T12:00:00.000Z",
+      output: "PASS",
+    }
+    expect(() => validateMission(structuredClone(mission))).not.toThrow()
+
+    const badOpenCount = structuredClone(mission)
+    if (badOpenCount.lastPassingIntegrationCheck) badOpenCount.lastPassingIntegrationCheck.openCodeTasks = -1
+    expect(() => validateMission(badOpenCount)).toThrow()
+
+    const badTimestamp = structuredClone(mission)
+    if (badTimestamp.lastPassingIntegrationCheck) badTimestamp.lastPassingIntegrationCheck.at = "not-a-date"
+    expect(() => validateMission(badTimestamp)).toThrow()
+
+    const extraField = structuredClone(mission) as unknown as Record<string, unknown>
+    extraField.lastPassingIntegrationCheck = {
+      fingerprint: "a".repeat(64),
+      openCodeTasks: 0,
+      at: "2026-11-27T12:00:00.000Z",
+      output: "PASS",
+      unexpected: true,
+    }
+    expect(() => validateMission(extraField as unknown as typeof mission)).toThrow()
   })
 })

@@ -1,4 +1,4 @@
-export { goalBriefSchema, reviewSchema } from "./mission-state-schema"
+export { goalBriefSchema, lastPassingIntegrationCheckSchema, reviewSchema } from "./mission-state-schema"
 export { parseJson, validatePlan } from "./plan-validation"
 export {
   parseSupervisionResponse,
@@ -23,6 +23,7 @@ import { metricSourcePolicySchema } from "./metric-source-policy"
 import {
   advisoryReviewSchema,
   goalBriefSchema,
+  lastPassingIntegrationCheckSchema,
   refineChiefWaitSchedule,
   reviewSchema,
   skillDescriptorSchema,
@@ -152,6 +153,7 @@ export const missionSchema = z
       .optional(),
     goalVerification: goalVerificationResultSchema.optional(),
     integrationEvidence: integrationEvidenceSchema.optional(),
+    lastPassingIntegrationCheck: lastPassingIntegrationCheckSchema.optional(),
     verificationBaseline: verificationBaselineSchema.optional(),
     executionPolicy: executionPolicySchema.optional(),
     execution: executionStateSchema.optional(),

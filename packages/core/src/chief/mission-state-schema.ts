@@ -53,6 +53,13 @@ export const verificationSchema = z.strictObject({
   fingerprint: text,
 })
 
+export const lastPassingIntegrationCheckSchema = z.strictObject({
+  fingerprint: z.string().min(1).max(200),
+  openCodeTasks: z.number().int().min(0).max(1_000),
+  at: z.iso.datetime(),
+  output: z.string().max(8_000),
+})
+
 export const advisoryReviewSchema = z.strictObject({
   planKey: text,
   reviewerId: id,
