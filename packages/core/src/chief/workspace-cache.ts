@@ -56,10 +56,24 @@ function validCachePath(path: string): boolean {
   return !reserved && parts.every((part) => part && part !== "." && part !== "..")
 }
 
+const MANIFEST_CACHE_RULES: ReadonlyArray<{ manifests: readonly string[]; caches: readonly string[] }> = [
+  { manifests: ["Cargo.toml"], caches: ["target/debug", "target/release"] },
+  { manifests: ["pyproject.toml", "requirements.txt", "uv.lock", "poetry.lock"], caches: [".venv"] },
+  { manifests: ["Package.swift"], caches: [".build"] },
+  { manifests: ["pubspec.yaml"], caches: [".dart_tool"] },
+  { manifests: ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"], caches: [".gradle"] },
+]
+
+async function hasAnyManifestFile(workspace: string, manifests: readonly string[]): Promise<boolean> {
+  const stats = await Promise.all(manifests.map((name) => lstat(join(workspace, name)).catch(() => undefined)))
+  return stats.some((entry) => entry?.isFile() === true)
+}
+
 /**
  * Regenerable build output worth carrying into a fresh workspace. `AV_WORKSPACE_CACHE_PATHS` lists
- * repository-relative directories (comma separated) or disables seeding with `off`; unset, a Cargo
- * workspace seeds its debug and release profiles. Instrumented coverage output is left out on purpose.
+ * repository-relative directories (comma separated) or disables seeding with `off`; unset, common
+ * Cargo, JS/TS, Python, Swift, Dart/Flutter, and Gradle manifests auto-detect their cache dirs.
+ * Instrumented coverage output is left out on purpose.
  */
 export async function workspaceCachePaths(
   workspace: string,
@@ -71,11 +85,19 @@ export async function workspaceCachePaths(
     const entries = value.split(",").map((entry) => entry.trim().replace(/\/+$/, ""))
     return [...new Set(entries.filter(validCachePath))]
   }
+  const [cargoRule, ...otherRules] = MANIFEST_CACHE_RULES
+  const [cargoDetected, nodeCaches, ...otherDetected] = await Promise.all([
+    cargoRule ? hasAnyManifestFile(workspace, cargoRule.manifests) : Promise.resolve(false),
+    jsWorkspaceCachePaths(workspace),
+    ...otherRules.map((rule) => hasAnyManifestFile(workspace, rule.manifests)),
+  ])
   const paths: string[] = []
-  const cargo = await lstat(join(workspace, "Cargo.toml")).catch(() => undefined)
-  if (cargo?.isFile()) paths.push("target/debug", "target/release")
-  const nodeCaches = await jsWorkspaceCachePaths(workspace)
+  if (cargoDetected && cargoRule) paths.push(...cargoRule.caches)
   paths.push(...nodeCaches)
+  for (let i = 0; i < otherRules.length; i += 1) {
+    const rule = otherRules[i]
+    if (rule && otherDetected[i]) paths.push(...rule.caches)
+  }
   return [...new Set(paths.filter(validCachePath))]
 }
 

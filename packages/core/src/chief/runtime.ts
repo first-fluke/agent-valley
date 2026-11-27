@@ -10,7 +10,6 @@ import {
   type SkillMatrixDeps,
 } from "../oma/skill-matrix-adapter"
 import { runVerificationGate } from "../orchestrator/verification-gate"
-import { cargoParallelJobsEnvironment } from "./cargo-toolchain"
 import { releaseContinuousBuildOutputs } from "./continuous-workspace"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
@@ -18,6 +17,7 @@ import { fingerprintWorkspace, workspaceFileManifest } from "./fingerprint"
 import { HOST_SUSPENDED_EVIDENCE, isHostSleepArtefact } from "./host-suspension"
 import { createLocalMissionRunner, finishLocalProcess } from "./local-runner"
 import { type PreparedOmaActor, prepareOmaActor, requiresOmaActor } from "./oma-actor"
+import { parallelBuildJobsEnvironment } from "./parallel-build-env"
 import {
   captureWorkspaceTree,
   collectDirectChangeSet,
@@ -387,7 +387,7 @@ export class ChiefRuntime {
         // Do not inject sccache into sandboxed Actor runs: an sccache daemon spawned inside an Actor's
         // OS sandbox inherits that single worktree's write boundary and breaks later host/workspace builds.
         env: {
-          ...(await cargoParallelJobsEnvironment(workspace.path, context?.parallelSlots)),
+          ...(await parallelBuildJobsEnvironment(workspace.path, context?.parallelSlots)),
           ...resolveToolEnvironment(mission.toolEnvKeys),
           AGENT_VALLEY_MANAGED_RUN: "1",
         },

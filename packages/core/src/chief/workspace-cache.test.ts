@@ -396,3 +396,68 @@ describe("JS/TS workspace cache detection", () => {
     expect(prune).not.toHaveBeenCalled()
   })
 })
+
+describe("Multi-language workspace cache auto-detection", () => {
+  it.each(["pyproject.toml", "requirements.txt", "uv.lock", "poetry.lock"])(
+    "detects .venv when Python manifest %s is present",
+    async (manifest) => {
+      await writeFile(join(workspace, manifest), "# python\n")
+      expect(await workspaceCachePaths(workspace, undefined)).toEqual([".venv"])
+    },
+  )
+
+  it("detects .build for Swift packages", async () => {
+    await writeFile(join(workspace, "Package.swift"), "// swift-tools-version: 5.9\n")
+    expect(await workspaceCachePaths(workspace, undefined)).toEqual([".build"])
+  })
+
+  it("detects .dart_tool for Dart/Flutter projects", async () => {
+    await writeFile(join(workspace, "pubspec.yaml"), "name: app\n")
+    expect(await workspaceCachePaths(workspace, undefined)).toEqual([".dart_tool"])
+  })
+
+  it.each(["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"])(
+    "detects .gradle when Gradle manifest %s is present",
+    async (manifest) => {
+      await writeFile(join(workspace, manifest), "// gradle\n")
+      expect(await workspaceCachePaths(workspace, undefined)).toEqual([".gradle"])
+    },
+  )
+
+  it("detects all caches in a polyglot repo and still honors AV_WORKSPACE_CACHE_PATHS=off", async () => {
+    await writeFile(join(workspace, "Cargo.toml"), "[workspace]\n")
+    await writeFile(join(workspace, "package.json"), JSON.stringify({ name: "polyglot" }))
+    await writeFile(join(workspace, "pyproject.toml"), "[project]\nname='poly'\n")
+    await writeFile(join(workspace, "Package.swift"), "// swift\n")
+    await writeFile(join(workspace, "pubspec.yaml"), "name: poly\n")
+    await writeFile(join(workspace, "settings.gradle.kts"), 'rootProject.name = "poly"\n')
+
+    expect(await workspaceCachePaths(workspace, undefined)).toEqual([
+      "target/debug",
+      "target/release",
+      "node_modules",
+      ".venv",
+      ".build",
+      ".dart_tool",
+      ".gradle",
+    ])
+    expect(await workspaceCachePaths(workspace, "off")).toEqual([])
+  })
+
+  it("seeds ignored Python .venv cache without triggering Cargo artifact pruning", async () => {
+    const prune = vi.fn(async () => {})
+    await writeFile(join(workspace, ".gitignore"), ".venv/\n")
+    await writeFile(join(workspace, "pyproject.toml"), "[project]\nname='py'\n")
+    await cache(source, ".venv", "site-packages")
+
+    const seeded = await seedWorkspaceCaches({
+      workspace,
+      sources: [source],
+      clone: copy,
+      prune,
+    })
+    expect(seeded).toEqual([{ path: ".venv", source }])
+    expect(await readFile(join(workspace, ".venv/deps/artifact"), "utf8")).toBe("site-packages")
+    expect(prune).not.toHaveBeenCalled()
+  })
+})

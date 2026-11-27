@@ -81,11 +81,12 @@
 import { execFileSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { isAbsolute, join } from "node:path"
+import { basename, dirname, isAbsolute, join } from "node:path"
 import { PROJECT_CONFIG_FILENAME } from "../config/project-config-path"
 import { agentHomeAccess } from "./sandbox-agent-paths"
 import { resolveBinaryPath } from "./sandbox-binary"
 import { linkedWorktreeGitPaths } from "./sandbox-git"
+import { toolchainSandboxPaths } from "./sandbox-toolchain-paths"
 import type { SandboxBuildRequest, SandboxCommand } from "./sandbox-types"
 
 const SANDBOX_EXEC_CANDIDATES = ["/usr/bin/sandbox-exec"]
@@ -192,19 +193,10 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string, darwinUser
   // path for every candidate temp dir (os.tmpdir(), req.env.TMPDIR, and
   // DARWIN_USER_TEMP_DIR) and allow-list both forms, deduplicated.
 
-  // Rust and mise toolchains write outside the workspace: Cargo downloads crates into its registry
-  // cache and `cargo install` writes `bin/`, rustup downloads components into its home, and mise
-  // records trusted configs under its state dir. Without these grants a `cargo fetch` of one new
-  // crate or a `rustup component add` fails with "Operation not permitted" inside the sandbox.
-  const env = req.env ?? process.env
-  const cargoHome = env.CARGO_HOME || `${home}/.cargo`
-  const rustupHome = env.RUSTUP_HOME || `${home}/.rustup`
-  const toolchainPaths = [
-    cargoHome,
-    rustupHome,
-    env.MISE_STATE_DIR || `${home}/.local/state/mise`,
-    env.MISE_DATA_DIR || `${home}/.local/share/mise`,
-  ]
+  // Language toolchains write outside the workspace into per-user cache/package homes
+  // (Rust/Mise, Go, Python pip/uv, JS pnpm/yarn, Dart/Flutter, SwiftPM, JVM Gradle/Maven).
+  // Known credential files/dirs inside those homes are explicitly denied below.
+  const toolchain = toolchainSandboxPaths("darwin", home, req.env ?? process.env)
   const writablePaths = [
     ...new Set([
       ...workspacePaths,
@@ -214,10 +206,9 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string, darwinUser
       `${home}/.cache`,
       `${home}/.npm`,
       `${home}/.bun`,
-      ...toolchainPaths,
+      ...toolchain.writableDirs,
     ]),
   ]
-  const cargoCredentialFiles = [`${cargoHome}/credentials`, `${cargoHome}/credentials.toml`]
   // NOTE: deliberately no blanket `${home}/.config` entry here — that
   // used to make `~/.config/agent-valley/settings.yaml` (and every other
   // tool's config under `~/.config`, e.g. `gh`, `gcloud`) writable by the
@@ -255,19 +246,22 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string, darwinUser
   // See the module docstring "Credential denylist" section for why these
   // exact paths are carved out of the broad read allowance below.
   const denyReadSubpaths = [
-    `${home}/.config/agent-valley`,
-    `${home}/.agent-valley`,
-    `${home}/.ssh`,
-    ...agentPaths.inactive,
+    ...new Set([
+      `${home}/.config/agent-valley`,
+      `${home}/.agent-valley`,
+      `${home}/.ssh`,
+      ...agentPaths.inactive,
+      ...toolchain.credentialDirs.flatMap((dir) => expandTargetAliases(dir)),
+    ]),
   ]
   const denyReadLiterals = [
-    `${home}/.git-credentials`,
-    ...cargoCredentialFiles,
-    ...new Set(
-      [process.cwd(), req.workspacePath].flatMap((root) =>
+    ...new Set([
+      `${home}/.git-credentials`,
+      ...toolchain.credentialFiles.flatMap((file) => expandTargetAliases(file)),
+      ...[process.cwd(), req.workspacePath].flatMap((root) =>
         pathAliases(root).flatMap((path) => pathAliases(join(path, PROJECT_CONFIG_FILENAME))),
       ),
-    ),
+    ]),
   ]
   const denyReadRules = [
     ...denyReadSubpaths.map((p) => `(deny file-read* (subpath ${seatbeltString(p)}))`),
@@ -350,6 +344,12 @@ function pathAliases(path: string): string[] {
   } catch {
     return [path]
   }
+}
+
+function expandTargetAliases(target: string): string[] {
+  const parentAliases = pathAliases(dirname(target))
+  const name = basename(target)
+  return [...new Set([...pathAliases(target), ...parentAliases.map((parent) => join(parent, name))])]
 }
 
 function seatbeltString(value: string): string {
