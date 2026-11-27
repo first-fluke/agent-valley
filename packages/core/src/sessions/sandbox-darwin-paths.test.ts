@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { buildDarwinSandboxCommand } from "./sandbox-darwin"
+import { buildDarwinSandboxCommand, resetDarwinUserTempDirCache, resolveDarwinUserTempDir } from "./sandbox-darwin"
 
 let directory: string
 let protectedRoot: string
@@ -77,4 +77,87 @@ describe("Darwin protected project path aliases", () => {
       expect(readFileSync(config, "utf8")).toBe(secret)
     },
   )
+})
+
+describe("Darwin temp directories (TMPDIR + DARWIN_USER_TEMP_DIR)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    resetDarwinUserTempDirCache()
+  })
+
+  it("allows file writes and local unix sockets for both req.env.TMPDIR and DARWIN_USER_TEMP_DIR with aliases", () => {
+    const envTmpReal = join(directory, "env-tmp-real")
+    const envTmpAlias = join(directory, "env-tmp-alias")
+    const darwinTmpReal = join(directory, "darwin-tmp-real")
+    const darwinTmpAlias = join(directory, "darwin-tmp-alias")
+    for (const dir of [envTmpReal, darwinTmpReal]) mkdirSync(dir)
+    symlinkSync(envTmpReal, envTmpAlias, "dir")
+    symlinkSync(darwinTmpReal, darwinTmpAlias, "dir")
+    vi.stubEnv("TMPDIR", "/tmp/oacp-override")
+
+    const profile = buildDarwinSandboxCommand(
+      {
+        agentType: "claude",
+        command: process.execPath,
+        args: [],
+        workspacePath: workspace,
+        networkAllowlist: [],
+        env: { TMPDIR: `${envTmpAlias}/` },
+      },
+      "/usr/bin/sandbox-exec",
+      home,
+      `${darwinTmpAlias}/`,
+    ).args[1] as string
+
+    for (const dir of [envTmpAlias, envTmpReal, darwinTmpAlias, darwinTmpReal, "/tmp/oacp-override"]) {
+      const quoted = JSON.stringify(dir)
+      expect(profile).toContain(`(allow file-write* (subpath ${quoted}))`)
+      expect(profile).toContain(`(allow network-bind (local unix-socket (subpath ${quoted})))`)
+      expect(profile).toContain(`(allow network-inbound (local unix-socket (subpath ${quoted})))`)
+    }
+    // Credential denies stay verbatim and after all allow rules.
+    expect(profile.indexOf(`(allow file-write* (subpath ${JSON.stringify(darwinTmpReal)}))`)).toBeLessThan(
+      profile.indexOf(`(deny file-write* (subpath ${JSON.stringify(`${home}/.config/agent-valley`)}))`),
+    )
+    expect(profile).toContain(`(deny file-read* (subpath ${JSON.stringify(`${home}/.ssh`)}))`)
+  })
+
+  it("deduplicates overlapping temp directory write and unix socket rules", () => {
+    vi.stubEnv("TMPDIR", "/tmp")
+    const profile = buildDarwinSandboxCommand(
+      {
+        agentType: "claude",
+        command: process.execPath,
+        args: [],
+        workspacePath: workspace,
+        networkAllowlist: [],
+        env: { TMPDIR: "/tmp/" },
+      },
+      "/usr/bin/sandbox-exec",
+      home,
+      "/tmp/",
+    ).args[1] as string
+
+    const writeTmpMatches = profile.match(/\(allow file-write\* \(subpath "\/tmp"\)\)/g) ?? []
+    const bindTmpMatches = profile.match(/\(allow network-bind \(local unix-socket \(subpath "\/tmp"\)\)\)/g) ?? []
+    expect(writeTmpMatches).toHaveLength(1)
+    expect(bindTmpMatches).toHaveLength(1)
+  })
+
+  it("normalizes DARWIN_USER_TEMP_DIR and falls back cleanly off darwin or when getconf fails", () => {
+    expect(resolveDarwinUserTempDir({ platform: "linux", read: () => "/var/folders/a/b/T/\n" })).toBeUndefined()
+    expect(
+      resolveDarwinUserTempDir({
+        platform: "darwin",
+        read: () => {
+          throw new Error("ENOENT")
+        },
+      }),
+    ).toBeUndefined()
+    expect(resolveDarwinUserTempDir({ platform: "darwin", read: () => "relative/path/\n" })).toBeUndefined()
+    expect(resolveDarwinUserTempDir({ platform: "darwin", read: () => "  /var/folders/ab/cd/T/  \n" })).toBe(
+      "/var/folders/ab/cd/T",
+    )
+    expect(resolveDarwinUserTempDir({ platform: "darwin", read: () => "/" })).toBe("/")
+  })
 })

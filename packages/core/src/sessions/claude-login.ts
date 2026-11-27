@@ -98,7 +98,16 @@ export function refreshClaudeLogin(env: NodeJS.ProcessEnv, deps: ClaudeLoginDeps
     if (before - deps.now() > REFRESH_LEAD_MS) return true
     await deps.run(
       "claude",
-      ["--print", "--no-session-persistence", "--model", "haiku", "Reply with the single word OK"],
+      [
+        "--print",
+        "--no-session-persistence",
+        "--strict-mcp-config",
+        "--settings",
+        '{"disableAllHooks":true}',
+        "--model",
+        "haiku",
+        "Reply with the single word OK",
+      ],
       { env, timeoutMs: REFRESH_TIMEOUT_MS, cwd: tmpdir() },
     )
     const after = await claudeLoginExpiry(env, deps)

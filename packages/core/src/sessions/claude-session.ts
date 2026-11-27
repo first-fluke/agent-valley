@@ -27,6 +27,10 @@ import { MAX_NATIVE_RESULT_LENGTH, nativeResultLimitMessage } from "./native-res
 import { QUEUED_MESSAGE_GRACE_MS, QueuedMessages } from "./queued-messages"
 import type { SandboxSpawnPlan } from "./sandbox"
 
+export const CLAUDE_KEEP_MCP_ENV = "AV_CLAUDE_KEEP_MCP"
+export const CLAUDE_KEEP_HOOKS_ENV = "AV_CLAUDE_KEEP_HOOKS"
+const CLAUDE_DISABLE_HOOKS_SETTINGS = '{"disableAllHooks":true}'
+
 type TokenUsage = { input: number; output: number; model: string }
 
 export class ClaudeSession extends BaseSession {
@@ -60,6 +64,25 @@ export class ClaudeSession extends BaseSession {
       "--dangerously-skip-permissions",
       "--no-session-persistence",
     ]
+
+    // Isolate headless Claude runs from ambient MCP servers and interactive PreToolUse hooks
+    // (which fail inside Seatbelt and can block native Grep/Glob/Bash). Gated strictly to
+    // Claude so subclasses (QwenSession, DshSession) never inherit Claude-specific flags.
+    if (this.vendor === "claude") {
+      const keepMcp =
+        this.config?.options?.keepMcp === true ||
+        (this.config?.env?.[CLAUDE_KEEP_MCP_ENV] ?? process.env[CLAUDE_KEEP_MCP_ENV]) === "1"
+      if (!keepMcp) {
+        args.push("--strict-mcp-config")
+      }
+
+      const keepHooks =
+        this.config?.options?.keepHooks === true ||
+        (this.config?.env?.[CLAUDE_KEEP_HOOKS_ENV] ?? process.env[CLAUDE_KEEP_HOOKS_ENV]) === "1"
+      if (!keepHooks) {
+        args.push("--settings", CLAUDE_DISABLE_HOOKS_SETTINGS)
+      }
+    }
 
     if (this.config?.model) {
       args.push("--model", this.config?.model)

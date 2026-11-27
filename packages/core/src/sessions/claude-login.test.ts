@@ -13,12 +13,12 @@ const START = Date.UTC(2026, 10, 21, 14, 0, 0)
 
 /** A host whose keychain holds a login; an unsandboxed claude call moves the expiry when `refreshes`. */
 function host(expiresAt: number | null, refreshes = true) {
-  const calls: string[] = []
+  const calls: Array<{ command: string; args: string[] }> = []
   const state = { expiresAt }
   const deps: ClaudeLoginDeps = {
     now: () => Date.now(),
     run: async (command, args) => {
-      calls.push(command)
+      calls.push({ command, args })
       if (command === "/usr/bin/security") {
         expect(args).toEqual(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
         if (state.expiresAt === null) return null
@@ -28,8 +28,9 @@ function host(expiresAt: number | null, refreshes = true) {
       return "OK\n"
     },
   }
-  const claudeCalls = () => calls.filter((command) => command === "claude").length
-  return { deps, state, claudeCalls }
+  const claudeCalls = () => calls.filter((call) => call.command === "claude").length
+  const claudeArgs = () => calls.filter((call) => call.command === "claude").map((call) => call.args)
+  return { deps, state, claudeCalls, claudeArgs }
 }
 
 describe("Claude login outside the sandbox", () => {
@@ -57,10 +58,20 @@ describe("Claude login outside the sandbox", () => {
   })
 
   test("refreshes at once when the token expires within the lead time", async () => {
-    const { deps, state, claudeCalls } = host(START + REFRESH_LEAD_MS - 1_000)
+    const { deps, state, claudeCalls, claudeArgs } = host(START + REFRESH_LEAD_MS - 1_000)
     const keeper = keepClaudeLoginFresh({}, deps)
     await keeper.ready
     expect(claudeCalls()).toBe(1)
+    expect(claudeArgs()[0]).toEqual([
+      "--print",
+      "--no-session-persistence",
+      "--strict-mcp-config",
+      "--settings",
+      '{"disableAllHooks":true}',
+      "--model",
+      "haiku",
+      "Reply with the single word OK",
+    ])
     expect(state.expiresAt).toBe(START + 8 * HOUR)
     keeper.stop()
   })
