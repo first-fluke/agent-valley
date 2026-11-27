@@ -41,7 +41,16 @@ export async function coordinate(mission: Mission, ports: ChiefPorts): Promise<M
   const protectedFailure = (error: unknown) =>
     fatal(error) ||
     (error instanceof MissionPause &&
-      (Boolean(error.nextRunAt) || ["budget", "interrupted", "chief-unavailable"].includes(error.kind)))
+      (Boolean(error.nextRunAt) ||
+        [
+          "budget",
+          "interrupted",
+          "chief-unavailable",
+          "handoff-unavailable",
+          "unknown-effect",
+          "service-shutdown",
+          "integrity",
+        ].includes(error.kind)))
   const invalidate = () => {
     delete context.reusableVerificationFingerprint
     resetTaskApprovals(mission, { preserveUnfinished: true })

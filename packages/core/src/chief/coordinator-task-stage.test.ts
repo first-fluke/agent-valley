@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { executionPolicySchema } from "./contracts"
 import { coordinate } from "./coordinator"
+import { MissionPause } from "./execution"
 import { brief, fixture, passed, plan, rejected } from "./goal-supervision.fixture"
 import type { TaskWorktreeRecord } from "./parallel-workspace"
 import type { Mission } from "./types"
@@ -287,5 +288,63 @@ describe("concurrent independent task reviews through the coordinator", () => {
     expect(mission.tasks.find((state) => state.id === "a")?.carriedTo).toBe("b")
     expect(mission.plan?.tasks.find((entry) => entry.id === "b")?.acceptance.at(-1)).toContain("Carried from a")
     expect(mission.history.some((event) => event.stage === "task-carried" && event.taskId === "a")).toBe(true)
+  })
+
+  it("immediately pauses with handoff-unavailable during single-task review without invoking supervision", async () => {
+    const value = fixture()
+    value.mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 1 })
+    const base = value.runAgent.getMockImplementation()
+    value.runAgent.mockImplementation(async (...args) => {
+      const stage = args[3]
+      if (stage === "review") {
+        throw new MissionPause("Usage allowance exhausted and no other provider is ready", "handoff-unavailable")
+      }
+      return (await base?.(...args)) ?? ""
+    })
+    const mission = await coordinate(value.mission, value.ports)
+    expect(mission.status).toBe("paused")
+    expect(mission.execution?.failureKind).toBe("handoff-unavailable")
+    expect(mission.execution?.pauseReason).toContain("Usage allowance exhausted")
+    expect(mission.supervision?.rounds).toBe(0)
+    expect(value.runAgent.mock.calls.some((call) => call[3] === "supervise")).toBe(false)
+  })
+
+  it("immediately pauses with handoff-unavailable during parallel wave review without invoking supervision", async () => {
+    const value = fixture()
+    const task = plan.tasks[0]
+    if (!task) throw new Error("Expected a fixture task")
+    value.mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 2 })
+    value.mission.plan = {
+      tasks: [
+        { ...task, id: "a" },
+        { ...task, id: "b" },
+      ],
+    }
+    value.mission.tasks = [
+      { id: "a", reviewerId: "reviewer", status: "pending", attempts: 0 },
+      { id: "b", reviewerId: "reviewer", status: "pending", attempts: 0 },
+    ]
+    value.mission.goalBrief = brief
+    if (value.mission.supervision)
+      value.mission.supervision.originalAcceptance = value.mission.plan.tasks.flatMap((entry) => entry.acceptance)
+    value.ports.parallel = {
+      prepare: vi.fn(async (_mission, taskId, attempt) => record(value.mission, taskId, attempt)),
+      integrate: vi.fn(async () => {}),
+      dispose: vi.fn(async () => {}),
+    }
+    const base = value.runAgent.getMockImplementation()
+    value.runAgent.mockImplementation(async (...args) => {
+      const stage = args[3]
+      if (stage === "review") {
+        throw new MissionPause("Usage allowance exhausted and no other provider is ready", "handoff-unavailable")
+      }
+      return (await base?.(...args)) ?? ""
+    })
+    const mission = await coordinate(value.mission, value.ports)
+    expect(mission.status).toBe("paused")
+    expect(mission.execution?.failureKind).toBe("handoff-unavailable")
+    expect(mission.execution?.pauseReason).toContain("Usage allowance exhausted")
+    expect(mission.supervision?.rounds).toBe(0)
+    expect(value.runAgent.mock.calls.some((call) => call[3] === "supervise")).toBe(false)
   })
 })

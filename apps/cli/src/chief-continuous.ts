@@ -298,7 +298,16 @@ export async function runOperation(
       const finishedChild = child?.status === "completed"
       // The operator's stop tells them to resume with --retry, and the operation is the ID they hold: on
       // 2026-11-23 it refused that flag here and, without it, refused the interrupted child.
-      if (child?.status === "paused" && child.execution?.failureKind === "interrupted") interruptedChild = child.id
+      const retriableChild =
+        child?.status === "paused" &&
+        (child.execution?.failureKind === "interrupted" || child.execution?.failureKind === "handoff-unavailable")
+      if (retriableChild) {
+        interruptedChild = child.id
+        if (child.execution?.failureKind === "handoff-unavailable") {
+          delete operation.exhaustedProviders
+          delete operation.recovery
+        }
+      }
       if (!finishedChild && !interruptedChild && (options.retry || budgetChange)) {
         if (operation.currentMissionId || !operation.decisionId)
           throw new Error(
@@ -329,6 +338,9 @@ export async function runOperation(
               nextRunAt: priorExecution.nextRunAt,
             })
             rearmContinuousDecision(decision)
+            if (priorExecution.failureKind === "handoff-unavailable") {
+              delete operation.exhaustedProviders
+            }
           }
           await decisions.save(decision)
           if (!options.retry) operation.recovery = undefined

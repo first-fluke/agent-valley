@@ -354,4 +354,65 @@ describe("continuous operation CLI", () => {
     ).rejects.toThrow("not recorded")
     expect((await operationStore(root).load(created.id)).charterAmendments).toBeUndefined()
   })
+
+  it("retries a child paused with handoff-unavailable on operator --retry and clears operation.exhaustedProviders", async () => {
+    const decisions = vi.fn().mockResolvedValue({
+      action: "execute",
+      goal: "Repair login",
+      reason: "Measured failure",
+      evidence: ["failure evidence"],
+    })
+    let childLaunch = 0
+    const child = vi.fn(async (operation, id: string, goal: string, baseline: string) => {
+      childLaunch += 1
+      const workspace = await createContinuousMissionWorkspace(root, operation.id, baseline, id, goal)
+      const mission = completedMission(id, goal, workspace)
+      if (childLaunch === 1) {
+        mission.status = "paused"
+        mission.error = "Usage allowance exhausted"
+        mission.execution = {
+          startedAt: new Date().toISOString(),
+          runsStarted: 2,
+          retries: 0,
+          failureKind: "handoff-unavailable",
+          pauseReason: "Usage allowance exhausted",
+        }
+        mission.handoff = {
+          exhaustedAgents: ["codex"],
+          routes: {},
+          continuations: {},
+        }
+      }
+      await new MissionStore(join(root, ".agent-valley", "missions")).save(mission)
+      return mission
+    })
+    const paused = await runOperation("Improve continuously", { workspace: root, cycles: "1" }, root, {
+      decide: decisions,
+      runMission: child,
+    })
+    expect(paused.phase).toBe("paused")
+    expect(paused.exhaustedProviders).toBeDefined()
+    expect(paused.currentMissionId).toBeDefined()
+
+    const retryMission = vi.fn(async (missionId: string) => {
+      const store = new MissionStore(join(root, ".agent-valley", "missions"))
+      const mission = await store.load(missionId)
+      delete mission.handoff
+      mission.status = "completed"
+      mission.verification = { ok: true, fingerprint: await fingerprintWorkspace(mission.workspace.path) }
+      mission.fingerprint = mission.verification.fingerprint
+      delete mission.error
+      await store.save(mission)
+      return mission
+    })
+    const resumed = await runOperation(undefined, { resume: paused.id, retry: true }, root, {
+      decide: decisions,
+      runMission: child,
+      retryMission,
+    })
+    expect(resumed.phase).toBe("completed")
+    expect(resumed.exhaustedProviders).toBeUndefined()
+    expect(resumed.recovery).toBeUndefined()
+    expect(retryMission).toHaveBeenCalledWith(paused.currentMissionId, expect.anything())
+  })
 })

@@ -261,7 +261,8 @@ export async function prepareHandoff(
       : unique
   }
   const blocked = unavailableProviders(state)
-  const retired = reviewing ? (mission.handoff?.retiredReviewRoutes ?? []) : []
+  const retiredReviewRoutes = mission.handoff?.retiredReviewRoutes ?? []
+  const retired = reviewing ? retiredReviewRoutes : []
   const selectable = (candidate: string) =>
     routeSchema.shape.agentType.safeParse(candidate).success &&
     candidate !== actor.agentType &&
@@ -275,10 +276,16 @@ export async function prepareHandoff(
     return { actorType: vendor, ...(model ? { model } : {}) }
   }
   // Same-vendor roster candidates beat an out-of-roster vendor under "prefer".
-  const eligible = [
+  const rawEligible = [
     ...ordered(readyRoster).filter(selectable),
     ...ordered(discovered.filter((vendor) => !roster.includes(vendor))).filter(selectable),
   ]
+  const eligible = reviewing
+    ? rawEligible
+    : [
+        ...rawEligible.filter((vendor) => !retiredReviewRoutes.includes(vendor)),
+        ...rawEligible.filter((vendor) => retiredReviewRoutes.includes(vendor)),
+      ]
   if (!eligible.length)
     throw new MissionPause(
       `${unavailable ? "The selected native model is unavailable" : "Usage allowance exhausted"} and no other installed, authenticated provider is ready. Restore provider access or log in to another supported CLI, then resume the saved order with --retry; spent limits are retained.`,

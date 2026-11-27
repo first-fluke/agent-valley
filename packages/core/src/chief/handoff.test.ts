@@ -319,4 +319,32 @@ describe("automatic exhaustion handoff", () => {
       model: "opus",
     })
   })
+
+  it("deprioritizes retiredReviewRoutes on non-review handoff, choosing healthy non-retired first or falling back if none left", async () => {
+    // 1. Healthy non-retired provider (claude) chosen ahead of retired route (qwen)
+    const value = setup()
+    value.mission.handoff = {
+      exhaustedAgents: [],
+      routes: {},
+      continuations: {},
+      retiredReviewRoutes: ["qwen"],
+    }
+    value.discover.mockResolvedValue(["codex", "qwen", "claude"])
+    value.runAgent.mockRejectedValueOnce(new Error("usage_limit_reached")).mockResolvedValue("planned")
+    expect(await value.run(value.actor, "Plan", "plan")).toBe("planned")
+    expect(value.runAgent.mock.calls[1]?.[0].agentType).toBe("claude")
+
+    // 2. If only the retired route remains, non-review handoff falls back to it
+    const fallback = setup()
+    fallback.mission.handoff = {
+      exhaustedAgents: ["claude"],
+      routes: {},
+      continuations: {},
+      retiredReviewRoutes: ["qwen"],
+    }
+    fallback.discover.mockResolvedValue(["codex", "qwen", "claude"])
+    fallback.runAgent.mockRejectedValueOnce(new Error("usage_limit_reached")).mockResolvedValue("planned")
+    expect(await fallback.run(fallback.actor, "Plan", "plan")).toBe("planned")
+    expect(fallback.runAgent.mock.calls[1]?.[0].agentType).toBe("qwen")
+  })
 })

@@ -38,13 +38,29 @@ export function rearmContinuousDecision(mission: Mission): void {
     delete state.nextRunAt
     return
   }
+  if (mission.status === "paused" && state.failureKind === "handoff-unavailable") {
+    assertNoUncertainExecution(mission)
+    assertExecutionBudget(mission)
+    mission.history.push({
+      at: new Date().toISOString(),
+      stage: "continuous-decision-operator-resume",
+      message: `Operator resumed the decision after provider availability recovery; ${state.runsStarted} spent calls and ${state.retries} automatic retries remain recorded.`,
+    })
+    mission.status = "planning"
+    delete mission.handoff
+    delete mission.error
+    delete state.pauseReason
+    delete state.failureKind
+    delete state.nextRunAt
+    return
+  }
   if (
     mission.status !== "paused" ||
     state.failureKind !== "implementation" ||
     !reason.startsWith("Invalid Chief decision")
   )
     throw new Error(
-      "Operation --retry requires a paused decision that the operator interrupted or that returned invalid JSON. Inspect its saved blocker or resume the active child instead.",
+      "Operation --retry requires a paused decision that the operator interrupted, that ran out of provider availability, or that returned invalid JSON. Inspect its saved blocker or resume the active child instead.",
     )
   assertNoUncertainExecution(mission)
   assertExecutionBudget(mission)
