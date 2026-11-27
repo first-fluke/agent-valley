@@ -1,27 +1,11 @@
-import { parseJson, validatePlan } from "./plan-validation"
-import { validateOriginalAcceptance } from "./supervision-contract"
-
+export { goalBriefSchema, reviewSchema } from "./mission-state-schema"
 export { parseJson, validatePlan } from "./plan-validation"
-
 export {
   parseSupervisionResponse,
   type SupervisionResponse,
   supervisionResponseSchema,
   validateOriginalAcceptance,
 } from "./supervision-contract"
-
-import {
-  advisoryReviewSchema,
-  goalBriefSchema,
-  refineChiefWaitSchedule,
-  reviewSchema,
-  skillDescriptorSchema,
-  supervisionSchema,
-  taskStateSchema,
-  verificationSchema,
-} from "./mission-state-schema"
-
-export { goalBriefSchema, reviewSchema } from "./mission-state-schema"
 
 import { isAbsolute } from "node:path"
 import { z } from "zod"
@@ -32,15 +16,27 @@ import { containerObservationPolicySchema, containerObservationSnapshotSchema } 
 import { refineMissionContainerState } from "./container-observation-state"
 import { CDO_ROLE } from "./design-lead"
 import { executionPolicySchema, executionStateSchema } from "./execution"
-import { validateFinalReview } from "./goal-evidence"
+import { validateFinalReview, waivedCriteria } from "./goal-evidence"
 import { handoffStateSchema } from "./handoff-contract"
 import { CMO_ROLE } from "./marketing-lead"
 import { metricSourcePolicySchema } from "./metric-source-policy"
+import {
+  advisoryReviewSchema,
+  goalBriefSchema,
+  refineChiefWaitSchedule,
+  reviewSchema,
+  skillDescriptorSchema,
+  supervisionSchema,
+  taskStateSchema,
+  verificationSchema,
+} from "./mission-state-schema"
 import { assignFixedActorSkills, requiresOmaActor } from "./oma-actor"
 import { chiefOperatingPolicySchema, chiefOperationsSchema } from "./operations"
 import { organizationContextSchema } from "./organization"
+import { parseJson, validatePlan } from "./plan-validation"
 import { chiefReportSchema } from "./reports"
 import { gateReviewSchema } from "./review-gates"
+import { validateOriginalAcceptance } from "./supervision-contract"
 import { CTO_ROLE } from "./technical-lead"
 import { toolEnvKeysSchema } from "./tool-environment"
 import type { ChiefPlan, GoalBrief, Mission, Persona, Review } from "./types"
@@ -382,7 +378,11 @@ export function validateMission(input: Mission): Mission {
   )
     throw new Error("Saved verification contract does not match its immutable digest. Restore the original checks.")
   if (mission.goalVerification && mission.verificationContract)
-    validateGoalVerificationResult(mission.goalVerification, mission.verificationContract)
+    validateGoalVerificationResult(
+      mission.goalVerification,
+      mission.verificationContract,
+      new Set(waivedCriteria(mission).keys()),
+    )
   const personas = new Map(mission.personas.map((persona) => [persona.id, persona]))
   if (personas.size !== mission.personas.length) throw new Error("Duplicate Actor ids. Give every Actor a unique id.")
   if (!personas.has(mission.chiefId)) throw new Error("chiefId is not a configured Actor. Set chiefId to an Actor id.")

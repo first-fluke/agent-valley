@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import { type WorkspaceFileEntry, type WorkspaceManifest, workspaceFileManifest } from "../workspace/fingerprint"
+import { waivedCriteria } from "./goal-evidence"
 import { reviewGatesAreCurrent } from "./review-gate-check"
 import type { Mission } from "./types"
 import {
@@ -384,7 +385,11 @@ export function canReusePriorVerification(mission: Mission, currentFingerprint: 
     )
       return false
     try {
-      validateGoalVerificationResult(mission.goalVerification, mission.verificationContract)
+      validateGoalVerificationResult(
+        mission.goalVerification,
+        mission.verificationContract,
+        new Set(waivedCriteria(mission).keys()),
+      )
     } catch {
       return false
     }

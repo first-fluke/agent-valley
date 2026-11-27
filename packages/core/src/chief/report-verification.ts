@@ -1,3 +1,4 @@
+import { waivedCriteria } from "./goal-evidence"
 import { reviewGatesAreCurrent } from "./review-gate-check"
 import type { Mission } from "./types"
 import { validateGoalVerificationResult } from "./verification"
@@ -14,7 +15,11 @@ export function verificationIncompleteReasons(mission: Mission): string[] {
       if (
         !mission.verificationContract ||
         !mission.goalVerification ||
-        !validateGoalVerificationResult(mission.goalVerification, mission.verificationContract).ok
+        !validateGoalVerificationResult(
+          mission.goalVerification,
+          mission.verificationContract,
+          new Set(waivedCriteria(mission).keys()),
+        ).ok
       )
         reasons.push("목표별 실제 파일·테스트 검증이 통과하지 않았습니다.")
     } catch {

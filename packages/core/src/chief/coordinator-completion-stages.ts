@@ -76,6 +76,7 @@ export async function verifyMission(context: CoordinatorContext): Promise<StageT
       ? [
           ...new Set(
             mission.goalVerification.evidence
+              .filter((entry) => !entry.waived)
               .flatMap((entry) => entry.checks)
               .filter((check) => !check.passed)
               .map((check) => check.checkSha256),

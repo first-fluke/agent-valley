@@ -438,7 +438,7 @@ export function renderReport(mission: Mission): string {
           "### Chief가 설계한 목표별 검사",
           list(
             mission.goalVerification.evidence.flatMap((entry) => [
-              `${entry.criterion}: ${entry.passed ? "통과" : "실패"}`,
+              `${entry.criterion}: ${entry.passed ? "통과" : entry.waived ? "미달(운영자 면제)" : "실패"}`,
               ...entry.checks.map(
                 (check) =>
                   `${check.kind}: ${check.summary}${check.path ? ` / ${check.path}` : ""}${check.sha256 ? ` / SHA256 ${check.sha256}` : ""}${check.outputSha256 ? ` / 출력 SHA256 ${check.outputSha256}` : ""}`,
