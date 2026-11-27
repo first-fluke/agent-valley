@@ -110,6 +110,8 @@ export interface ChiefRunContext {
   taskId?: string
   workspace?: Workspace
   signal?: AbortSignal
+  /** Number of concurrent Actor slots active in this parallel wave (omitted or 1 for serial runs). */
+  parallelSlots?: number
   omaActor?: PreparedOmaActor
   handoff?: string
   /** Invoke claim synchronously after reserving a call, before awaiting its durable checkpoint. */

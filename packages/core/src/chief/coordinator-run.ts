@@ -32,7 +32,7 @@ export function createMissionRun(
     prompt: string,
     stage: ChiefStage,
     taskId?: string,
-    context?: { workspace?: Mission["workspace"]; signal?: AbortSignal; handoff?: string },
+    context?: { workspace?: Mission["workspace"]; signal?: AbortSignal; handoff?: string; parallelSlots?: number },
   ): Promise<string> => {
     assertNoUncertainExecution(mission)
     checkAbort()
@@ -145,7 +145,7 @@ export function createMissionRun(
     prompt: string,
     stage: ChiefStage,
     taskId?: string,
-    context?: { workspace?: Mission["workspace"]; signal?: AbortSignal },
+    context?: { workspace?: Mission["workspace"]; signal?: AbortSignal; parallelSlots?: number },
   ): Promise<string> => {
     checkAbort()
     ports.signal?.throwIfAborted()

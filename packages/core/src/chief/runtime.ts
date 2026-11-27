@@ -10,6 +10,7 @@ import {
   type SkillMatrixDeps,
 } from "../oma/skill-matrix-adapter"
 import { runVerificationGate } from "../orchestrator/verification-gate"
+import { cargoParallelJobsEnvironment } from "./cargo-toolchain"
 import { releaseContinuousBuildOutputs } from "./continuous-workspace"
 import { MissionPause } from "./execution"
 import { withMissionDeadline } from "./execution-signal"
@@ -120,11 +121,9 @@ export class ChiefRuntime {
         },
         reclaimApplied: async (mission) => {
           const errors: Array<{ path: string; message: string }> = []
-          const result = await releaseAppliedTaskWorktrees(mission, {
-            onError: (path, error) => {
-              errors.push({ path, message: error instanceof Error ? error.message : String(error) })
-            },
-          })
+          const onError = (path: string, error: unknown) =>
+            void errors.push({ path, message: error instanceof Error ? error.message : String(error) })
+          const result = await releaseAppliedTaskWorktrees(mission, { onError })
           return errors.length ? { ...result, errors } : result
         },
       },
@@ -303,10 +302,8 @@ export class ChiefRuntime {
         ? selectWorkActor(mission, persona, context?.taskId, compatibleRoutes)
         : undefined
     persona = route?.actor ?? persona
-    if (compatibility && compatibilityPolicy) {
-      if (compatibilityPolicy.mode === "require")
-        assertCompatibleRoute({ actorType: persona.agentType, model: persona.model }, compatibility)
-    }
+    if (compatibility && compatibilityPolicy?.mode === "require")
+      assertCompatibleRoute({ actorType: persona.agentType, model: persona.model }, compatibility)
     const attempt: RunAttempt = {
       id: randomUUID(),
       issueId: mission.id,
@@ -390,6 +387,7 @@ export class ChiefRuntime {
         // Do not inject sccache into sandboxed Actor runs: an sccache daemon spawned inside an Actor's
         // OS sandbox inherits that single worktree's write boundary and breaks later host/workspace builds.
         env: {
+          ...(await cargoParallelJobsEnvironment(workspace.path, context?.parallelSlots)),
           ...resolveToolEnvironment(mission.toolEnvKeys),
           AGENT_VALLEY_MANAGED_RUN: "1",
         },
