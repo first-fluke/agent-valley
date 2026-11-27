@@ -51,6 +51,24 @@ describe("operator recovery of a saved operation decision", () => {
     expect(decision.status).toBe("paused")
   })
 
+  it("reopens a handoff-unavailable paused decision on explicit retry and clears decision.handoff", () => {
+    const decision = pausedDecision("handoff-unavailable", "Usage allowance exhausted and no other provider is ready.")
+    decision.handoff = {
+      exhaustedAgents: ["codex"],
+      routes: {},
+      continuations: {},
+    }
+    rearmContinuousDecision(decision)
+    expect(decision.status).toBe("planning")
+    expect(decision.error).toBeUndefined()
+    expect(decision.handoff).toBeUndefined()
+    expect(decision.execution).toMatchObject({ runsStarted: 3, retries: 0 })
+    expect(decision.execution?.failureKind).toBeUndefined()
+    expect(decision.execution?.pauseReason).toBeUndefined()
+    expect(decision.history.map((entry) => entry.stage)).toEqual(["continuous-decision-operator-resume"])
+    expect(() => assertContinuousDecisionRecovery(decision)).not.toThrow()
+  })
+
   it("still refuses explicit retry for integrity and budget pauses", () => {
     for (const kind of ["integrity", "budget"] as const) {
       const decision = pausedDecision(kind, "Decision stage changed its saved charter.")
