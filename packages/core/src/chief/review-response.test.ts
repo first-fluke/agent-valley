@@ -40,6 +40,7 @@ describe("Chief review response contract", () => {
     expect(prompt).toContain("findings must be an array of nonempty strings")
     expect(prompt).toContain("Do not put objects, arrays, numbers or null in findings")
     expect(prompt).toContain("Do not add other top-level keys")
+    expect(prompt).toContain('extra/comment keys (such as "_"')
     const responses = examples(prompt).map(parseReview)
     expect(responses.map((response) => response.passed)).toEqual([true, false])
     expect(responses[0]?.findings).toEqual([])
@@ -53,6 +54,7 @@ describe("Chief review response contract", () => {
       )
       expect(response.findings.every((finding) => typeof finding === "string" && finding.trim().length > 0)).toBe(true)
       expect(() => parseReview(JSON.stringify({ ...response, recommendation: "Unexpected extra key" }))).toThrow()
+      expect(() => parseReview(JSON.stringify({ ...response, _: "comment" }))).toThrow()
     }
   })
 

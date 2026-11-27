@@ -73,7 +73,7 @@ export function reviewResponseFormat(
   }
   return [
     "Return ONLY one JSON object under 8,000 characters, without Markdown fences or text outside JSON.",
-    `Use exactly these top-level keys: passed, summary, findings${options.followUps ? ", followUps" : ""}${criteria ? ", criteria" : ""}. Do not add other top-level keys or wrap the response in another object.`,
+    `Use strictly and only these top-level keys: passed, summary, findings${options.followUps ? ", followUps" : ""}${criteria ? ", criteria" : ""}. Do not add other top-level keys, extra/comment keys (such as "_" or "notes"), or wrap the response in another object — any unrecognized key fails strict schema validation.`,
     ...(options.followUps
       ? [
           "followUps is an array of at most 50 nonempty strings and may be empty. It holds concerns that do not fail this review; they are recorded in the mission report and never cause another repair. A response may pass with followUps.",

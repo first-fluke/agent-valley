@@ -3,7 +3,7 @@ import { recordIntegrationCheck } from "./coordinator-integration"
 import { applyWorkResult, recordTaskReviewFailure } from "./coordinator-results"
 import { classifyFailure, MissionPause } from "./execution"
 import { runJoinedWave } from "./parallel"
-import { ParallelIntegrationConflict } from "./parallel-workspace"
+import { type ParallelBaseline, ParallelIntegrationConflict } from "./parallel-workspace"
 import { workPrompt } from "./prompts"
 import { closeContinuedWorkRun } from "./routing"
 import type { ChiefPorts, ChiefStage, ChiefTask, ChiefTaskState, Mission, Persona } from "./types"
@@ -157,7 +157,16 @@ export async function performParallelWave(
     previousAttempts: number
     workRunsBefore: number
   }> = []
-  // No Actor starts until all workspace preparations and their checkpoints settle.
+  const candidates: Array<{
+    task: ChiefTask
+    state: ChiefTaskState
+    actor: Persona
+    previousOutput?: string
+    previousAttempts: number
+    workRunsBefore: number
+    needsPrepare: boolean
+  }> = []
+  // Validate every task in wave order before preparing workspaces; no Actor starts until preparations settle.
   for (const task of wave) {
     ports.signal?.throwIfAborted()
     const state = mission.tasks.find((entry) => entry.id === task.id)
@@ -175,38 +184,102 @@ export async function performParallelWave(
       fail(task.id, new Error(`Restore Actor ${task.personaId} before executing ${task.id}.`))
       continue
     }
+    const previousAttempts = state.attempts
+    const workRunsBefore =
+      mission.operations?.runs.filter((run) => run.stage === "work" && run.taskId === task.id).length ?? 0
+    const previousOutput = state.parallel ? undefined : state.output
+    // An output is resumable only when it is bound to its original task workspace.
+    if (!state.parallel) delete state.output
+    const needsPrepare = !state.parallel || state.output === undefined
+    candidates.push({ task, state, actor, previousOutput, previousAttempts, workRunsBefore, needsPrepare })
+  }
+  const toPrepare = candidates.filter((candidate) => candidate.needsPrepare)
+  let waveBaseline: ParallelBaseline | undefined
+  let baselineFailed = false
+  if (toPrepare.length > 0 && parallel.prepareBaseline) {
+    ports.signal?.throwIfAborted()
     try {
-      const previousAttempts = state.attempts
-      const workRunsBefore =
-        mission.operations?.runs.filter((run) => run.stage === "work" && run.taskId === task.id).length ?? 0
-      const previousOutput = state.parallel ? undefined : state.output
-      // An output is resumable only when it is bound to its original task workspace.
-      if (!state.parallel) delete state.output
-      if (!state.parallel || state.output === undefined) {
-        state.status = "running"
-        state.attempts += 1
-        const attempt = state.parallel?.attempt ?? state.attempts
-        state.parallel = await parallel.prepare(mission, task.id, attempt)
-        await save(
-          "parallel-prepared",
-          `Prepared ${task.id}, attempt ${state.attempts}, at ${state.parallel.path}.`,
-          task.id,
-        )
-      }
-      const workspace: Workspace = {
-        ...mission.workspace,
-        path: state.parallel.path,
-        branch: state.parallel.branch,
-      }
-      prepared.push({ task, state, actor, workspace, previousOutput, previousAttempts, workRunsBefore })
+      waveBaseline = await parallel.prepareBaseline(mission)
     } catch (error) {
-      state.status = "pending"
-      fail(task.id, error)
-      if (hooks.fatal?.(error)) break
+      ports.signal?.throwIfAborted()
+      baselineFailed = true
+      for (const candidate of toPrepare) {
+        candidate.state.status = "pending"
+        fail(candidate.task.id, error)
+        if (hooks.fatal?.(error)) break
+      }
+      if ([...failures.values()].some((failure) => hooks.fatal?.(failure.error)))
+        return wave.flatMap((task) => failures.get(task.id) ?? [])
     }
+  }
+  if (!baselineFailed && toPrepare.length > 0) {
+    let prepareStopped = false
+    const prepareOne = async (candidate: (typeof candidates)[number], signal?: AbortSignal) => {
+      if (prepareStopped) return
+      const { task, state } = candidate
+      try {
+        signal?.throwIfAborted()
+        ports.signal?.throwIfAborted()
+        const attempt = await serialize(() => {
+          state.status = "running"
+          state.attempts += 1
+          return state.parallel?.attempt ?? state.attempts
+        })
+        const record =
+          waveBaseline !== undefined
+            ? await parallel.prepare(mission, task.id, attempt, waveBaseline)
+            : await parallel.prepare(mission, task.id, attempt)
+        await serialize(async () => {
+          state.parallel = record
+          await rawSave(
+            "parallel-prepared",
+            `Prepared ${task.id}, attempt ${state.attempts}, at ${record.path}.`,
+            task.id,
+          )
+        })
+      } catch (error) {
+        await serialize(() => {
+          state.status = "pending"
+        })
+        fail(task.id, error)
+        if (hooks.fatal?.(error)) prepareStopped = true
+      }
+    }
+    if (toPrepare.length === 1) {
+      await prepareOne(toPrepare[0] as (typeof candidates)[number])
+    } else {
+      const prepareLimit = Math.max(
+        1,
+        Math.min(toPrepare.length, mission.executionPolicy?.maxParallel ?? toPrepare.length),
+      )
+      await runJoinedWave(toPrepare, (candidate, signal) => prepareOne(candidate, signal), ports.signal, prepareLimit)
+    }
+  }
+  if (ports.signal?.aborted) {
+    for (const candidate of candidates)
+      if (!failures.has(candidate.task.id))
+        fail(candidate.task.id, ports.signal.reason ?? new Error("Mission interrupted during parallel preparation."))
+    return wave.flatMap((task) => failures.get(task.id) ?? [])
   }
   if ([...failures.values()].some((failure) => hooks.fatal?.(failure.error)))
     return wave.flatMap((task) => failures.get(task.id) ?? [])
+  for (const candidate of candidates) {
+    if (failures.has(candidate.task.id) || !candidate.state.parallel) continue
+    const workspace: Workspace = {
+      ...mission.workspace,
+      path: candidate.state.parallel.path,
+      branch: candidate.state.parallel.branch,
+    }
+    prepared.push({
+      task: candidate.task,
+      state: candidate.state,
+      actor: candidate.actor,
+      workspace,
+      previousOutput: candidate.previousOutput,
+      previousAttempts: candidate.previousAttempts,
+      workRunsBefore: candidate.workRunsBefore,
+    })
+  }
   const pending = prepared.filter(({ state }) => state.output === undefined)
   mission.status = "executing"
   const results = await runJoinedWave(

@@ -22,6 +22,7 @@ import {
   collectDirectChangeSet,
   disposeTaskWorktree,
   integrateTaskWorktree,
+  prepareParallelBaseline,
   prepareTaskWorktree,
   releaseAppliedTaskWorktrees,
 } from "./parallel-workspace"
@@ -84,9 +85,8 @@ export class ChiefRuntime {
         await assertMissionWorkspace(mission)
         return fingerprintWorkspace(mission.workspace.path)
       },
-      captureWorkspaceTree: (workspacePath: string) => captureWorkspaceTree(workspacePath),
-      collectDirectChangeSet: (workspacePath: string, inputTree: string, deliveryTree?: string) =>
-        collectDirectChangeSet(workspacePath, inputTree, deliveryTree),
+      captureWorkspaceTree,
+      collectDirectChangeSet,
       verify: (mission) => withMissionDeadline(mission, this.signal, (signal) => this.verifyMission(mission, signal)),
       ...(integrationCheckEnabled()
         ? {
@@ -104,8 +104,9 @@ export class ChiefRuntime {
         : {}),
       runAgent: (persona, prompt, mission, stage, context) => this.runAgent(persona, prompt, mission, stage, context),
       parallel: {
-        prepare: async (mission, taskId, attempt) => {
-          const record = await prepareTaskWorktree(mission, taskId, attempt)
+        prepareBaseline: prepareParallelBaseline,
+        prepare: async (mission, taskId, attempt, baseline) => {
+          const record = await prepareTaskWorktree(mission, taskId, attempt, baseline)
           await prepareMissionSkills(mission.workspace.path, record.path)
           return record
         },

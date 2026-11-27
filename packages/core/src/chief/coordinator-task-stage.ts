@@ -173,6 +173,7 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
               // fail-closed: leave state.changeSet undefined
             }
           }
+          if (task.effectScope !== "external") mission.fingerprint = await ports.fingerprint(mission)
         }
         if (awaitingReview && state.parallel) {
           if (!ports.parallel)
@@ -189,6 +190,13 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
           await reclaimAppliedParallelWorkspaces(mission, ports.parallel, save, task.id)
         }
         if (!awaitingReview) await save("work", `Worker returned evidence for ${task.id}.`, task.id)
+        if (
+          ports.parallel &&
+          (mission.executionPolicy?.maxParallel ?? 1) > 1 &&
+          task.effectScope !== "external" &&
+          (await reviewReturnedFindings(context, [task]))
+        )
+          return
         await recordIntegrationCheck(mission, ports, [state], save)
         reviewStarted = true
         await taskReview(task, state)
@@ -268,9 +276,11 @@ export async function runTaskStage(context: CoordinatorContext): Promise<StageTr
     const wave = (
       ports.parallel && limit > 1 ? readyTasks(plan, mission.tasks) : readyTaskWave(plan, mission.tasks, limit)
     ).filter((task) => task.effectScope !== "external")
-    // A task whose isolated delivery was rejected keeps that delivery mode: its repair must produce a fresh
-    // AV-captured changeSet, otherwise the review would compare a direct worktree edit against stale capture.
+    const canCaptureDirectChangeSet = Boolean(ports.captureWorkspaceTree && ports.collectDirectChangeSet)
+    // A task whose isolated delivery was rejected keeps that delivery mode only when direct changeSet capture
+    // is unavailable; otherwise performTask runs in-place and captures a fresh AV changeSet.
     const isolatedBefore = (taskId: string) =>
+      !canCaptureDirectChangeSet &&
       mission.history.some((event) => event.taskId === taskId && event.stage === "parallel-review-rejected")
     if (
       ports.parallel &&

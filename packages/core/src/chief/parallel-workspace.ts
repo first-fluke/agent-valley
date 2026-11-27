@@ -30,6 +30,39 @@ export { captureParallelBaseline } from "./parallel-git"
 
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex")
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+/** Baselines already validated by `prepareParallelBaseline` for a canonical source path. */
+const validatedBaselines = new WeakMap<ParallelBaseline, { sourcePath: string; baselineTree: string }>()
+
+/** Serialize disk-budget reclamation per source repository so concurrent preparations never race on cleanup. */
+const releaseLocks = new Map<string, Promise<unknown>>()
+async function withReleaseLock<T>(source: string, fn: () => Promise<T>): Promise<T> {
+  const previous = releaseLocks.get(source) ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const tail = previous.then(() => current)
+  releaseLocks.set(source, tail)
+  await previous
+  try {
+    return await fn()
+  } finally {
+    release()
+    if (releaseLocks.get(source) === tail) releaseLocks.delete(source)
+  }
+}
+
+/** Capture and validate one shared wave baseline snapshot so concurrent lane preparations reuse it. */
+export async function prepareParallelBaseline(mission: Mission): Promise<ParallelBaseline> {
+  await assertMissionWorkspace(mission)
+  const sourcePath = await realpath(mission.workspace.path)
+  const baseline = await captureParallelBaseline(mission.workspace.path)
+  await parallelTreeImages(mission.workspace.path, baseline.tree)
+  const baselineTree = (await parallelGit(mission.workspace.path, ["rev-parse", `${baseline.head}^{tree}`])).trim()
+  validatedBaselines.set(baseline, { sourcePath, baselineTree })
+  return baseline
+}
 function identity(missionId: string, taskId: string, attempt: number) {
   if (!taskId || taskId.length > 200 || !Number.isSafeInteger(attempt) || attempt < 1)
     throw new Error("Use a valid task ID and positive attempt number for each parallel Actor.")
@@ -125,8 +158,12 @@ export async function prepareTaskWorktree(
     }
     return record
   }
+  const sourcePath = await realpath(mission.workspace.path)
   const snapshot = baseline ?? (await captureParallelBaseline(mission.workspace.path))
-  await parallelTreeImages(mission.workspace.path, snapshot.tree)
+  const validated = baseline ? validatedBaselines.get(baseline) : undefined
+  if (!validated || validated.sourcePath !== sourcePath) {
+    await parallelTreeImages(mission.workspace.path, snapshot.tree)
+  }
   await mkdir(dirname(location.path), { recursive: true, mode: 0o700 })
   if ((await realpath(dirname(location.path))) !== dirname(location.path))
     throw new Error("Parallel workspaces directory must not redirect through a symlink.")
@@ -135,8 +172,10 @@ export async function prepareTaskWorktree(
       `Unrecorded parallel workspace exists at ${location.path}. Preserve its edits and inspect it before retrying.`,
     )
   const referenced = new Set(mission.tasks.flatMap((state) => (state.parallel ? [state.parallel.path] : [])))
-  await ensureDiskBudget(dirname(location.path), `a parallel Actor workspace for ${taskId}`, () =>
-    releaseAppliedTaskWorktrees(mission, { keep: referenced }),
+  await withReleaseLock(sourcePath, () =>
+    ensureDiskBudget(dirname(location.path), `a parallel Actor workspace for ${taskId}`, () =>
+      releaseAppliedTaskWorktreesUnlocked(mission, { keep: referenced }),
+    ),
   )
   await parallelGit(mission.workspace.path, [
     "clone",
@@ -170,13 +209,16 @@ export async function prepareTaskWorktree(
   const seeded = await seedWorkspaceCaches({ workspace: location.path, sources: [...earlier, mission.workspace.path] })
   if (seeded.length) await writeParallelJson(join(location.directory, "cache-seed.json"), seeded)
   // baselineTree must resolve from baselineHead for reviewers; the snapshot input may add an uncommitted overlay.
-  const baselineTree = (await parallelGit(mission.workspace.path, ["rev-parse", `${snapshot.head}^{tree}`])).trim()
+  const baselineTree =
+    validated && validated.sourcePath === sourcePath
+      ? validated.baselineTree
+      : (await parallelGit(mission.workspace.path, ["rev-parse", `${snapshot.head}^{tree}`])).trim()
   const record: ParallelTaskWorkspace = {
     version: 1,
     missionId: mission.id,
     taskId,
     attempt,
-    sourceWorkspacePath: await realpath(mission.workspace.path),
+    sourceWorkspacePath: sourcePath,
     path: location.path,
     branch: location.branch,
     baselineHead: snapshot.head,
@@ -363,6 +405,15 @@ export async function releaseAppliedTaskWorktrees(
   options: { keep?: ReadonlySet<string>; apply?: boolean; onError?: (path: string, error: unknown) => void } = {},
 ): Promise<{ released: string[]; retained: string[] }> {
   const source = await realpath(mission.workspace.path)
+  return withReleaseLock(source, () => releaseAppliedTaskWorktreesUnlocked(mission, options, source))
+}
+
+async function releaseAppliedTaskWorktreesUnlocked(
+  mission: Mission,
+  options: { keep?: ReadonlySet<string>; apply?: boolean; onError?: (path: string, error: unknown) => void } = {},
+  canonicalSource?: string,
+): Promise<{ released: string[]; retained: string[] }> {
+  const source = canonicalSource ?? (await realpath(mission.workspace.path))
   if (!(await lstat(join(source, ".agent-valley", "parallel")).catch(() => undefined)))
     return { released: [], retained: [] }
   const root = await parallelRoot(source)

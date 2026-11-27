@@ -23,6 +23,7 @@ import {
   integrateTaskDelivery,
   integrateTaskWorktree,
   ParallelIntegrationConflict,
+  prepareParallelBaseline,
   prepareTaskWorktree,
 } from "./parallel-workspace"
 import type { Mission } from "./types"
@@ -369,6 +370,32 @@ describe("isolated parallel Actor worktrees", () => {
     expect(names).not.toContain("staged-then-gone.txt")
     expect(names).toContain("a.txt")
   })
+
+  it("prepares multiple workspaces concurrently with a shared baseline and retains valid snapshot refs without lock races", async () => {
+    const root = mission.workspace.path
+    await writeFile(join(root, "overlay.txt"), "Shared wave baseline overlay\n")
+    const shared = await prepareParallelBaseline(mission)
+    const ids = ["lane-1", "lane-2", "lane-3", "lane-4"]
+    const workspaces = await Promise.all(ids.map((id) => prepareTaskWorktree(mission, id, 1, shared)))
+
+    expect(workspaces).toHaveLength(ids.length)
+    for (const workspace of workspaces) {
+      expect(workspace.baselineHead).toBe(shared.head)
+      expect(workspace.snapshotTree).toBe(shared.tree)
+      expect(workspace.snapshotCommit).toBeDefined()
+      expect(await readFile(join(workspace.path, "overlay.txt"), "utf8")).toBe("Shared wave baseline overlay\n")
+      const refs = taskEvidenceRefs(workspace)
+      expect((await git(["rev-parse", refs.snapshotRef])).trim()).toBe(workspace.snapshotCommit)
+    }
+
+    await Promise.all(
+      workspaces.map((workspace) =>
+        writeFile(join(workspace.path, `${workspace.taskId}.txt`), `Output ${workspace.taskId}\n`),
+      ),
+    )
+    for (const workspace of workspaces) await integrateTaskWorktree(mission, workspace)
+    for (const id of ids) expect(await readFile(join(root, `${id}.txt`), "utf8")).toBe(`Output ${id}\n`)
+  }, 30_000)
 
   it("overlaps isolated children, then integrates disjoint results in deterministic order", async () => {
     const snapshot = await captureParallelBaseline(mission.workspace.path)
