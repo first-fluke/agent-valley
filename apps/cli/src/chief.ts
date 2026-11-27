@@ -9,6 +9,7 @@ import { createContinuousMissionWorkspace } from "@agent-valley/core/chief/conti
 import { coordinate } from "@agent-valley/core/chief/coordinator"
 import { executionState, MissionPause, recordPause } from "@agent-valley/core/chief/execution"
 import { loadOrganizationContext } from "@agent-valley/core/chief/organization"
+import { seededExhaustion } from "@agent-valley/core/chief/provider-exhaustion"
 import { ChiefRuntime, missionIssue } from "@agent-valley/core/chief/runtime"
 import {
   isServiceShutdown,
@@ -175,6 +176,7 @@ export async function runOrder(
       }
       if (!codeDelivery) await prepareMissionSkills(config.workspace, workspace.path)
       const now = new Date().toISOString()
+      const handoff = operation ? seededExhaustion(operation, now) : undefined
       mission = {
         id,
         repositoryRoot: config.workspace,
@@ -211,6 +213,7 @@ export async function runOrder(
               },
             }
           : {}),
+        ...(handoff ? { handoff } : {}),
         capturePolicy: config.capturePolicy,
         status: "pending",
         tasks: [],
