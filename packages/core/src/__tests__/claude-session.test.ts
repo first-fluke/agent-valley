@@ -347,4 +347,78 @@ describe("ClaudeSession — streaming output", () => {
     expect(keep).toHaveBeenCalledTimes(1)
     expect(stop).toHaveBeenCalledTimes(1)
   })
+
+  test("isolates headless Claude runs from ambient MCP servers and hooks by default", async () => {
+    writeMockClaude([JSON.stringify({ type: "result", result: "done", is_error: false })])
+    const { ClaudeSession } = await import("../sessions/claude-session")
+    const session = new ClaudeSession()
+    await session.start({
+      type: "claude",
+      timeout: 30,
+      workspacePath: "/tmp",
+      model: "sonnet",
+      options: { effort: "high" },
+    })
+    await session.execute("test")
+
+    const args = vi.mocked(sandboxModule.planSandboxedSpawn).mock.calls[0]?.[0].args ?? []
+    expect(args).toEqual([
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--no-session-persistence",
+      "--strict-mcp-config",
+      "--settings",
+      '{"disableAllHooks":true}',
+      "--model",
+      "sonnet",
+      "--effort",
+      "high",
+    ])
+  })
+
+  test("allows opting back into MCP servers or hooks via env vars or options", async () => {
+    writeMockClaude([JSON.stringify({ type: "result", result: "done", is_error: false })])
+    const { ClaudeSession } = await import("../sessions/claude-session")
+
+    const runWith = async (config: { env?: Record<string, string>; options?: Record<string, unknown> }) => {
+      vi.mocked(sandboxModule.planSandboxedSpawn).mockClear()
+      const session = new ClaudeSession()
+      await session.start({ type: "claude", timeout: 30, workspacePath: "/tmp", ...config })
+      await session.execute("test")
+      return vi.mocked(sandboxModule.planSandboxedSpawn).mock.calls[0]?.[0].args ?? []
+    }
+
+    const keepMcpEnvArgs = await runWith({ env: { AV_CLAUDE_KEEP_MCP: "1" } })
+    expect(keepMcpEnvArgs).not.toContain("--strict-mcp-config")
+    expect(keepMcpEnvArgs).toEqual(expect.arrayContaining(["--settings", '{"disableAllHooks":true}']))
+
+    const keepMcpOptionArgs = await runWith({ options: { keepMcp: true } })
+    expect(keepMcpOptionArgs).not.toContain("--strict-mcp-config")
+    expect(keepMcpOptionArgs).toEqual(expect.arrayContaining(["--settings", '{"disableAllHooks":true}']))
+
+    const keepHooksEnvArgs = await runWith({ env: { AV_CLAUDE_KEEP_HOOKS: "1" } })
+    expect(keepHooksEnvArgs).toContain("--strict-mcp-config")
+    expect(keepHooksEnvArgs).not.toContain("--settings")
+
+    const keepHooksOptionArgs = await runWith({ options: { keepHooks: true } })
+    expect(keepHooksOptionArgs).toContain("--strict-mcp-config")
+    expect(keepHooksOptionArgs).not.toContain("--settings")
+
+    vi.stubEnv("AV_CLAUDE_KEEP_MCP", "1")
+    vi.stubEnv("AV_CLAUDE_KEEP_HOOKS", "1")
+    try {
+      const processEnvArgs = await runWith({})
+      expect(processEnvArgs).not.toContain("--strict-mcp-config")
+      expect(processEnvArgs).not.toContain("--settings")
+
+      const overriddenArgs = await runWith({ env: { AV_CLAUDE_KEEP_MCP: "0", AV_CLAUDE_KEEP_HOOKS: "0" } })
+      expect(overriddenArgs).toContain("--strict-mcp-config")
+      expect(overriddenArgs).toEqual(expect.arrayContaining(["--settings", '{"disableAllHooks":true}']))
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
 })

@@ -47,6 +47,20 @@ REASONING: <one paragraph explaining the analysis>`
 
 // ── LLM Scoring Service ────────────────────────────────────────────
 
+export function buildScoringArgs(model: string, prompt: string): string[] {
+  const modelFlag = model !== "claude" ? ["--model", model] : []
+  return [
+    "--print",
+    "--no-session-persistence",
+    "--strict-mcp-config",
+    "--settings",
+    '{"disableAllHooks":true}',
+    ...modelFlag,
+    "-p",
+    prompt,
+  ]
+}
+
 export class LlmScoringService implements ScoringService {
   constructor(private readonly model: string) {}
 
@@ -61,8 +75,7 @@ export class LlmScoringService implements ScoringService {
   }
 
   private callLlm(prompt: string): Promise<string> {
-    const modelFlag = this.model !== "claude" ? ["--model", this.model] : []
-    const args = ["--print", "--no-session-persistence", ...modelFlag, "-p", prompt]
+    const args = buildScoringArgs(this.model, prompt)
 
     return new Promise((resolve, reject) => {
       const proc = spawn("claude", args, { stdio: ["ignore", "pipe", "pipe"] })

@@ -87,6 +87,9 @@ describe("Qwen Code native single-shot session", () => {
       workspacePath: workspace,
       env: expect.any(Object),
     })
+    const spawnedArgs = vi.mocked(sandbox.planSandboxedSpawn).mock.calls[0]?.[0].args ?? []
+    expect(spawnedArgs).not.toContain("--strict-mcp-config")
+    expect(spawnedArgs).not.toContain("--settings")
     const complete = events.find((event) => event.type === "complete")
     expect(complete?.result.tokenUsage).toEqual({ input: 100, output: 12, model: "actual-qwen-model" })
     expect(complete?.result.output).toBe("done")

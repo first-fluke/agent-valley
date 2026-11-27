@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { buildDarwinSandboxCommand } from "./sandbox-darwin"
+import { buildDarwinSandboxCommand, resolveDarwinUserTempDir } from "./sandbox-darwin"
 
 let root: string
 let workspace: string
@@ -153,5 +153,20 @@ describe.skipIf(process.platform !== "darwin")("Darwin named Unix socket confine
     expect(result.status, result.stderr).toBe(0)
     expect(JSON.parse(result.stdout)).toEqual({ read: true, write: true })
     expect(readFileSync(path, "utf8")).toBe("synthetic-credential")
+  })
+
+  it("allows file writes and Unix listeners in DARWIN_USER_TEMP_DIR even when TMPDIR is overridden", () => {
+    const darwinTempDir = resolveDarwinUserTempDir()
+    expect(darwinTempDir).toBeTruthy()
+    const scratch = mkdtempSync(join(darwinTempDir as string, "av-darwin-tmp-"))
+    try {
+      const marker = join(scratch, "marker")
+      const result = run(roundtrip, [join(scratch, "u.sock"), marker])
+      expect(result.status, result.stderr).toBe(0)
+      expect(readFileSync(marker, "utf8")).toBe("file-write-allowed")
+      expect(JSON.parse(result.stdout)).toEqual({ accepted: true, response: "local-response" })
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
   })
 })

@@ -134,14 +134,81 @@ export async function integrationCheckContextEnv(
 
 export const LANE_CHECK_COMMAND_ENV = "AV_LANE_CHECK_COMMAND"
 export const LANE_CHECK_TIMEOUT_ENV = "AV_LANE_CHECK_TIMEOUT_SEC"
+export const LANE_CHECK_CONCURRENCY_ENV = "AV_LANE_CHECK_CONCURRENCY"
 
-/**
- * The operator's quick command for one Actor's isolated workspace, for example a formatter, a linter and an
- * architecture check. A delivery used to meet its first machine check only after every Actor of the wave had
- * returned and the tree was integrated, so a failure a twenty-second command finds cost a whole round of
- * Actor run, integration check and review. This command runs as soon as the Actor returns, and its failure
- * goes straight back to that Actor.
- */
+const MAX_LANE_CHECK_CONCURRENCY = 16
+const laneCheckSemaphores = new Map<string, { active: number; waiters: Array<{ grant: () => void; limit: number }> }>()
+
+export function laneCheckSemaphoreCount(): number {
+  return laneCheckSemaphores.size
+}
+
+/** Max concurrent host-side lane checks per repo (default 1 to prevent parallel CPU/RAM thrashing). */
+export function laneCheckConcurrency(source: NodeJS.ProcessEnv = process.env): number {
+  const raw = source[LANE_CHECK_CONCURRENCY_ENV]?.trim()
+  if (!raw || !/^\d+$/.test(raw)) return 1
+  const parsed = Number(raw)
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? Math.min(MAX_LANE_CHECK_CONCURRENCY, parsed) : 1
+}
+
+async function acquireLaneSlot(key: string, limit: number, signal?: AbortSignal): Promise<(() => void) | null> {
+  if (signal?.aborted) return null
+  const entry = laneCheckSemaphores.get(key) ?? { active: 0, waiters: [] }
+  let released = false
+  const cleanup = () => {
+    if (entry.active === 0 && entry.waiters.length === 0) laneCheckSemaphores.delete(key)
+  }
+  const release = () => {
+    if (released) return
+    released = true
+    entry.active = Math.max(0, entry.active - 1)
+    while (entry.waiters.length > 0) {
+      const idx = entry.waiters.findIndex((w) => entry.active < w.limit)
+      if (idx === -1) break
+      const [next] = entry.waiters.splice(idx, 1)
+      entry.active += 1
+      next?.grant()
+    }
+    cleanup()
+  }
+  laneCheckSemaphores.set(key, entry)
+  if (entry.active < limit) {
+    entry.active += 1
+    return release
+  }
+  return await new Promise<(() => void) | null>((resolveWaiter) => {
+    const waiter = {
+      limit,
+      grant: () => {
+        signal?.removeEventListener("abort", onAbort)
+        resolveWaiter(release)
+      },
+    }
+    const onAbort = () => {
+      const idx = entry.waiters.indexOf(waiter)
+      if (idx !== -1) entry.waiters.splice(idx, 1)
+      cleanup()
+      resolveWaiter(null)
+    }
+    entry.waiters.push(waiter)
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+function formatLaneCheckResult(
+  command: string,
+  result: Pick<VerificationGateResult, "ok" | "output" | "timedOut">,
+): { ok: boolean; output: string } {
+  const verdict = result.ok
+    ? "PASS"
+    : result.timedOut
+      ? "FAIL: the command timed out."
+      : "FAIL: the command exited nonzero. Output tail:"
+  const tail = result.ok ? "" : `\n${(result.output ?? "").slice(-6_000)}`
+  return { ok: result.ok, output: `${command.slice(0, 600)}\n${verdict}${tail}`.slice(0, 8_000) }
+}
+
+/** Operator quick check for one Actor workspace; failures return straight to that Actor. */
 export function laneCheckCommand(source: NodeJS.ProcessEnv = process.env): string | undefined {
   return source[LANE_CHECK_COMMAND_ENV]?.trim() || undefined
 }
@@ -151,27 +218,27 @@ export async function runLaneCheck(
   workspacePath: string,
   signal?: AbortSignal,
   source: NodeJS.ProcessEnv = process.env,
+  deps?: { runGate?: typeof runVerificationGate },
 ): Promise<{ ok: boolean; output: string } | undefined> {
   const command = laneCheckCommand(source)
   if (!command) return undefined
-  const seconds = Number(source[LANE_CHECK_TIMEOUT_ENV])
-  const cacheEnv = await cargoCompilerCacheEnvironment(workspacePath, source)
-  const result = await runVerificationGate({ ...mission.workspace, path: workspacePath }, command, {
-    timeoutSec: Number.isFinite(seconds) && seconds > 0 ? seconds : 900,
-    signal,
-    ...(Object.keys(cacheEnv).length ? { extraEnv: cacheEnv } : {}),
-  })
-  const verdict = result.ok
-    ? "PASS"
-    : result.timedOut
-      ? "FAIL: the command timed out."
-      : "FAIL: the command exited nonzero. Output tail:"
-  return {
-    ok: result.ok,
-    output: `${command.slice(0, 600)}\n${verdict}${result.ok ? "" : `\n${(result.output ?? "").slice(-6_000)}`}`.slice(
-      0,
-      8_000,
-    ),
+  const cancelled = () =>
+    formatLaneCheckResult(command, { ok: false, timedOut: false, output: "Verification cancelled." })
+  const release = await acquireLaneSlot(mission.repositoryRoot || mission.id, laneCheckConcurrency(source), signal)
+  if (!release) return cancelled()
+  try {
+    if (signal?.aborted) return cancelled()
+    const seconds = Number(source[LANE_CHECK_TIMEOUT_ENV])
+    const cacheEnv = await cargoCompilerCacheEnvironment(workspacePath, source)
+    const runGate = deps?.runGate ?? runVerificationGate
+    const result = await runGate({ ...mission.workspace, path: workspacePath }, command, {
+      timeoutSec: Number.isFinite(seconds) && seconds > 0 ? seconds : 900,
+      signal,
+      ...(Object.keys(cacheEnv).length ? { extraEnv: cacheEnv } : {}),
+    })
+    return formatLaneCheckResult(command, result)
+  } finally {
+    release()
   }
 }
 

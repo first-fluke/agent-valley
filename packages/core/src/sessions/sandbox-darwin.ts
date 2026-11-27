@@ -78,9 +78,10 @@
  * to consume; it is not enforced by this module today.
  */
 
+import { execFileSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
 import { PROJECT_CONFIG_FILENAME } from "../config/project-config-path"
 import { agentHomeAccess } from "./sandbox-agent-paths"
 import { resolveBinaryPath } from "./sandbox-binary"
@@ -92,6 +93,7 @@ const SANDBOX_EXEC_CANDIDATES = ["/usr/bin/sandbox-exec"]
 const SHARED_TMP_PATHS = ["/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp"]
 
 let cachedPath: string | null | undefined
+let cachedDarwinUserTempDir: string | null | undefined
 
 /** Resolve the sandbox-exec binary path, or `null` if unavailable. Cached after first call. */
 export async function resolveSandboxExecPath(): Promise<string | null> {
@@ -109,31 +111,86 @@ export function resetSandboxExecCache(): void {
   cachedPath = undefined
 }
 
+function normalizeAbsoluteDir(value: string | undefined | null): string | undefined {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  const stripped = trimmed.length > 1 ? trimmed.replace(/\/+$/, "") : trimmed
+  const normalized = stripped || "/"
+  return isAbsolute(normalized) ? normalized : undefined
+}
+
+/**
+ * Resolve macOS's per-user temporary directory (`confstr(_CS_DARWIN_USER_TEMP_DIR)`).
+ * Native macOS/Rust binaries query this directly even when `TMPDIR` is overridden or unset.
+ * Cached after the first default call; returns `undefined` off macOS or when `getconf` fails.
+ */
+export function resolveDarwinUserTempDir(options?: {
+  platform?: NodeJS.Platform
+  read?: () => string
+}): string | undefined {
+  const useCache = options === undefined
+  if (useCache && cachedDarwinUserTempDir !== undefined) {
+    return cachedDarwinUserTempDir ?? undefined
+  }
+  const platform = options?.platform ?? process.platform
+  if (platform !== "darwin") {
+    if (useCache) cachedDarwinUserTempDir = null
+    return undefined
+  }
+  let resolved: string | undefined
+  try {
+    const raw = options?.read
+      ? options.read()
+      : execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], {
+          encoding: "utf8",
+          timeout: 1_000,
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+    resolved = normalizeAbsoluteDir(raw)
+  } catch {
+    resolved = undefined
+  }
+  if (useCache) cachedDarwinUserTempDir = resolved ?? null
+  return resolved
+}
+
+/** Test-only: reset the cached DARWIN_USER_TEMP_DIR lookup. */
+export function resetDarwinUserTempDirCache(): void {
+  cachedDarwinUserTempDir = undefined
+}
+
 export function buildDarwinSandboxCommand(
   req: SandboxBuildRequest,
   sandboxExecPath = "/usr/bin/sandbox-exec",
   home = homedir(),
+  darwinUserTempDir?: string | null,
 ): SandboxCommand {
-  const profile = buildSeatbeltProfile(req, home)
+  const resolvedDarwinUserTempDir =
+    darwinUserTempDir === undefined ? resolveDarwinUserTempDir() : (darwinUserTempDir ?? undefined)
+  const profile = buildSeatbeltProfile(req, home, resolvedDarwinUserTempDir)
   return {
     command: sandboxExecPath,
     args: ["-p", profile, req.command, ...req.args],
   }
 }
 
-function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
+function buildSeatbeltProfile(req: SandboxBuildRequest, home: string, darwinUserTempDir?: string): string {
   const workspacePaths = pathAliases(req.workspacePath)
-  const tmpPaths = pathAliases(tmpdir())
+  const tmpCandidates = [
+    normalizeAbsoluteDir(tmpdir()),
+    normalizeAbsoluteDir(req.env?.TMPDIR),
+    normalizeAbsoluteDir(darwinUserTempDir),
+  ].filter((value): value is string => value !== undefined)
+  const tmpPaths = [...new Set(tmpCandidates.flatMap((dir) => pathAliases(dir)))]
   const git = linkedWorktreeGitPaths(req.workspacePath)
   const agentPaths = agentHomeAccess(req.agentType, home, req.env)
 
-  // On macOS, os.tmpdir() returns the `/var/folders/...` symlink path, but
-  // Seatbelt resolves the real `/private/var/folders/...` path when a
-  // process creates a NEW file there — a write-rule scoped only to the
-  // `/var/folders/...` subpath silently denies those writes. Resolve the
-  // real path and allow-list both forms so writes to the
-  // sandboxed tmp workspace succeed regardless of which form the kernel
-  // checks against. Keep unresolved paths when they do not exist yet.
+  // On macOS, os.tmpdir() and DARWIN_USER_TEMP_DIR return `/var/folders/...`
+  // symlink paths, but Seatbelt resolves the real `/private/var/folders/...`
+  // path when a process creates a NEW file or socket there — a rule scoped only
+  // to `/var/folders/...` silently denies those operations. Resolve the real
+  // path for every candidate temp dir (os.tmpdir(), req.env.TMPDIR, and
+  // DARWIN_USER_TEMP_DIR) and allow-list both forms, deduplicated.
 
   // Rust and mise toolchains write outside the workspace: Cargo downloads crates into its registry
   // cache and `cargo install` writes `bin/`, rustup downloads components into its home, and mise
@@ -149,14 +206,16 @@ function buildSeatbeltProfile(req: SandboxBuildRequest, home: string): string {
     env.MISE_DATA_DIR || `${home}/.local/share/mise`,
   ]
   const writablePaths = [
-    ...workspacePaths,
-    ...tmpPaths,
-    ...SHARED_TMP_PATHS,
-    ...agentPaths.active,
-    `${home}/.cache`,
-    `${home}/.npm`,
-    `${home}/.bun`,
-    ...toolchainPaths,
+    ...new Set([
+      ...workspacePaths,
+      ...tmpPaths,
+      ...SHARED_TMP_PATHS,
+      ...agentPaths.active,
+      `${home}/.cache`,
+      `${home}/.npm`,
+      `${home}/.bun`,
+      ...toolchainPaths,
+    ]),
   ]
   const cargoCredentialFiles = [`${cargoHome}/credentials`, `${cargoHome}/credentials.toml`]
   // NOTE: deliberately no blanket `${home}/.config` entry here — that

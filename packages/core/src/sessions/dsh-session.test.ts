@@ -81,6 +81,9 @@ describe("DSH native headless JSON protocol", () => {
       workspacePath: workspace,
       env: expect.any(Object),
     })
+    const spawnedArgs = vi.mocked(sandbox.planSandboxedSpawn).mock.calls[0]?.[0].args ?? []
+    expect(spawnedArgs).not.toContain("--strict-mcp-config")
+    expect(spawnedArgs).not.toContain("--settings")
     expect(events.find((event) => event.type === "complete")?.result.output).toBe("final answer")
     expect(events.filter((event) => event.type === "output")).toEqual([{ type: "output", chunk: "progress" }])
     expect(events.find((event) => event.type === "toolUse")).toMatchObject({ tool: "bash", args: { command: "pwd" } })
