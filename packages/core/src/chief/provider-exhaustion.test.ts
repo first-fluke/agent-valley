@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EXHAUSTION_WINDOW_MS, recordExhaustion } from "./provider-exhaustion"
+import { EXHAUSTION_WINDOW_MS, recordExhaustion, seededExhaustion } from "./provider-exhaustion"
 
 const at = (ms: number) => new Date(Date.parse("2026-10-05T00:00:00.000Z") + ms).toISOString()
 const hour = 60 * 60 * 1_000
@@ -45,5 +45,44 @@ describe("provider exhaustion records", () => {
     const recorded = [{ agentType: "codex", at: at(0) }]
 
     expect(recordExhaustion(recorded, { createdAt: at(hour) }, at(2 * hour))).toEqual(recorded)
+  })
+})
+
+describe("seeded provider exhaustion", () => {
+  it("seeds exhausted providers within the exhaustion window", () => {
+    const operation = {
+      exhaustedProviders: [
+        { agentType: "codex", at: at(hour) },
+        { agentType: "qwen", at: at(2 * hour) },
+      ],
+    }
+    expect(seededExhaustion(operation, at(3 * hour))).toEqual({
+      exhaustedAgents: ["codex", "qwen"],
+      routes: {},
+      continuations: {},
+    })
+  })
+
+  it("omits providers past the exhaustion window", () => {
+    const operation = {
+      exhaustedProviders: [
+        { agentType: "codex", at: at(0) },
+        { agentType: "qwen", at: at(7 * hour) },
+      ],
+    }
+    expect(seededExhaustion(operation, at(8 * hour))).toEqual({
+      exhaustedAgents: ["qwen"],
+      routes: {},
+      continuations: {},
+    })
+  })
+
+  it("returns undefined when all providers are expired or list is empty", () => {
+    const expired = {
+      exhaustedProviders: [{ agentType: "codex", at: at(0) }],
+    }
+    expect(seededExhaustion(expired, at(7 * hour))).toBeUndefined()
+    expect(seededExhaustion({}, at(hour))).toBeUndefined()
+    expect(seededExhaustion({ exhaustedProviders: [] }, at(hour))).toBeUndefined()
   })
 })
