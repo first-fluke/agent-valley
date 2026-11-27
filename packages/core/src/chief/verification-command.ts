@@ -5,6 +5,7 @@ import { cargoCompilerCacheEnvironment, cargoVerificationEnvironment } from "./c
 import { cargoVerificationInputs } from "./cargo-verification"
 import { safeVerificationCommand, verificationCommandTestPaths } from "./verification-contract"
 import { readVerificationFile } from "./verification-files"
+import { dartVerificationInputs, goVerificationInputs, swiftVerificationInputs } from "./workspace-verification-inputs"
 
 export const MAX_VERIFICATION_OUTPUT_BYTES = 1_048_576
 
@@ -60,6 +61,9 @@ export async function verificationCommandInputs(
   if (!safeVerificationCommand(program, args))
     throw new Error("Verification command is outside the allowed argv contract.")
   if (program === "cargo") return cargoVerificationInputs(root, budget)
+  if (program === "go") return goVerificationInputs(root, budget)
+  if (program === "swift") return swiftVerificationInputs(root, budget)
+  if (program === "dart" && args.length === 1) return dartVerificationInputs(root, budget)
   const names = verificationCommandTestPaths(program, args)
   if (program === "node" && args[0] === "node_modules/vitest/vitest.mjs") {
     // Package managers may link this installed dependency within node_modules.

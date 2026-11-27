@@ -565,7 +565,7 @@ describe("Part B: operator integration check AV_INTEGRATION_EVIDENCE_FILE handof
     expect(verified.evidence[1]?.checks[0]?.passed).toBe(true)
   })
 
-  it("rejects AV_INTEGRATION_EVIDENCE_FILE when operator command fails or mutates the workspace", async () => {
+  it("preserves passing AV_INTEGRATION_EVIDENCE_FILE on partial operator gate failure when workspace is unchanged", async () => {
     const root = await gitRepo({
       "tests/app.test.mjs": "import test from 'node:test'\ntest('ok', () => {})\n",
       "docs/report.md": "Report body\n",
@@ -580,8 +580,8 @@ describe("Part B: operator integration check AV_INTEGRATION_EVIDENCE_FILE handof
     const active = store.processGuard(mission.id)
     const outputSha = "b".repeat(64)
 
-    // 1. Failing operator command (exit 1) -> evidence ignored
-    const failingCommand = `node -e '
+    // 1. Failing extra operator gate (exit 1) after recording passing contract evidence on unchanged tree -> reused
+    const partialFailCommand = `node -e '
       const fs = require("node:fs");
       fs.writeFileSync(process.env.${INTEGRATION_EVIDENCE_FILE_ENV}, JSON.stringify({
         version: 1,
@@ -590,15 +590,51 @@ describe("Part B: operator integration check AV_INTEGRATION_EVIDENCE_FILE handof
       process.exit(1);
     '`
     const failResult = await runIntegrationCheck(mission, active, undefined, {
-      AV_INTEGRATION_CHECK_COMMAND: failingCommand,
+      AV_INTEGRATION_CHECK_COMMAND: partialFailCommand,
     })
     expect(failResult?.ok).toBe(false)
+    expect(mission.integrationEvidence?.checks).toHaveLength(1)
+    expect(mission.integrationEvidence?.checks[0]?.outputSha256).toBe(outputSha)
+
+    const reuse = await integrationEvidenceFor(mission)
+    expect(reuse).toHaveLength(1)
+    const executeCommand = vi.fn(async () => ({ exitCode: 0, stdout: "should not run", stderr: "" }))
+    const verified = await executeGoalVerification(contract, root, {
+      successCriteria,
+      executeCommand,
+      reuse,
+    })
+    expect(verified.ok).toBe(true)
+    expect(executeCommand).not.toHaveBeenCalled()
+
+    // 2. Failing operator command that writes no evidence file -> stays undefined
+    const noEvidenceFailCommand = `node -e 'process.exit(1)'`
+    const noEvidenceResult = await runIntegrationCheck(mission, active, undefined, {
+      AV_INTEGRATION_CHECK_COMMAND: noEvidenceFailCommand,
+    })
+    expect(noEvidenceResult?.ok).toBe(false)
     expect(mission.integrationEvidence).toBeUndefined()
 
-    // 2. Operator command mutates a tracked file -> before !== after -> evidence rejected
+    // 3. Failing operator command that mutates a tracked file -> before !== after -> evidence rejected
+    const mutatingFailCommand = `node -e '
+      const fs = require("node:fs");
+      fs.writeFileSync("docs/report.md", "Mutated during failing check\\n");
+      fs.writeFileSync(process.env.${INTEGRATION_EVIDENCE_FILE_ENV}, JSON.stringify({
+        version: 1,
+        checks: [{ program: "node", args: ["--test", "tests/app.test.mjs"], cwd: process.cwd(), passed: true, exitCode: 0, outputSha256: "${outputSha}" }]
+      }));
+      process.exit(1);
+    '`
+    const mutFailResult = await runIntegrationCheck(mission, active, undefined, {
+      AV_INTEGRATION_CHECK_COMMAND: mutatingFailCommand,
+    })
+    expect(mutFailResult?.ok).toBe(false)
+    expect(mission.integrationEvidence).toBeUndefined()
+
+    // 4. Passing operator command that mutates a tracked file -> before !== after -> evidence rejected
     const mutatingCommand = `node -e '
       const fs = require("node:fs");
-      fs.writeFileSync("docs/report.md", "Mutated during check\\n");
+      fs.writeFileSync("docs/report.md", "Mutated during passing check\\n");
       fs.writeFileSync(process.env.${INTEGRATION_EVIDENCE_FILE_ENV}, JSON.stringify({
         version: 1,
         checks: [{ program: "node", args: ["--test", "tests/app.test.mjs"], cwd: process.cwd(), passed: true, exitCode: 0, outputSha256: "${outputSha}" }]
