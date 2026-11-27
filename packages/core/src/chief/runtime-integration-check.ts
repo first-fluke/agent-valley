@@ -14,6 +14,7 @@ import {
   type GoalVerificationCheck,
   isPassingCommandEvidence,
   safeVerificationCommand,
+  VERIFICATION_COMMAND_PROGRAMS,
   validateGoalVerificationContract,
 } from "./verification"
 import { verificationCommandInputs } from "./verification-command"
@@ -32,7 +33,7 @@ export const INTEGRATION_OPEN_TASKS_ENV = "AV_INTEGRATION_OPEN_TASKS"
 const MAX_OPERATOR_EVIDENCE_BYTES = 512 * 1024
 
 export const operatorCommandEvidenceSchema = z.strictObject({
-  program: z.enum(["git", "node", "bun", "cargo"]),
+  program: z.enum(VERIFICATION_COMMAND_PROGRAMS),
   args: z.array(z.string().min(1).max(1_024)).min(1).max(30),
   cwd: z.string().min(1).max(2_048),
   passed: z.literal(true),
@@ -423,7 +424,9 @@ async function checkIntegratedTree(
         ...(Object.keys(extraEnv).length ? { extraEnv } : {}),
         ...(logPath ? { outputFile: logPath } : {}),
       })
-      if (gateResult.ok && evidenceFilePath && beforeOperator && mission.verificationContract) {
+      // Preserve verified passing command receipts even when a later operator-only gate fails,
+      // provided the workspace remained byte-identical and every receipt passes strict validation.
+      if (evidenceFilePath && beforeOperator && mission.verificationContract) {
         const afterOperator = await fingerprintWorkspace(mission.workspace.path).catch(() => undefined)
         if (afterOperator && beforeOperator === afterOperator) {
           const operatorEvidence = await readOperatorIntegrationEvidence(

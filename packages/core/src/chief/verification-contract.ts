@@ -2,6 +2,8 @@ import { createHash } from "node:crypto"
 import { isAbsolute } from "node:path"
 import { z } from "zod"
 
+export const VERIFICATION_COMMAND_PROGRAMS = ["git", "node", "bun", "cargo", "go", "pytest", "swift", "dart"] as const
+
 const text = z.string().trim().min(1).max(4_000)
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/)
 
@@ -26,11 +28,40 @@ const testPath = (name: string, nodeOnly = false): boolean =>
   !name.startsWith("node_modules/") &&
   (nodeOnly ? /(?:\.test|\.spec)\.(?:js|mjs|cjs)$/ : /(?:\.test|\.spec)\.(?:[cm]?[jt]sx?)$/).test(name)
 
+const pytestTestPath = (name: string): boolean =>
+  safeVerificationPath(name) &&
+  !name.startsWith("-") &&
+  !/[*?{}]/.test(name) &&
+  !name.startsWith("node_modules/") &&
+  !name.startsWith(".venv/") &&
+  /(?:^|\/)(?:test_[^/]+\.py|[^/]+_test\.py)$/.test(name)
+
+const dartTestPath = (name: string): boolean =>
+  safeVerificationPath(name) &&
+  !name.startsWith("-") &&
+  !/[*?{}]/.test(name) &&
+  !name.startsWith(".dart_tool/") &&
+  /(?:^|\/)[^/]+_test\.dart$/.test(name)
+
 /** Planners often write `./tests/x.test.ts`; it names the same repository-relative file. */
 const plainTestPath = (name: string): string => (name.startsWith("./") && name.length > 2 ? name.slice(2) : name)
 
+const exactArgs = (args: string[], allowed: readonly (readonly string[])[]): boolean =>
+  allowed.some((shape) => args.length === shape.length && args.every((arg, index) => arg === shape[index]))
+
 export function verificationCommandTestPaths(program: string, args: string[]): string[] {
   if (program === "cargo") return ["Cargo.toml"]
+  if (program === "go") return ["go.mod"]
+  if (program === "swift") return ["Package.swift"]
+  if (program === "dart") {
+    if (args[0] === "analyze" && args.length === 1) return ["pubspec.yaml"]
+    if (args[0] === "test") return args.length === 1 ? ["pubspec.yaml"] : args.slice(1).map(plainTestPath)
+    return []
+  }
+  if (program === "pytest") {
+    const paths = args[0] === "-q" ? args.slice(1) : args
+    return paths.map(plainTestPath)
+  }
   if (program === "bun" && args[0] === "test") return args.slice(1).map(plainTestPath)
   if (program === "node" && args[0] === "--test") return args.slice(1).map(plainTestPath)
   if (program === "node" && args[0] === "node_modules/vitest/vitest.mjs" && args[1] === "run")
@@ -42,14 +73,32 @@ export function verificationCommandTestPaths(program: string, args: string[]): s
 export function safeVerificationCommand(program: string, args: string[]): boolean {
   if (args.some((arg) => /[\0\r\n]/.test(arg))) return false
   if (program === "cargo")
-    return [
+    return exactArgs(args, [
       ["fmt", "--all", "--", "--check"],
       ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
       ["test", "--workspace"],
       ["test", "--workspace", "--no-fail-fast"],
-    ].some((allowed) => args.length === allowed.length && args.every((arg, index) => arg === allowed[index]))
-  const tests = verificationCommandTestPaths(program, args)
-  if (tests.length) return tests.every((name) => testPath(name, program === "node" && args[0] === "--test"))
+    ])
+  if (program === "go")
+    return exactArgs(args, [
+      ["test", "./..."],
+      ["test", "-count=1", "./..."],
+      ["vet", "./..."],
+    ])
+  if (program === "swift") return exactArgs(args, [["test"]])
+  if (program === "dart") {
+    if (exactArgs(args, [["analyze"], ["test"]])) return true
+    if (args[0] === "test" && args.length > 1) return args.slice(1).map(plainTestPath).every(dartTestPath)
+    return false
+  }
+  if (program === "pytest") {
+    const paths = args[0] === "-q" ? args.slice(1) : args
+    return paths.length > 0 && paths.map(plainTestPath).every(pytestTestPath)
+  }
+  if (program === "bun" || program === "node") {
+    const tests = verificationCommandTestPaths(program, args)
+    return tests.length > 0 && tests.every((name) => testPath(name, program === "node" && args[0] === "--test"))
+  }
   if (program !== "git") return false
   if (args.join("\0") === ["rev-parse", "--verify", "HEAD"].join("\0")) return true
   if (
@@ -95,7 +144,7 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
   z
     .strictObject({
       kind: z.literal("command"),
-      program: z.enum(["git", "node", "bun", "cargo"]),
+      program: z.enum(VERIFICATION_COMMAND_PROGRAMS),
       args: z.array(z.string().min(1).max(1_024)).min(1).max(30),
       /** Planning-time estimate; the operator's per-check timeout governs when the mission runs. */
       timeoutMs: z.number().int().min(100).max(3_600_000).default(120_000),
@@ -108,10 +157,12 @@ export const goalVerificationCheckSchema = z.discriminatedUnion("kind", [
       const hint =
         check.program === "bun" || check.program === "node"
           ? " bun test and node --test take only explicit test file paths ending in .test or .spec; a bare test command, flags such as --cwd, globs and package scripts are rejected, so list each test file or record the gate in a JSON report checked by pointer."
-          : ""
+          : check.program === "pytest"
+            ? " pytest takes optional -q followed by explicit test_*.py or *_test.py file paths only; bare pytest, other flags, globs and directories are rejected."
+            : ""
       ctx.addIssue({
         code: "custom",
-        message: `Rejected command: ${rejected}.${hint} Use explicit node/bun/Vitest tests, read-only Git, or exactly cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- -D warnings, cargo test --workspace. Other Cargo commands or flags, shells, scripts, installs and publishing are forbidden.`,
+        message: `Rejected command: ${rejected}.${hint} Use explicit node/bun/Vitest tests, pytest [-q] <test_*.py|*_test.py>, dart test <*_test.dart>, read-only Git, or exact workspace checks (cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- -D warnings, cargo test --workspace, go test [-count=1] ./..., go vet ./..., swift test, dart analyze, dart test). Other commands or flags, shells, scripts, installs and publishing are forbidden.`,
       })
     }),
 ])
