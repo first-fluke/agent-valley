@@ -44,6 +44,29 @@ export async function recordIntegrationCheck(
     ...(changedFiles !== undefined ? { changedFiles } : {}),
     openCodeTasks,
   }
+  const prior = mission.lastPassingIntegrationCheck
+  if (
+    changedFiles !== undefined &&
+    changedFiles.length === 0 &&
+    prior !== undefined &&
+    (prior.openCodeTasks === 0 || openCodeTasks > 0)
+  ) {
+    const currentFingerprint = await ports.fingerprint(mission).catch(() => undefined)
+    if (currentFingerprint && currentFingerprint === prior.fingerprint) {
+      const observed = {
+        at: new Date().toISOString(),
+        ok: true,
+        output: `Reused passing integration check for unchanged workspace.\n${prior.output}`.slice(0, 8_000),
+      }
+      for (const state of targets) state.integrationCheck = observed
+      await save(
+        "integration-check",
+        `Reused passing integration check on unchanged workspace before review of ${targets.map((state) => state.id).join(", ")}.`,
+        first.id,
+      )
+      return
+    }
+  }
   let result: { ok: boolean; output: string } | undefined
   try {
     result = await ports.integrationCheck(mission, context)
@@ -61,6 +84,21 @@ export async function recordIntegrationCheck(
   }
   if (!result) return
   const observed = { at: new Date().toISOString(), ok: result.ok, output: result.output.slice(0, 8_000) }
+  if (result.ok) {
+    const afterFingerprint = await ports.fingerprint(mission).catch(() => undefined)
+    if (afterFingerprint) {
+      mission.lastPassingIntegrationCheck = {
+        fingerprint: afterFingerprint,
+        openCodeTasks,
+        at: observed.at,
+        output: observed.output,
+      }
+    } else {
+      delete mission.lastPassingIntegrationCheck
+    }
+  } else {
+    delete mission.lastPassingIntegrationCheck
+  }
   for (const state of targets) state.integrationCheck = observed
   await save(
     "integration-check",

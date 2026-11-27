@@ -93,6 +93,8 @@ export interface Mission {
   goalVerification?: GoalVerificationResult
   /** Passing contract commands from the latest integration check; see `IntegrationEvidence`. */
   integrationEvidence?: IntegrationEvidence
+  /** Latest passing integration check bound to workspace fingerprint and remaining open code tasks. */
+  lastPassingIntegrationCheck?: LastPassingIntegrationCheck
   /** Passing contract commands from the latest fully passing goal verification; see `VerificationBaseline`. */
   verificationBaseline?: VerificationBaseline
   executionPolicy?: ExecutionPolicy
@@ -116,6 +118,13 @@ export interface ChiefRunContext {
   handoff?: string
   /** Invoke claim synchronously after reserving a call, before awaiting its durable checkpoint. */
   beforeDispatch?: (claim: () => void) => Promise<void>
+}
+
+export interface LastPassingIntegrationCheck {
+  fingerprint: string
+  openCodeTasks: number
+  at: string
+  output: string
 }
 
 export interface IntegrationCheckContext {
