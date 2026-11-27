@@ -8,6 +8,10 @@ import { readContinuousMissionWorkspace } from "./continuous-workspace"
 const exec = promisify(execFile)
 const CLONE_TIMEOUT_MS = 180_000
 const PRUNE_TIMEOUT_MS = 120_000
+const CARGO_METADATA_MAX_BUFFER = 16 * 1024 * 1024
+const CARGO_PROFILES = ["debug", "release"] as const
+const CARGO_ARTIFACT_DIRS = ["deps", "examples"] as const
+const CARGO_HASHED_ARTIFACT = /^([A-Za-z0-9_-]+)-[a-f0-9]{16}(?:$|\.)/
 export const WORKSPACE_CACHE_ENV = "AV_WORKSPACE_CACHE_PATHS"
 const disabled = new Set(["0", "off", "none", "false"])
 
@@ -16,6 +20,34 @@ export interface CacheSeed {
   source: string
 }
 export type CloneTree = (source: string, destination: string) => Promise<void>
+export interface PruneCargoOptions {
+  runCargoClean?: (workspace: string) => Promise<void>
+  discoverWorkspaceIdents?: (workspace: string) => Promise<ReadonlySet<string>>
+}
+
+function isCargoProfilePath(path: string): boolean {
+  return path.startsWith("target/") && (path.endsWith("/debug") || path.endsWith("/release"))
+}
+
+function isCargoTargetPath(path: string): boolean {
+  return path === "target" || path.startsWith("target/")
+}
+
+async function cloneCargoProfileWithoutIncremental(
+  sourceDir: string,
+  destinationDir: string,
+  clone: CloneTree,
+): Promise<void> {
+  await mkdir(destinationDir, { recursive: true })
+  const entries = await readdir(sourceDir, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    if (entry.name === "incremental") continue
+    const entrySource = join(sourceDir, entry.name)
+    // Skip entries that vanished between readdir and clone (e.g. transient lock files).
+    if (!(await lstat(entrySource).catch(() => undefined))) continue
+    await clone(entrySource, join(destinationDir, entry.name))
+  }
+}
 
 function validCachePath(path: string): boolean {
   if (!path || isAbsolute(path)) return false
@@ -169,13 +201,28 @@ export async function seedWorkspaceCaches(options: {
             () => true,
             () => false,
           ))
-        if (!moved) await (options.clone ?? copyOnWriteClone)(join(source, path), destination)
+        if (moved) {
+          // Strip incremental caches even on handover in case an older unpruned build-cache contained them.
+          if (isCargoProfilePath(path)) {
+            await rm(join(destination, "incremental"), { recursive: true, force: true }).catch(() => undefined)
+          } else if (path === "target") {
+            for (const profile of CARGO_PROFILES) {
+              await rm(join(destination, profile, "incremental"), { recursive: true, force: true }).catch(
+                () => undefined,
+              )
+            }
+          }
+        } else if (isCargoProfilePath(path)) {
+          await cloneCargoProfileWithoutIncremental(join(source, path), destination, options.clone ?? copyOnWriteClone)
+        } else {
+          await (options.clone ?? copyOnWriteClone)(join(source, path), destination)
+        }
         seeded.push({ path, source })
       } catch {
         await rm(destination, { recursive: true, force: true })
       }
     }
-    if (seeded.some((entry) => entry.path === "target" || entry.path.startsWith("target/")))
+    if (seeded.some((entry) => isCargoTargetPath(entry.path)))
       await (options.prune ?? pruneCarriedArtifacts)(options.workspace).catch(() => undefined)
   } catch {
     // A cache is an optimization; the workspace stays usable without it.
@@ -183,17 +230,79 @@ export async function seedWorkspaceCaches(options: {
   return seeded
 }
 
+/** Discover normalized Cargo crate and target identifiers owned by the workspace itself. */
+export async function discoverCargoWorkspaceIdentifiers(workspace: string): Promise<Set<string>> {
+  const identifiers = new Set<string>()
+  try {
+    const { stdout } = await exec("cargo", ["metadata", "--no-deps", "--offline", "--format-version", "1"], {
+      cwd: workspace,
+      timeout: PRUNE_TIMEOUT_MS,
+      maxBuffer: CARGO_METADATA_MAX_BUFFER,
+      env: { ...process.env, CARGO_NET_OFFLINE: "true" },
+    })
+    const parsed = JSON.parse(stdout) as {
+      packages?: Array<{ name?: unknown; targets?: Array<{ name?: unknown }> }>
+    }
+    for (const pkg of parsed.packages ?? []) {
+      if (typeof pkg.name === "string" && pkg.name.trim()) identifiers.add(pkg.name.trim().replace(/-/g, "_"))
+      for (const target of pkg.targets ?? []) {
+        if (typeof target.name === "string" && target.name.trim())
+          identifiers.add(target.name.trim().replace(/-/g, "_"))
+      }
+    }
+  } catch {
+    // Metadata lookup is best-effort; never fail workspace preparation or cache retention.
+  }
+  return identifiers
+}
+
+function isWorkspaceOwnedCargoArtifact(filename: string, workspaceIdents: ReadonlySet<string>): boolean {
+  const match = CARGO_HASHED_ARTIFACT.exec(filename)
+  if (!match?.[1]) return false
+  const stem = match[1].replace(/-/g, "_")
+  return workspaceIdents.has(stem) || (stem.startsWith("lib") && workspaceIdents.has(stem.slice(3)))
+}
+
 /**
- * A cloned Cargo cache still holds the source workspace's own crates, which the new path can never reuse.
- * Dropping them keeps only dependency builds, so the cache does not grow with every workspace it passes through.
+ * A cloned Cargo cache still holds the source workspace's own crates, path-bound incremental caches, and
+ * historical hash-suffixed `.rcgu.o` / test binaries that `cargo clean --workspace` leaves behind.
+ * Dropping them keeps only third-party dependency builds, so the cache does not grow across cycles.
  */
-export async function pruneCarriedArtifacts(workspace: string): Promise<void> {
+export async function pruneCarriedArtifacts(workspace: string, options?: PruneCargoOptions): Promise<void> {
   if (!(await lstat(join(workspace, "Cargo.toml")).catch(() => undefined))?.isFile()) return
-  await exec("cargo", ["clean", "--workspace", "--offline", "--quiet"], {
-    cwd: workspace,
-    timeout: PRUNE_TIMEOUT_MS,
-    env: { ...process.env, CARGO_NET_OFFLINE: "true" },
-  })
+  // 1. Remove path-bound rustc incremental caches (never hit after moving/cloning to another workspace path).
+  for (const profile of CARGO_PROFILES) {
+    await rm(join(workspace, "target", profile, "incremental"), { recursive: true, force: true }).catch(() => undefined)
+  }
+  // 2. Clean current-hash workspace outputs via Cargo.
+  try {
+    if (options?.runCargoClean) {
+      await options.runCargoClean(workspace)
+    } else {
+      await exec("cargo", ["clean", "--workspace", "--offline", "--quiet"], {
+        cwd: workspace,
+        timeout: PRUNE_TIMEOUT_MS,
+        env: { ...process.env, CARGO_NET_OFFLINE: "true" },
+      })
+    }
+  } catch {
+    // Continue to stale workspace artifact pruning even if cargo clean fails or is unavailable.
+  }
+  // 3. Prune historical workspace-owned artifacts in deps/ and examples/ that cargo clean misses.
+  const workspaceIdents = options?.discoverWorkspaceIdents
+    ? await options.discoverWorkspaceIdents(workspace).catch(() => new Set<string>())
+    : await discoverCargoWorkspaceIdentifiers(workspace)
+  if (workspaceIdents.size === 0) return
+  for (const profile of CARGO_PROFILES) {
+    for (const subdir of CARGO_ARTIFACT_DIRS) {
+      const directory = join(workspace, "target", profile, subdir)
+      const entries = await readdir(directory).catch(() => [] as string[])
+      for (const entry of entries) {
+        if (!isWorkspaceOwnedCargoArtifact(entry, workspaceIdents)) continue
+        await rm(join(directory, entry), { recursive: true, force: true }).catch(() => undefined)
+      }
+    }
+  }
 }
 
 /** Where one operation keeps the build caches of its latest completed child, laid out like a workspace. */
@@ -211,10 +320,22 @@ export async function retainWorkspaceCaches(
   workspace: string,
   store: string,
   paths?: readonly string[],
+  options?: { prune?: (workspace: string) => Promise<void> },
 ): Promise<string[]> {
   const retained: string[] = []
   try {
-    for (const path of paths ?? (await workspaceCachePaths(workspace))) {
+    const resolved = paths ?? (await workspaceCachePaths(workspace))
+    let hasCargoCacheDir = false
+    for (const path of resolved) {
+      if (isCargoTargetPath(path) && (await lstat(join(workspace, path)).catch(() => undefined))?.isDirectory()) {
+        hasCargoCacheDir = true
+        break
+      }
+    }
+    if (hasCargoCacheDir && (await lstat(join(workspace, "Cargo.toml")).catch(() => undefined))?.isFile()) {
+      await (options?.prune ?? pruneCarriedArtifacts)(workspace).catch(() => undefined)
+    }
+    for (const path of resolved) {
       const source = join(workspace, path)
       if (!(await lstat(source).catch(() => undefined))?.isDirectory()) continue
       const destination = join(store, path)

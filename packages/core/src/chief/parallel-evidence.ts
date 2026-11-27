@@ -8,6 +8,25 @@ const objectId = /^[a-f0-9]{40,64}$/
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16)
 const git = (root: string, args: string[]) => parallelGit(root, ["--no-replace-objects", ...args])
 
+/** Serialize git ref mutations per source repository so concurrent wave preparations never race on packed-refs.lock. */
+const sourceRepoLocks = new Map<string, Promise<unknown>>()
+async function withSourceRepoLock<T>(source: string, fn: () => Promise<T>): Promise<T> {
+  const previous = sourceRepoLocks.get(source) ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const tail = previous.then(() => current)
+  sourceRepoLocks.set(source, tail)
+  await previous
+  try {
+    return await fn()
+  } finally {
+    release()
+    if (sourceRepoLocks.get(source) === tail) sourceRepoLocks.delete(source)
+  }
+}
+
 export function taskEvidenceRefs(workspace: Pick<ParallelTaskWorkspace, "missionId" | "taskId" | "attempt">) {
   const key = `${hash(workspace.missionId)}-${hash(workspace.taskId)}-${workspace.attempt}`
   const prefix = `refs/agent-valley/task-evidence/${key}`
@@ -54,53 +73,56 @@ export async function retainTaskEvidence(
   )
     throw new Error("Parallel evidence must use its owned task path and private references.")
   const ref = kind === "snapshot" ? refs.snapshotRef : refs.workerRef
-  const existing = (await git(source, ["for-each-ref", "--format=%(refname) %(objectname)", ref]))
-    .split("\n")
-    .find((line) => line.startsWith(`${ref} `))
-    ?.slice(ref.length + 1)
-  if (existing) {
-    if (existing !== commit) throw new Error("Saved parallel evidence reference points to a different original commit.")
-    await validateCommit(source, workspace, commit, kind === "snapshot")
-    return
-  }
-  const local = await lstat(expectedPath).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return undefined
-    throw error
+  await withSourceRepoLock(source, async () => {
+    const existing = (await git(source, ["for-each-ref", "--format=%(refname) %(objectname)", ref]))
+      .split("\n")
+      .find((line) => line.startsWith(`${ref} `))
+      ?.slice(ref.length + 1)
+    if (existing) {
+      if (existing !== commit)
+        throw new Error("Saved parallel evidence reference points to a different original commit.")
+      await validateCommit(source, workspace, commit, kind === "snapshot")
+      return
+    }
+    const local = await lstat(expectedPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined
+      throw error
+    })
+    if (!local) {
+      // An already integrated Actor may have been disposed, while its original objects remain local.
+      await validateCommit(source, workspace, commit, kind === "snapshot")
+      await git(source, ["update-ref", ref, commit, "0".repeat(commit.length)])
+      return
+    }
+    if (!local.isDirectory() || (await realpath(expectedPath)) !== expectedPath)
+      throw new Error("Parallel evidence may only be imported from its canonical local Actor repository.")
+    const top = (await git(expectedPath, ["rev-parse", "--show-toplevel"])).trim()
+    const gitDirectory = (await git(expectedPath, ["rev-parse", "--absolute-git-dir"])).trim()
+    if ((await realpath(top)) !== expectedPath || (await realpath(gitDirectory)) !== join(expectedPath, ".git"))
+      throw new Error("Parallel evidence Actor repository has a different root.")
+    await validateCommit(expectedPath, workspace, commit, kind === "snapshot")
+    const temporary = `refs/agent-valley/task-evidence/${refs.key}/imports/${randomUUID()}`
+    try {
+      await git(source, [
+        "-c",
+        "protocol.file.allow=always",
+        "-c",
+        "protocol.ext.allow=never",
+        "fetch",
+        "--no-tags",
+        "--no-write-fetch-head",
+        "--no-recurse-submodules",
+        "--no-auto-gc",
+        "--",
+        expectedPath,
+        `${commit}:${temporary}`,
+      ])
+      const fetched = (await git(source, ["rev-parse", "--verify", `${temporary}^{commit}`])).trim()
+      if (fetched !== commit) throw new Error("Imported parallel evidence differs from the original Actor commit.")
+      await validateCommit(source, workspace, commit, kind === "snapshot")
+      await git(source, ["update-ref", ref, commit, "0".repeat(commit.length)])
+    } finally {
+      await git(source, ["update-ref", "-d", temporary])
+    }
   })
-  if (!local) {
-    // An already integrated Actor may have been disposed, while its original objects remain local.
-    await validateCommit(source, workspace, commit, kind === "snapshot")
-    await git(source, ["update-ref", ref, commit, "0".repeat(commit.length)])
-    return
-  }
-  if (!local.isDirectory() || (await realpath(expectedPath)) !== expectedPath)
-    throw new Error("Parallel evidence may only be imported from its canonical local Actor repository.")
-  const top = (await git(expectedPath, ["rev-parse", "--show-toplevel"])).trim()
-  const gitDirectory = (await git(expectedPath, ["rev-parse", "--absolute-git-dir"])).trim()
-  if ((await realpath(top)) !== expectedPath || (await realpath(gitDirectory)) !== join(expectedPath, ".git"))
-    throw new Error("Parallel evidence Actor repository has a different root.")
-  await validateCommit(expectedPath, workspace, commit, kind === "snapshot")
-  const temporary = `refs/agent-valley/task-evidence/${refs.key}/imports/${randomUUID()}`
-  try {
-    await git(source, [
-      "-c",
-      "protocol.file.allow=always",
-      "-c",
-      "protocol.ext.allow=never",
-      "fetch",
-      "--no-tags",
-      "--no-write-fetch-head",
-      "--no-recurse-submodules",
-      "--no-auto-gc",
-      "--",
-      expectedPath,
-      `${commit}:${temporary}`,
-    ])
-    const fetched = (await git(source, ["rev-parse", "--verify", `${temporary}^{commit}`])).trim()
-    if (fetched !== commit) throw new Error("Imported parallel evidence differs from the original Actor commit.")
-    await validateCommit(source, workspace, commit, kind === "snapshot")
-    await git(source, ["update-ref", ref, commit, "0".repeat(commit.length)])
-  } finally {
-    await git(source, ["update-ref", "-d", temporary])
-  }
 }

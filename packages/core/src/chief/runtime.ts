@@ -22,6 +22,7 @@ import {
   collectDirectChangeSet,
   disposeTaskWorktree,
   integrateTaskWorktree,
+  prepareParallelBaseline,
   prepareTaskWorktree,
   releaseAppliedTaskWorktrees,
 } from "./parallel-workspace"
@@ -104,8 +105,9 @@ export class ChiefRuntime {
         : {}),
       runAgent: (persona, prompt, mission, stage, context) => this.runAgent(persona, prompt, mission, stage, context),
       parallel: {
-        prepare: async (mission, taskId, attempt) => {
-          const record = await prepareTaskWorktree(mission, taskId, attempt)
+        prepareBaseline: (mission) => prepareParallelBaseline(mission),
+        prepare: async (mission, taskId, attempt, baseline) => {
+          const record = await prepareTaskWorktree(mission, taskId, attempt, baseline)
           await prepareMissionSkills(mission.workspace.path, record.path)
           return record
         },

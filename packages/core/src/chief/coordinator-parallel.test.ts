@@ -495,6 +495,88 @@ describe("parallel Chief task coordination", () => {
     expect(firstReviewIndex).toBeGreaterThan(checkIndex)
   })
 
+  it("captures one shared baseline per wave and prepares tasks concurrently while preserving wave order", async () => {
+    const { mission, ports, wave, parallel, hooks, events } = setup()
+    wave.push({
+      id: "c",
+      title: "c",
+      personaId: "worker",
+      instructions: "Work c",
+      acceptance: ["Verified c"],
+      dependencies: [],
+    })
+    mission.tasks.push({ id: "c", reviewerId: "reviewer", status: "pending", attempts: 0 })
+    mission.executionPolicy = executionPolicySchema.parse({ maxParallel: 2 })
+
+    const sharedBaseline = { head: "a".repeat(40), tree: "b".repeat(40) }
+    parallel.prepareBaseline = vi.fn(async () => {
+      events.push("prepare-baseline")
+      return sharedBaseline
+    })
+
+    const bothPreparing = barrier()
+    const finishFirstBatch = barrier()
+    let active = 0
+    let maxActive = 0
+    let startedCount = 0
+    let saving = 0
+    let maxSaving = 0
+    const receivedBaselines: unknown[] = []
+
+    parallel.prepare = vi.fn(async (_mission, taskId, attempt, baseline) => {
+      receivedBaselines.push(baseline)
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      events.push(`prepare-start:${taskId}`)
+      if (++startedCount === 2) bothPreparing.release()
+      if (taskId === "a") await finishFirstBatch.wait
+      active -= 1
+      events.push(`prepare-done:${taskId}`)
+      return record(mission, taskId, attempt)
+    })
+
+    const baseSave = hooks.save
+    hooks.save = vi.fn(async (stage, message, taskId) => {
+      saving += 1
+      maxSaving = Math.max(maxSaving, saving)
+      await Promise.resolve()
+      await baseSave(stage, message, taskId)
+      saving -= 1
+    })
+
+    const running = performParallelWave(mission, ports, wave, hooks)
+    await bothPreparing.wait
+    expect(maxActive).toBe(2)
+    expect(parallel.prepareBaseline).toHaveBeenCalledTimes(1)
+    finishFirstBatch.release()
+
+    expect(await running).toEqual([])
+    expect(parallel.prepareBaseline).toHaveBeenCalledTimes(1)
+    expect(receivedBaselines).toEqual([sharedBaseline, sharedBaseline, sharedBaseline])
+    expect(maxSaving).toBe(1)
+    // Integration still follows exact wave order even when task b finished preparing before task a.
+    expect(events.filter((event) => event.startsWith("integrate:"))).toEqual([
+      "integrate:a",
+      "integrate:b",
+      "integrate:c",
+    ])
+    expect(mission.tasks.every((state) => state.status === "completed")).toBe(true)
+  })
+
+  it("does not call prepareBaseline when every task in the wave already has checkpointed output", async () => {
+    const { mission, ports, wave, parallel, hooks } = setup()
+    parallel.prepareBaseline = vi.fn(async () => ({ head: "a".repeat(40), tree: "b".repeat(40) }))
+    for (const state of mission.tasks) {
+      state.status = "running"
+      state.attempts = 2
+      state.parallel = record(mission, state.id, 2)
+      state.output = `Saved ${state.id}`
+    }
+    expect(await performParallelWave(mission, ports, wave, hooks)).toEqual([])
+    expect(parallel.prepareBaseline).not.toHaveBeenCalled()
+    expect(parallel.prepare).not.toHaveBeenCalled()
+  })
+
   it("treats mid-mission reclaimApplied errors as non-fatal and records parallel-retained warnings", async () => {
     const { mission, ports, wave, parallel, hooks } = setup()
     parallel.reclaimApplied = vi.fn(async () => ({

@@ -23,7 +23,7 @@ import type { MetricSourcePolicy } from "./metric-source-policy"
 import type { PreparedOmaActor } from "./oma-actor"
 import type { ChiefOperatingPolicy, ChiefOperations } from "./operations"
 import type { OrganizationContext } from "./organization-types"
-import type { TaskChangeSet } from "./parallel-contract"
+import type { ParallelBaseline, TaskChangeSet } from "./parallel-contract"
 import type { SkillDescriptor } from "./skills"
 import type {
   GoalVerificationContract,
@@ -193,10 +193,13 @@ export interface ChiefPorts {
     deliveryTree?: string,
   ): Promise<TaskChangeSet | undefined>
   parallel?: {
+    /** Capture and validate one shared wave baseline snapshot so concurrent lane preparations reuse it. */
+    prepareBaseline?(mission: Mission): Promise<ParallelBaseline>
     prepare(
       mission: Mission,
       taskId: string,
       attempt: number,
+      baseline?: ParallelBaseline,
     ): Promise<import("./parallel-contract").TaskWorktreeRecord>
     integrate(mission: Mission, record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>
     dispose(record: import("./parallel-contract").TaskWorktreeRecord): Promise<void>

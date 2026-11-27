@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   copyOnWriteClone,
   operationCacheStore,
+  pruneCarriedArtifacts,
   retainWorkspaceCaches,
   seedWorkspaceCaches,
   siblingMissionWorkspaces,
@@ -106,6 +107,51 @@ describe("workspace cache seeding", () => {
     expect(await exists(join(workspace, "target/debug"))).toBe(false)
   })
 
+  it("skips incremental/ when cloning Cargo profile directories while preserving deps, build, and .fingerprint", async () => {
+    await mkdir(join(source, "target/debug/deps"), { recursive: true })
+    await mkdir(join(source, "target/debug/build/pkg-123"), { recursive: true })
+    await mkdir(join(source, "target/debug/.fingerprint/pkg-123"), { recursive: true })
+    await mkdir(join(source, "target/debug/incremental/session-1"), { recursive: true })
+    await writeFile(join(source, "target/debug/deps/libserde-0123456789abcdef.rlib"), "dep")
+    await writeFile(join(source, "target/debug/build/pkg-123/out"), "build")
+    await writeFile(join(source, "target/debug/.fingerprint/pkg-123/invoked.timestamp"), "fp")
+    await writeFile(join(source, "target/debug/incremental/session-1/dep-graph.bin"), "stale-incremental")
+
+    const seeded = await seedWorkspaceCaches({
+      workspace,
+      sources: [source],
+      paths: ["target/debug"],
+      clone: copy,
+      prune: async () => {},
+    })
+    expect(seeded).toEqual([{ path: "target/debug", source }])
+    expect(await readFile(join(workspace, "target/debug/deps/libserde-0123456789abcdef.rlib"), "utf8")).toBe("dep")
+    expect(await readFile(join(workspace, "target/debug/build/pkg-123/out"), "utf8")).toBe("build")
+    expect(await readFile(join(workspace, "target/debug/.fingerprint/pkg-123/invoked.timestamp"), "utf8")).toBe("fp")
+    expect(await exists(join(workspace, "target/debug/incremental"))).toBe(false)
+    expect(copy.mock.calls.some(([from]) => from.endsWith("/incremental"))).toBe(false)
+  })
+
+  it("strips incremental/ even when handing over an older unpruned build-cache", async () => {
+    const store = join(directory, "build-cache")
+    await cache(store, "target/debug", "from store")
+    await mkdir(join(store, "target/debug/incremental/old-session"), { recursive: true })
+    await writeFile(join(store, "target/debug/incremental/old-session/query-cache.bin"), "bloat")
+
+    const seeded = await seedWorkspaceCaches({
+      workspace,
+      sources: [store],
+      paths: ["target/debug"],
+      handover: [store],
+      clone: copy,
+      prune: async () => {},
+    })
+    expect(seeded).toEqual([{ path: "target/debug", source: store }])
+    expect(await readFile(join(workspace, "target/debug/deps/artifact"), "utf8")).toBe("from store")
+    expect(await exists(join(workspace, "target/debug/incremental"))).toBe(false)
+    expect(copy).not.toHaveBeenCalled()
+  })
+
   it.skipIf(process.platform !== "darwin")("clones a tree copy-on-write with its timestamps", async () => {
     await cache(source, "target/debug", "real clone")
     const stamp = new Date("2026-01-02T03:04:05Z")
@@ -155,6 +201,110 @@ describe("operation build cache", () => {
     expect(await exists(join(store, "target/debug"))).toBe(false)
     expect(await readFile(join(source, "target/release/deps/artifact"), "utf8")).toBe("from mission")
     expect(copy).toHaveBeenCalledTimes(1)
+  })
+
+  it("prunes incremental/ and stale historical workspace artifacts while preserving third-party dependencies", async () => {
+    await writeFile(join(workspace, "Cargo.toml"), "[workspace]\n")
+    const debugDeps = join(workspace, "target/debug/deps")
+    const releaseDeps = join(workspace, "target/release/deps")
+    const debugExamples = join(workspace, "target/debug/examples")
+    await mkdir(join(workspace, "target/debug/incremental/s1"), { recursive: true })
+    await mkdir(join(workspace, "target/release/incremental/s2"), { recursive: true })
+    await mkdir(debugDeps, { recursive: true })
+    await mkdir(releaseDeps, { recursive: true })
+    await mkdir(debugExamples, { recursive: true })
+    await writeFile(join(workspace, "target/debug/incremental/s1/cache.bin"), "inc")
+    await writeFile(join(workspace, "target/release/incremental/s2/cache.bin"), "inc")
+
+    // Stale historical workspace-owned artifacts across multiple hashes
+    const staleWorkspaceFiles = [
+      join(debugDeps, "arc_daemon-0123456789abcdef"),
+      join(debugDeps, "arc_daemon-0123456789abcdef.d"),
+      join(debugDeps, "arc_daemon-0123456789abcdef.1a2b3c4d.rcgu.o"),
+      join(debugDeps, "libarc_daemon-fedcba9876543210.rlib"),
+      join(debugDeps, "libarc_daemon-fedcba9876543210.rmeta"),
+      join(debugDeps, "memory_pressure-1111222233334444"),
+      join(debugDeps, "memory_pressure-5555666677778888.99aa.rcgu.o"),
+      join(releaseDeps, "libarc_core-abcdef0123456789.dylib"),
+      join(debugExamples, "demo_bin-0011223344556677"),
+    ]
+    for (const file of staleWorkspaceFiles) await writeFile(file, "stale")
+    await mkdir(join(debugDeps, "arc_daemon-0123456789abcdef.dSYM/Contents"), { recursive: true })
+    await writeFile(join(debugDeps, "arc_daemon-0123456789abcdef.dSYM/Contents/Info.plist"), "plist")
+
+    // Third-party dependency artifacts (including prefix-similar names) must be preserved
+    const thirdPartyFiles = [
+      join(debugDeps, "libserde-0123456789abcdef.rlib"),
+      join(debugDeps, "libserde-0123456789abcdef.rmeta"),
+      join(debugDeps, "libserde_derive-0123456789abcdef.dylib"),
+      join(debugDeps, "libarc_daemon_ext-0123456789abcdef.rlib"),
+      join(debugDeps, "libtokio-abcdef0123456789.rlib"),
+      join(releaseDeps, "liblibc-1234567890abcdef.rlib"),
+      join(debugExamples, "other_example-0011223344556677"),
+    ]
+    for (const file of thirdPartyFiles) await writeFile(file, "third-party")
+
+    const runCargoClean = vi.fn(async () => {})
+    const discoverWorkspaceIdents = vi.fn(
+      async () => new Set(["arc_daemon", "arc_core", "memory_pressure", "demo_bin"]),
+    )
+
+    await pruneCarriedArtifacts(workspace, { runCargoClean, discoverWorkspaceIdents })
+
+    expect(runCargoClean).toHaveBeenCalledExactlyOnceWith(workspace)
+    expect(discoverWorkspaceIdents).toHaveBeenCalledExactlyOnceWith(workspace)
+    expect(await exists(join(workspace, "target/debug/incremental"))).toBe(false)
+    expect(await exists(join(workspace, "target/release/incremental"))).toBe(false)
+    expect(await exists(join(debugDeps, "arc_daemon-0123456789abcdef.dSYM"))).toBe(false)
+    for (const file of staleWorkspaceFiles) expect(await exists(file)).toBe(false)
+    for (const file of thirdPartyFiles) expect(await exists(file)).toBe(true)
+  })
+
+  it("stays fail-safe when cargo clean or cargo metadata fails during pruneCarriedArtifacts", async () => {
+    await writeFile(join(workspace, "Cargo.toml"), "[workspace]\n")
+    await mkdir(join(workspace, "target/debug/incremental"), { recursive: true })
+    await cache(workspace, "target/debug", "keep-dep")
+
+    await expect(
+      pruneCarriedArtifacts(workspace, {
+        runCargoClean: async () => {
+          throw new Error("cargo clean failed")
+        },
+        discoverWorkspaceIdents: async () => {
+          throw new Error("cargo metadata timed out")
+        },
+      }),
+    ).resolves.toBeUndefined()
+
+    expect(await exists(join(workspace, "target/debug/incremental"))).toBe(false)
+    expect(await exists(join(workspace, "target/debug/deps/artifact"))).toBe(true)
+  })
+
+  it("prunes Cargo artifacts before retaining workspace caches into the operation cache store", async () => {
+    const store = join(directory, "build-cache")
+    await writeFile(join(workspace, "Cargo.toml"), "[workspace]\n")
+    await cache(workspace, "target/debug", "latest child")
+    await mkdir(join(workspace, "target/debug/incremental/s1"), { recursive: true })
+    await writeFile(join(workspace, "target/debug/incremental/s1/cache.bin"), "bloat")
+
+    const events: string[] = []
+    const prune = vi.fn(async (dir: string) => {
+      events.push(`prune:${dir}`)
+      expect(await exists(join(dir, "target/debug"))).toBe(true)
+      await rm(join(dir, "target/debug/incremental"), { recursive: true, force: true })
+    })
+
+    const retained = await retainWorkspaceCaches(workspace, store, ["target/debug", "target/release"], { prune })
+    expect(retained).toEqual(["target/debug"])
+    expect(events).toEqual([`prune:${workspace}`])
+    expect(await readFile(join(store, "target/debug/deps/artifact"), "utf8")).toBe("latest child")
+    expect(await exists(join(store, "target/debug/incremental"))).toBe(false)
+    expect(await exists(join(workspace, "target/debug"))).toBe(false)
+
+    // No target directory left to retain: prune is not called again.
+    prune.mockClear()
+    expect(await retainWorkspaceCaches(workspace, store, ["target/debug"], { prune })).toEqual([])
+    expect(prune).not.toHaveBeenCalled()
   })
 
   it("moves a finished workspace's caches into the store and replaces the previous copy", async () => {
