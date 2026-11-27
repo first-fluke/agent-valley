@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.22.0](https://github.com/first-fluke/agent-valley/compare/v4.21.2...v4.22.0) (2026-11-27)
+
+
+### Features
+
+* **core:** add multi-language sandbox caches, workspace auto-seeding, and build concurrency caps ([#119](https://github.com/first-fluke/agent-valley/issues/119)) ([ac6e8e7](https://github.com/first-fluke/agent-valley/commit/ac6e8e75415e30515efc6032fb49f20bfdf357ad))
+
 ## [4.21.2](https://github.com/first-fluke/agent-valley/compare/v4.21.1...v4.21.2) (2026-11-27)
 
 
