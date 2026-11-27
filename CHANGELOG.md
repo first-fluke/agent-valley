@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.22.1](https://github.com/first-fluke/agent-valley/compare/v4.22.0...v4.22.1) (2026-11-27)
+
+
+### Performance
+
+* **core:** preserve partial gate evidence, add multi-lang verify, and speed up fingerprinting ([#121](https://github.com/first-fluke/agent-valley/issues/121)) ([ec7e098](https://github.com/first-fluke/agent-valley/commit/ec7e0989f7df1243ca5a40d5d8ce97bd85225e4c))
+
 ## [4.22.0](https://github.com/first-fluke/agent-valley/compare/v4.21.2...v4.22.0) (2026-11-27)
 
 
