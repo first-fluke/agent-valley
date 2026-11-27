@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.21.0](https://github.com/first-fluke/agent-valley/compare/v4.20.1...v4.21.0) (2026-11-27)
+
+
+### Features
+
+* **chief:** seed operation exhausted providers and clarify effect scope ([#112](https://github.com/first-fluke/agent-valley/issues/112)) ([26c97de](https://github.com/first-fluke/agent-valley/commit/26c97de8200b8d1140fd24c8a93842ac84c2e664))
+
 ## [4.20.1](https://github.com/first-fluke/agent-valley/compare/v4.20.0...v4.20.1) (2026-11-26)
 
 
