@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.21.1](https://github.com/first-fluke/agent-valley/compare/v4.21.0...v4.21.1) (2026-11-27)
+
+
+### Performance
+
+* **chief:** optimize parallel workspace prep, Cargo cache hygiene, and single-task repair routing ([#114](https://github.com/first-fluke/agent-valley/issues/114)) ([1e0fd53](https://github.com/first-fluke/agent-valley/commit/1e0fd530e288dfcf545351dd1db2136805b02313))
+
 ## [4.21.0](https://github.com/first-fluke/agent-valley/compare/v4.20.1...v4.21.0) (2026-11-27)
 
 
