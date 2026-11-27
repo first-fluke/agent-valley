@@ -6,6 +6,14 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.21.2](https://github.com/first-fluke/agent-valley/compare/v4.21.1...v4.21.2) (2026-11-27)
+
+
+### Performance
+
+* **chief:** bound CARGO_BUILD_JOBS for concurrent parallel Cargo Actor waves ([#117](https://github.com/first-fluke/agent-valley/issues/117)) ([5c7d1ee](https://github.com/first-fluke/agent-valley/commit/5c7d1eecbacce67a2ecc126931eee67d60bd56ad))
+* **core:** allow Darwin user temp dir, isolate Claude MCP/hooks, and serialize lane checks ([#116](https://github.com/first-fluke/agent-valley/issues/116)) ([1192b31](https://github.com/first-fluke/agent-valley/commit/1192b312631060ad7830daff56f7b3dec7d70f8f))
+
 ## [4.21.1](https://github.com/first-fluke/agent-valley/compare/v4.21.0...v4.21.1) (2026-11-27)
 
 
