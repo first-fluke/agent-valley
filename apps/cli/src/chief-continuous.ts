@@ -25,7 +25,7 @@ import type { Mission } from "@agent-valley/core/chief/types"
 import { ensureRuntimeGitignore } from "@agent-valley/core/workspace/runtime-ignore"
 import { type OrderOptions, resolveOrderConfig } from "./chief-config"
 import { decideContinuousGoal } from "./chief-continuous-decision"
-import { rearmContinuousDecision } from "./chief-continuous-recovery"
+import { isLegacyProviderExhaustionChild, rearmContinuousDecision } from "./chief-continuous-recovery"
 import { createOperationProgressReporter, saveOperationReport } from "./chief-continuous-report"
 import { deliveryResumeKeys, enableOperationDelivery, hasDeliveryResumeOptions } from "./chief-delivery-resume"
 
@@ -65,9 +65,6 @@ const orderKeys = [
   "deliverySkipPrePush",
 ] as const
 const decisionBudgetKeys = ["runs", "duration", "cost", "accountRun", "accountCost"] as const
-// This exact supervision reason is the only provider-exhaustion marker in legacy budget checkpoints.
-const legacyProviderExhaustionReason =
-  "Usage allowance exhausted and no other installed, authenticated provider is ready"
 
 export interface ContinuousOptions extends OrderOptions {
   cycles?: string
@@ -304,10 +301,7 @@ export async function runOperation(
       const retriableChild =
         child?.status === "paused" &&
         (child.execution?.failureKind === "interrupted" || child.execution?.failureKind === "handoff-unavailable")
-      const legacyProviderExhaustionChild =
-        child?.status === "paused" &&
-        child.execution?.failureKind === "budget" &&
-        child.supervision?.pendingRecovery?.reason === legacyProviderExhaustionReason
+      const legacyProviderExhaustionChild = options.retry && isLegacyProviderExhaustionChild(child)
       if (retriableChild || (options.retry && legacyProviderExhaustionChild)) {
         interruptedChild = child.id
         if (child.execution?.failureKind === "handoff-unavailable" || legacyProviderExhaustionChild) {

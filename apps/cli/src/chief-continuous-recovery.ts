@@ -16,6 +16,18 @@ import type { MissionStore } from "@agent-valley/core/chief/store"
 import type { Mission } from "@agent-valley/core/chief/types"
 import { abortableDelay } from "./chief-supervisor"
 
+const legacyProviderExhaustionReason =
+  "Usage allowance exhausted and no other installed, authenticated provider is ready"
+
+/** Legacy budget checkpoints have no structured provider-exhaustion marker beyond this exact supervision reason. */
+export function isLegacyProviderExhaustionChild(mission: Mission | undefined): mission is Mission {
+  return (
+    mission?.status === "paused" &&
+    mission.execution?.failureKind === "budget" &&
+    mission.supervision?.pendingRecovery?.reason === legacyProviderExhaustionReason
+  )
+}
+
 /**
  * An explicit operator retry reopens a decision the operator interrupted, or permits one corrected response without
  * replenishing automatic retries. Spent calls, retries and the original deadline stay recorded in both cases.

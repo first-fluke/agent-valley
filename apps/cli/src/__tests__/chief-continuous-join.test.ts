@@ -221,6 +221,133 @@ describe("continuous operation joins a live child", () => {
     expect(await missions.load(child.id)).toEqual(child)
   })
 
+  it("retries the legacy provider-exhaustion checkpoint without discarding evidence or spend", async () => {
+    const { parent, child } = await seed()
+    const reason = "Usage allowance exhausted and no other installed, authenticated provider is ready"
+    const legacy = structuredClone(child)
+    if (!legacy.execution || !legacy.operations?.runs[0] || !legacy.tasks[0])
+      throw new Error("Missing fixture child execution")
+    legacy.status = "paused"
+    legacy.error = reason
+    legacy.execution = {
+      ...legacy.execution,
+      runsStarted: 2,
+      retries: 1,
+      failureKind: "budget",
+      pauseReason: reason,
+    }
+    legacy.executionPolicy = executionPolicySchema.parse({ maxRuns: 20, maxEstimatedCostUsd: 5 })
+    legacy.supervision = {
+      maxRounds: 3,
+      rounds: 1,
+      stalledRounds: 0,
+      decisions: [],
+      originalAcceptance: ["Verified improvement"],
+      pendingRecovery: { reason, taskId: "work" },
+    }
+    legacy.handoff = { exhaustedAgents: ["claude"], routes: {}, continuations: {} }
+    legacy.tasks[0].output = "Completed implementation before provider recovery"
+    legacy.tasks[0].changeSet = {
+      version: 1,
+      inputTree: "a".repeat(40),
+      deliveryTree: "b".repeat(40),
+      files: [{ path: "service.txt", status: "modified", size: 12, sha256: "c".repeat(64) }],
+      diff: "retained patch evidence",
+      diffTruncated: false,
+    }
+    Object.assign(legacy.operations.runs[0], {
+      finishedAt: new Date().toISOString(),
+      elapsedMs: 100,
+      inputTokens: 10,
+      outputTokens: 20,
+      costUsd: 0.25,
+      outcome: "failed",
+      executionState: "settled",
+      evidence: "Provider usage allowance was exhausted.",
+    })
+    parent.exhaustedProviders = [{ agentType: "claude", at: new Date().toISOString() }]
+    parent.recovery = {
+      target: "child",
+      checkpointId: child.id,
+      attempts: 0,
+      disposition: "protected",
+      reason,
+    }
+    await missions.save(legacy)
+    await operationStore(root).save(parent)
+    await releaseOwner?.()
+    releaseOwner = undefined
+
+    const retryMission = vi.fn(async (id: string) => {
+      const resumed = await missions.load(id)
+      expect(resumed.tasks[0]).toMatchObject({
+        output: "Completed implementation before provider recovery",
+        changeSet: { diff: "retained patch evidence" },
+        review: { summary: "Actual product inspected" },
+      })
+      expect(resumed.execution).toMatchObject({ runsStarted: 2, retries: 1 })
+      expect(resumed.executionPolicy).toMatchObject({ maxRuns: 20, maxEstimatedCostUsd: 5 })
+      expect(resumed.operations?.runs[0]).toMatchObject({
+        runId: "uncertain-local",
+        costUsd: 0.25,
+        evidence: "Provider usage allowance was exhausted.",
+      })
+      delete resumed.handoff
+      delete resumed.error
+      if (resumed.execution) {
+        delete resumed.execution.failureKind
+        delete resumed.execution.pauseReason
+      }
+      resumed.status = "completed"
+      await missions.save(resumed)
+    })
+    const result = await runOperation(undefined, { resume: parent.id, retry: true }, root, {
+      retryMission,
+      runMission: vi.fn(),
+      decide: vi.fn(),
+    })
+
+    expect(retryMission).toHaveBeenCalledExactlyOnceWith(child.id, expect.any(AbortSignal))
+    expect(result).toMatchObject({ phase: "completed", completedCycles: 1 })
+    expect(result.exhaustedProviders).toBeUndefined()
+    expect(result.recovery).toBeUndefined()
+    const saved = await missions.load(child.id)
+    expect(saved.tasks[0]).toMatchObject({
+      output: "Completed implementation before provider recovery",
+      changeSet: { diff: "retained patch evidence" },
+    })
+    expect(saved.execution).toMatchObject({ runsStarted: 2, retries: 1 })
+    expect(saved.operations?.runs[0]).toMatchObject({
+      runId: "uncertain-local",
+      costUsd: 0.25,
+      evidence: "Provider usage allowance was exhausted.",
+    })
+  })
+
+  it("keeps a genuine budget-exhausted child protected from operation-level retry", async () => {
+    const { parent, child } = await seed()
+    const budget = structuredClone(child)
+    if (!budget.execution) throw new Error("Missing fixture child execution")
+    budget.execution.failureKind = "budget"
+    budget.execution.runsStarted = 20
+    budget.execution.pauseReason = "Mission Actor call limit reached."
+    budget.error = budget.execution.pauseReason
+    await missions.save(budget)
+    await releaseOwner?.()
+    releaseOwner = undefined
+    const retryMission = vi.fn()
+
+    await expect(runOperation(undefined, { resume: parent.id, retry: true }, root, { retryMission })).rejects.toThrow(
+      "Resume the current child directly with av order --resume",
+    )
+    expect(retryMission).not.toHaveBeenCalled()
+    expect(await missions.load(child.id)).toMatchObject({
+      status: "paused",
+      execution: { failureKind: "budget", runsStarted: 20 },
+      executionPolicy: { maxRuns: 20 },
+    })
+  })
+
   it("cancels only the joining parent and leaves the live owner's child byte-for-byte unchanged", async () => {
     const { parent, child } = await seed()
     const childPath = join(root, ".agent-valley", "missions", `${child.id}.json`)
