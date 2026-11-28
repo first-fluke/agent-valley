@@ -65,6 +65,9 @@ const orderKeys = [
   "deliverySkipPrePush",
 ] as const
 const decisionBudgetKeys = ["runs", "duration", "cost", "accountRun", "accountCost"] as const
+// This exact supervision reason is the only provider-exhaustion marker in legacy budget checkpoints.
+const legacyProviderExhaustionReason =
+  "Usage allowance exhausted and no other installed, authenticated provider is ready"
 
 export interface ContinuousOptions extends OrderOptions {
   cycles?: string
@@ -301,15 +304,23 @@ export async function runOperation(
       const retriableChild =
         child?.status === "paused" &&
         (child.execution?.failureKind === "interrupted" || child.execution?.failureKind === "handoff-unavailable")
-      if (retriableChild) {
+      const legacyProviderExhaustionChild =
+        child?.status === "paused" &&
+        child.execution?.failureKind === "budget" &&
+        child.supervision?.pendingRecovery?.reason === legacyProviderExhaustionReason
+      if (retriableChild || (options.retry && legacyProviderExhaustionChild)) {
         interruptedChild = child.id
-        if (child.execution?.failureKind === "handoff-unavailable") {
+        if (child.execution?.failureKind === "handoff-unavailable" || legacyProviderExhaustionChild) {
           delete operation.exhaustedProviders
           delete operation.recovery
         }
       }
       if (!finishedChild && !interruptedChild && (options.retry || budgetChange)) {
-        if (operation.currentMissionId || !operation.decisionId)
+        if (operation.currentMissionId)
+          throw new Error(
+            `Operation --retry cannot safely classify the paused child as provider recovery. Resume the current child directly with av order --resume ${operation.currentMissionId}; increase its saved budget explicitly if it hit a genuine limit.`,
+          )
+        if (!operation.decisionId)
           throw new Error(
             "Operation resume budget reconciliation applies only to an active decision checkpoint. Adjust the current child's budget with av order --resume <child-id>.",
           )

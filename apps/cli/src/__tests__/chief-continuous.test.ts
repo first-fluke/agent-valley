@@ -415,4 +415,197 @@ describe("continuous operation CLI", () => {
     expect(resumed.recovery).toBeUndefined()
     expect(retryMission).toHaveBeenCalledWith(paused.currentMissionId, expect.anything())
   })
+
+  it("retries the legacy provider-exhaustion child without discarding its checkpoint or spent budget", async () => {
+    const decisions = vi.fn().mockResolvedValue({
+      action: "execute",
+      goal: "Repair login",
+      reason: "Measured failure",
+      evidence: ["failure evidence"],
+    })
+    const providerExhaustionReason = "Usage allowance exhausted and no other installed, authenticated provider is ready"
+    const child = vi.fn(async (operation, id: string, goal: string, baseline: string) => {
+      const workspace = await createContinuousMissionWorkspace(root, operation.id, baseline, id, goal)
+      const mission = completedMission(id, goal, workspace)
+      mission.status = "paused"
+      mission.error = providerExhaustionReason
+      mission.execution = {
+        startedAt: new Date().toISOString(),
+        runsStarted: 2,
+        retries: 1,
+        failureKind: "budget",
+        pauseReason: providerExhaustionReason,
+      }
+      mission.executionPolicy = {
+        maxParallel: 1,
+        maxDurationSec: 3_600,
+        maxRuns: 10,
+        maxEstimatedCostUsd: 5,
+        maxRetries: 3,
+        retryDelayMs: 1_000,
+        autoResume: true,
+      }
+      mission.supervision = {
+        maxRounds: 3,
+        rounds: 1,
+        stalledRounds: 0,
+        decisions: [],
+        originalAcceptance: ["Verified improvement"],
+        pendingRecovery: { reason: providerExhaustionReason, taskId: "work" },
+      }
+      mission.handoff = { exhaustedAgents: ["claude"], routes: {}, continuations: {} }
+      const task = mission.tasks.find((entry) => entry.id === "work")
+      if (!task) throw new Error("Missing work task fixture")
+      task.output = "Completed implementation before provider recovery"
+      task.review = {
+        passed: true,
+        summary: "Actual files inspected",
+        findings: [],
+        criteria: [{ criterion: "Verified improvement", passed: true, evidence: "Retained task review evidence" }],
+      }
+      task.changeSet = {
+        version: 1,
+        inputTree: "a".repeat(40),
+        deliveryTree: "b".repeat(40),
+        files: [{ path: "service.txt", status: "modified", size: 12, sha256: "c".repeat(64) }],
+        diff: "retained patch evidence",
+        diffTruncated: false,
+      }
+      mission.operations = {
+        runs: [
+          {
+            runId: "spent-run",
+            stage: "work",
+            actorId: "worker",
+            actorType: "claude",
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+            elapsedMs: 100,
+            inputTokens: 10,
+            outputTokens: 20,
+            costUsd: 0.25,
+            outcome: "failed",
+            executionState: "settled",
+            evidence: "Provider usage allowance was exhausted.",
+          },
+        ],
+        routingEvidence: [],
+        reviewDecisions: [],
+      }
+      await new MissionStore(join(root, ".agent-valley", "missions")).save(mission)
+      return mission
+    })
+    const paused = await runOperation("Improve continuously", { workspace: root, cycles: "1" }, root, {
+      decide: decisions,
+      runMission: child,
+    })
+    expect(paused.phase).toBe("paused")
+    expect(paused.currentMissionId).toBeDefined()
+    expect(paused.exhaustedProviders).toEqual([{ agentType: "claude", at: expect.any(String) }])
+    expect(paused.recovery?.disposition).toBe("protected")
+
+    const retryMission = vi.fn(async (missionId: string) => {
+      const store = new MissionStore(join(root, ".agent-valley", "missions"))
+      const mission = await store.load(missionId)
+      expect(mission.tasks[0]).toMatchObject({
+        output: "Completed implementation before provider recovery",
+        changeSet: { diff: "retained patch evidence" },
+        review: {
+          passed: true,
+          summary: "Actual files inspected",
+          criteria: [{ evidence: "Retained task review evidence" }],
+        },
+      })
+      expect(mission.execution).toMatchObject({ runsStarted: 2, retries: 1 })
+      expect(mission.executionPolicy).toMatchObject({ maxRuns: 10, maxEstimatedCostUsd: 5 })
+      expect(mission.operations?.runs).toMatchObject([
+        { runId: "spent-run", costUsd: 0.25, inputTokens: 10, outputTokens: 20 },
+      ])
+      delete mission.handoff
+      delete mission.error
+      if (mission.execution) {
+        delete mission.execution.failureKind
+        delete mission.execution.pauseReason
+        delete mission.execution.nextRunAt
+      }
+      mission.status = "completed"
+      mission.verification = { ok: true, fingerprint: await fingerprintWorkspace(mission.workspace.path) }
+      mission.fingerprint = mission.verification.fingerprint
+      await store.save(mission)
+      return mission
+    })
+    const resumed = await runOperation(undefined, { resume: paused.id, retry: true }, root, {
+      decide: decisions,
+      runMission: child,
+      retryMission,
+    })
+    expect(retryMission).toHaveBeenCalledOnce()
+    expect(retryMission).toHaveBeenCalledWith(paused.currentMissionId, expect.anything())
+    expect(child).toHaveBeenCalledOnce()
+    expect(resumed.phase, resumed.error).toBe("completed")
+    expect(resumed.exhaustedProviders).toBeUndefined()
+    expect(resumed.recovery).toBeUndefined()
+    expect(retryMission).toHaveBeenCalledWith(paused.currentMissionId, expect.anything())
+    const saved = await new MissionStore(join(root, ".agent-valley", "missions")).load(paused.currentMissionId ?? "")
+    expect(saved.tasks[0]).toMatchObject({
+      output: "Completed implementation before provider recovery",
+      changeSet: { diff: "retained patch evidence" },
+      review: { criteria: [{ evidence: "Retained task review evidence" }] },
+    })
+    expect(saved.execution).toMatchObject({ runsStarted: 2, retries: 1 })
+    expect(saved.operations?.runs[0]).toMatchObject({
+      runId: "spent-run",
+      costUsd: 0.25,
+      evidence: "Provider usage allowance was exhausted.",
+    })
+  })
+
+  it("keeps a genuine child budget pause protected and directs operators to the child checkpoint", async () => {
+    const decisions = vi.fn().mockResolvedValue({
+      action: "execute",
+      goal: "Repair login",
+      reason: "Measured failure",
+      evidence: ["failure evidence"],
+    })
+    const child = vi.fn(async (operation, id: string, goal: string, baseline: string) => {
+      const workspace = await createContinuousMissionWorkspace(root, operation.id, baseline, id, goal)
+      const mission = completedMission(id, goal, workspace)
+      mission.status = "paused"
+      mission.error = "Mission Actor call limit reached."
+      mission.execution = {
+        startedAt: new Date().toISOString(),
+        runsStarted: 10,
+        retries: 0,
+        failureKind: "budget",
+        pauseReason: mission.error,
+      }
+      mission.executionPolicy = {
+        maxParallel: 1,
+        maxDurationSec: 3_600,
+        maxRuns: 10,
+        maxRetries: 3,
+        retryDelayMs: 1_000,
+        autoResume: true,
+      }
+      await new MissionStore(join(root, ".agent-valley", "missions")).save(mission)
+      return mission
+    })
+    const paused = await runOperation("Improve continuously", { workspace: root, cycles: "1" }, root, {
+      decide: decisions,
+      runMission: child,
+    })
+    const retryMission = vi.fn()
+    await expect(
+      runOperation(undefined, { resume: paused.id, retry: true }, root, {
+        decide: decisions,
+        runMission: child,
+        retryMission,
+      }),
+    ).rejects.toThrow("Resume the current child directly with av order --resume")
+    expect(retryMission).not.toHaveBeenCalled()
+    const saved = await new MissionStore(join(root, ".agent-valley", "missions")).load(paused.currentMissionId ?? "")
+    expect(saved.status).toBe("paused")
+    expect(saved.execution).toMatchObject({ failureKind: "budget", runsStarted: 10 })
+    expect(saved.executionPolicy?.maxRuns).toBe(10)
+  })
 })

@@ -216,7 +216,7 @@ describe("continuous operation joins a live child", () => {
     const { parent, child } = await seed()
 
     await expect(runOperation(undefined, { resume: parent.id, retry: true }, root, {})).rejects.toThrow(
-      "applies only to an active decision checkpoint",
+      "Resume the current child directly with av order --resume",
     )
     expect(await missions.load(child.id)).toEqual(child)
   })
