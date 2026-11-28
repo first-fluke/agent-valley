@@ -6,6 +6,13 @@ from [Conventional Commits](https://www.conventionalcommits.org/) on
 `main`. Hand-written release context for each tag lives under
 `docs/releases/`.
 
+## [4.22.5](https://github.com/first-fluke/agent-valley/compare/v4.22.4...v4.22.5) (2026-11-28)
+
+
+### Bug Fixes
+
+* **cli:** retry legacy provider-recovery operations ([#129](https://github.com/first-fluke/agent-valley/issues/129)) ([99459df](https://github.com/first-fluke/agent-valley/commit/99459df251afa284233ad9d607eb3b6eb32ec619))
+
 ## [4.22.4](https://github.com/first-fluke/agent-valley/compare/v4.22.3...v4.22.4) (2026-11-27)
 
 
