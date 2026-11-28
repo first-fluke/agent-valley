@@ -1,6 +1,6 @@
 {
   "name": "agent-valley-dashboard",
-  "version": "4.22.4",
+  "version": "4.22.5",
   "private": true,
   "type": "module",
   "scripts": {
